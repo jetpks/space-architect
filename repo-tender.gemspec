@@ -12,9 +12,11 @@ Gem::Specification.new do |spec|
   spec.required_ruby_version = ">= 4.0.5"
 
   spec.files = Dir.chdir(__dir__) do
-    Dir["lib/**/*.rb", "README.md", "LICENSE.txt", "repo-tender.gemspec"].select { |f| File.file?(f) }
+    Dir["lib/**/*.rb", "bin/**/*", "README.md", "LICENSE.txt", "repo-tender.gemspec"].select { |f| File.file?(f) }
   end
   spec.require_paths = ["lib"]
+  spec.bindir = "bin"
+  spec.executables = ["repo-tender"]
 
   spec.add_dependency "async", "~> 2.39"
   spec.add_dependency "dry-cli", "~> 1.4"
