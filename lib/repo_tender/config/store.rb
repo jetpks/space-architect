@@ -25,6 +25,18 @@ module RepoTender
       def self.load(path)
         raw = read_yaml(path)
         hash = symbolize(raw)
+        # CF1: normalize `refresh_interval` from a human-duration
+        # string ("6h", "90m", "45s", "30d") or bare integer string
+        # ("21600") into integer seconds BEFORE the contract runs.
+        # The contract stays integer-typed (:integer, gt?: 0); this
+        # is a load-layer normalization that lets a hand-edited
+        # config.yaml round-trip without rejecting "6h" as a
+        # non-integer. See lib/repo_tender/config/duration.rb.
+        if hash.key?(:refresh_interval)
+          result = Duration.parse(hash[:refresh_interval])
+          return result if result.failure?
+          hash[:refresh_interval] = result.success
+        end
         with_defaults(hash) do |filled|
           result = Contract.new.call(filled)
           if result.success?
