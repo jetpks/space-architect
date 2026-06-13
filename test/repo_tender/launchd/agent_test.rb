@@ -190,4 +190,129 @@ class LaunchdAgentTest < Minitest::Test
     assert_equal false, s[:running]
     assert_nil s[:pid]
   end
+
+  # ---- Slice 5 / CF5: benign bootout → Success in stop/uninstall ----
+  #
+  # A `bootout` Failure with status 3 (POSIX ESRCH = "No such
+  # process") or matching the not-loaded stderr markers is the
+  # COMMON case at a 6h refresh interval — the agent is
+  # already not loaded. We map it to Success idempotently. The
+  # install/bootstrap path is UNAFFECTED (regression guard:
+  # `test_nonzero_exit_surfaces_as_failure_not_raise` above).
+
+  def test_stop_treats_status_3_bootout_as_benign_and_still_runs_disable
+    runner = RecordingRunner.new
+    # bootout returns the documented benign Failure; disable
+    # returns Success (its real-world result on a not-loaded
+    # service is "the flag is set" — it does not raise).
+    runner.queue({failure: true, stderr: "Boot-out failed: 3: No such process", status: 3})
+    agent = make_agent(runner, uid: 516, label: "com.example.benign")
+    result = agent.stop
+    assert result.success?, "expected Success for benign bootout, got #{result.inspect}"
+    # G3 argv assertion: both bootout AND disable were invoked.
+    assert_equal [
+      ["launchctl", "bootout", "gui/516/com.example.benign"],
+      ["launchctl", "disable", "gui/516/com.example.benign"]
+    ], runner.calls
+  end
+
+  def test_stop_treats_stderr_no_such_process_as_benign_when_status_is_not_3
+    # Defensive OR: a non-3 status whose stderr still says
+    # "No such process" is also treated as benign (defends
+    # against status drift).
+    runner = RecordingRunner.new
+    runner.queue({failure: true, stderr: "No such process: service not loaded", status: 1})
+    agent = make_agent(runner, uid: 517, label: "com.example.benign2")
+    result = agent.stop
+    assert result.success?
+    assert_equal [
+      ["launchctl", "bootout", "gui/517/com.example.benign2"],
+      ["launchctl", "disable", "gui/517/com.example.benign2"]
+    ], runner.calls
+  end
+
+  def test_stop_treats_could_not_find_specified_service_stderr_as_benign
+    # The legacy "Could not find specified service" phrasing
+    # is matched by the same defensive regex.
+    runner = RecordingRunner.new
+    runner.queue({failure: true, stderr: "Could not find specified service", status: 1})
+    agent = make_agent(runner, uid: 518, label: "com.example.legacy")
+    result = agent.stop
+    assert result.success?
+    assert_equal 2, runner.calls.size
+  end
+
+  def test_stop_propagates_non_benign_bootout_failure_and_skips_disable
+    runner = RecordingRunner.new
+    runner.queue({failure: true, stderr: "Operation not permitted", status: 1})
+    agent = make_agent(runner, uid: 519, label: "com.example.real")
+    result = agent.stop
+    assert result.failure?
+    failure = result.failure
+    assert_equal 1, failure[:status]
+    assert_match(/Operation not permitted/, failure[:stderr])
+    # Disable was NOT attempted — non-benign bootout short-circuits.
+    assert_equal [["launchctl", "bootout", "gui/519/com.example.real"]], runner.calls
+  end
+
+  def test_stop_propagates_disable_failure_after_benign_bootout
+    # Benign bootout → we proceed to disable → disable fails
+    # with a real error. The disable failure IS the final
+    # result (we don't paper over real failures).
+    runner = RecordingRunner.new
+    runner.queue({failure: true, stderr: "Boot-out failed: 3: No such process", status: 3})
+    runner.queue({failure: true, stderr: "Operation not permitted", status: 1})
+    agent = make_agent(runner, uid: 520, label: "com.example.disablefail")
+    result = agent.stop
+    assert result.failure?
+    failure = result.failure
+    assert_equal 1, failure[:status]
+    assert_match(/Operation not permitted/, failure[:stderr])
+    assert_equal 2, runner.calls.size
+  end
+
+  def test_uninstall_treats_status_3_bootout_as_benign
+    runner = RecordingRunner.new
+    runner.queue({failure: true, stderr: "Boot-out failed: 3: No such process", status: 3})
+    agent = make_agent(runner, uid: 521, label: "com.example.uninst")
+    result = agent.uninstall
+    assert result.success?
+    assert_equal [["launchctl", "bootout", "gui/521/com.example.uninst"]], runner.calls
+  end
+
+  def test_uninstall_treats_stderr_no_such_process_as_benign
+    runner = RecordingRunner.new
+    runner.queue({failure: true, stderr: "No such process", status: 7})
+    agent = make_agent(runner, uid: 522, label: "com.example.uninst2")
+    result = agent.uninstall
+    assert result.success?
+    assert_equal 1, runner.calls.size
+  end
+
+  def test_uninstall_propagates_non_benign_bootout_failure
+    runner = RecordingRunner.new
+    runner.queue({failure: true, stderr: "Operation not permitted", status: 1})
+    agent = make_agent(runner, uid: 523, label: "com.example.uninst3")
+    result = agent.uninstall
+    assert result.failure?
+    failure = result.failure
+    assert_equal 1, failure[:status]
+    assert_match(/Operation not permitted/, failure[:stderr])
+  end
+
+  def test_install_bootstrap_status_3_still_fails_regression_guard
+    # Regression guard: the benign mapping is bootout-only.
+    # A bootstrap (install path) with status 3 must still
+    # surface as Failure. Mirrors the Slice-4 manual-checklist
+    # scenario where install can return status 3 for a
+    # malformed plist.
+    runner = RecordingRunner.new
+    runner.queue({failure: true, stderr: "service not found", status: 3})
+    agent = make_agent(runner, uid: 524, label: "com.example.installfail")
+    result = agent.install("/tmp/install-fail.plist")
+    assert result.failure?
+    failure = result.failure
+    assert_equal 3, failure[:status]
+    assert_match(/service not found/, failure[:stderr])
+  end
 end

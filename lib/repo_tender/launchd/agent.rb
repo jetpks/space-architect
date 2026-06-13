@@ -59,8 +59,17 @@ module RepoTender
       end
 
       # `launchctl bootout gui/<UID>/<label>`
+      #
+      # Idempotency (Slice 5 / CF5): a benign bootout Failure
+      # (status 3 / "No such process" / "Could not find
+      # specified service") is mapped to **Success** —
+      # uninstalling a not-loaded agent is a no-op for the
+      # bootout step. The plist removal in the CLI command
+      # layer is independent of this result.
       def uninstall
-        run("bootout", "gui/#{@uid}/#{@label}")
+        r = run("bootout", "gui/#{@uid}/#{@label}")
+        return Dry::Monads::Success("") if benign_bootout_failure?(r)
+        r
       end
 
       # bootstrap the plist, then `enable` the service.
@@ -73,9 +82,20 @@ module RepoTender
       end
 
       # bootout the service, then `disable` it.
+      #
+      # Idempotency (Slice 5 / CF5): a `bootout` Failure with
+      # `status == 3` ("No such process") or matching the
+      # not-loaded stderr is treated as **already not loaded**
+      # and is not propagated — the disable step still runs so
+      # the persistent `disable` override stays in place
+      # (matching the gate's recorded-argv assertion
+      # `[[bootout,…], [disable,…]]` and the
+      # "stopped" semantic). A non-benign bootout Failure
+      # (e.g. status 1 "Operation not permitted") short-
+      # circuits as before.
       def stop
         r1 = run("bootout", "gui/#{@uid}/#{@label}")
-        return r1 if r1.failure?
+        return r1 if r1.failure? && !benign_bootout_failure?(r1)
         run("disable", "gui/#{@uid}/#{@label}")
       end
 
@@ -103,6 +123,36 @@ module RepoTender
       # ----- internal: argv dispatch + list parser -----
 
       private
+
+      # CF5: a `bootout` Failure whose `status == 3` ("No such
+      # process") OR whose stderr matches the
+      # not-loaded markers is **not a real failure** — the
+      # service is simply not currently loaded, which is the
+      # common case at a 6h refresh interval. We key on
+      # `argv[1] == "bootout"` so the benign mapping is
+      # strictly scoped to bootout (bootstrap status-3
+      # remains a real Failure — gate G3 regression guard).
+      #
+      # Status 3 is the POSIX `ESRCH` errno (`launchctl error 3`
+      # → "No such process") and is the documented signal.
+      # The stderr regex is the defensive OR — `launchctl`
+      # stderr text is NOT API and may drift; we accept both
+      # observed phrasings ("No such process" from recent
+      # macOS, "Could not find specified service" from older
+      # releases / the legacy `unload` path).
+      def benign_bootout_failure?(result)
+        return false unless result.failure?
+
+        f = result.failure
+        return false unless f.is_a?(Hash)
+
+        argv = f[:argv]
+        return false unless argv.is_a?(Array) && argv[1] == "bootout"
+
+        return true if f[:status] == 3
+        stderr = f[:stderr].to_s
+        stderr.match?(/No such process|Could not find specified service/i)
+      end
 
       # Every operation is a `launchctl` subcommand — the program
       # name must be argv[0] so the runner (real `Shell.run` →

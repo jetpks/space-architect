@@ -129,9 +129,14 @@ module RepoTender
 
           agent = make_agent
           result = agent.uninstall
-          # Bootout is best-effort — if the job is not loaded,
-          # launchctl returns non-zero. We still want to remove
-          # the plist (idempotent uninstall, gate G3).
+          # CF5 (Slice 5): the Agent maps a not-loaded bootout
+          # (status 3 / "No such process") to Success — the
+          # common case at a 6h refresh interval. A non-benign
+          # bootout Failure (e.g. status 1 "Operation not
+          # permitted") still surfaces here as a real failure
+          # the operator needs to see. We still remove the
+          # plist regardless (idempotent uninstall, Slice-4
+          # gate G3): the bootout is the only best-effort step.
           if result.failure?
             err.puts "bootout reported: #{format_failure(result.failure)}"
           end
