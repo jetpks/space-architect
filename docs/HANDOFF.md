@@ -21,16 +21,25 @@
   live `gh` 2.93 (CF2 closed), arbitrated all 8 disagreements (8 ACCEPT, 1 with
   a carry-forward CF3). Slice-level verdict **CONTINUE**. Merged
   `slice/sync-engine` → `main` (`--no-ff`; merge sha in session log), integration smoke green.
-- **Slice 3 (CLI + config CRUD + CF1) — SPEC'D & DISPATCHED 2026-06-13.** Gates
-  G0–G9 frozen at `docs/gates/slice-3.md` (`3e72e16`); 1 lane on `slice/cli`
-  (dispatch base = slice/cli tip before builder run); builder block `.architect/slice-3.block.md`; xhigh.
-  CF3 deferred to a later slice (architect+human decision). Builder run in flight.
-- **Next action (fresh architect session):** **judge Slice 3** — do NOT judge in
-  the dispatching session (rule 4). When the builder run completes: post-flight
-  integrity (`git log <freeze>..` empty, `git status` only in Builds+Extends set,
-  `docs/gates/` clean, report present, disagreements raised) → preserve on
-  `slice/cli` → next session runs G0–G9 from `docs/gates/slice-3.md`, reads the
-  diff vs PRD §3.1/§3.3/§5, renders PASS/FAIL → KILL/CONTINUE → merge on PASS.
+- **Slice 3 (CLI + config CRUD + CF1) — BUILT 2026-06-13, UNJUDGED.** Gates G0–G9
+  frozen at `docs/gates/slice-3.md` (`3e72e16`); 1 lane on `slice/cli`. First
+  builder run hit a `pi` step cap mid-task; completed via a same-session
+  `--session-id slice-3` continuation. Work preserved on `slice/cli` (`c4bb2c2`);
+  `main` left clean at the Slice 2 merge (`eb57976`). Post-flight integrity
+  PASSED (no builder commits `f107ec5..`, `docs/gates/` clean, all files in
+  Builds+Extends + 2 *documented* extra test files, report present, 8
+  disagreements raised). CF3 deferred. Builder-reported (HEARSAY): `rake test`
+  147/548/0/0/0, `standardrb` 0, no new gems.
+- **Next action (fresh architect session):** **judge Slice 3** (rule 4 — not the
+  dispatching session, which is done). On `slice/cli`: (1) arbitrate the 8
+  disagreements (see table below — JUDGMENT TARGETS flagged), (2) run G0–G9 from
+  `docs/gates/slice-3.md` yourself (`bundle install && rake test && standardrb`)
+  and open each gate→test mapping (lane report §2) to confirm real-config /
+  real-repo / no-mock coverage, (3) read the diff `git diff 3e72e16..slice/cli`
+  vs PRD §3.1/§3.3/§5 + the no-data-loss invariant (CLI must never mutate a repo
+  directly — only via the unchanged engine), (4) render PASS/FAIL → KILL/CONTINUE.
+  On PASS/CONTINUE: `git checkout main && git merge --no-ff slice/cli`, then spec
+  Slice 4 (launchd) — fold in CF3 there or as its own state-schema slice.
 
 ## Pointers
 
@@ -55,7 +64,7 @@ bundle exec standardrb       # exit 0
 - `docs/gates/slice-1.md` — Slice 1, frozen at `65f36c4`. **JUDGED PASS, merged.**
 - `docs/gates/slice-2.md` — Slice 2, frozen at `6889a12`. **JUDGED PASS, merged.**
 - `docs/gates/slice-3.md` — Slice 3, frozen at `3e72e16`, BEFORE work began.
-  Read-only. **DISPATCHED, UNJUDGED.**
+  Read-only. **BUILT, UNJUDGED** (work on `slice/cli` @ `c4bb2c2`).
 
 ## Current slice — Slice 3: CLI surface + config CRUD (+ CF1)
 
@@ -74,12 +83,54 @@ bundle exec standardrb       # exit 0
   off the freeze commit (main stays at the Slice 2 merge).
 - **Effort:** xhigh — exit-code semantics + dry-cli nested registration + CF1
   parsing + real-config/real-repo integration are fiddly and correctness-bearing.
-- **Report →** `docs/lanes/slice-3-01.md`.
-- **Freeze commit:** the commit recording this section (post-flight checks:
-  `git log <freeze>..` empty; `git diff --name-only` only Builds+Extends;
-  `git diff docs/gates/` clean).
+- **Report →** `docs/lanes/slice-3-01.md` (full plan, 8 disagreements, PHASE-0
+  rulings, gate→test mapping, verbatim output, file tree). Freeze `3e72e16`;
+  build preserved on `slice/cli` @ `c4bb2c2`.
+- **Post-flight integrity (this session): PASS.** No builder commits
+  (`git log f107ec5..` empty); `docs/gates/` clean; all production files in the
+  Builds+Extends set; only deviation is 2 extra **test** files
+  (`test/repo_tender/cli/test_helper.rb`, `cli/nested_registration_test.rb`),
+  both *documented* as disagreements #7/#8 (additive coverage, no protected file
+  touched). 1st run hit a step cap; finished via `--session-id slice-3` continue.
 - **CF1** lands here (Slice 1 disagreement-#1 MODIFY ruling). **CF3** explicitly
   deferred (state-schema change, orthogonal to the CLI).
+
+Raw result column = **builder-reported (HEARSAY)**; verdict column filled by the
+next session after running the gates itself.
+
+| Gate | Threshold (short) | Builder-reported raw result | Architect verdict |
+|------|-------------------|------------------------------|-------------------|
+| G0 | suite green + lint + no new gems + bin runs | `rake test` 147/548/0/0/0; `standardrb` 0; `bundle` 0; `--help` exit 0 | _pending next session_ |
+| G1 | repo CRUD persists; dup idempotent (exit 0) | `cli/repo_test` 4 tests (add/list/remove/idempotent) | _pending_ |
+| G2 | org CRUD persists | `cli/org_test` 6 tests (incl host default, flag round-trip) | _pending_ |
+| G3 | invalid input → nonzero exit + stderr + config untouched | repo/org/sync tests; in-process `last_outcome` + subprocess `Open3` | _pending_ |
+| G4 | sync invokes engine; `--repo` scopes | `cli/sync_test`; scoping proof = non-target `last_synced_at` unchanged | _pending_ |
+| G5 | status renders per-repo table | `cli/status_test` 3 tests | _pending_ |
+| G6 | config path / show (defaults applied) | `cli/config_test` (show prints 21600/8/base default) | _pending_ |
+| G7 | nested subcommand registration | `cli/nested_registration_test` 9 tests | _pending_ |
+| G8 | CF1 duration parses at load layer | `config/duration_test` 23 tests + Store-load + `config show` integration | _pending_ |
+| G9 | only in-scope files | architect integrity-checked ✓ (2 extra test files documented) | **PASS (integrity)** |
+
+### Slice 3 disagreements (builder raised 8; next session arbitrates)
+
+Full reasoning in `docs/lanes/slice-3-01.md` §1. None ruled in the dispatching
+session. Most are routine seam/UX choices; flagged JUDGMENT TARGETS need a hard
+ruling + diff read.
+
+| # | Builder's position (short) | Disposition for next session |
+|---|----------------------------|------------------------------|
+| 1 | exit-code seam = thread-local `Outcome` stash + entrypoint `Kernel.exit` (dry-cli swallows command return) | **JUDGMENT TARGET** — confirm G3 is genuinely proven (in-process `last_outcome` AND a real-exit subprocess), and the thread-local isn't leaking across tests |
+| 2 | `repo add` accepts only `host/owner/name` (no `--host/--owner/--name` flags) | Routine — spec said builder's choice; confirm bad form rejected with clear msg |
+| 3 | `sync --repo` filters Config (`Store.with`), engine unchanged; unknown ref → exit 1, no write | Routine — matches spec; confirm engine untouched in the diff |
+| 4 | CF1 normalized in `Store.load` before contract; write-back emits integer seconds (human string not preserved) | Routine — matches MODIFY ruling; confirm the load-before-contract order in the diff |
+| 5 | `repo`/`org`/`config` with no subcommand → exit **1** + usage on stderr (dry-cli default, not exit 0) | **JUDGMENT TARGET (light)** — gate G7 allowed "exit 0 OR dry-cli default"; confirm the default genuinely lists subcommands, exit 1 acceptable |
+| 6 | idempotent add = load-check-then-write (no second write) | Routine — satisfies G1 "no duplicate" + avoids needless rewrite |
+| 7 | added `cli/test_helper.rb` (undeclared) to DRY the env/invoke/subprocess helpers | Routine — additive test file; confirm it doesn't touch the protected top-level `test_helper.rb` (it doesn't) |
+| 8 | added `cli/nested_registration_test.rb` (undeclared) for G7's full-registry tests | Routine — additive test file for G7 cross-cutting coverage |
+
+**PHASE-0 rulings (builder answered; next session confirms against the diff):**
+dry-cli 1.4.1 API (nested `register` + block, `out:`/`err:` injection, return
+swallowed); exit-code seam; `--repo` filter scoping; CF1 normalization point.
 
 ## Slice 2 — Sync engine (RESOLVED, archived)
 
@@ -186,3 +237,5 @@ non-clobber) here or as its own small state-schema slice, architect's call.
 | 2026-06-13 | architect | 2 | a7cbeb2 (preserve) | G12 integrity PASS; rest pending | Post-flight integrity; did NOT judge gates (rule 4); flagged JUDGMENT TARGETS #5/#6; deferred |
 | 2026-06-13 | architect | 2 | be73b04 (merge) | **G0–G12 PASS → CONTINUE** | Re-ran all 13 gates; arbitrated 8 disagreements (8 ACCEPT, #5 +CF3); re-verified `gh` argv live (CF2 closed); read diff vs PRD §3.3/§5 + no-data-loss; merged `slice/sync-engine`→`main` |
 | 2026-06-13 | architect | 3 | 3e72e16 (freeze) | n/a | Slice 3 spec'd, gates G0–G9 frozen (CF1 in, CF3 deferred), dispatched on slice/cli (1 lane, xhigh); main stays at eb57976 |
+| 2026-06-13 | builder (m3) | 3 | none (UNJUDGED) | builder: 147/548/0/0/0 | CLI + config CRUD + CF1 built; 1st run hit step cap, finished via `--session-id slice-3` continue; preserved on slice/cli @ c4bb2c2; integrity PASS; 8 disagreements raised |
+| 2026-06-13 | architect | 3 | c4bb2c2 (preserve) | G9 integrity PASS; rest pending | Post-flight integrity; did NOT judge gates (rule 4); flagged JUDGMENT TARGETS #1/#5; deferred |
