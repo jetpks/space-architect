@@ -62,31 +62,44 @@
   `slice/launchd` → `main` (`--no-ff` `a0c44be`), integration smoke green
   (198/811/0/0/0). **CF3 CLOSED.** Full detail: `docs/lanes/slice-4-01.md`;
   manual sign-off + remaining warts archived below.
-- **Slice 5 (daemon-polish: CF5 + CF6) — SPEC'D, FROZEN & DISPATCHED 2026-06-13.**
-  One combined lane in the main checkout (the `pi` worktree-isolation lesson).
-  Gates G0–G5 frozen at `docs/gates/daemon-polish.md` @ **`0c2302c`** (the freeze
-  sha / dispatch base). **CF5** = make `daemon stop`/`uninstall` idempotent when
-  the agent is already not-loaded (map a `bootout` status-3 / "No such process"
-  Failure to Success in `stop`+`uninstall` ONLY; bootstrap failures unaffected).
-  **CF6** = harden `REPO_TENDER_LOG_MAX_BYTES` parsing so a malformed value falls
-  back to the 10 MiB default instead of crashing `sync`. Fully CI-judgeable — the
-  status-3 case is simulated through the injected runner seam, **no manual
-  checklist** (and the gates require G1/G2 to drive the REAL `Agent` via the
-  runner seam, not a hand-set Agent-class stub — the anti-tautology guard from the
-  Slice-4 G2 lesson). Dispatched `pi --session-id daemon-polish --thinking high`
-  (routine, tightly specified → high not xhigh); run-log `.architect/last-run.jsonl`;
-  block `.architect/daemon-polish-01.block.md`. `main` stays at `0c2302c`.
-- **Next action (FRESH architect session — rule 4: this session dispatched it):**
-  post-flight the daemon-polish lane (no builder commits `git log 0c2302c..`
-  empty; only in-scope files in `git status`; `docs/gates/` diff-clean), then
-  **JUDGE** G0–G5 yourself on a `slice/daemon-polish` branch built from the
-  builder's working-tree output: run the suite + lint, open the named G1–G4 tests
-  and confirm the status-3 Failure enters through the **runner seam on a real
-  `Agent`** (not a tautological class-stub), arbitrate any PHASE-0 disagreements,
-  read the diff vs the CF5/CF6 intent + the launchctl-argv-stability constraint.
-  On PASS: commit the builder work to `slice/daemon-polish`, merge `--no-ff` to
-  `main`, integration smoke, **close CF5 + CF6**, archive. That completes the
-  project (PRD §7 DoD) — all features + both follow-ups done.
+- **Slice 5 (daemon-polish: CF5 + CF6) — BUILT & PRESERVED on `slice/daemon-polish`
+  @ `ad97164`, UNJUDGED, NOT MERGED.** One combined lane in the main checkout (the
+  `pi` worktree-isolation lesson). Gates G0–G5 frozen at
+  `docs/gates/daemon-polish.md` @ **`0c2302c`** (freeze / dispatch base). **CF5** =
+  make `daemon stop`/`uninstall` idempotent when the agent is already not-loaded
+  (map a `bootout` status-3 / "No such process" Failure to Success in
+  `stop`+`uninstall` ONLY; bootstrap failures unaffected). **CF6** = harden
+  `REPO_TENDER_LOG_MAX_BYTES` parsing so a malformed value falls back to the 10 MiB
+  default instead of crashing `sync`. Fully CI-judgeable — status-3 simulated
+  through the injected runner seam, **no manual checklist**; the gates require
+  G1/G2 to drive the REAL `Agent` via the runner seam (anti-tautology guard from
+  the Slice-4 G2 lesson). Dispatched `pi --session-id daemon-polish --thinking
+  high` (routine, tightly specified → high not xhigh). **Builder STATUS: COMPLETE**
+  (builder-reported **222/890/0/0/0**). **Post-flight integrity PASS:** no builder
+  commits (`git log 0c2302c..` empty), all 6 files + lane report in-scope,
+  `docs/gates/` diff-clean, no new gems; committed to `slice/daemon-polish`
+  (`ad97164`); **smoke green** (re-ran suite 222/890/0/0/0, `standardrb` 0).
+  **Did NOT judge gates (rule 4 — I dispatched this build).** `main` stays at
+  `713c4f2`. Report: `docs/lanes/daemon-polish-01.md`. Notable from the report:
+  predicate keyed on `argv[1] == "bootout"` (bootstrap status-3 stays a Failure);
+  builder reality-checked `launchctl error bootstrap 3` ≠ `launchctl error 3` to
+  validate the discriminator; 6 PHASE-0 disagreements raised (minor, all
+  self-resolved within spec latitude — a fresh judge rules on them).
+- **Next action (FRESH architect session — rule 4: this session dispatched the
+  build):** JUDGE Slice 5 on `slice/daemon-polish` @ **`ad97164`**. Run all gates
+  yourself (`bundle install && bundle exec rake test && bundle exec standardrb`);
+  open the named G1/G2 tests and **confirm the status-3 bootout Failure enters
+  through the runner seam on a REAL `Agent`** (the report claims `stub_make_agent`
+  overrides only the factory, keeping the real Agent — verify this is not a
+  hand-set-Result tautology, the exact Slice-4 G2 trap); open G3 and confirm the
+  `argv[1] == "bootout"` discriminator keeps `install`/`start` status-3 a Failure
+  (existing `test_nonzero_exit_surfaces_as_failure_not_raise` unmodified + green);
+  open G4 and confirm malformed `REPO_TENDER_LOG_MAX_BYTES` never raises + sync
+  exits 0; check the launchctl-argv-stability constraint (no op's argv changed).
+  Arbitrate the 6 PHASE-0 disagreements (`docs/lanes/daemon-polish-01.md` §1.3).
+  On PASS: merge `slice/daemon-polish` → `main` (`--no-ff`), integration smoke,
+  **close CF5 + CF6**, archive. That completes the project (PRD §7 DoD) — all
+  features + both follow-ups done.
 
 ## Pointers
 
@@ -117,8 +130,9 @@ bundle exec standardrb       # exit 0
   launchctl checklist). **JUDGED PASS (G0–G8, fresh session @ `ce92ce9`) + manual
   checklist HUMAN-RUN PASS, merged `a0c44be`.** CF3 CLOSED. 6 disagreements ACCEPT.
 - `docs/gates/daemon-polish.md` — Slice 5 (CF5 + CF6), frozen at `0c2302c`
-  (G0–G5, fully CI-judgeable, no manual checklist). **DISPATCHED, UNJUDGED**
-  (1 lane in main; gate verdict belongs to the next fresh session, rule 4).
+  (G0–G5, fully CI-judgeable, no manual checklist). **BUILT & PRESERVED on
+  `slice/daemon-polish` @ `ad97164`, UNJUDGED** (integrity PASS, smoke green; gate
+  verdict + 6-disagreement arbitration belong to the next fresh session, rule 4).
 
 ## Slice 4 — launchd daemon + log rotation (+ CF3) (RESOLVED, archived)
 
@@ -295,3 +309,5 @@ PRD §7 DoD is met.
 | 2026-06-13 | human | 4 | (manual checklist) | **manual checklist PASS** | Human re-ran the full live launchctl checklist on `ce92ce9`: install/print/status/restart(real sync, last exit 0)/uninstall all correct. Sign-off recorded in Slice 4 TL;DR. One cosmetic wart logged as **CF5** (bootout "No such process" on a not-running agent) |
 | 2026-06-13 | architect | 4 | a0c44be (merge) | **G0–G8 PASS + manual PASS → CONTINUE** | Fresh session judged Slice 4 @ `ce92ce9` (rule 4 — prior session dispatched build AND inline fix). Re-ran all gates myself: G0 198/811/0/0/0, lint 0, no new gems, --help lists daemon; G1 plutil -lint OK on a real generated plist; G2 corrected argv (launchctl argv[0]) matches the real ShellRunner→Shell.run→Open3 path; G3/G4 DI-double effects confirmed against the live path by the human checklist; G5 byte-preserving no-op wiring (Slice-3 --repo scoping intact); G6/G7 CF3 no-data-loss holds (preserve repo_count/last_listed_at, set last_error, repos preserved), Slice 2 G10 green; G8 in-scope, gates diff-clean, no builder commits. Heeded the G2 lesson (re-checked every DI-double vs production code). Arbitrated 6 disagreements (all ACCEPT). Cross-model adversarial diff pass: no merge-blockers (1 robustness nit → CF6). Merged `slice/launchd`→`main` (`--no-ff` `a0c44be`), integration smoke green. **CF3 CLOSED.** All 4 feature slices done; CF5/CF6 non-blocking follow-up remain |
 | 2026-06-13 | architect | 5 | 0c2302c (freeze) | n/a | Slice 5 (daemon-polish: CF5 launchctl status-3 idempotency + CF6 env parse hardening) spec'd, gates G0–G5 frozen, 1 combined lane in main checkout. Dispatched `pi --session-id daemon-polish --thinking high`; fully CI-judgeable (status-3 via injected runner seam, no manual checklist; gates require real-Agent-via-runner-seam, anti-tautology). Block `.architect/daemon-polish-01.block.md`. Did NOT judge (rule 4 — dispatched this session); fresh session judges + merges |
+| 2026-06-13 | builder (m3) | 5 | none (UNJUDGED) | builder: 222/890/0/0/0 | CF5+CF6 built in 1 lane (main checkout). `benign_bootout_failure?` keyed on `argv[1]=="bootout"` (status 3 OR stderr regex); `log_max_bytes` defensive parse (default+warn on bad value). New CLI tests drive real Agent via runner seam (anti-tautology). STATUS COMPLETE; 6 PHASE-0 disagreements raised (all within spec latitude). No commits, no out-of-scope touches, no new gems |
+| 2026-06-13 | architect | 5 | ad97164 (preserve) | integrity PASS; gates pending | Post-flight PASS (no builder commits `git log 0c2302c..` empty, 6 files + lane report in-scope, `docs/gates/` diff-clean, no new gems); committed builder work to `slice/daemon-polish`; smoke green (re-ran 222/890/0/0/0, lint 0). Did NOT judge gates (rule 4 — dispatched this build); deferred to fresh session. `main` stays `713c4f2` |
