@@ -22,9 +22,9 @@
   a carry-forward CF3). Slice-level verdict **CONTINUE**. Merged
   `slice/sync-engine` → `main` (`--no-ff`; merge sha in session log), integration smoke green.
 - **Slice 3 (CLI + config CRUD + CF1) — SPEC'D & DISPATCHED 2026-06-13.** Gates
-  G0–G9 frozen at `docs/gates/slice-3.md` (freeze commit below); 1 lane, main
-  checkout; builder block `.architect/slice-3.block.md`; xhigh. CF3 deferred to a
-  later slice (architect+human decision). Builder run in flight.
+  G0–G9 frozen at `docs/gates/slice-3.md` (`3e72e16`); 1 lane on `slice/cli`
+  (dispatch base `60b3941`); builder block `.architect/slice-3.block.md`; xhigh.
+  CF3 deferred to a later slice (architect+human decision). Builder run in flight.
 - **Next action (fresh architect session):** **judge Slice 3** — do NOT judge in
   the dispatching session (rule 4). When the builder run completes: post-flight
   integrity (`git log <freeze>..` empty, `git status` only in Builds+Extends set,
@@ -54,7 +54,7 @@ bundle exec standardrb       # exit 0
 
 - `docs/gates/slice-1.md` — Slice 1, frozen at `65f36c4`. **JUDGED PASS, merged.**
 - `docs/gates/slice-2.md` — Slice 2, frozen at `6889a12`. **JUDGED PASS, merged.**
-- `docs/gates/slice-3.md` — Slice 3, frozen at `79a9e84`, BEFORE work began.
+- `docs/gates/slice-3.md` — Slice 3, frozen at `3e72e16`, BEFORE work began.
   Read-only. **DISPATCHED, UNJUDGED.**
 
 ## Current slice — Slice 3: CLI surface + config CRUD (+ CF1)
@@ -70,8 +70,8 @@ bundle exec standardrb       # exit 0
   (status only reads it; CF3 deferred), `scm/*`, `forge/*`, `paths.rb`,
   `config/{model,contract}.rb`, `test_helper.rb`.
 - **Lanes:** 1 lane (the CLI is one cohesive registry surface; splitting commands
-  would all collide on `cli.rb` + the shared exit-code seam). Dispatched in the
-  main checkout off the freeze commit.
+  would all collide on `cli.rb` + the shared exit-code seam). Dispatched on slice/cli
+  off the freeze commit (main stays at the Slice 2 merge).
 - **Effort:** xhigh — exit-code semantics + dry-cli nested registration + CF1
   parsing + real-config/real-repo integration are fiddly and correctness-bearing.
 - **Report →** `docs/lanes/slice-3-01.md`.
@@ -185,4 +185,4 @@ non-clobber) here or as its own small state-schema slice, architect's call.
 | 2026-06-13 | builder (m3) | 2 | none (UNJUDGED) | builder: 85/296/0/0/0 | Sync engine built; preserved on slice/sync-engine @ a7cbeb2; integrity PASS; 8 disagreements raised |
 | 2026-06-13 | architect | 2 | a7cbeb2 (preserve) | G12 integrity PASS; rest pending | Post-flight integrity; did NOT judge gates (rule 4); flagged JUDGMENT TARGETS #5/#6; deferred |
 | 2026-06-13 | architect | 2 | be73b04 (merge) | **G0–G12 PASS → CONTINUE** | Re-ran all 13 gates; arbitrated 8 disagreements (8 ACCEPT, #5 +CF3); re-verified `gh` argv live (CF2 closed); read diff vs PRD §3.3/§5 + no-data-loss; merged `slice/sync-engine`→`main` |
-| 2026-06-13 | architect | 3 | 79a9e84 (freeze) | n/a | Slice 3 spec'd, gates G0–G9 frozen (CF1 in, CF3 deferred), dispatched (1 lane, main checkout, xhigh) |
+| 2026-06-13 | architect | 3 | 3e72e16 (freeze) | n/a | Slice 3 spec'd, gates G0–G9 frozen (CF1 in, CF3 deferred), dispatched on slice/cli (1 lane, xhigh); main stays at eb57976 |
