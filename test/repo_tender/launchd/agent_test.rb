@@ -52,7 +52,7 @@ class LaunchdAgentTest < Minitest::Test
     pp = "/tmp/foo/Library/LaunchAgents/com.example.x.plist"
     result = agent.install(pp)
     assert result.success?
-    assert_equal [["bootstrap", "gui/501", pp]], runner.calls
+    assert_equal [["launchctl", "bootstrap", "gui/501", pp]], runner.calls
   end
 
   def test_uninstall_uses_bootout_gui_uid_label
@@ -60,7 +60,7 @@ class LaunchdAgentTest < Minitest::Test
     agent = make_agent(runner, uid: 502, label: "com.example.x")
     result = agent.uninstall
     assert result.success?
-    assert_equal [["bootout", "gui/502/com.example.x"]], runner.calls
+    assert_equal [["launchctl", "bootout", "gui/502/com.example.x"]], runner.calls
   end
 
   def test_start_runs_bootstrap_then_enable
@@ -70,8 +70,8 @@ class LaunchdAgentTest < Minitest::Test
     result = agent.start(pp)
     assert result.success?
     assert_equal [
-      ["bootstrap", "gui/503", pp],
-      ["enable", "gui/503/com.example.y"]
+      ["launchctl", "bootstrap", "gui/503", pp],
+      ["launchctl", "enable", "gui/503/com.example.y"]
     ], runner.calls
   end
 
@@ -81,8 +81,8 @@ class LaunchdAgentTest < Minitest::Test
     result = agent.stop
     assert result.success?
     assert_equal [
-      ["bootout", "gui/504/com.example.z"],
-      ["disable", "gui/504/com.example.z"]
+      ["launchctl", "bootout", "gui/504/com.example.z"],
+      ["launchctl", "disable", "gui/504/com.example.z"]
     ], runner.calls
   end
 
@@ -91,7 +91,7 @@ class LaunchdAgentTest < Minitest::Test
     agent = make_agent(runner, uid: 505, label: "com.example.q")
     result = agent.restart
     assert result.success?
-    assert_equal [["kickstart", "-k", "gui/505/com.example.q"]], runner.calls
+    assert_equal [["launchctl", "kickstart", "-k", "gui/505/com.example.q"]], runner.calls
   end
 
   def test_nonzero_exit_surfaces_as_failure_not_raise
@@ -114,7 +114,7 @@ class LaunchdAgentTest < Minitest::Test
     result = agent.start("/tmp/s.plist")
     assert result.failure?
     # Only bootstrap ran — enable was NOT attempted.
-    assert_equal [["bootstrap", "gui/507", "/tmp/s.plist"]], runner.calls
+    assert_equal [["launchctl", "bootstrap", "gui/507", "/tmp/s.plist"]], runner.calls
   end
 
   # ---- G4: status parses launchctl list output defensively ----

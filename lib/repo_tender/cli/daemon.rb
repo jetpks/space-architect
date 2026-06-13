@@ -237,7 +237,7 @@ class RepoTender::CLI::Daemon::Helpers::Resolve
   def self.detect(repo_root:)
     mise_bin = detect_mise_bin
     ruby_bin = detect_ruby_bin(repo_root, mise_bin)
-    bin_path = detect_bin_path
+    bin_path = detect_bin_path(repo_root)
     mise_toml = File.join(repo_root, "mise.toml")
     new(repo_root: repo_root, mise_toml: mise_toml, mise_bin: mise_bin, ruby_bin: ruby_bin, bin_path: bin_path)
   end
@@ -263,16 +263,19 @@ class RepoTender::CLI::Daemon::Helpers::Resolve
     st.success? ? out.strip : "/usr/bin/ruby"
   end
 
-  def self.detect_bin_path
+  def self.detect_bin_path(repo_root)
     path = ENV["REPO_TENDER_BIN_PATH"]
     return path if path && !path.empty?
-    # bin/repo-tender is always at `<repo_root>/bin/repo-tender`
-    # in dev. The installed gem location varies; we prefer the
-    # dev path (it's what the human will run during testing).
+    # Prefer the on-disk dev bin at `<repo_root>/bin/repo-tender`
+    # — it's what the human runs during testing, and the gem is
+    # typically not `gem install`ed in a source checkout.
+    dev = File.join(repo_root, "bin", "repo-tender")
+    return dev if File.exist?(dev)
+    # Next, an installed binary on PATH.
     require "open3"
     out, _e, st = Open3.capture3("which", "repo-tender")
     return out.strip if st.success? && !out.strip.empty?
-    # No installed binary found — use the gem's bin.
+    # Last resort: the installed gem's bin (raises if not installed).
     Gem.bin_path("repo-tender", "repo-tender")
   end
 end

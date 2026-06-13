@@ -104,8 +104,11 @@ module RepoTender
 
       private
 
+      # Every operation is a `launchctl` subcommand — the program
+      # name must be argv[0] so the runner (real `Shell.run` →
+      # Open3) actually execs `launchctl`, not the bare subcommand.
       def run(*argv)
-        @runner.run(*argv)
+        @runner.run("launchctl", *argv)
       end
 
       # Parses the tabular output of `launchctl list`. Each line

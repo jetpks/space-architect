@@ -297,4 +297,28 @@ class CLIDaemonTest < Minitest::Test
       assert_includes daemon_children.keys, sub
     end
   end
+
+  # ---- Resolve.detect_bin_path (real, not stubbed) ----
+  # Regression: a source checkout has no `gem install`ed binary, so
+  # detect_bin_path must resolve the on-disk `<repo_root>/bin/repo-tender`
+  # and NOT fall through to Gem.bin_path (which raises GemNotFound).
+
+  def test_detect_bin_path_prefers_on_disk_dev_bin
+    Dir.mktmpdir do |root|
+      FileUtils.mkdir_p(File.join(root, "bin"))
+      dev = File.join(root, "bin", "repo-tender")
+      File.write(dev, "#!/usr/bin/env ruby\n")
+      assert_equal dev, Daemon::Helpers::Resolve.detect_bin_path(root)
+    end
+  end
+
+  def test_detect_bin_path_honors_env_override
+    prev = ENV["REPO_TENDER_BIN_PATH"]
+    ENV["REPO_TENDER_BIN_PATH"] = "/custom/repo-tender"
+    Dir.mktmpdir do |root|
+      assert_equal "/custom/repo-tender", Daemon::Helpers::Resolve.detect_bin_path(root)
+    end
+  ensure
+    ENV["REPO_TENDER_BIN_PATH"] = prev
+  end
 end
