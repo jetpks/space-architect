@@ -206,4 +206,102 @@ class CLISyncTest < Minitest::Test
       refute_nil state.repos["github.com/bar/repo1"]
     end
   end
+
+  # ---- Slice 5 / CF6: `REPO_TENDER_LOG_MAX_BYTES` parse
+  #      hardening. A malformed value (e.g. `"10MB"`) must
+  #      fall back to the 10 MiB default instead of raising
+  #      `ArgumentError` and crashing the entire `sync` run.
+  #      Gate G4: the threshold helper returns the 10 MiB
+  #      default for unset/empty/whitespace/non-numeric/
+  #      non-positive inputs, and the parsed positive
+  #      integer for valid input. **No `ArgumentError`
+  #      escapes** for any input.
+
+  def log_max_bytes(value)
+    cmd = RepoTenderCLI::Sync::Run.new
+    cmd.send(:log_max_bytes, value)
+  end
+
+  def test_log_max_bytes_unset_returns_default
+    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes(nil)
+  end
+
+  def test_log_max_bytes_empty_returns_default
+    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("")
+  end
+
+  def test_log_max_bytes_whitespace_returns_default
+    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("   ")
+  end
+
+  def test_log_max_bytes_non_numeric_returns_default
+    # The CF6 example value — must NOT raise ArgumentError.
+    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("10MB")
+    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("abc")
+    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("1.5")
+    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("10MiB")
+  end
+
+  def test_log_max_bytes_zero_returns_default
+    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("0")
+  end
+
+  def test_log_max_bytes_negative_returns_default
+    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("-5")
+    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("-1048576")
+  end
+
+  def test_log_max_bytes_valid_positive_returns_value
+    assert_equal 1048576, log_max_bytes("1048576")
+    assert_equal 1, log_max_bytes("1")
+  end
+
+  def test_log_max_bytes_strips_surrounding_whitespace_from_valid_value
+    # `Integer("  524288  ", 10, exception: false)` → 524288
+    # (Ruby's Integer tolerates leading/trailing whitespace).
+    assert_equal 524288, log_max_bytes("  524288  ")
+  end
+
+  def test_log_max_bytes_never_raises_argument_error
+    # Belt-and-braces: every shape of bad input must NOT
+    # raise. Looped so a single failure points to the
+    # exact value that broke the contract.
+    ["10MB", "abc", "0", "-1", "1.5", "", "  ", "  ", "0x10", "1e6", "1_000_000", nil].each do |v|
+      log_max_bytes(v)
+    rescue ArgumentError => e
+      flunk "log_max_bytes(#{v.inspect}) raised ArgumentError: #{e.message}"
+    end
+  end
+
+  def test_sync_with_malformed_log_max_bytes_does_not_crash
+    # Integration: a real `sync` run with
+    # `REPO_TENDER_LOG_MAX_BYTES="10MB"` set in the env must
+    # exit 0 and write state for both repos. The pre-step's
+    # parse must NOT crash the run.
+    with_engine_home_2_repos do |_env, paths, base_dir, refs|
+      config = Config.new(
+        base_dir: base_dir,
+        refresh_interval: 3600,
+        concurrency: 2,
+        repos: refs,
+        orgs: []
+      )
+      RepoTender::Config::Store.write(paths.config_file, config)
+
+      prev = ENV["REPO_TENDER_LOG_MAX_BYTES"]
+      begin
+        ENV["REPO_TENDER_LOG_MAX_BYTES"] = "10MB"
+        out, _err = invoke_command(RepoTenderCLI::Sync::Run)
+      ensure
+        ENV["REPO_TENDER_LOG_MAX_BYTES"] = prev
+      end
+      assert_equal 0, RepoTenderCLI.last_outcome.exit_code,
+        "expected exit 0 with malformed log_max_bytes; got #{RepoTenderCLI.last_outcome.exit_code}"
+      assert_includes out.string, "synced 2 repo(s)"
+
+      state = RepoTender::State::Store.load(paths.state_file).success
+      refute_nil state.repos["github.com/foo/repo0"], "repo0 missing — sync crashed before writing state"
+      refute_nil state.repos["github.com/bar/repo1"], "repo1 missing — sync crashed before writing state"
+    end
+  end
 end

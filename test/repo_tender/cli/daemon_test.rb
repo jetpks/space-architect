@@ -103,6 +103,23 @@ class CLIDaemonTest < Minitest::Test
       Daemon::Helpers::Resolve.define_singleton_method(:detect, @resolve_detect_orig)
       @resolve_detect_orig = nil
     end
+    if @make_agent_stub_class
+      @make_agent_stub_class.send(:remove_method, :make_agent)
+      @make_agent_stub_class = nil
+    end
+  end
+
+  # Stub ONLY `make_agent` on the given command class (NOT
+  # `Launchd::Agent.new`) so the real `Launchd::Agent` class
+  # is exercised end-to-end against a `RecordingRunner`. This
+  # is the anti-tautology guard from Slice 4's G2 lesson: the
+  # status-3 bootout Failure MUST enter through the runner
+  # seam on a REAL `Agent`, not a hand-set Agent-class stub.
+  # Teardown `remove_method`s the stub so the included
+  # `Helpers#make_agent` re-emerges.
+  def stub_make_agent(cmd_class, returning:)
+    @make_agent_stub_class = cmd_class
+    cmd_class.define_method(:make_agent) { |**| returning }
   end
 
   def with_daemon_home
@@ -320,5 +337,150 @@ class CLIDaemonTest < Minitest::Test
     end
   ensure
     ENV["REPO_TENDER_BIN_PATH"] = prev
+  end
+
+  # ---- Slice 5 / CF5: G1 `daemon stop` + G2 `daemon uninstall`
+  #      are idempotent on a not-loaded agent. Anti-tautology:
+  #      the status-3 bootout Failure enters through the
+  #      RUNNER SEAM on a REAL `Launchd::Agent` (not the
+  #      `stub_agent` class-fake used by the argv-stability
+  #      tests above). The real Agent's benign-bootout
+  #      mapping is what produces the exit-0 result — not a
+  #      hand-set `stop_result: Success(...)`.
+
+  def make_recording_agent(responses:, uid: 525, label: LABEL)
+    # Reuses the same `RecordingRunner` shape as
+    # `test/repo_tender/launchd/agent_test.rb` (kept in
+    # sync by hand — both are <30 lines and identical in
+    # shape). The real `Launchd::Agent` calls the runner
+    # with the frozen Slice-4 argv.
+    runner = Class.new do
+      attr_reader :calls
+
+      def initialize(responses)
+        @calls = []
+        @responses = responses.dup
+      end
+
+      def run(*argv)
+        @calls << argv
+        r = @responses.shift
+        if r.nil?
+          Dry::Monads::Success("")
+        elsif r.is_a?(Hash) && r[:failure]
+          Dry::Monads::Failure({argv: argv, stderr: r[:stderr] || "", status: r[:status] || 1})
+        else
+          Dry::Monads::Success(r.to_s)
+        end
+      end
+    end.new(responses)
+    # Return [runner, agent] so the test can inspect
+    # `runner.calls` directly — `Agent` does not expose its
+    # runner (the Agent API is the frozen Slice-4 public
+    # surface; the runner is an injected collaborator).
+    [runner, Agent.new(runner: runner, uid: uid, label: label)]
+  end
+
+  def test_daemon_stop_idempotent_on_status_3_bootout_via_real_agent_and_runner
+    with_daemon_home do |_env, _paths|
+      # bootout = benign Failure; disable = Success (the
+      # real launchctl behavior on a not-loaded service).
+      benign_failure = {failure: true, stderr: "Boot-out failed: 3: No such process", status: 3}
+      runner, real_agent = make_recording_agent(responses: [benign_failure, ""])
+      stub_make_agent(Daemon::Stop, returning: real_agent)
+
+      out, err = invoke_command(Daemon::Stop)
+      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_includes out.string, "stopped:"
+      # No error noise on stderr (gate G1).
+      assert_empty err.string,
+        "expected no stderr; got: #{err.string.inspect}"
+      # The real Agent invoked bootout THEN disable (the
+      # G3 argv assertion in agent_test.rb, re-verified
+      # here through the CLI command).
+      assert_equal [
+        ["launchctl", "bootout", "gui/525/#{LABEL}"],
+        ["launchctl", "disable", "gui/525/#{LABEL}"]
+      ], runner.calls
+    end
+  end
+
+  def test_daemon_stop_surfaces_non_benign_bootout_failure
+    with_daemon_home do |_env, _paths|
+      real_failure = {failure: true, stderr: "Operation not permitted", status: 1}
+      runner, real_agent = make_recording_agent(responses: [real_failure])
+      stub_make_agent(Daemon::Stop, returning: real_agent)
+
+      _out, err = invoke_command(Daemon::Stop)
+      assert_equal 1, RepoTender::CLI.last_outcome.exit_code
+      assert_includes err.string, "stop failed:"
+      assert_includes err.string, "Operation not permitted"
+      # Only bootout was invoked — disable was NOT attempted
+      # (non-benign bootout short-circuits in the real Agent).
+      assert_equal [
+        ["launchctl", "bootout", "gui/525/#{LABEL}"]
+      ], runner.calls
+    end
+  end
+
+  def test_daemon_uninstall_idempotent_on_status_3_bootout_via_real_agent_and_runner
+    with_daemon_home do |env, _paths|
+      benign_failure = {failure: true, stderr: "Boot-out failed: 3: No such process", status: 3}
+      runner, real_agent = make_recording_agent(responses: [benign_failure])
+      stub_make_agent(Daemon::Uninstall, returning: real_agent)
+      pp = File.join(env["HOME"], "Library", "LaunchAgents", "#{LABEL}.plist")
+      FileUtils.mkdir_p(File.dirname(pp))
+      File.write(pp, "<?xml version=\"1.0\"?><plist/>")
+
+      out, err = invoke_command(Daemon::Uninstall)
+      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      # Plist was removed (the CLI's plist-removal step is
+      # independent of the bootout result).
+      refute File.exist?(pp), "plist should have been removed"
+      assert_includes out.string, "removed plist:"
+      # No `bootout reported:` noise on stderr (gate G2).
+      refute_includes err.string, "bootout reported:",
+        "expected no bootout noise; got: #{err.string.inspect}"
+      # Real Agent invoked exactly one bootout call.
+      assert_equal [
+        ["launchctl", "bootout", "gui/525/#{LABEL}"]
+      ], runner.calls
+    end
+  end
+
+  def test_daemon_uninstall_idempotent_quiet_when_plist_already_gone_and_bootout_status_3
+    with_daemon_home do |env, _paths|
+      benign_failure = {failure: true, stderr: "Boot-out failed: 3: No such process", status: 3}
+      _runner, real_agent = make_recording_agent(responses: [benign_failure])
+      stub_make_agent(Daemon::Uninstall, returning: real_agent)
+      pp = File.join(env["HOME"], "Library", "LaunchAgents", "#{LABEL}.plist")
+      refute File.exist?(pp), "precondition: plist must not exist"
+
+      out, err = invoke_command(Daemon::Uninstall)
+      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_includes out.string, "plist not present"
+      refute_includes err.string, "bootout reported:"
+    end
+  end
+
+  def test_daemon_uninstall_surfaces_non_benign_bootout_failure
+    with_daemon_home do |env, _paths|
+      real_failure = {failure: true, stderr: "Operation not permitted", status: 1}
+      _runner, real_agent = make_recording_agent(responses: [real_failure])
+      stub_make_agent(Daemon::Uninstall, returning: real_agent)
+      pp = File.join(env["HOME"], "Library", "LaunchAgents", "#{LABEL}.plist")
+      FileUtils.mkdir_p(File.dirname(pp))
+      File.write(pp, "<?xml version=\"1.0\"?><plist/>")
+
+      out, err = invoke_command(Daemon::Uninstall)
+      # Uninstall still exits 0 + removes the plist (Slice-4
+      # G3 invariant preserved) — bootout is best-effort.
+      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      refute File.exist?(pp)
+      assert_includes out.string, "removed plist:"
+      # The non-benign bootout failure IS surfaced on stderr.
+      assert_includes err.string, "bootout reported:"
+      assert_includes err.string, "Operation not permitted"
+    end
   end
 end

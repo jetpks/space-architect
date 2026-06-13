@@ -85,12 +85,41 @@ module RepoTender
         DEFAULT_LOG_MAX_BYTES = 10 * 1024 * 1024
 
         def rotate_plist_logs(paths)
-          threshold = Integer(ENV["REPO_TENDER_LOG_MAX_BYTES"] || DEFAULT_LOG_MAX_BYTES)
+          threshold = log_max_bytes
           label = Launchd::Agent::DEFAULT_LABEL
           [File.join(paths.log_dir, "#{label}.out.log"),
             File.join(paths.log_dir, "#{label}.err.log")].each do |p|
             RepoTender::LogRotator.call(p, threshold_bytes: threshold)
           end
+        end
+
+        # CF6 (Slice 5): defensively parse the
+        # `REPO_TENDER_LOG_MAX_BYTES` env var so a malformed
+        # operator value (e.g. `"10MB"`) falls back to the
+        # 10 MiB default instead of raising `ArgumentError`
+        # and crashing the entire `sync` run before any repo
+        # work.
+        #
+        # Accepted: any positive integer in base 10
+        # (e.g. `"1048576"`, `"  524288  "`). Falls back to
+        # `DEFAULT_LOG_MAX_BYTES` (and emits a single
+        # `Kernel#warn` to stderr) for: unset, empty,
+        # whitespace, non-numeric (`"10MB"`, `"abc"`), zero,
+        # and negative inputs. Never raises.
+        #
+        # The optional `env_value` arg exists so the unit
+        # tests can pass arbitrary values without mutating
+        # the real `ENV`; production callers invoke with
+        # no args and the method reads `ENV` itself.
+        def log_max_bytes(env_value = ENV["REPO_TENDER_LOG_MAX_BYTES"])
+          return DEFAULT_LOG_MAX_BYTES if env_value.nil? || env_value.strip.empty?
+
+          parsed = Integer(env_value, 10, exception: false)
+          return parsed if parsed.is_a?(Integer) && parsed.positive?
+
+          warn "repo-tender: REPO_TENDER_LOG_MAX_BYTES=#{env_value.inspect} is invalid; " \
+            "falling back to #{DEFAULT_LOG_MAX_BYTES} bytes"
+          DEFAULT_LOG_MAX_BYTES
         end
       end
     end
