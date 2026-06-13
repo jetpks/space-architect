@@ -23,7 +23,7 @@
   `slice/sync-engine` → `main` (`--no-ff`; merge sha in session log), integration smoke green.
 - **Slice 3 (CLI + config CRUD + CF1) — SPEC'D & DISPATCHED 2026-06-13.** Gates
   G0–G9 frozen at `docs/gates/slice-3.md` (`3e72e16`); 1 lane on `slice/cli`
-  (dispatch base `60b3941`); builder block `.architect/slice-3.block.md`; xhigh.
+  (dispatch base = slice/cli tip before builder run); builder block `.architect/slice-3.block.md`; xhigh.
   CF3 deferred to a later slice (architect+human decision). Builder run in flight.
 - **Next action (fresh architect session):** **judge Slice 3** — do NOT judge in
   the dispatching session (rule 4). When the builder run completes: post-flight
