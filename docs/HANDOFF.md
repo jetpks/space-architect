@@ -53,12 +53,28 @@
   green** (`bundle` 0 / no new gems, `rake test` **196/809/0/0/0**, `standardrb`
   0, `--help` lists `daemon`). `main` stays at `d6f1587`. Report:
   `docs/lanes/slice-4-01.md`.
-- **Next action (FRESH architect session — rule 4, I dispatched this build):**
-  JUDGE Slice 4 on `slice/launchd` @ `455df92`. Run all gates yourself
+- **Manual checklist found 2 real runtime bugs — fixed inline @ `ce92ce9`
+  (slice/launchd HEAD).** Human ran the live checklist and hit: (1)
+  `Launchd::Agent#run` never prepended `launchctl` → every op execed the bare
+  subcommand → `Errno::ENOENT`; the G2 test asserted the launchctl-less argv,
+  **codifying the bug (DI-double false confidence)**. (2)
+  `Resolve.detect_bin_path` fell through to `Gem.bin_path` (raises in a source
+  checkout); the documented dev-path fallback was missing. Both fixed inline at
+  human direction (CF4 precedent), G2 argv assertions corrected, +2 regression
+  tests (detect_bin_path was fully stubbed before). Suite **198/811/0/0/0**, lint
+  0. **This is why the manual checklist is mandatory — the offline gates passed
+  while the real launchctl path was 100% broken.**
+- **Next action (FRESH architect session — rule 4, I dispatched the build AND the
+  inline fix):** JUDGE Slice 4 on `slice/launchd` @ **`ce92ce9`** (the fixed
+  HEAD, not 455df92). Run all gates yourself
   (`bundle install && bundle exec rake test && bundle exec standardrb`; then the
   offline gate proofs: `plutil -lint` a generated plist, open the named G1–G8
   tests and confirm they assert the gate behavior with the **injected runner /
-  temp HOME / canned fixtures — no real `launchctl`**), read the diff vs PRD §3.2
+  temp HOME / canned fixtures — no real `launchctl`**). **Heeding the G2 lesson:
+  scrutinize every DI-double gate (G2/G3/G4/G5) for the same blind spot — does the
+  asserted argv/effect match what the REAL runner path actually does? G2 asserted
+  launchctl-less argv and passed while the live path was broken; re-check the
+  others against the production code, not just the test.** Read the diff vs PRD §3.2
   / §5 Slice 4 / §1 (CF3 no-data-loss), and **arbitrate the 6 PHASE-0
   disagreements** (`docs/lanes/slice-4-01.md` §1.3): #1 CF3 location, #2 launchd
   log-label constant, #3 LogRotator 10 MiB default + `REPO_TENDER_LOG_MAX_BYTES`,
@@ -233,3 +249,4 @@ non-clobber) here or as its own small state-schema slice, architect's call.
 | 2026-06-13 | architect | 4 | fd9ece4 (salvage) | reset clean | Root-caused isolation failure; preserved raw mixed output (untrusted) on `salvage/slice-4-raw-mixed`; reset `main`→`153ead2`; removed worktrees+lane branches. Checkpointed to human for re-dispatch approach (worktree-pinned vs sequential-in-main) |
 | 2026-06-13 | builder (m3) | 4 | none (UNJUDGED) | builder: 196/809/0/0/0 | Re-dispatched as ONE combined lane in main checkout (human call); base `d6f1587`. Built launchd/{plist,agent}+cli/daemon+log_rotator+CF3; STATUS COMPLETE_WITH_CONCERNS (manual checklist only). 6 PHASE-0 disagreements raised |
 | 2026-06-13 | architect | 4 | 455df92 (slice/launchd) | integrity PASS; gates pending | Post-flight PASS (no commits, files in-scope, gates clean, real ~/Library/LaunchAgents untouched); committed builder work to `slice/launchd`; integration smoke green (196/809/0/0/0, lint 0, --help lists daemon). Did NOT judge gates (rule 4 — dispatched this build); deferred to fresh session. `main` stays `d6f1587` |
+| 2026-06-13 | human + architect | 4 | ce92ce9 (slice/launchd) | 2 runtime bugs found+fixed | Human ran the manual real-Mac checklist → 2 real bugs the DI gates missed: Agent#run dropped `launchctl` from argv (ENOENT; G2 test codified it), detect_bin_path raised via Gem.bin_path in a source checkout. Fixed inline (CF4 precedent), corrected 6 G2 argv assertions, +2 regression tests. Suite 198/811/0/0/0, lint 0. Judgment still deferred (fresh session, @ ce92ce9) |
