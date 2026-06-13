@@ -38,9 +38,16 @@ module RepoTender
       end
 
       def build_argv(org_ref)
+        # G11 fix (Slice 2): `--no-source` is NOT a valid `gh repo list`
+        # flag (`gh repo list --help` lists `--archived`, `--no-archived`,
+        # `--fork`, `--source`, `--json`, `--limit`, `--topic`,
+        # `--language`, `--visibility`, `--jq`, `--template` — no
+        # `--no-source`). Fork exclusion is handled authoritatively in
+        # `parse_repos` below (the `include_forks` filter), so we no
+        # longer emit an advisory CLI flag for it. The existing G6
+        # behavioral tests for `include_forks=false` still pass.
         argv = ["gh", "repo", "list", org_ref.name, "--json", "nameWithOwner,defaultBranchRef,isArchived,isFork", "--limit", LIST_LIMIT.to_s]
         argv << "--no-archived" unless org_ref.include_archived
-        argv << "--no-source" if !org_ref.include_forks
         argv
       end
 

@@ -146,4 +146,51 @@ class ForgeGitHubTest < Minitest::Test
       assert_includes fields, f, "missing gh --json field #{f}"
     end
   end
+
+  # G11: --no-source is NOT a valid `gh repo list` flag. The forge
+  # must not emit it. Fork exclusion remains the responsibility of
+  # `parse_repos` (asserted by the include_* tests above). The
+  # test scans every flag-combination of build_argv and asserts no
+  # unknown flag slips through.
+  VALID_GH_REPO_LIST_FLAGS = %w[
+    --archived --no-archived --fork --source --json --limit
+    --topic --language --visibility --jq --template --help
+  ].freeze
+
+  def test_build_argv_never_emits_no_source
+    [
+      {include_archived: false, include_forks: false},
+      {include_archived: true, include_forks: false},
+      {include_archived: false, include_forks: true},
+      {include_archived: true, include_forks: true}
+    ].each do |attrs|
+      org = OrgRef.new(name: "cli", **attrs)
+      argv = GitHub.new.build_argv(org)
+      refute_includes argv, "--no-source",
+        "build_argv(#{attrs}) emitted --no-source, which is not a valid gh repo list flag"
+    end
+  end
+
+  def test_build_argv_only_emits_valid_flags
+    [
+      {include_archived: false, include_forks: false},
+      {include_archived: true, include_forks: false},
+      {include_archived: false, include_forks: true},
+      {include_archived: true, include_forks: true}
+    ].each do |attrs|
+      org = OrgRef.new(name: "cli", **attrs)
+      argv = GitHub.new.build_argv(org)
+      argv.select { |a| a.start_with?("--") }.each do |flag|
+        assert_includes VALID_GH_REPO_LIST_FLAGS, flag,
+          "build_argv(#{attrs}) emitted unknown flag #{flag}"
+      end
+    end
+  end
+
+  def test_build_argv_emits_no_archived_only_when_excluding_archived
+    org_excluding = OrgRef.new(name: "cli", include_archived: false, include_forks: true)
+    org_including = OrgRef.new(name: "cli", include_archived: true, include_forks: true)
+    assert_includes GitHub.new.build_argv(org_excluding), "--no-archived"
+    refute_includes GitHub.new.build_argv(org_including), "--no-archived"
+  end
 end
