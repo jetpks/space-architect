@@ -40,7 +40,9 @@ bundle exec standardrb       # exit 0
 ## Current slice
 
 - **Spec:** Slice 1 Foundation — PRD §5 + `docs/gates/slice-1.md`.
-- **Gates:** `docs/gates/slice-1.md` (G0–G8), frozen at the initial commit.
+- **Gates:** `docs/gates/slice-1.md` (G0–G8), frozen at `65f36c4`.
+  Builder freeze base = the commit recording this SHA (post-flight:
+  `git log <freeze>..` must be empty, `git status` only Slice 1 files).
 - **Lanes:** 1 lane (greenfield foundation — shared skeleton + interdependent
   modules; not splittable without collision). Dispatched in the main checkout.
   Report → `docs/lanes/slice-1-01.md`.
