@@ -36,74 +36,50 @@
   `3e72e16`; no builder commits. **G0 PASS → 10/10 → CONTINUE.** Merged
   `slice/cli` → `main` (`--no-ff` `87a3f4b`), integration smoke green. Full detail:
   `docs/lanes/slice-3-01.md`. **CF4 CLOSED.**
-- **Slice 4 (launchd + CF3) — BUILT & INTEGRATED on `slice/launchd` @ `455df92`,
-  UNJUDGED, NOT MERGED.** Human decisions (2026-06-13): launchctl gates are
-  **DI-unit + a manual real-Mac checklist** (no builder/architect runs live
-  `launchctl`); **CF3 folded in**. Gates frozen `docs/gates/slice-4.md` @
-  **`153ead2`** (G0–G8 + manual checklist). First dispatch (2 parallel `pi`
-  worktree lanes) FAILED on isolation — both escaped into the main checkout;
-  reset clean, raw output parked on `salvage/slice-4-raw-mixed` `fd9ece4` (detail
-  in session log + decisions log). **Re-dispatched per human call as ONE combined
-  lane in the main checkout** (dispatch base `d6f1587`; `pi` stays put there) →
-  `STATUS: COMPLETE_WITH_CONCERNS` (sole concern = the by-design manual checklist).
-  **Post-flight integrity PASS:** no builder commits (`git log d6f1587..` empty),
-  all 17 files in the Builds+Extends set, `docs/gates/` diff-clean, **real
-  `~/Library/LaunchAgents` untouched**, temp test artifact cleaned, 6 PHASE-0
-  disagreements raised (cited). Committed to `slice/launchd`; **integration smoke
-  green** (`bundle` 0 / no new gems, `rake test` **196/809/0/0/0**, `standardrb`
-  0, `--help` lists `daemon`). `main` stays at `d6f1587`. Report:
-  `docs/lanes/slice-4-01.md`.
-- **Manual checklist found 2 real runtime bugs — fixed inline @ `ce92ce9`
-  (slice/launchd HEAD).** Human ran the live checklist and hit: (1)
-  `Launchd::Agent#run` never prepended `launchctl` → every op execed the bare
-  subcommand → `Errno::ENOENT`; the G2 test asserted the launchctl-less argv,
-  **codifying the bug (DI-double false confidence)**. (2)
-  `Resolve.detect_bin_path` fell through to `Gem.bin_path` (raises in a source
-  checkout); the documented dev-path fallback was missing. Both fixed inline at
-  human direction (CF4 precedent), G2 argv assertions corrected, +2 regression
-  tests (detect_bin_path was fully stubbed before). Suite **198/811/0/0/0**, lint
-  0. **This is why the manual checklist is mandatory — the offline gates passed
-  while the real launchctl path was 100% broken.**
-- **Manual real-Mac launchctl checklist — HUMAN-RUN PASS 2026-06-13 (on `ce92ce9`).**
-  All 5 steps verified live: `daemon install` → `launchctl print gui/501/<label>`
-  shows the agent loaded with the correct `ProgramArguments`
-  (`mise exec -- <abs ruby> <abs bin/repo-tender> sync`), `WorkingDirectory`,
-  `MISE_CONFIG_FILE`, absolute stdout/stderr log paths, `run interval = 21600`,
-  `runatload`; `daemon status` → loaded:true/running:false/last_exit:0;
-  `daemon restart` (`kickstart -k`) ran a real sync (`runs = 1`, `last exit code
-  = 0`); `daemon uninstall` booted out + removed the plist (confirmed gone). This
-  is the human's sign-off on the manual portion of the Slice 4 gate (the gate file
-  is frozen — sign-off lives here). **One cosmetic wart → CF5** (`bootout` on a
-  not-running agent prints `Boot-out failed: 3: No such process`; uninstall still
-  succeeds).
-- **Next action (FRESH architect session — rule 4, I dispatched the build AND the
-  inline fix):** JUDGE Slice 4 on `slice/launchd` @ **`ce92ce9`** (the fixed
-  HEAD, not 455df92), folding in **CF5**. Run all gates yourself
-  (`bundle install && bundle exec rake test && bundle exec standardrb`; then the
-  offline gate proofs: `plutil -lint` a generated plist, open the named G1–G8
-  tests and confirm they assert the gate behavior with the **injected runner /
-  temp HOME / canned fixtures — no real `launchctl`**). **Heeding the G2 lesson:
-  scrutinize every DI-double gate (G2/G3/G4/G5) for the same blind spot — does the
-  asserted argv/effect match what the REAL runner path actually does? G2 asserted
-  launchctl-less argv and passed while the live path was broken; re-check the
-  others against the production code, not just the test.** Read the diff vs PRD §3.2
-  / §5 Slice 4 / §1 (CF3 no-data-loss), and **arbitrate the 6 PHASE-0
-  disagreements** (`docs/lanes/slice-4-01.md` §1.3): #1 CF3 location, #2 launchd
-  log-label constant, #3 LogRotator 10 MiB default + `REPO_TENDER_LOG_MAX_BYTES`,
-  #4 ShellRunner `Sync{}` default, #5 `launchctl list` status parse, #6 start/stop
-  argv. **High-stakes** (engine surgery for CF3 + new launchd surface) → consider
-  the cross-model adversarial diff review (`dispatch.md`). On PASS: merge
-  `slice/launchd` → `main` (`--no-ff`), integration smoke, archive Slice 4 detail.
-  Separately, the **human runs the manual real-Mac launchctl checklist**
-  (`docs/gates/slice-4.md`) and signs off here — that completes PRD §7 DoD.
+- **Slice 4 (launchd + CF3) — JUDGED PASS & MERGED 2026-06-13 (`a0c44be`).**
+  Built (combined single lane in main, freeze `153ead2`, dispatch base `d6f1587`)
+  after a first dispatch failed on `pi` worktree isolation (raw parked on
+  `salvage/slice-4-raw-mixed` `fd9ece4`). The human's manual real-Mac checklist
+  caught **2 real runtime bugs the offline DI gates missed** — `Launchd::Agent#run`
+  dropped `launchctl` from argv (ENOENT; the G2 test *codified* the bug), and
+  `Resolve.detect_bin_path` raised via `Gem.bin_path` in a source checkout — both
+  fixed inline @ `ce92ce9` (G2 argv assertions corrected, +2 regression tests).
+  **This (fresh) session judged @ `ce92ce9` (rule 4 — the prior session dispatched
+  the build AND the inline fix):** re-ran every gate myself — **G0** suite
+  **198/811/0/0/0**, `standardrb` 0, `bundle` 0 / no new gems, `--help` lists
+  `daemon`; **G1** `plutil -lint` OK on a real generated plist (abs paths, no
+  `KeepAlive`, no `~`/`$HOME`); **G2** corrected argv (`launchctl` as argv[0])
+  matches the real `ShellRunner`→`Shell.run`→`Open3` path; **G3/G4** DI-double
+  effects confirmed against the live path by the human checklist; **G5**
+  byte-preserving rename, no-op wiring leaves Slice-3 `--repo` scoping intact;
+  **G6/G7** CF3 no-data-loss holds (preserve `repo_count`/`last_listed_at`, set
+  `last_error`, repos preserved, run doesn't abort), Slice 2 G10 still green;
+  **G8** file set in-scope, `docs/gates/` diff-clean since freeze, no builder
+  commits. Heeded the G2 lesson — re-checked every DI-double gate against the
+  production code, not just the test. Arbitrated the **6 PHASE-0 disagreements
+  (all ACCEPT)**; ran a **cross-model adversarial diff pass (no merge-blockers)**.
+  **8/8 (G0–G8) PASS + manual checklist PASS → CONTINUE.** Merged
+  `slice/launchd` → `main` (`--no-ff` `a0c44be`), integration smoke green
+  (198/811/0/0/0). **CF3 CLOSED.** Full detail: `docs/lanes/slice-4-01.md`;
+  manual sign-off + remaining warts archived below.
+- **Next action:** Slice 4 was the **final feature slice** (PRD §5 chain
+  1→2→3→4 complete). Project is feature-complete and the live launchd path is
+  human-verified. Remaining is **non-blocking follow-up only**: **CF5** (`daemon
+  stop`/`uninstall` should treat launchctl status-3 "No such process" as
+  already-not-loaded *success* — `stop` currently returns exit 1 on an
+  already-stopped job; the common case at a 6h interval) and **CF6** (malformed
+  `REPO_TENDER_LOG_MAX_BYTES` crashes `sync` via an unrescued `Integer()`). A
+  next session can fold CF5+CF6 into one small daemon-polish slice, or the human
+  can take them inline. No frozen gate is open.
 
 ## Pointers
 
 - **PRD (build contract):** `docs/prd/repo-tender.md`
 - **Research (evidence ledger):** `docs/research/repo-tender.md`
 - **Builder standing context:** `AGENTS.md`
-- **Slices:** PRD §5 — 1 Foundation ✅ → 2 Sync engine ✅ → 3 CLI (current) →
-  4 launchd. Hard dependency chain 1→2→3; 4 depends on 3.
+- **Slices:** PRD §5 — 1 Foundation ✅ → 2 Sync engine ✅ → 3 CLI ✅ →
+  4 launchd ✅. All four feature slices merged. Project feature-complete; only
+  non-blocking CF5/CF6 daemon-polish remains.
 - **Slice 1 detail (resolved):** `docs/lanes/slice-1-01.md` (full disagreement
   reasoning + gate→test mapping). Gates: `docs/gates/slice-1.md` (frozen).
 
@@ -122,9 +98,39 @@ bundle exec standardrb       # exit 0
 - `docs/gates/slice-3.md` — Slice 3, frozen at `3e72e16`. **JUDGED PASS
   (G0–G9, over two sessions), merged `87a3f4b`.** CF4 (G0 fix) CLOSED.
 - `docs/gates/slice-4.md` — Slice 4, frozen at `153ead2` (G0–G8 + manual real-Mac
-  launchctl checklist). **BUILT & INTEGRATED on `slice/launchd` @ `455df92`,
-  UNJUDGED** (gate verdict + 6-disagreement arbitration belong to the next fresh
-  session, rule 4). CF3 folded in here.
+  launchctl checklist). **JUDGED PASS (G0–G8, fresh session @ `ce92ce9`) + manual
+  checklist HUMAN-RUN PASS, merged `a0c44be`.** CF3 CLOSED. 6 disagreements ACCEPT.
+
+## Slice 4 — launchd daemon + log rotation (+ CF3) (RESOLVED, archived)
+
+Built (combined single lane in main, freeze `153ead2`) → judged @ `ce92ce9`
+(fresh session, rule 4) → merged `a0c44be`. **G0–G8 all PASS + manual checklist
+PASS.** Full detail (plan, 6 disagreements + rulings, gate→test mapping, verbatim
+output, sample plist, CF3 before/after): **`docs/lanes/slice-4-01.md`**. Gates
+frozen at `docs/gates/slice-4.md`. Notable:
+- **6 PHASE-0 disagreements — all ACCEPT** (cited against real files;
+  `docs/lanes/slice-4-01.md` §1.3): #1 CF3 fix in `expand_orgs` (single point
+  that builds the per-org record; `prev.repos.dup` preserves repos); #2 hardcoded
+  `Agent::DEFAULT_LABEL` shared by plist + sync pre-step (one constant ⇒ log paths
+  can't drift); #3 LogRotator 10 MiB default in the caller + `REPO_TENDER_LOG_MAX_BYTES`
+  (rotator takes the injected threshold); #4 `ShellRunner` wraps `Shell.run` in
+  `Sync{}` (satisfies the ambient-`Async::Task` requirement; live path proven by
+  the checklist); #5 `status` via `launchctl list` + scan (matches the gate's
+  stated preference; `print` is "not API"); #6 start/stop = bootstrap+enable /
+  bootout+disable per spec (full sequence asserted + short-circuit).
+- **Cross-model adversarial diff pass** (fresh-context Claude, independent of the
+  minimax-m3 builder) exercised the CF3 write→load→fail→write cycle live: invariant
+  holds, `last_listed_at` round-trips as a String, no input raises `parse_list`,
+  plist `plutil`-clean. **No merge-blocking defects.** One robustness nit → **CF6**.
+- **Manual real-Mac launchctl checklist — HUMAN-RUN PASS 2026-06-13 (on `ce92ce9`).**
+  All 5 steps verified live: `daemon install` → `launchctl print gui/501/<label>`
+  shows the agent loaded with correct `ProgramArguments`
+  (`mise exec -- <abs ruby> <abs bin/repo-tender> sync`), `WorkingDirectory`,
+  `MISE_CONFIG_FILE`, absolute log paths, `run interval = 21600`, `runatload`;
+  `daemon status` → loaded:true/running:false/last_exit:0; `daemon restart`
+  (`kickstart -k`) ran a real sync (`runs = 1`, last exit 0); `daemon uninstall`
+  booted out + removed the plist (confirmed gone). **Human's sign-off on the manual
+  portion of the frozen Slice 4 gate.** Warts → CF5 (bootout status-3 noise) + CF6.
 
 ## Slice 3 — CLI surface + config CRUD (+ CF1) (RESOLVED, archived)
 
@@ -200,9 +206,10 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 |---|------|----------------|------|
 | CF1 | `refresh_interval` human durations (`6h`/`90m`) must parse at the **config-load layer** (PRD §3.1 documents them in the hand-editable config file), not just CLI input. Until done, PRD §3.1's `6h` example is load-incompatible. | **Slice 3** gate | Disagreement #1 ruling (MODIFY) |
 | CF2 | Forge `--no-source` invalid `gh` flag → drop it; rely on authoritative `parse_repos` filter. | ✅ **CLOSED** — Slice 2 gate G11 PASS (argv valid, verified vs live `gh`). | Slice 1 judgment |
-| CF3 | `State::Store::Org` should carry an org-list `last_error` (text), and an org-list `Failure` should **not** clobber the prior good `repo_count`/`last_listed_at` (currently `prev.orgs.merge` overwrites it with nil/0). Schema change to `state/store.rb`. Not a no-data-loss violation (repos are preserved); cosmetic state regression only. | **Slice 4** or a dedicated state slice (deferred — orthogonal to the CLI) | Slice 2 disagreement #5 ruling (ACCEPT) |
+| CF3 | `State::Store::Org` should carry an org-list `last_error` (text), and an org-list `Failure` should **not** clobber the prior good `repo_count`/`last_listed_at` (currently `prev.orgs.merge` overwrites it with nil/0). Schema change to `state/store.rb`. Not a no-data-loss violation (repos are preserved); cosmetic state regression only. | ✅ **CLOSED** — Slice 4 G6/G7 PASS (`Org#last_error` round-trips; `expand_orgs` preserves prior good `repo_count`/`last_listed_at` + sets `last_error`; repos preserved; Slice 2 G10 green). Merged `a0c44be`. | Slice 2 disagreement #5 ruling (ACCEPT) |
 | CF4 | Top-level `repo-tender --help`, `repo-tender version`, and bare `repo-tender` must print usage/version to **stdout** and **exit 0** (gate G0). Were hitting Dry::CLI's no-leaf `Usage.call`→`exit(1)` path. | ✅ **CLOSED** — fixed inline @ `b4b2d98`, re-judged G0 PASS in a fresh session (rule 4) and merged to `main` (`87a3f4b`). Top-level `--help`/`version`/bare exit 0 to stdout; leaf/group un-regressed. | Slice 3 judgment (G0 FAIL) + disagreement #1 ruling |
-| CF5 | `daemon uninstall` / `stop` surface `launchctl bootout`'s `Boot-out failed: 3: No such process` (status 3) as an error line on stderr when the agent isn't currently loaded/running — the COMMON case at a 6h interval. `uninstall` still succeeds + removes the plist (cosmetic noise), but `stop` short-circuits on the bootout Failure and returns exit 1 (wrong — stopping an already-stopped job should be idempotent success). Treat launchctl "No such process" / "Could not find specified service" (status 3) as **already-not-loaded success**, not a Failure. | **Next architect session** (fold into the Slice 4 judgment/fix, or a small follow-up). Found in the 2026-06-13 manual checklist. | Slice 4 manual checklist (human) |
+| CF5 | `daemon uninstall` / `stop` surface `launchctl bootout`'s `Boot-out failed: 3: No such process` (status 3) as an error line on stderr when the agent isn't currently loaded/running — the COMMON case at a 6h interval. `uninstall` still succeeds + removes the plist (cosmetic noise), but `stop` short-circuits on the bootout Failure and returns exit 1 (wrong — stopping an already-stopped job should be idempotent success). Treat launchctl "No such process" / "Could not find specified service" (status 3) as **already-not-loaded success**, not a Failure. | **OPEN** — non-blocking; not on any frozen gate (G3 requires idempotent *uninstall*, which works). Fold into a small daemon-polish follow-up with CF6, or human-inline. | Slice 4 manual checklist (human) |
+| CF6 | `cli/sync.rb` `rotate_plist_logs` does `Integer(ENV["REPO_TENDER_LOG_MAX_BYTES"] \|\| DEFAULT)` with no rescue — a malformed value (e.g. `"10MB"`) raises `ArgumentError` and crashes the entire `sync` run before any repo work. Operator-set escape hatch; loud failure, no data loss. Validate/clamp the env var (fall back to the 10 MiB default + warn on parse failure). | **OPEN** — non-blocking robustness nit; fold into the CF5 daemon-polish follow-up. | Slice 4 cross-model adversarial review (this session) |
 
 ## Slice 1 disagreements — RULED (full reasoning: `docs/lanes/slice-1-01.md` §1)
 
@@ -231,13 +238,16 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | 2026-06-13 | Forge `--no-source` fix folded into Slice 2 (G11) not a Slice 1 re-dispatch | Defect isn't on any Slice 1 execution path; the engine is where the forge first runs live |
 | 2026-06-13 | DISPATCH MECHANISM: `pi` worktree isolation does NOT hold — bash cwd is not pinned to the launch dir; builders cd to whatever abs repo path is in their context (the MAIN checkout). Future parallel dispatch must bake the lane's worktree abs path into the block as the repo root + forbid the main path + forbid all git, OR run sequentially in main. (Update `dispatch.md` in the architect skill.) | First Slice 4 dispatch corrupted main's working tree this way; cost a full multi-hour run |
 
-## Next slice (architect decides after Slice 3 PASS)
+## Next (project feature-complete after Slice 4 PASS)
 
-Slice 4 — launchd integration + daemon control (`launchd/{plist,agent}`,
-`cli/daemon`, log rotation). Depends on Slice 3. See PRD §5 Slice 4 (several
-gates are integration-level on a real Mac — may run as a documented manual
-checklist rather than CI). Also fold in **CF3** (state `Org#last_error` +
-non-clobber) here or as its own small state-schema slice, architect's call.
+All four PRD §5 feature slices are merged (1→2→3→4). The live launchd path is
+human-verified. **No frozen gate is open.** Remaining work is non-blocking
+daemon polish: **CF5** (launchctl status-3 → idempotent stop/uninstall success)
+and **CF6** (`REPO_TENDER_LOG_MAX_BYTES` parse hardening). A future session can
+freeze a tiny `slice/daemon-polish` (both CFs, file set `cli/daemon.rb` +
+`launchd/agent.rb` + `cli/sync.rb` + tests) and run the loop, or the human can
+take them inline (CF4/CF5 precedent — trivial fixes skip the loop). Otherwise the
+PRD §7 DoD is met.
 
 ## Session log
 
@@ -264,3 +274,4 @@ non-clobber) here or as its own small state-schema slice, architect's call.
 | 2026-06-13 | architect | 4 | 455df92 (slice/launchd) | integrity PASS; gates pending | Post-flight PASS (no commits, files in-scope, gates clean, real ~/Library/LaunchAgents untouched); committed builder work to `slice/launchd`; integration smoke green (196/809/0/0/0, lint 0, --help lists daemon). Did NOT judge gates (rule 4 — dispatched this build); deferred to fresh session. `main` stays `d6f1587` |
 | 2026-06-13 | human + architect | 4 | ce92ce9 (slice/launchd) | 2 runtime bugs found+fixed | Human ran the manual real-Mac checklist → 2 real bugs the DI gates missed: Agent#run dropped `launchctl` from argv (ENOENT; G2 test codified it), detect_bin_path raised via Gem.bin_path in a source checkout. Fixed inline (CF4 precedent), corrected 6 G2 argv assertions, +2 regression tests. Suite 198/811/0/0/0, lint 0. Judgment still deferred (fresh session, @ ce92ce9) |
 | 2026-06-13 | human | 4 | (manual checklist) | **manual checklist PASS** | Human re-ran the full live launchctl checklist on `ce92ce9`: install/print/status/restart(real sync, last exit 0)/uninstall all correct. Sign-off recorded in Slice 4 TL;DR. One cosmetic wart logged as **CF5** (bootout "No such process" on a not-running agent) |
+| 2026-06-13 | architect | 4 | a0c44be (merge) | **G0–G8 PASS + manual PASS → CONTINUE** | Fresh session judged Slice 4 @ `ce92ce9` (rule 4 — prior session dispatched build AND inline fix). Re-ran all gates myself: G0 198/811/0/0/0, lint 0, no new gems, --help lists daemon; G1 plutil -lint OK on a real generated plist; G2 corrected argv (launchctl argv[0]) matches the real ShellRunner→Shell.run→Open3 path; G3/G4 DI-double effects confirmed against the live path by the human checklist; G5 byte-preserving no-op wiring (Slice-3 --repo scoping intact); G6/G7 CF3 no-data-loss holds (preserve repo_count/last_listed_at, set last_error, repos preserved), Slice 2 G10 green; G8 in-scope, gates diff-clean, no builder commits. Heeded the G2 lesson (re-checked every DI-double vs production code). Arbitrated 6 disagreements (all ACCEPT). Cross-model adversarial diff pass: no merge-blockers (1 robustness nit → CF6). Merged `slice/launchd`→`main` (`--no-ff` `a0c44be`), integration smoke green. **CF3 CLOSED.** All 4 feature slices done; CF5/CF6 non-blocking follow-up remain |
