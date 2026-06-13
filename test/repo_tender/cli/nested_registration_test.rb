@@ -114,4 +114,54 @@ class CLINestedRegistrationTest < Minitest::Test
       refute_empty stderr
     end
   end
+
+  # ---- G0 executable sub-clause: top-level --help / version must
+  #      exit 0 with output on STDOUT (a leaf like `sync --help`
+  #      already does; the program-name level previously fell into
+  #      Dry::CLI's no-leaf path → stderr + exit 1). Subprocess
+  #      tests assert the real process exit status. ----
+
+  def test_top_level_help_exits_zero_with_usage_on_stdout
+    with_cli_env do |env, _home|
+      stdout, stderr, status = run_cli_subprocess(env: env, args: ["--help"])
+      assert status.success?, "top-level --help should exit 0; got #{status.exitstatus}"
+      assert_empty stderr, "usage must go to stdout, not stderr"
+      %w[repo org sync status config].each do |group|
+        assert_includes stdout, group, "--help usage should list the #{group} group"
+      end
+    end
+  end
+
+  def test_top_level_dash_h_exits_zero_with_usage_on_stdout
+    with_cli_env do |env, _home|
+      stdout, _stderr, status = run_cli_subprocess(env: env, args: ["-h"])
+      assert status.success?, "top-level -h should exit 0; got #{status.exitstatus}"
+      assert_includes stdout, "sync"
+    end
+  end
+
+  def test_bare_invocation_exits_zero_with_usage_on_stdout
+    with_cli_env do |env, _home|
+      stdout, stderr, status = run_cli_subprocess(env: env, args: [])
+      assert status.success?, "bare invocation should exit 0; got #{status.exitstatus}"
+      assert_empty stderr
+      assert_includes stdout, "status"
+    end
+  end
+
+  def test_version_exits_zero_with_version_string
+    with_cli_env do |env, _home|
+      stdout, _stderr, status = run_cli_subprocess(env: env, args: ["version"])
+      assert status.success?, "version should exit 0; got #{status.exitstatus}"
+      assert_includes stdout, RepoTender::VERSION
+    end
+  end
+
+  def test_dash_dash_version_exits_zero_with_version_string
+    with_cli_env do |env, _home|
+      stdout, _stderr, status = run_cli_subprocess(env: env, args: ["--version"])
+      assert status.success?, "--version should exit 0; got #{status.exitstatus}"
+      assert_includes stdout, RepoTender::VERSION
+    end
+  end
 end

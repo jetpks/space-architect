@@ -51,13 +51,42 @@ module RepoTender
       Thread.current[:repo_tender_cli_outcome]
     end
 
-    # Entrypoint. Called by bin/repo-tender. Calls into Dry::CLI
-    # (which handles the argv → command dispatch), then translates
-    # the last Outcome to a process exit code.
+    # Program-name-level invocations that must succeed (exit 0) with
+    # output on stdout. Dry::CLI has no root command registered, so it
+    # would otherwise route these through its "command not found" path
+    # (Usage → stderr → exit 1). We intercept ONLY the exact top-level
+    # forms here; a *leaf* help like `sync --help` (argv ["sync",
+    # "--help"]) and a *group* like `repo` / `repo --help` are NOT
+    # matched, so Dry::CLI keeps handling them as before (leaf help →
+    # stdout/exit 0; group → usage/stderr/exit 1, accepted per G7).
+    TOP_LEVEL_HELP = [[], ["--help"], ["-h"], ["help"]].freeze
+    VERSION_REQUEST = [["version"], ["--version"]].freeze
+
+    # Entrypoint. Called by bin/repo-tender. Intercepts the top-level
+    # help/version forms (stdout, exit 0), otherwise hands argv to
+    # Dry::CLI for command dispatch and translates the last Outcome to
+    # a process exit code.
     def self.run(argv, stdout, stderr)
+      return print_usage(stdout) if TOP_LEVEL_HELP.include?(argv)
+      return print_version(stdout) if VERSION_REQUEST.include?(argv)
+
       Dry::CLI.new(Registry).call(arguments: argv, out: stdout, err: stderr)
       outcome = last_outcome
       Kernel.exit(outcome&.exit_code || 0)
+    end
+
+    # Render the top-level command-group listing (reusing Dry::CLI's
+    # own Usage formatter so it stays in sync with the registry) to
+    # stdout and exit 0.
+    def self.print_usage(stdout)
+      stdout.puts Dry::CLI::Usage.call(Registry.get([]))
+      Kernel.exit(0)
+    end
+
+    # Print the gem version to stdout and exit 0.
+    def self.print_version(stdout)
+      stdout.puts RepoTender::VERSION
+      Kernel.exit(0)
     end
 
     # Internal: build a Paths instance scoped to the active env
