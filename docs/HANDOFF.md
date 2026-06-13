@@ -64,9 +64,21 @@
   tests (detect_bin_path was fully stubbed before). Suite **198/811/0/0/0**, lint
   0. **This is why the manual checklist is mandatory — the offline gates passed
   while the real launchctl path was 100% broken.**
+- **Manual real-Mac launchctl checklist — HUMAN-RUN PASS 2026-06-13 (on `ce92ce9`).**
+  All 5 steps verified live: `daemon install` → `launchctl print gui/501/<label>`
+  shows the agent loaded with the correct `ProgramArguments`
+  (`mise exec -- <abs ruby> <abs bin/repo-tender> sync`), `WorkingDirectory`,
+  `MISE_CONFIG_FILE`, absolute stdout/stderr log paths, `run interval = 21600`,
+  `runatload`; `daemon status` → loaded:true/running:false/last_exit:0;
+  `daemon restart` (`kickstart -k`) ran a real sync (`runs = 1`, `last exit code
+  = 0`); `daemon uninstall` booted out + removed the plist (confirmed gone). This
+  is the human's sign-off on the manual portion of the Slice 4 gate (the gate file
+  is frozen — sign-off lives here). **One cosmetic wart → CF5** (`bootout` on a
+  not-running agent prints `Boot-out failed: 3: No such process`; uninstall still
+  succeeds).
 - **Next action (FRESH architect session — rule 4, I dispatched the build AND the
   inline fix):** JUDGE Slice 4 on `slice/launchd` @ **`ce92ce9`** (the fixed
-  HEAD, not 455df92). Run all gates yourself
+  HEAD, not 455df92), folding in **CF5**. Run all gates yourself
   (`bundle install && bundle exec rake test && bundle exec standardrb`; then the
   offline gate proofs: `plutil -lint` a generated plist, open the named G1–G8
   tests and confirm they assert the gate behavior with the **injected runner /
@@ -190,6 +202,7 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | CF2 | Forge `--no-source` invalid `gh` flag → drop it; rely on authoritative `parse_repos` filter. | ✅ **CLOSED** — Slice 2 gate G11 PASS (argv valid, verified vs live `gh`). | Slice 1 judgment |
 | CF3 | `State::Store::Org` should carry an org-list `last_error` (text), and an org-list `Failure` should **not** clobber the prior good `repo_count`/`last_listed_at` (currently `prev.orgs.merge` overwrites it with nil/0). Schema change to `state/store.rb`. Not a no-data-loss violation (repos are preserved); cosmetic state regression only. | **Slice 4** or a dedicated state slice (deferred — orthogonal to the CLI) | Slice 2 disagreement #5 ruling (ACCEPT) |
 | CF4 | Top-level `repo-tender --help`, `repo-tender version`, and bare `repo-tender` must print usage/version to **stdout** and **exit 0** (gate G0). Were hitting Dry::CLI's no-leaf `Usage.call`→`exit(1)` path. | ✅ **CLOSED** — fixed inline @ `b4b2d98`, re-judged G0 PASS in a fresh session (rule 4) and merged to `main` (`87a3f4b`). Top-level `--help`/`version`/bare exit 0 to stdout; leaf/group un-regressed. | Slice 3 judgment (G0 FAIL) + disagreement #1 ruling |
+| CF5 | `daemon uninstall` / `stop` surface `launchctl bootout`'s `Boot-out failed: 3: No such process` (status 3) as an error line on stderr when the agent isn't currently loaded/running — the COMMON case at a 6h interval. `uninstall` still succeeds + removes the plist (cosmetic noise), but `stop` short-circuits on the bootout Failure and returns exit 1 (wrong — stopping an already-stopped job should be idempotent success). Treat launchctl "No such process" / "Could not find specified service" (status 3) as **already-not-loaded success**, not a Failure. | **Next architect session** (fold into the Slice 4 judgment/fix, or a small follow-up). Found in the 2026-06-13 manual checklist. | Slice 4 manual checklist (human) |
 
 ## Slice 1 disagreements — RULED (full reasoning: `docs/lanes/slice-1-01.md` §1)
 
@@ -250,3 +263,4 @@ non-clobber) here or as its own small state-schema slice, architect's call.
 | 2026-06-13 | builder (m3) | 4 | none (UNJUDGED) | builder: 196/809/0/0/0 | Re-dispatched as ONE combined lane in main checkout (human call); base `d6f1587`. Built launchd/{plist,agent}+cli/daemon+log_rotator+CF3; STATUS COMPLETE_WITH_CONCERNS (manual checklist only). 6 PHASE-0 disagreements raised |
 | 2026-06-13 | architect | 4 | 455df92 (slice/launchd) | integrity PASS; gates pending | Post-flight PASS (no commits, files in-scope, gates clean, real ~/Library/LaunchAgents untouched); committed builder work to `slice/launchd`; integration smoke green (196/809/0/0/0, lint 0, --help lists daemon). Did NOT judge gates (rule 4 — dispatched this build); deferred to fresh session. `main` stays `d6f1587` |
 | 2026-06-13 | human + architect | 4 | ce92ce9 (slice/launchd) | 2 runtime bugs found+fixed | Human ran the manual real-Mac checklist → 2 real bugs the DI gates missed: Agent#run dropped `launchctl` from argv (ENOENT; G2 test codified it), detect_bin_path raised via Gem.bin_path in a source checkout. Fixed inline (CF4 precedent), corrected 6 G2 argv assertions, +2 regression tests. Suite 198/811/0/0/0, lint 0. Judgment still deferred (fresh session, @ ce92ce9) |
+| 2026-06-13 | human | 4 | (manual checklist) | **manual checklist PASS** | Human re-ran the full live launchctl checklist on `ce92ce9`: install/print/status/restart(real sync, last exit 0)/uninstall all correct. Sign-off recorded in Slice 4 TL;DR. One cosmetic wart logged as **CF5** (bootout "No such process" on a not-running agent) |
