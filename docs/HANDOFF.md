@@ -37,17 +37,24 @@
   147/548/0/0/0), lint 0, no new gems. Full per-gate judgment + arbitration:
   `docs/lanes/slice-3-01.md §6`. **Does NOT merge until G0 passes** — tracked as
   **CF4** (top-level help/version exit-0 fix in the `CLI.run` seam).
-- **Next action — CF4 fix is HUMAN-INLINE (decided 2026-06-13).** The human
-  patches the top-level `--help`/`version`/bare → exit-0-to-stdout fix directly
-  on `slice/cli` in a normal session (trivial; ~5–10 lines in the `CLI.run` seam
-  at `lib/repo_tender/cli.rb:57-61` and/or a new top-level `version` command).
-  Must not regress leaf `--help` (already 0) or G7 group behavior (exit 1,
-  accepted). **Then a fresh architect session re-runs G0 only**
-  (`ruby -Ilib bin/repo-tender --help` exit 0 + usage→stdout listing the 5
-  groups; `version` exit 0; `rake test` still 147+/…/0/0/0; `standardrb` 0) and,
-  on PASS, merges `slice/cli` → `main` (`--no-ff`), then specs Slice 4 (launchd)
-  folding in CF3. No corrective builder lane / no `slice-3b` gate freeze — the
-  human owns this fix inline.
+- **CF4 fix DONE on `slice/cli` @ `b4b2d98` (inline, locally verified — NOT yet
+  re-judged or merged).** `CLI.run` now intercepts the top-level forms before
+  Dry::CLI: bare / `--help` / `-h` / `help` → usage to **stdout**, exit **0**
+  (reusing `Dry::CLI::Usage.call(Registry.get([]))`); `version` / `--version` →
+  `RepoTender::VERSION` to stdout, exit 0. Leaf `sync --help` (exit 0/stdout) and
+  group `repo` (exit 1/stderr, G7-accepted) verified un-regressed. Suite
+  **152/575/0/0/0** (+5 subprocess regression tests in
+  `cli/nested_registration_test.rb`), `standardrb` 0. Only `cli.rb` + that test
+  file changed; no protected files.
+- **Next action (FRESH architect session — rule 4, the fix's author must not
+  grade it):** re-judge **G0 only** on `slice/cli` — run `bundle install &&
+  bundle exec rake test && bundle exec standardrb`, then the executable
+  sub-clause yourself: `ruby -Ilib bin/repo-tender --help` (exit 0, usage→stdout
+  listing the 5 groups), `version` (exit 0, prints `0.1.0`), and confirm
+  `sync --help` stays 0/stdout + `repo` stays 1/stderr. On **G0 PASS** (all other
+  gates already PASS this session): `git checkout main && git merge --no-ff
+  slice/cli`, run the gate as an integration smoke check, archive Slice 3 detail
+  into the lane report, then spec **Slice 4** (launchd) folding in **CF3**.
 
 ## Pointers
 
@@ -202,7 +209,7 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | CF1 | `refresh_interval` human durations (`6h`/`90m`) must parse at the **config-load layer** (PRD §3.1 documents them in the hand-editable config file), not just CLI input. Until done, PRD §3.1's `6h` example is load-incompatible. | **Slice 3** gate | Disagreement #1 ruling (MODIFY) |
 | CF2 | Forge `--no-source` invalid `gh` flag → drop it; rely on authoritative `parse_repos` filter. | ✅ **CLOSED** — Slice 2 gate G11 PASS (argv valid, verified vs live `gh`). | Slice 1 judgment |
 | CF3 | `State::Store::Org` should carry an org-list `last_error` (text), and an org-list `Failure` should **not** clobber the prior good `repo_count`/`last_listed_at` (currently `prev.orgs.merge` overwrites it with nil/0). Schema change to `state/store.rb`. Not a no-data-loss violation (repos are preserved); cosmetic state regression only. | **Slice 4** or a dedicated state slice (deferred — orthogonal to the CLI) | Slice 2 disagreement #5 ruling (ACCEPT) |
-| CF4 | Top-level `repo-tender --help`, `repo-tender version` (currently unregistered), and bare `repo-tender` must print usage/version to **stdout** and **exit 0** (gate G0). Currently all three hit Dry::CLI's no-leaf `Usage.call`→`exit(1)` path (exit 1, stderr), bypassing the `CLI.run` exit-code seam. Fix in the `CLI.run` seam / Registry; must NOT regress leaf `--help` (already 0) or G7 group no-subcommand (exit 1, accepted). **Blocks the Slice 3 merge.** | **HUMAN-INLINE on `slice/cli`** (decided 2026-06-13 — trivial, no builder lane); fresh architect session then re-runs G0 + merges | Slice 3 judgment (G0 FAIL) + disagreement #1 ruling |
+| CF4 | Top-level `repo-tender --help`, `repo-tender version`, and bare `repo-tender` must print usage/version to **stdout** and **exit 0** (gate G0). Were hitting Dry::CLI's no-leaf `Usage.call`→`exit(1)` path. | ✅ **FIXED inline on `slice/cli` @ `b4b2d98`** (2026-06-13), locally verified (suite 152/575/0/0/0, lint 0, no protected files touched). **Pending:** fresh-session G0 re-judge (rule 4 — author ≠ judge) + merge. | Slice 3 judgment (G0 FAIL) + disagreement #1 ruling |
 
 ## Slice 1 disagreements — RULED (full reasoning: `docs/lanes/slice-1-01.md` §1)
 
@@ -254,3 +261,4 @@ non-clobber) here or as its own small state-schema slice, architect's call.
 | 2026-06-13 | builder (m3) | 3 | none (UNJUDGED) | builder: 147/548/0/0/0 | CLI + config CRUD + CF1 built; 1st run hit step cap, finished via `--session-id slice-3` continue; preserved on slice/cli @ c4bb2c2; integrity PASS; 8 disagreements raised |
 | 2026-06-13 | architect | 3 | c4bb2c2 (preserve) | G9 integrity PASS; rest pending | Post-flight integrity; did NOT judge gates (rule 4); flagged JUDGMENT TARGETS #1/#5; deferred |
 | 2026-06-13 | architect | 3 | (judgment, no merge) | **G1–G9 PASS, G0 FAIL (partial) → CONTINUE** | Fresh session judged Slice 3: re-ran all gates, opened named tests (real config/repo/subprocess, no mocks), read diff vs PRD §1/§3.1/§3.3/§5, verified gates+protected files diff-clean. Arbitrated 8 (8 ACCEPT; #1+CF4, #5 boundary). G0 exec sub-clause FAILS (top-level `--help`/`version` exit 1, not 0) — builder HEARSAY false. NOT merged; CF4 raised to fix before merge |
+| 2026-06-13 | architect (inline fix) | 3 | b4b2d98 (slice/cli) | suite 152/575/0/0/0, lint 0 | CF4 fixed inline at human direction: `CLI.run` intercepts top-level help/version → stdout/exit 0 (reuses Dry::CLI Usage); leaf/group behavior un-regressed; +5 subprocess regression tests. Did NOT self-judge G0 / merge (rule 4) — left for a fresh session |
