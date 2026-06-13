@@ -62,44 +62,40 @@
   `slice/launchd` → `main` (`--no-ff` `a0c44be`), integration smoke green
   (198/811/0/0/0). **CF3 CLOSED.** Full detail: `docs/lanes/slice-4-01.md`;
   manual sign-off + remaining warts archived below.
-- **Slice 5 (daemon-polish: CF5 + CF6) — BUILT & PRESERVED on `slice/daemon-polish`
-  @ `ad97164`, UNJUDGED, NOT MERGED.** One combined lane in the main checkout (the
-  `pi` worktree-isolation lesson). Gates G0–G5 frozen at
-  `docs/gates/daemon-polish.md` @ **`0c2302c`** (freeze / dispatch base). **CF5** =
-  make `daemon stop`/`uninstall` idempotent when the agent is already not-loaded
-  (map a `bootout` status-3 / "No such process" Failure to Success in
-  `stop`+`uninstall` ONLY; bootstrap failures unaffected). **CF6** = harden
-  `REPO_TENDER_LOG_MAX_BYTES` parsing so a malformed value falls back to the 10 MiB
-  default instead of crashing `sync`. Fully CI-judgeable — status-3 simulated
-  through the injected runner seam, **no manual checklist**; the gates require
-  G1/G2 to drive the REAL `Agent` via the runner seam (anti-tautology guard from
-  the Slice-4 G2 lesson). Dispatched `pi --session-id daemon-polish --thinking
-  high` (routine, tightly specified → high not xhigh). **Builder STATUS: COMPLETE**
-  (builder-reported **222/890/0/0/0**). **Post-flight integrity PASS:** no builder
-  commits (`git log 0c2302c..` empty), all 6 files + lane report in-scope,
-  `docs/gates/` diff-clean, no new gems; committed to `slice/daemon-polish`
-  (`ad97164`); **smoke green** (re-ran suite 222/890/0/0/0, `standardrb` 0).
-  **Did NOT judge gates (rule 4 — I dispatched this build).** `main` stays at
-  `713c4f2`. Report: `docs/lanes/daemon-polish-01.md`. Notable from the report:
-  predicate keyed on `argv[1] == "bootout"` (bootstrap status-3 stays a Failure);
-  builder reality-checked `launchctl error bootstrap 3` ≠ `launchctl error 3` to
-  validate the discriminator; 6 PHASE-0 disagreements raised (minor, all
-  self-resolved within spec latitude — a fresh judge rules on them).
-- **Next action (FRESH architect session — rule 4: this session dispatched the
-  build):** JUDGE Slice 5 on `slice/daemon-polish` @ **`ad97164`**. Run all gates
-  yourself (`bundle install && bundle exec rake test && bundle exec standardrb`);
-  open the named G1/G2 tests and **confirm the status-3 bootout Failure enters
-  through the runner seam on a REAL `Agent`** (the report claims `stub_make_agent`
-  overrides only the factory, keeping the real Agent — verify this is not a
-  hand-set-Result tautology, the exact Slice-4 G2 trap); open G3 and confirm the
-  `argv[1] == "bootout"` discriminator keeps `install`/`start` status-3 a Failure
-  (existing `test_nonzero_exit_surfaces_as_failure_not_raise` unmodified + green);
-  open G4 and confirm malformed `REPO_TENDER_LOG_MAX_BYTES` never raises + sync
-  exits 0; check the launchctl-argv-stability constraint (no op's argv changed).
-  Arbitrate the 6 PHASE-0 disagreements (`docs/lanes/daemon-polish-01.md` §1.3).
-  On PASS: merge `slice/daemon-polish` → `main` (`--no-ff`), integration smoke,
-  **close CF5 + CF6**, archive. That completes the project (PRD §7 DoD) — all
-  features + both follow-ups done.
+- **Slice 5 (daemon-polish: CF5 + CF6) — JUDGED PASS & MERGED 2026-06-13
+  (`eceebff`).** One combined lane in the main checkout (the `pi`
+  worktree-isolation lesson), freeze `0c2302c`. **CF5** = `daemon stop`/`uninstall`
+  idempotent when the agent is already not-loaded (map a `bootout` status-3 / "No
+  such process" Failure to Success in `stop`+`uninstall` only; bootstrap
+  unaffected). **CF6** = harden `REPO_TENDER_LOG_MAX_BYTES` parsing so a malformed
+  value falls back to the 10 MiB default instead of crashing `sync`. **This (fresh)
+  session judged @ `ad97164` (rule 4 — prior session dispatched + preserved it):**
+  re-ran every gate myself — **G0** suite **222/890/0/0/0**, `standardrb` 0,
+  `bundle` 0 / no new gems, `--help` lists `daemon`; **G1/G2** `daemon
+  stop`/`uninstall` idempotent on a status-3 bootout — **verified the Failure
+  enters through the runner seam on a REAL `Agent`** (`make_recording_agent` builds
+  `Agent.new(runner:)`, `stub_make_agent` overrides only the factory; `runner.calls`
+  asserts the real `[bootout, disable]` argv — NOT a hand-set stub, the Slice-4 G2
+  anti-tautology trap avoided), non-benign (status 1) still exits 1 / surfaces
+  noise; **G3** benign mapping keyed on `argv[1] == "bootout"` (status 3 OR stderr
+  regex), `install`/`start` bootstrap status-3 still Failure (regression guard
+  green), existing argv assertions unmodified (agent_test purely additive); **G4**
+  `log_max_bytes` never raises across a wide input set + sync no-crash integration
+  (`REPO_TENDER_LOG_MAX_BYTES="10MB"` → exit 0); **G5** in-scope, `docs/gates/`
+  diff-clean, no builder commits. Read the production diff against CF5/CF6 intent +
+  the launchctl-argv-stability constraint (no op's argv changed; public `Agent` API
+  unchanged). Arbitrated the **6 PHASE-0 disagreements (all ACCEPT)**. Low-stakes
+  (no persistence/schema/API) → no extra cross-model pass. **6/6 (G0–G5) PASS →
+  CONTINUE.** Merged `slice/daemon-polish` → `main` (`--no-ff` `eceebff`),
+  integration smoke green (222/890/0/0/0). **CF5 + CF6 CLOSED.** Full detail:
+  `docs/lanes/daemon-polish-01.md`.
+- **PROJECT COMPLETE (PRD §7 DoD met).** All four feature slices (1→2→3→4) merged
+  and the live launchd path human-verified; both carry-forward follow-ups (CF5,
+  CF6) closed. No frozen gate is open; no carry-forward item is open. repo-tender
+  is feature-complete: `dry-cli` binary + config CRUD + sync engine (evergreen
+  invariant, no-data-loss) + launchd daemon (install/uninstall/start/stop/restart/
+  status, idempotent) + log rotation. Any further work is net-new scope a human
+  would spec as a fresh PRD slice.
 
 ## Pointers
 
@@ -107,8 +103,8 @@
 - **Research (evidence ledger):** `docs/research/repo-tender.md`
 - **Builder standing context:** `AGENTS.md`
 - **Slices:** PRD §5 — 1 Foundation ✅ → 2 Sync engine ✅ → 3 CLI ✅ →
-  4 launchd ✅. All four feature slices merged. Project feature-complete; only
-  non-blocking CF5/CF6 daemon-polish remains.
+  4 launchd ✅ → 5 daemon-polish (CF5+CF6) ✅. **PROJECT COMPLETE** — all feature
+  slices + both carry-forwards merged; no open gate, no open carry-forward.
 - **Slice 1 detail (resolved):** `docs/lanes/slice-1-01.md` (full disagreement
   reasoning + gate→test mapping). Gates: `docs/gates/slice-1.md` (frozen).
 
@@ -130,9 +126,8 @@ bundle exec standardrb       # exit 0
   launchctl checklist). **JUDGED PASS (G0–G8, fresh session @ `ce92ce9`) + manual
   checklist HUMAN-RUN PASS, merged `a0c44be`.** CF3 CLOSED. 6 disagreements ACCEPT.
 - `docs/gates/daemon-polish.md` — Slice 5 (CF5 + CF6), frozen at `0c2302c`
-  (G0–G5, fully CI-judgeable, no manual checklist). **BUILT & PRESERVED on
-  `slice/daemon-polish` @ `ad97164`, UNJUDGED** (integrity PASS, smoke green; gate
-  verdict + 6-disagreement arbitration belong to the next fresh session, rule 4).
+  (G0–G5, fully CI-judgeable, no manual checklist). **JUDGED PASS (G0–G5, fresh
+  session @ `ad97164`), merged `eceebff`.** CF5 + CF6 CLOSED. 6 disagreements ACCEPT.
 
 ## Slice 4 — launchd daemon + log rotation (+ CF3) (RESOLVED, archived)
 
@@ -241,8 +236,8 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | CF2 | Forge `--no-source` invalid `gh` flag → drop it; rely on authoritative `parse_repos` filter. | ✅ **CLOSED** — Slice 2 gate G11 PASS (argv valid, verified vs live `gh`). | Slice 1 judgment |
 | CF3 | `State::Store::Org` should carry an org-list `last_error` (text), and an org-list `Failure` should **not** clobber the prior good `repo_count`/`last_listed_at` (currently `prev.orgs.merge` overwrites it with nil/0). Schema change to `state/store.rb`. Not a no-data-loss violation (repos are preserved); cosmetic state regression only. | ✅ **CLOSED** — Slice 4 G6/G7 PASS (`Org#last_error` round-trips; `expand_orgs` preserves prior good `repo_count`/`last_listed_at` + sets `last_error`; repos preserved; Slice 2 G10 green). Merged `a0c44be`. | Slice 2 disagreement #5 ruling (ACCEPT) |
 | CF4 | Top-level `repo-tender --help`, `repo-tender version`, and bare `repo-tender` must print usage/version to **stdout** and **exit 0** (gate G0). Were hitting Dry::CLI's no-leaf `Usage.call`→`exit(1)` path. | ✅ **CLOSED** — fixed inline @ `b4b2d98`, re-judged G0 PASS in a fresh session (rule 4) and merged to `main` (`87a3f4b`). Top-level `--help`/`version`/bare exit 0 to stdout; leaf/group un-regressed. | Slice 3 judgment (G0 FAIL) + disagreement #1 ruling |
-| CF5 | `daemon uninstall` / `stop` surface `launchctl bootout`'s `Boot-out failed: 3: No such process` (status 3) as an error line on stderr when the agent isn't currently loaded/running — the COMMON case at a 6h interval. `uninstall` still succeeds + removes the plist (cosmetic noise), but `stop` short-circuits on the bootout Failure and returns exit 1 (wrong — stopping an already-stopped job should be idempotent success). Treat launchctl "No such process" / "Could not find specified service" (status 3) as **already-not-loaded success**, not a Failure. | **OPEN** — non-blocking; not on any frozen gate (G3 requires idempotent *uninstall*, which works). Fold into a small daemon-polish follow-up with CF6, or human-inline. | Slice 4 manual checklist (human) |
-| CF6 | `cli/sync.rb` `rotate_plist_logs` does `Integer(ENV["REPO_TENDER_LOG_MAX_BYTES"] \|\| DEFAULT)` with no rescue — a malformed value (e.g. `"10MB"`) raises `ArgumentError` and crashes the entire `sync` run before any repo work. Operator-set escape hatch; loud failure, no data loss. Validate/clamp the env var (fall back to the 10 MiB default + warn on parse failure). | **OPEN** — non-blocking robustness nit; fold into the CF5 daemon-polish follow-up. | Slice 4 cross-model adversarial review (this session) |
+| CF5 | `daemon uninstall` / `stop` surface `launchctl bootout`'s `Boot-out failed: 3: No such process` (status 3) as an error line on stderr when the agent isn't currently loaded/running — the COMMON case at a 6h interval. `uninstall` still succeeds + removes the plist (cosmetic noise), but `stop` short-circuits on the bootout Failure and returns exit 1 (wrong — stopping an already-stopped job should be idempotent success). Treat launchctl "No such process" / "Could not find specified service" (status 3) as **already-not-loaded success**, not a Failure. | ✅ **CLOSED** — Slice 5 G1/G2/G3 PASS (`Agent#benign_bootout_failure?` keyed on `argv[1]=="bootout"`; `stop`/`uninstall` idempotent on status-3; non-benign still surfaces; bootstrap unaffected). Merged `eceebff`. | Slice 4 manual checklist (human) |
+| CF6 | `cli/sync.rb` `rotate_plist_logs` does `Integer(ENV["REPO_TENDER_LOG_MAX_BYTES"] \|\| DEFAULT)` with no rescue — a malformed value (e.g. `"10MB"`) raises `ArgumentError` and crashes the entire `sync` run before any repo work. Operator-set escape hatch; loud failure, no data loss. Validate/clamp the env var (fall back to the 10 MiB default + warn on parse failure). | ✅ **CLOSED** — Slice 5 G4 PASS (`Sync::Run#log_max_bytes` never raises; falls back to 10 MiB default + warns; sync no-crash integration green). Merged `eceebff`. | Slice 4 cross-model adversarial review |
 
 ## Slice 1 disagreements — RULED (full reasoning: `docs/lanes/slice-1-01.md` §1)
 
@@ -271,16 +266,20 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | 2026-06-13 | Forge `--no-source` fix folded into Slice 2 (G11) not a Slice 1 re-dispatch | Defect isn't on any Slice 1 execution path; the engine is where the forge first runs live |
 | 2026-06-13 | DISPATCH MECHANISM: `pi` worktree isolation does NOT hold — bash cwd is not pinned to the launch dir; builders cd to whatever abs repo path is in their context (the MAIN checkout). Future parallel dispatch must bake the lane's worktree abs path into the block as the repo root + forbid the main path + forbid all git, OR run sequentially in main. (Update `dispatch.md` in the architect skill.) | First Slice 4 dispatch corrupted main's working tree this way; cost a full multi-hour run |
 
-## Next (project feature-complete after Slice 4 PASS)
+## Next — PROJECT COMPLETE
 
-All four PRD §5 feature slices are merged (1→2→3→4). The live launchd path is
-human-verified. **No frozen gate is open.** Remaining work is non-blocking
-daemon polish: **CF5** (launchctl status-3 → idempotent stop/uninstall success)
-and **CF6** (`REPO_TENDER_LOG_MAX_BYTES` parse hardening). A future session can
-freeze a tiny `slice/daemon-polish` (both CFs, file set `cli/daemon.rb` +
-`launchd/agent.rb` + `cli/sync.rb` + tests) and run the loop, or the human can
-take them inline (CF4/CF5 precedent — trivial fixes skip the loop). Otherwise the
-PRD §7 DoD is met.
+All five slices merged (1 Foundation → 2 Sync engine → 3 CLI → 4 launchd →
+5 daemon-polish). The live launchd path is human-verified. **No frozen gate is
+open; no carry-forward is open** (CF1–CF6 all CLOSED). **PRD §7 DoD is met** —
+repo-tender keeps local clones evergreen via a `dry-cli` binary + a periodic
+launchd `sync` sweep, with idempotent daemon control and defensive log rotation.
+
+There is no queued architect work. Any further change is net-new scope: a human
+would write a fresh PRD slice + freeze new gates. Candidate future scope (NOT
+committed, NOT gated): SCM/forge backends beyond GitHub (the interfaces are
+already decoupled), a `config` subcommand for `log_max_size`/label as real config
+fields (today env/constant), or richer `daemon status` output. Until a human
+asks, the loop is idle.
 
 ## Session log
 
@@ -311,3 +310,4 @@ PRD §7 DoD is met.
 | 2026-06-13 | architect | 5 | 0c2302c (freeze) | n/a | Slice 5 (daemon-polish: CF5 launchctl status-3 idempotency + CF6 env parse hardening) spec'd, gates G0–G5 frozen, 1 combined lane in main checkout. Dispatched `pi --session-id daemon-polish --thinking high`; fully CI-judgeable (status-3 via injected runner seam, no manual checklist; gates require real-Agent-via-runner-seam, anti-tautology). Block `.architect/daemon-polish-01.block.md`. Did NOT judge (rule 4 — dispatched this session); fresh session judges + merges |
 | 2026-06-13 | builder (m3) | 5 | none (UNJUDGED) | builder: 222/890/0/0/0 | CF5+CF6 built in 1 lane (main checkout). `benign_bootout_failure?` keyed on `argv[1]=="bootout"` (status 3 OR stderr regex); `log_max_bytes` defensive parse (default+warn on bad value). New CLI tests drive real Agent via runner seam (anti-tautology). STATUS COMPLETE; 6 PHASE-0 disagreements raised (all within spec latitude). No commits, no out-of-scope touches, no new gems |
 | 2026-06-13 | architect | 5 | ad97164 (preserve) | integrity PASS; gates pending | Post-flight PASS (no builder commits `git log 0c2302c..` empty, 6 files + lane report in-scope, `docs/gates/` diff-clean, no new gems); committed builder work to `slice/daemon-polish`; smoke green (re-ran 222/890/0/0/0, lint 0). Did NOT judge gates (rule 4 — dispatched this build); deferred to fresh session. `main` stays `713c4f2` |
+| 2026-06-13 | architect | 5 | eceebff (merge) | **G0–G5 PASS → CONTINUE** | Fresh session judged Slice 5 @ `ad97164` (rule 4 — prior session dispatched + preserved). Re-ran all gates myself: G0 222/890/0/0/0, lint 0, no new gems, --help daemon; G1/G2 verified status-3 bootout enters the runner seam on a REAL Agent (`runner.calls` asserts `[bootout,disable]`, not a hand-set stub — Slice-4 G2 trap avoided), non-benign exits 1/surfaces noise; G3 benign mapping keyed on `argv[1]=="bootout"`, install/start bootstrap status-3 still Failure, existing argv assertions unmodified (agent_test additive); G4 `log_max_bytes` never raises + sync no-crash integration; G5 in-scope, gates clean, no builder commits. Read diff vs CF5/CF6 intent + argv-stability (no op argv changed, public Agent API unchanged). Arbitrated 6 disagreements (all ACCEPT). Low-stakes → no extra cross-model pass. Merged `slice/daemon-polish`→`main` (`--no-ff` `eceebff`), integration smoke green. **CF5 + CF6 CLOSED. PROJECT COMPLETE (PRD §7 DoD).** |
