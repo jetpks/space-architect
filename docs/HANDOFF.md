@@ -36,31 +36,38 @@
   `3e72e16`; no builder commits. **G0 PASS → 10/10 → CONTINUE.** Merged
   `slice/cli` → `main` (`--no-ff` `87a3f4b`), integration smoke green. Full detail:
   `docs/lanes/slice-3-01.md`. **CF4 CLOSED.**
-- **Slice 4 (launchd + CF3) — SPEC'D & FROZEN, FIRST DISPATCH FAILED (isolation),
-  RESET CLEAN. Awaiting human call on re-dispatch.** Human decisions taken
-  (2026-06-13): launchctl gates are **DI-unit + a manual real-Mac checklist**
-  (no builder/architect runs live `launchctl`); **CF3 folds in as a 2nd disjoint
-  lane**. Gates frozen `docs/gates/slice-4.md` @ **`153ead2`** (G0–G8 + manual
-  checklist); blocks `.architect/slice-4-0{1,2}.block.md`. Dispatched 2 parallel
-  `pi` lanes in worktrees → **both escaped their worktree and wrote into the MAIN
-  checkout** (rule-7 isolation failure: `pi`'s bash cwd did not stay in the
-  launched worktree — Lane 01 hardcoded `cd <main-abs-path>` on every command;
-  Lane 02's git/edit ops resolved against main too). Lane 01 never wrote a report
-  + ran `git stash`/`pop` in main + hit a `NameError`; Lane 02 reported COMPLETE.
-  **No commits, stash empty → nothing lost.** Raw mixed output preserved
-  (untrusted, do-not-merge) on branch **`salvage/slice-4-raw-mixed` (`fd9ece4`)**;
-  `main` reset to pristine `153ead2`; worktrees + lane branches removed.
-- **Next action: re-dispatch Slice 4 with worktree isolation that actually holds
-  for `pi`.** Root cause = `pi` bash does not persist the launch cwd; the only
-  repo path in the builder's context was the MAIN abs path (gates/spec), so it
-  cd'd there. Fix options for the human to pick (see session close):
-  (a) re-dispatch with **worktree-pinned blocks** — bake the lane's absolute
-  worktree path in as "YOUR REPO ROOT", instruct `cd` there first on every
-  command, forbid the main path + all git (Lane 01 proved `pi` *will* consistently
-  cd to a given abs path — it just had the wrong one); (b) **sequential single-lane
-  in main** (lanes are disjoint; run one builder over both, architect commits) —
-  sidesteps cwd entirely since `pi` defaults to main; (c) salvage the raw output
-  manually. Gates stay frozen at `153ead2` either way.
+- **Slice 4 (launchd + CF3) — BUILT & INTEGRATED on `slice/launchd` @ `455df92`,
+  UNJUDGED, NOT MERGED.** Human decisions (2026-06-13): launchctl gates are
+  **DI-unit + a manual real-Mac checklist** (no builder/architect runs live
+  `launchctl`); **CF3 folded in**. Gates frozen `docs/gates/slice-4.md` @
+  **`153ead2`** (G0–G8 + manual checklist). First dispatch (2 parallel `pi`
+  worktree lanes) FAILED on isolation — both escaped into the main checkout;
+  reset clean, raw output parked on `salvage/slice-4-raw-mixed` `fd9ece4` (detail
+  in session log + decisions log). **Re-dispatched per human call as ONE combined
+  lane in the main checkout** (dispatch base `d6f1587`; `pi` stays put there) →
+  `STATUS: COMPLETE_WITH_CONCERNS` (sole concern = the by-design manual checklist).
+  **Post-flight integrity PASS:** no builder commits (`git log d6f1587..` empty),
+  all 17 files in the Builds+Extends set, `docs/gates/` diff-clean, **real
+  `~/Library/LaunchAgents` untouched**, temp test artifact cleaned, 6 PHASE-0
+  disagreements raised (cited). Committed to `slice/launchd`; **integration smoke
+  green** (`bundle` 0 / no new gems, `rake test` **196/809/0/0/0**, `standardrb`
+  0, `--help` lists `daemon`). `main` stays at `d6f1587`. Report:
+  `docs/lanes/slice-4-01.md`.
+- **Next action (FRESH architect session — rule 4, I dispatched this build):**
+  JUDGE Slice 4 on `slice/launchd` @ `455df92`. Run all gates yourself
+  (`bundle install && bundle exec rake test && bundle exec standardrb`; then the
+  offline gate proofs: `plutil -lint` a generated plist, open the named G1–G8
+  tests and confirm they assert the gate behavior with the **injected runner /
+  temp HOME / canned fixtures — no real `launchctl`**), read the diff vs PRD §3.2
+  / §5 Slice 4 / §1 (CF3 no-data-loss), and **arbitrate the 6 PHASE-0
+  disagreements** (`docs/lanes/slice-4-01.md` §1.3): #1 CF3 location, #2 launchd
+  log-label constant, #3 LogRotator 10 MiB default + `REPO_TENDER_LOG_MAX_BYTES`,
+  #4 ShellRunner `Sync{}` default, #5 `launchctl list` status parse, #6 start/stop
+  argv. **High-stakes** (engine surgery for CF3 + new launchd surface) → consider
+  the cross-model adversarial diff review (`dispatch.md`). On PASS: merge
+  `slice/launchd` → `main` (`--no-ff`), integration smoke, archive Slice 4 detail.
+  Separately, the **human runs the manual real-Mac launchctl checklist**
+  (`docs/gates/slice-4.md`) and signs off here — that completes PRD §7 DoD.
 
 ## Pointers
 
@@ -86,6 +93,10 @@ bundle exec standardrb       # exit 0
 - `docs/gates/slice-2.md` — Slice 2, frozen at `6889a12`. **JUDGED PASS, merged.**
 - `docs/gates/slice-3.md` — Slice 3, frozen at `3e72e16`. **JUDGED PASS
   (G0–G9, over two sessions), merged `87a3f4b`.** CF4 (G0 fix) CLOSED.
+- `docs/gates/slice-4.md` — Slice 4, frozen at `153ead2` (G0–G8 + manual real-Mac
+  launchctl checklist). **BUILT & INTEGRATED on `slice/launchd` @ `455df92`,
+  UNJUDGED** (gate verdict + 6-disagreement arbitration belong to the next fresh
+  session, rule 4). CF3 folded in here.
 
 ## Slice 3 — CLI surface + config CRUD (+ CF1) (RESOLVED, archived)
 
@@ -220,3 +231,5 @@ non-clobber) here or as its own small state-schema slice, architect's call.
 | 2026-06-13 | architect | 4 | 153ead2 (freeze) | n/a | Slice 4 spec'd (2 disjoint lanes: launchd / CF3), gates G0–G8 + manual real-Mac checklist frozen; human decisions: DI-unit+manual launchctl, CF3 as 2nd lane. Worktrees off freeze; 2 `pi` lanes dispatched in parallel (xhigh) |
 | 2026-06-13 | builder (m3) | 4 | none | DISPATCH FAILED (isolation) | Both lanes escaped worktrees → wrote into MAIN checkout (`pi` bash cwd not pinned). Lane 01: no report, `git stash`/`pop` in main, NameError. Lane 02: COMPLETE. No commits/stash → nothing lost |
 | 2026-06-13 | architect | 4 | fd9ece4 (salvage) | reset clean | Root-caused isolation failure; preserved raw mixed output (untrusted) on `salvage/slice-4-raw-mixed`; reset `main`→`153ead2`; removed worktrees+lane branches. Checkpointed to human for re-dispatch approach (worktree-pinned vs sequential-in-main) |
+| 2026-06-13 | builder (m3) | 4 | none (UNJUDGED) | builder: 196/809/0/0/0 | Re-dispatched as ONE combined lane in main checkout (human call); base `d6f1587`. Built launchd/{plist,agent}+cli/daemon+log_rotator+CF3; STATUS COMPLETE_WITH_CONCERNS (manual checklist only). 6 PHASE-0 disagreements raised |
+| 2026-06-13 | architect | 4 | 455df92 (slice/launchd) | integrity PASS; gates pending | Post-flight PASS (no commits, files in-scope, gates clean, real ~/Library/LaunchAgents untouched); committed builder work to `slice/launchd`; integration smoke green (196/809/0/0/0, lint 0, --help lists daemon). Did NOT judge gates (rule 4 — dispatched this build); deferred to fresh session. `main` stays `d6f1587` |
