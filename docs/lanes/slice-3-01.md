@@ -271,3 +271,61 @@ No `sync/`, `state/store.rb`, `scm/`, `forge/`, `paths.rb`, `config/model.rb`, `
 ---
 
 STATUS: COMPLETE
+
+---
+
+## 6. ARCHITECT JUDGMENT — 2026-06-13 (fresh session, rule 4 satisfied)
+
+Judged on `slice/cli` @ `c4bb2c2` (build) / `946a0b1` (tip). Gates re-run by the
+architect; named tests opened and confirmed to assert real on-disk / real-repo
+behavior (no mocks of `Config::Store` / `State::Store` / `Engine`); diff read
+against PRD §1 (no-data-loss), §3.1, §3.3, §5 Slice 3. `docs/gates/` diff since
+freeze `3e72e16` is **empty** (no tamper). Protected-file diff (`sync/`,
+`state/store.rb`, `scm/`, `forge/`, `paths.rb`, `config/model.rb`,
+`config/contract.rb`, `test/test_helper.rb`) is **empty** — verified by the
+architect, not taken on the builder's word.
+
+### Per-gate verdicts (architect's own runs/reads)
+
+| Gate | Verdict | Evidence (architect-observed) |
+|------|---------|-------------------------------|
+| G0 | **FAIL (partial)** | Suite green (re-ran: `rake test` 147/548/0/0/0), `standardrb` 0, `bundle install` 0, no new gems — all PASS. **But the executable sub-clause FAILS:** the frozen G0 says verbatim "`ruby -Ilib bin/repo-tender --help` (or `version`) exits 0 and prints usage listing the command groups." Observed: `--help` → **exit 1**, usage to **stderr**; `version` → **exit 1** (no `version` command is registered at all); bare invocation → **exit 1**. Only *leaf* `--help` (`sync --help`) exits 0. The builder's report claimed "`--help` → exit 0" — **false HEARSAY**, caught by re-running (rule 4 working as designed). Root cause: no top-level default/help/version command, so all program-name-level invocations fall into Dry::CLI's no-leaf `Usage.call`→`exit(1)` path, which bypasses the entrypoint's `Kernel.exit(outcome.exit_code)` seam entirely. |
+| G1 | **PASS** | `repo_test.rb` against real temp `$XDG_CONFIG_HOME`; add validates+writes, reload yields `RepoRef(github.com,ruby,ruby)`; list; remove; idempotent add → "already tracked", exit 0, no second write (load-check-then-write in `cli/repo.rb:61-64`). |
+| G2 | **PASS** | `org_test.rb`; CRUD persists; bare-name host default; `include_archived`/`include_forks` round-trip. |
+| G3 | **PASS** | Invalid ref → exit 1 + Failure-derived stderr + config **byte-for-byte + mtime unchanged** (`repo_test.rb:84-99`, real file) AND absent-file stays absent (`:103-114`) AND real subprocess exit nonzero (`Open3.capture3`, `:119-122`). Both in-process and real-exit halves present, as the gate's "How measured" required. |
+| G4 | **PASS** | `sync_test.rb`: 2 real bare remotes + clones, real `Engine#call`; `sync` writes a state row per repo; `sync --repo` pre-seeds BOTH rows with a fixed `last_synced_at`, runs scoped, asserts targeted row moved forward AND **non-targeted row byte-identical** (`:146-151`) — genuine scoping proof. Scoping = `Config::Store.with(config, repos:[found], orgs:[])` + unchanged engine (`cli/sync.rb:40-44`); engine diff empty. |
+| G5 | **PASS** | `status_test.rb`; seeds real `state.yaml` via `State::Store.write`, asserts captured stdout contains each repo key + status + default_branch + last_synced_at; empty-state friendly message; subprocess variant. |
+| G6 | **PASS** | `config_test.rb`; `config path` matches `Paths#config_file`; `config show` on empty config prints defaults (`concurrency: 8`, `refresh_interval: 21600`, base default). |
+| G7 | **PASS** | `nested_registration_test.rb`; subcommand dispatch via real `Dry::CLI#call`; `repo`/`org`/`config` alone → exit 1 + usage listing subcommands on stderr (accepted under the gate's "or dry-cli's documented help behavior" clause — disagreement #5); unknown command → nonzero + usage. NB: this *group-level* exit-1 is tolerated by G7; the *top-level* exit-1 is NOT tolerated by G0 (distinct gate) — see G0. |
+| G8 | **PASS** | CF1 normalizes in `Config::Store.load` BEFORE the contract and returns the Failure early (`config/store.rb` diff verified). `duration_test.rb`: unit cases (6h/90m/45s/30d/bare int/bare string + reject 6x/-3h/empty/zero/nil/float) AND load-layer integration on a real YAML file (`refresh_interval: 6h` → loaded `21600`; invalid → Failure whose message is the **parser's** "invalid duration", proving the contract is never reached). End-to-end `config show` prints `21600`. |
+| G9 | **PASS** | Protected-file diff empty (architect-verified). All production changes inside Builds+Extends. 2 extra **test** files (`cli/test_helper.rb`, `cli/nested_registration_test.rb`) documented as disagreements #7/#8; neither touches the protected top-level `test_helper.rb`. |
+
+### Disagreement arbitration (all 8 — ACCEPT/REJECT/MODIFY + why)
+
+1. **Exit-code seam (thread-local `Outcome` + entrypoint `Kernel.exit`).** **ACCEPT.** Verified G3 proven both ways; `invoke_command` clears the stash and `with_cli_env` clears env in `ensure` → no cross-test leak. *Caveat (becomes CF4):* the seam only covers paths that reach `CLI.run`'s tail; Dry::CLI's no-leaf `exit(1)` short-circuits it — the root of the G0 defect.
+2. **`repo add` single-arg `host/owner/name` only.** **ACCEPT.** Spec gave builder's choice; bad form rejected with "expected host/owner/name" (`cli/repo.rb:21`).
+3. **`sync --repo` filters Config, engine unchanged; unknown ref → exit 1, no write.** **ACCEPT.** Matches spec + PHASE-0 ruling; engine diff empty; `cli/sync.rb:27-41`.
+4. **CF1 normalized in `Store.load` before contract; write-back emits integer seconds.** **ACCEPT.** Load-before-contract order confirmed in the `store.rb` diff; matches the Slice 1 disagreement-#1 MODIFY ruling. Human-string write-back loss is consistent with the documented comment-loss limitation.
+5. **`repo`/`org`/`config` no-subcommand → exit 1 + usage on stderr (dry-cli default).** **ACCEPT** *for the group nodes* — G7's "or dry-cli's documented help behavior" allows it, and the usage genuinely lists the subcommands. **Explicit boundary:** this same dry-cli no-leaf behavior at the **top level** is NOT acceptable — G0 requires top-level `--help`/`version` to exit 0. ACCEPTing #5 for groups does not excuse the G0 top-level FAIL.
+6. **Idempotent add = load-check-then-write.** **ACCEPT.** Satisfies G1 (no dup) + the G3 "untouched on no-op" spirit; `cli/repo.rb:61-64`.
+7. **Added `cli/test_helper.rb`.** **ACCEPT.** Additive test infra; reuses (does not touch) the protected `test/test_helper.rb`; DRYs env/invoke/subprocess across 5 files.
+8. **Added `cli/nested_registration_test.rb`.** **ACCEPT.** Additive; G7's full-registry seam differs from per-command `cmd.call(**)`.
+
+**Tally: 8 ACCEPT, 0 REJECT, 0 MODIFY.** #1 accepted with carry-forward CF4; #5 accepted with an explicit top-level/group boundary.
+
+### Slice-level verdict: **CONTINUE** (not KILL) — blocked on one corrective lane before merge.
+
+The slice is sound, well-factored, real-tested, and upholds the no-data-loss
+invariant (the CLI never mutates a repo; it delegates to the unchanged engine).
+The single gate miss (G0 top-level `--help`/`version` exit-0) is a real but
+trivial, well-bounded UX/contract defect in the exit-code seam, not a design
+flaw. **Does not merge to `main` until G0 fully passes.** Fix tracked as **CF4**.
+
+### CF4 — top-level `--help` / `version` must exit 0 (G0 fix)
+
+`repo-tender --help`, `repo-tender version` (currently nonexistent), and bare
+`repo-tender` must print usage/version to **stdout** and exit **0** — without
+regressing leaf `--help` (already 0) or the group no-subcommand behavior
+(exit 1, accepted under G7). The fix lives in the `CLI.run` seam / Registry
+(builder's PHASE-0 design call), not in the engine. Corrective lane on
+`slice/cli`; micro-gate to be frozen before dispatch.
