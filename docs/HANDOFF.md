@@ -21,10 +21,16 @@
   live `gh` 2.93 (CF2 closed), arbitrated all 8 disagreements (8 ACCEPT, 1 with
   a carry-forward CF3). Slice-level verdict **CONTINUE**. Merged
   `slice/sync-engine` → `main` (`--no-ff`; merge sha in session log), integration smoke green.
-- **Next action (fresh architect session):** spec **Slice 3 — CLI surface +
-  config CRUD** (PRD §5 Slice 3). Must also land **CF1** (duration parsing at the
-  config-load layer) and is the natural home for **CF3** consideration (state
-  `Org#last_error`). Freeze `docs/gates/slice-3.md` before dispatch.
+- **Slice 3 (CLI + config CRUD + CF1) — SPEC'D & DISPATCHED 2026-06-13.** Gates
+  G0–G9 frozen at `docs/gates/slice-3.md` (freeze commit below); 1 lane, main
+  checkout; builder block `.architect/slice-3.block.md`; xhigh. CF3 deferred to a
+  later slice (architect+human decision). Builder run in flight.
+- **Next action (fresh architect session):** **judge Slice 3** — do NOT judge in
+  the dispatching session (rule 4). When the builder run completes: post-flight
+  integrity (`git log <freeze>..` empty, `git status` only in Builds+Extends set,
+  `docs/gates/` clean, report present, disagreements raised) → preserve on
+  `slice/cli` → next session runs G0–G9 from `docs/gates/slice-3.md`, reads the
+  diff vs PRD §3.1/§3.3/§5, renders PASS/FAIL → KILL/CONTINUE → merge on PASS.
 
 ## Pointers
 
@@ -48,7 +54,32 @@ bundle exec standardrb       # exit 0
 
 - `docs/gates/slice-1.md` — Slice 1, frozen at `65f36c4`. **JUDGED PASS, merged.**
 - `docs/gates/slice-2.md` — Slice 2, frozen at `6889a12`. **JUDGED PASS, merged.**
-- `docs/gates/slice-3.md` — Slice 3, to be frozen next session before dispatch.
+- `docs/gates/slice-3.md` — Slice 3, frozen at `79a9e84`, BEFORE work began.
+  Read-only. **DISPATCHED, UNJUDGED.**
+
+## Current slice — Slice 3: CLI surface + config CRUD (+ CF1)
+
+- **Spec:** builder block `.architect/slice-3.block.md` + frozen gates
+  `docs/gates/slice-3.md` (G0–G9) + PRD §3.1 / §3.3 / §5 Slice 3 / §7 DoD.
+- **Builds:** `cli.rb`, `cli/{repo,org,sync,status,config}.rb`, `bin/repo-tender`,
+  `config/duration.rb` (CF1) + tests. **Extends:** `config/store.rb` (CF1
+  load-layer normalization), `lib/repo_tender.rb` (requires), `repo-tender.gemspec`
+  (executable registration only — no dep changes).
+- **MUST NOT TOUCH:** `sync/engine.rb`, `sync/repo_plan.rb` (`--repo` scoping =
+  CLI builds a filtered Config and calls the unchanged engine), `state/store.rb`
+  (status only reads it; CF3 deferred), `scm/*`, `forge/*`, `paths.rb`,
+  `config/{model,contract}.rb`, `test_helper.rb`.
+- **Lanes:** 1 lane (the CLI is one cohesive registry surface; splitting commands
+  would all collide on `cli.rb` + the shared exit-code seam). Dispatched in the
+  main checkout off the freeze commit.
+- **Effort:** xhigh — exit-code semantics + dry-cli nested registration + CF1
+  parsing + real-config/real-repo integration are fiddly and correctness-bearing.
+- **Report →** `docs/lanes/slice-3-01.md`.
+- **Freeze commit:** the commit recording this section (post-flight checks:
+  `git log <freeze>..` empty; `git diff --name-only` only Builds+Extends;
+  `git diff docs/gates/` clean).
+- **CF1** lands here (Slice 1 disagreement-#1 MODIFY ruling). **CF3** explicitly
+  deferred (state-schema change, orthogonal to the CLI).
 
 ## Slice 2 — Sync engine (RESOLVED, archived)
 
@@ -134,10 +165,13 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | 2026-06-13 | Slice 2 extends `scm/{client,git}.rb` (add `switch`) | Branch-switch is core to the "on default branch" evergreen invariant (G5); single lane ⇒ no parallel collision touching Slice 1 files |
 | 2026-06-13 | Forge `--no-source` fix folded into Slice 2 (G11) not a Slice 1 re-dispatch | Defect isn't on any Slice 1 execution path; the engine is where the forge first runs live |
 
-## Next slice (architect decides after Slice 2 PASS)
+## Next slice (architect decides after Slice 3 PASS)
 
-Slice 3 — CLI surface + config CRUD (`cli`, `cli/{repo,org,sync,status,config}`,
-`bin/repo-tender`). Depends on Slices 1–2. Must also land CF1 (duration parsing).
+Slice 4 — launchd integration + daemon control (`launchd/{plist,agent}`,
+`cli/daemon`, log rotation). Depends on Slice 3. See PRD §5 Slice 4 (several
+gates are integration-level on a real Mac — may run as a documented manual
+checklist rather than CI). Also fold in **CF3** (state `Org#last_error` +
+non-clobber) here or as its own small state-schema slice, architect's call.
 
 ## Session log
 
@@ -151,3 +185,4 @@ Slice 3 — CLI surface + config CRUD (`cli`, `cli/{repo,org,sync,status,config}
 | 2026-06-13 | builder (m3) | 2 | none (UNJUDGED) | builder: 85/296/0/0/0 | Sync engine built; preserved on slice/sync-engine @ a7cbeb2; integrity PASS; 8 disagreements raised |
 | 2026-06-13 | architect | 2 | a7cbeb2 (preserve) | G12 integrity PASS; rest pending | Post-flight integrity; did NOT judge gates (rule 4); flagged JUDGMENT TARGETS #5/#6; deferred |
 | 2026-06-13 | architect | 2 | be73b04 (merge) | **G0–G12 PASS → CONTINUE** | Re-ran all 13 gates; arbitrated 8 disagreements (8 ACCEPT, #5 +CF3); re-verified `gh` argv live (CF2 closed); read diff vs PRD §3.3/§5 + no-data-loss; merged `slice/sync-engine`→`main` |
+| 2026-06-13 | architect | 3 | 79a9e84 (freeze) | n/a | Slice 3 spec'd, gates G0–G9 frozen (CF1 in, CF3 deferred), dispatched (1 lane, main checkout, xhigh) |
