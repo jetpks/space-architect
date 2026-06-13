@@ -55,6 +55,18 @@ module RepoTender
       def clone(url, path)
         raise NotImplementedError
       end
+
+      # `git switch <branch>`. Switches the local repo to the given
+      # branch. By default `git switch` refuses to clobber a dirty
+      # working tree (the operation is aborted on local-change loss
+      # per `man git-switch`); the engine treats that as a Failure.
+      # The engine is responsible for the upstream dirty-tree guard
+      # (per Slice 2 gate G5 / PHASE-0 ruling): the plan returns
+      # `:report_wrong_branch` / `:report_detached` for a dirty tree,
+      # so this method is only called on clean trees.
+      def switch(path, branch)
+        raise NotImplementedError
+      end
     end
   end
 end

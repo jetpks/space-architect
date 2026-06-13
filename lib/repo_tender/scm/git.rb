@@ -118,6 +118,21 @@ module RepoTender
         end
       end
 
+      # `git switch <branch>`. `git switch` aborts on a dirty tree by
+      # default (man git-switch: "The operation is aborted however if
+      # the operation leads to loss of local changes"), so a nonzero
+      # exit here most likely means the caller violated the engine's
+      # dirty-tree guard. We surface that as a Failure with the
+      # captured stderr so the engine / log can diagnose it.
+      def switch(path, branch)
+        result = Shell.run("git", "switch", branch, chdir: path)
+        if result.success?
+          Dry::Monads::Success(branch)
+        else
+          Dry::Monads::Failure({path: path, branch: branch, reason: "git switch refused", stderr: result.failure[:stderr]})
+        end
+      end
+
       private
 
       # `git symbolic-ref --short refs/remotes/origin/HEAD` returns
