@@ -730,4 +730,117 @@ class SyncEngineTest < Minitest::Test
       end
     end
   end
+
+  # ===========================================================================
+  # G7 (CF3 part 2): an org-list Failure preserves prior good
+  # `repo_count` + `last_listed_at` (NOT 0/nil) and sets `last_error`.
+  # Previously-discovered repos remain present. The Slice 2 G10
+  # behavior (run does not abort; failure recorded) stays intact.
+  # ===========================================================================
+  def test_g7_org_list_failure_preserves_prior_repo_count_and_records_error
+    Dir.mktmpdir("repo-tender-cf3-") do |base_dir|
+      # Two repos already discovered from a prior good run.
+      FileUtils.mkdir_p(File.join(base_dir, "github.com", "socketry", "lib0"))
+      FileUtils.mkdir_p(File.join(base_dir, "github.com", "socketry", "lib1"))
+      with_paths(base_dir: base_dir) do |env, paths|
+        org = OrgRef.new(host: "github.com", name: "socketry")
+
+        # Run 1: forge lists 2 repos successfully. State captures
+        # repo_count: 2, last_listed_at: now, last_error: nil.
+        discovered = [
+          RepoRef.new(host: "github.com", owner: "socketry", name: "lib0"),
+          RepoRef.new(host: "github.com", owner: "socketry", name: "lib1")
+        ]
+        # Use a fixed clock for determinism.
+        now1 = Time.utc(2026, 6, 13, 10, 0, 0)
+        clock1 = -> { now1 }
+        forge1 = StubForge.new(response_for: ->(_o) { Dry::Monads::Success(discovered) })
+        scm1 = StubSCM.new(
+          status_value: clean_status(branch: "trunk", ahead: 0, behind: 0),
+          next_status_value: clean_status(branch: "trunk", ahead: 0, behind: 0)
+        )
+        config1 = make_config(base_dir: base_dir, orgs: [org], concurrency: 2)
+
+        result1 = Engine.new(scm: scm1, forge: forge1, clock: clock1).call(config: config1, paths: paths)
+        assert result1.success?, "run 1 should succeed: #{result1.failure.inspect}"
+
+        state_after_run1 = StateStore.load(paths.state_file).success
+        org_row1 = state_after_run1.orgs["github.com/socketry"]
+        refute_nil org_row1
+        assert_equal 2, org_row1.repo_count, "run 1 should set repo_count=2"
+        # `Org#to_h_compact` serializes `last_listed_at` as an
+        # ISO-8601 string (see state/store.rb); the next load
+        # re-reads it as a String. The engine received a Time
+        # (`now1`) and wrote that value through; the on-disk form
+        # is the string.
+        assert_equal now1.iso8601, org_row1.last_listed_at
+        assert_nil org_row1.last_error
+        # Both repos in state.
+        assert state_after_run1.repos["github.com/socketry/lib0"]
+        assert state_after_run1.repos["github.com/socketry/lib1"]
+
+        # Run 2: same config, but the forge now fails. The
+        # previously-discovered repos are NOT in `config.repos`
+        # (only the orgs track them); the engine will look them
+        # up via prev state via the `prev.repos.dup` semantics
+        # in build_new_state, and they remain present even
+        # though no new SCM probe happens (no org-discovered
+        # repos to process in this run).
+        now2 = Time.utc(2026, 6, 13, 11, 0, 0)
+        clock2 = -> { now2 }
+        forge2 = StubForge.new(
+          response_for: ->(o) { Dry::Monads::Failure({org: o.name, reason: "gh not authenticated"}) }
+        )
+        scm2 = StubSCM.new(
+          status_value: clean_status(branch: "trunk", ahead: 0, behind: 0),
+          next_status_value: clean_status(branch: "trunk", ahead: 0, behind: 0)
+        )
+        config2 = make_config(base_dir: base_dir, orgs: [org], concurrency: 2)
+        result2 = Engine.new(scm: scm2, forge: forge2, clock: clock2).call(config: config2, paths: paths)
+        assert result2.success?, "run 2 should NOT abort on an org-list failure: #{result2.failure.inspect}"
+
+        state_after_run2 = StateStore.load(paths.state_file).success
+        org_row2 = state_after_run2.orgs["github.com/socketry"]
+        refute_nil org_row2
+        # CF3: prior good values are preserved, NOT clobbered to 0/nil.
+        assert_equal 2, org_row2.repo_count, "CF3: repo_count must be preserved across transient failure"
+        assert_equal now1.iso8601, org_row2.last_listed_at, "CF3: last_listed_at must be preserved across transient failure"
+        # The failure is recorded (no longer nil).
+        refute_nil org_row2.last_error
+        assert_includes org_row2.last_error, "gh not authenticated"
+        # Previously-discovered repos remain in state.
+        assert state_after_run2.repos["github.com/socketry/lib0"], "lib0 vanished from state on transient failure"
+        assert state_after_run2.repos["github.com/socketry/lib1"], "lib1 vanished from state on transient failure"
+      end
+    end
+  end
+
+  # Companion to G7: an org-list Failure on the FIRST run (no prior
+  # state) records a last_error with repo_count: 0 and
+  # last_listed_at: nil (no prior good to preserve).
+  def test_g7_org_list_failure_on_first_run_records_error_with_zero_repo_count
+    Dir.mktmpdir("repo-tender-cf3-first-") do |base_dir|
+      with_paths(base_dir: base_dir) do |env, paths|
+        org = OrgRef.new(host: "github.com", name: "socketry")
+        forge = StubForge.new(
+          response_for: ->(o) { Dry::Monads::Failure({org: o.name, reason: "rate limit"}) }
+        )
+        scm = StubSCM.new(
+          status_value: clean_status(branch: "trunk", ahead: 0, behind: 0)
+        )
+        config = make_config(base_dir: base_dir, orgs: [org], concurrency: 2)
+
+        result = Engine.new(scm: scm, forge: forge).call(config: config, paths: paths)
+        assert result.success?, "first-run org-list failure should NOT abort: #{result.failure.inspect}"
+
+        state = StateStore.load(paths.state_file).success
+        org_row = state.orgs["github.com/socketry"]
+        refute_nil org_row
+        assert_equal 0, org_row.repo_count
+        assert_nil org_row.last_listed_at
+        refute_nil org_row.last_error
+        assert_includes org_row.last_error, "rate limit"
+      end
+    end
+  end
 end

@@ -82,4 +82,61 @@ class StateStoreTest < Minitest::Test
     assert_equal({}, state.repos)
     assert_equal({}, state.orgs)
   end
+
+  # ---- G6 (CF3 part 1): Org carries last_error (round-trips; omitted when nil) ----
+
+  def test_org_last_error_round_trips
+    Tempfile.create(["state-org-err", ".yaml"]) do |f|
+      f.write(<<~YAML)
+        orgs:
+          github.com/socketry:
+            last_listed_at: 2026-06-12T20:00:10Z
+            repo_count: 41
+            last_error: "gh not authenticated"
+      YAML
+      f.flush
+
+      state = Store.load(f.path).success
+      org = state.orgs["github.com/socketry"]
+      refute_nil org
+      assert_equal "gh not authenticated", org.last_error
+      assert_equal 41, org.repo_count
+
+      out = File.join(Dir.tmpdir, "state-org-rt-#{rand(1_000_000)}.yaml")
+      File.delete(out) if File.exist?(out)
+      Store.write(out, state)
+      reloaded = Store.load(out).success
+      assert_equal "gh not authenticated", reloaded.orgs["github.com/socketry"].last_error
+      File.delete(out)
+    end
+  end
+
+  def test_org_last_error_omitted_from_to_h_compact_when_nil
+    org = Store::Org.new(last_listed_at: nil, repo_count: 7, last_error: nil)
+    refute_includes org.to_h_compact.keys, "last_error"
+  end
+
+  def test_org_last_error_included_in_to_h_compact_when_present
+    org = Store::Org.new(last_listed_at: nil, repo_count: 0, last_error: "boom")
+    assert_includes org.to_h_compact.keys, "last_error"
+    assert_equal "boom", org.to_h_compact["last_error"]
+  end
+
+  def test_existing_org_yaml_without_last_error_loads_with_nil
+    Tempfile.create(["state-org-no-err", ".yaml"]) do |f|
+      f.write(<<~YAML)
+        orgs:
+          github.com/socketry:
+            last_listed_at: 2026-06-12T20:00:10Z
+            repo_count: 41
+      YAML
+      f.flush
+
+      state = Store.load(f.path).success
+      org = state.orgs["github.com/socketry"]
+      refute_nil org
+      assert_nil org.last_error
+      assert_equal 41, org.repo_count
+    end
+  end
 end

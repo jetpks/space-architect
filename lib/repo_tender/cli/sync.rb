@@ -22,8 +22,21 @@ module RepoTender
 
         def call(repo: nil, **)
           paths = CLI.make_paths
+          paths.ensure!
           config = Config::Store.load(paths.config_file).success
 
+          # Log rotation pre-step (slice-4 gate G5). launchd owns
+          # the stdout/stderr redirect via StandardOutPath /
+          # StandardErrorPath; the sync process rotates those
+          # files at the start of each run so the previous run's
+          # log doesn't grow unbounded. The rotator renames the
+          # file to a timestamped archive (preserving bytes); the
+          # current process's inherited fd still points to the
+          # renamed file, so writes during this run succeed.
+          # launchd opens a fresh file at the original path on
+          # the next spawn. No-op when the log is missing or
+          # under-threshold (sync tests in G4 stay green).
+          rotate_plist_logs(paths)
           if repo
             target = scope_target(repo)
             return fail_with(self, "invalid repo reference: #{repo.inspect} (expected host/owner/name)") if target.failure?
@@ -63,6 +76,21 @@ module RepoTender
         def fail_with(cmd, msg)
           cmd.send(:err).puts msg
           RepoTender::CLI.record_outcome(Outcome.new(exit_code: 1, message: msg))
+        end
+
+        # Default log-rotation threshold: 10 MiB. Tunable via the
+        # env var `REPO_TENDER_LOG_MAX_BYTES` (introspection /
+        # ops escape hatch). The LogRotator itself is unit-tested
+        # with an injected threshold (gate G5).
+        DEFAULT_LOG_MAX_BYTES = 10 * 1024 * 1024
+
+        def rotate_plist_logs(paths)
+          threshold = Integer(ENV["REPO_TENDER_LOG_MAX_BYTES"] || DEFAULT_LOG_MAX_BYTES)
+          label = Launchd::Agent::DEFAULT_LABEL
+          [File.join(paths.log_dir, "#{label}.out.log"),
+            File.join(paths.log_dir, "#{label}.err.log")].each do |p|
+            RepoTender::LogRotator.call(p, threshold_bytes: threshold)
+          end
         end
       end
     end

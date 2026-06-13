@@ -38,16 +38,29 @@ module RepoTender
         end
       end
 
-      Org = Data.define(:last_listed_at, :repo_count) do
-        def initialize(last_listed_at: nil, repo_count: 0)
+      Org = Data.define(:last_listed_at, :repo_count, :last_error) do
+        def initialize(last_listed_at: nil, repo_count: 0, last_error: nil)
           super
         end
 
         def to_h_compact
           {
-            "last_listed_at" => last_listed_at&.iso8601,
-            "repo_count" => repo_count
+            "last_listed_at" => format_time(last_listed_at),
+            "repo_count" => repo_count,
+            "last_error" => last_error
           }.compact
+        end
+
+        private
+
+        # `last_listed_at` may arrive as a Time (fresh from the
+        # engine) or as a String (round-tripped from YAML, since
+        # `to_h_compact` always emits the iso8601 form on
+        # write). Both forms are written as the same string on
+        # the next emit; the helper accepts either.
+        def format_time(t)
+          return nil if t.nil?
+          t.respond_to?(:iso8601) ? t.iso8601 : t
         end
       end
 
@@ -101,7 +114,8 @@ module RepoTender
         orgs = (raw["orgs"] || {}).each_with_object({}) do |(key, attrs), acc|
           acc[key] = Org.new(
             last_listed_at: attrs["last_listed_at"],
-            repo_count: attrs["repo_count"] || 0
+            repo_count: attrs["repo_count"] || 0,
+            last_error: attrs["last_error"]
           )
         end
         State.new(repos: repos, orgs: orgs)

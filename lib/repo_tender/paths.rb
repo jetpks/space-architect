@@ -36,6 +36,17 @@ module RepoTender
 
     def log_dir = File.join(state_dir, "logs")
 
+    # Per-user launchd agent directory. The user's
+    # `~/Library/LaunchAgents/` (PRD §3.2; slice-4 Lane 01). The
+    # path is resolved from the env's HOME so tests can inject a
+    # temp HOME via `Paths.new(environment:)` and assert that
+    # install/uninstall NEVER writes to the real
+    # `~/Library/LaunchAgents` (gate G3).
+    def launch_agents_dir
+      home = @environment["HOME"] || Dir.home
+      File.join(home, "Library", "LaunchAgents")
+    end
+
     # Default `base_dir` is ~/src/evergreen (per PRD §3.1). Callers may
     # override by passing one to the constructor (e.g. from loaded config).
     def base_dir

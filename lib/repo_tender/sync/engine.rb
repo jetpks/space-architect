@@ -70,8 +70,11 @@ module RepoTender
           now = @clock.call
 
           # Phase 1: org expansion (sequential; per-org failures isolated).
-          # see disagreement #7.
-          org_records, discovered_repos = expand_orgs(config, now)
+          # see disagreement #7. CF3 (Slice 4 Lane 02) passes the
+          # prev state's org map so an org-list `Failure` can
+          # preserve the prior good `repo_count` + `last_listed_at`
+          # instead of clobbering with `0`/`nil`.
+          org_records, discovered_repos = expand_orgs(config, now, prev_orgs: state.orgs)
 
           # Phase 2: dedupe explicit + discovered repos by (host, owner,
           # name); explicit wins.
@@ -113,12 +116,13 @@ module RepoTender
       private
 
       # Expands each OrgRef into RepoRefs via the injected forge. On
-      # list_org Failure, the org is recorded with last_listed_at: nil
-      # and repo_count: 0 — the existing State::Store::Org struct has
-      # no `last_error` field (MUST NOT TOUCH) so the failure is
-      # observable in the engine's run record / stdout, not in state.
-      # This is the maximum-honest read of disagreement #5.
-      def expand_orgs(config, now)
+      # list_org Failure, the org is recorded with the prior good
+      # `repo_count` + `last_listed_at` preserved (looked up from
+      # `prev_orgs`) and a non-nil `last_error` set to the
+      # failure's reason — CF3 (Slice 4 Lane 02). On the first-ever
+      # run for an org, `prev_orgs[key]` is nil and we fall back to
+      # `last_listed_at: nil, repo_count: 0, last_error: <reason>`.
+      def expand_orgs(config, now, prev_orgs: {})
         org_records = {}
         discovered = []
         config.orgs.each do |org_ref|
@@ -131,9 +135,11 @@ module RepoTender
             )
             discovered.concat(result.success)
           else
+            prev = prev_orgs[key]
             org_records[key] = State::Store::Org.new(
-              last_listed_at: nil,
-              repo_count: 0
+              last_listed_at: prev&.last_listed_at,
+              repo_count: prev&.repo_count || 0,
+              last_error: format_org_failure(result.failure)
             )
           end
         end
@@ -141,6 +147,12 @@ module RepoTender
       end
 
       def org_key(o) = "#{o.host}/#{o.name}"
+
+      def format_org_failure(failure)
+        return "list failed" if failure.nil?
+        return failure[:reason] if failure.is_a?(Hash) && failure[:reason]
+        failure.inspect
+      end
 
       def repo_key(r) = "#{r.host}/#{r.owner}/#{r.name}"
 
