@@ -36,13 +36,31 @@
   `3e72e16`; no builder commits. **G0 PASS → 10/10 → CONTINUE.** Merged
   `slice/cli` → `main` (`--no-ff` `87a3f4b`), integration smoke green. Full detail:
   `docs/lanes/slice-3-01.md`. **CF4 CLOSED.**
-- **Next action (this/next session): spec & dispatch Slice 4 (launchd).**
-  ⚠️ Blocked on a human decision first — see "Current slice" below: Slice 4 gates
-  2/3 shell out `launchctl bootstrap/bootout/kickstart` against the human's REAL
-  `gui/$UID` domain + `~/Library/LaunchAgents`. A builder must NOT do that
-  unsupervised. Architect to confirm the test split (DI-unit gates in CI + a
-  manual real-Mac smoke checklist) with the human before freezing gates. Fold in
-  **CF3** (state `Org#last_error` + non-clobber) here or as its own state slice.
+- **Slice 4 (launchd + CF3) — SPEC'D & FROZEN, FIRST DISPATCH FAILED (isolation),
+  RESET CLEAN. Awaiting human call on re-dispatch.** Human decisions taken
+  (2026-06-13): launchctl gates are **DI-unit + a manual real-Mac checklist**
+  (no builder/architect runs live `launchctl`); **CF3 folds in as a 2nd disjoint
+  lane**. Gates frozen `docs/gates/slice-4.md` @ **`153ead2`** (G0–G8 + manual
+  checklist); blocks `.architect/slice-4-0{1,2}.block.md`. Dispatched 2 parallel
+  `pi` lanes in worktrees → **both escaped their worktree and wrote into the MAIN
+  checkout** (rule-7 isolation failure: `pi`'s bash cwd did not stay in the
+  launched worktree — Lane 01 hardcoded `cd <main-abs-path>` on every command;
+  Lane 02's git/edit ops resolved against main too). Lane 01 never wrote a report
+  + ran `git stash`/`pop` in main + hit a `NameError`; Lane 02 reported COMPLETE.
+  **No commits, stash empty → nothing lost.** Raw mixed output preserved
+  (untrusted, do-not-merge) on branch **`salvage/slice-4-raw-mixed` (`fd9ece4`)**;
+  `main` reset to pristine `153ead2`; worktrees + lane branches removed.
+- **Next action: re-dispatch Slice 4 with worktree isolation that actually holds
+  for `pi`.** Root cause = `pi` bash does not persist the launch cwd; the only
+  repo path in the builder's context was the MAIN abs path (gates/spec), so it
+  cd'd there. Fix options for the human to pick (see session close):
+  (a) re-dispatch with **worktree-pinned blocks** — bake the lane's absolute
+  worktree path in as "YOUR REPO ROOT", instruct `cd` there first on every
+  command, forbid the main path + all git (Lane 01 proved `pi` *will* consistently
+  cd to a given abs path — it just had the wrong one); (b) **sequential single-lane
+  in main** (lanes are disjoint; run one builder over both, architect commits) —
+  sidesteps cwd entirely since `pi` defaults to main; (c) salvage the raw output
+  manually. Gates stay frozen at `153ead2` either way.
 
 ## Pointers
 
@@ -171,6 +189,7 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | 2026-06-13 | Slice 2 extends `scm/{client,git}.rb` (add `switch`) | Branch-switch is core to the "on default branch" evergreen invariant (G5); single lane ⇒ no parallel collision touching Slice 1 files |
 | 2026-06-13 | CF4 (G0 `--help`/`version` exit-0 fix) fixed HUMAN-INLINE, not via a corrective builder lane | Trivial ~5–10 line change in the `CLI.run` seam; skill says trivial fixes don't need the loop. Architect stays out of impl code (rule 1); a later session re-runs G0 and merges |
 | 2026-06-13 | Forge `--no-source` fix folded into Slice 2 (G11) not a Slice 1 re-dispatch | Defect isn't on any Slice 1 execution path; the engine is where the forge first runs live |
+| 2026-06-13 | DISPATCH MECHANISM: `pi` worktree isolation does NOT hold — bash cwd is not pinned to the launch dir; builders cd to whatever abs repo path is in their context (the MAIN checkout). Future parallel dispatch must bake the lane's worktree abs path into the block as the repo root + forbid the main path + forbid all git, OR run sequentially in main. (Update `dispatch.md` in the architect skill.) | First Slice 4 dispatch corrupted main's working tree this way; cost a full multi-hour run |
 
 ## Next slice (architect decides after Slice 3 PASS)
 
@@ -198,3 +217,6 @@ non-clobber) here or as its own small state-schema slice, architect's call.
 | 2026-06-13 | architect | 3 | (judgment, no merge) | **G1–G9 PASS, G0 FAIL (partial) → CONTINUE** | Fresh session judged Slice 3: re-ran all gates, opened named tests (real config/repo/subprocess, no mocks), read diff vs PRD §1/§3.1/§3.3/§5, verified gates+protected files diff-clean. Arbitrated 8 (8 ACCEPT; #1+CF4, #5 boundary). G0 exec sub-clause FAILS (top-level `--help`/`version` exit 1, not 0) — builder HEARSAY false. NOT merged; CF4 raised to fix before merge |
 | 2026-06-13 | architect (inline fix) | 3 | b4b2d98 (slice/cli) | suite 152/575/0/0/0, lint 0 | CF4 fixed inline at human direction: `CLI.run` intercepts top-level help/version → stdout/exit 0 (reuses Dry::CLI Usage); leaf/group behavior un-regressed; +5 subprocess regression tests. Did NOT self-judge G0 / merge (rule 4) — left for a fresh session |
 | 2026-06-13 | architect | 3 | 87a3f4b (merge) | **G0 PASS (re-judge) → 10/10 → CONTINUE** | Fresh session re-judged G0 only (rule 4, fix author ≠ judge): re-ran suite 152/575/0/0/0, lint 0, no new gems; top-level `--help`/`version`/bare all exit 0 to stdout (5 groups); leaf `sync --help` 0/stdout + group `repo` 1/stderr un-regressed; read CF4 diff (sound, only cli.rb+test, no protected files); gates+protected set diff-clean since freeze; no builder commits. Merged `slice/cli`→`main` (`--no-ff`), integration smoke green. CF4 CLOSED. Slice 4 next (blocked on human launchctl-test-strategy decision) |
+| 2026-06-13 | architect | 4 | 153ead2 (freeze) | n/a | Slice 4 spec'd (2 disjoint lanes: launchd / CF3), gates G0–G8 + manual real-Mac checklist frozen; human decisions: DI-unit+manual launchctl, CF3 as 2nd lane. Worktrees off freeze; 2 `pi` lanes dispatched in parallel (xhigh) |
+| 2026-06-13 | builder (m3) | 4 | none | DISPATCH FAILED (isolation) | Both lanes escaped worktrees → wrote into MAIN checkout (`pi` bash cwd not pinned). Lane 01: no report, `git stash`/`pop` in main, NameError. Lane 02: COMPLETE. No commits/stash → nothing lost |
+| 2026-06-13 | architect | 4 | fd9ece4 (salvage) | reset clean | Root-caused isolation failure; preserved raw mixed output (untrusted) on `salvage/slice-4-raw-mixed`; reset `main`→`153ead2`; removed worktrees+lane branches. Checkpointed to human for re-dispatch approach (worktree-pinned vs sequential-in-main) |
