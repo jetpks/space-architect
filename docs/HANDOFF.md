@@ -14,13 +14,21 @@
   arbitrated the 7 disagreements (6 ACCEPT, 1 MODIFY), merged `slice/foundation`
   → `main` (`7569d95`), integration smoke green. One latent defect logged
   (forge `--no-source`), folded into Slice 2 (gate G11).
-- **Slice 2 (Sync engine) — SPEC'D + GATES FROZEN, DISPATCHED 2026-06-13.**
-  1 lane, main checkout off the freeze commit. Builder run UNJUDGED.
-- **Next action (fresh architect session):** judge Slice 2 — (1) confirm the
-  builder raised PHASE-0 disagreements (silent compliance = defect), (2) run
-  `docs/gates/slice-2.md` G0–G12 yourself, (3) read the diff against PRD §3.3 /
-  §5 + the no-data-loss invariant (PRD §1), (4) PASS/FAIL → KILL/CONTINUE. On
-  PASS: merge the lane branch → `main`, then spec Slice 3.
+- **Slice 2 (Sync engine) — BUILT 2026-06-13, UNJUDGED.** Builder run completed
+  clean (exit 0); work preserved on branch `slice/sync-engine` (`a7cbeb2`),
+  `main` left clean at freeze `6889a12`. Post-flight integrity PASSED (no builder
+  commits `6889a12..`, all files in the Builds+Extends set, `docs/gates/` clean,
+  report present, 8 disagreements raised). Gate verdict NOT yet rendered (rule 4).
+  Builder-reported (hearsay): `rake test` 85/296/0/0/0, `standardrb` 0.
+- **Next action (fresh architect session):** on branch `slice/sync-engine`,
+  (1) confirm the 8 disagreements were raised (done — see below), arbitrate the
+  ones flagged as JUDGMENT TARGETS, (2) run `docs/gates/slice-2.md` G0–G12
+  yourself — `bundle install && bundle exec rake test && bundle exec standardrb`
+  — and open each gate→test mapping (lane report §2) to confirm real-repo /
+  no-mock coverage, (3) read the diff `git diff 6889a12..slice/sync-engine`
+  against PRD §3.3/§5 + the no-data-loss invariant (PRD §1), (4) render
+  PASS/FAIL → KILL/CONTINUE. On PASS/CONTINUE: `git checkout main && git merge
+  --no-ff slice/sync-engine`, then spec Slice 3 (must also land CF1).
 
 ## Pointers
 
@@ -67,19 +75,40 @@ next session after running the gates itself.
 
 | Gate | Threshold (short) | Builder-reported raw result | Architect verdict |
 |------|-------------------|------------------------------|-------------------|
-| G0 | suite green + lint clean, no new gems | _pending dispatch_ | _pending next session_ |
-| G1 | clean+behind → ff → up-to-date, clean | _pending_ | _pending_ |
-| G2 | fresh → no network (FETCH_HEAD unchanged) | _pending_ | _pending_ |
-| G3 | dirty → byte-untouched + reported | _pending_ | _pending_ |
-| G4 | diverged → no destruction, commits intact | _pending_ | _pending_ |
-| G5 | wrong-branch: clean switched, dirty left | _pending_ | _pending_ |
-| G6 | missing → clone to $BASE/host/owner/repo | _pending_ | _pending_ |
-| G7 | concurrency:2 → max in-flight ≤ 2 | _pending_ | _pending_ |
-| G8 | per-repo Failure isolated + state written | _pending_ | _pending_ |
-| G9 | idempotent: 2nd run no network | _pending_ | _pending_ |
-| G10 | org expansion + org-list Failure resilient | _pending_ | _pending_ |
-| G11 | forge argv valid (no `--no-source`) | _pending_ | _pending_ |
-| G12 | only in-scope files | _pending_ | _pending_ |
+| G0 | suite green + lint clean, no new gems | `rake test` 85/296/0/0/0; `standardrb` 0; `bundle` 0; no new gems | _pending next session_ |
+| G1 | clean+behind → ff → up-to-date, clean | `engine_test` `test_g1_clean_behind_fast_forwards_to_clean` → status clean, new file on disk | _pending_ |
+| G2 | fresh → no network (FETCH_HEAD unchanged) | `test_g2_fresh_repo_makes_no_network_call` → mtime unchanged | _pending_ |
+| G3 | dirty → byte-untouched + reported | `test_g3_dirty_repo_left_byte_untouched_and_reported` | _pending_ |
+| G4 | diverged → no destruction, commits intact | `test_g4_diverged_repo_local_commits_intact` (4 assertions) | _pending_ |
+| G5 | wrong-branch: clean switched, dirty left | 3 tests: clean→switch trunk; dirty wrong_branch; dirty detached | _pending_ |
+| G6 | missing → clone to $BASE/host/owner/repo | `test_g6_missing_path_clones_to_derived_path` (injected `url_builder`) | _pending_ |
+| G7 | concurrency:2 → max in-flight ≤ 2 | `test_g7…` SlowSCM counter `max_seen <= 2` | _pending_ |
+| G8 | per-repo Failure isolated + state written | 2 tests: StubSCM Failure→error; unhandled raise captured | _pending_ |
+| G9 | idempotent: 2nd run no network | `test_g9_idempotent_second_run_no_network` mtimes equal | _pending_ |
+| G10 | org expansion + org-list Failure resilient | 3 tests (see JUDGMENT TARGET #5) | _pending_ |
+| G11 | forge argv valid (no `--no-source`) | 3 new argv tests + 7 G6 behavioral still green | _pending_ |
+| G12 | only in-scope files | architect integrity-checked ✓ (all in Builds+Extends set) | **PASS (integrity)** |
+
+## Slice 2 disagreements (builder raised 8; next session arbitrates the flagged ones)
+
+Full reasoning in `docs/lanes/slice-2-01.md` §1. None ruled in the dispatching
+session. Most are routine seam choices; the **JUDGMENT TARGETS** are the ones
+that could make a gate INVALID and need a hard ruling + diff read next session.
+
+| # | Builder's position (short) | Disposition for next session |
+|---|----------------------------|------------------------------|
+| 1 | `SCM#switch` is a thin `git switch`; dirty-guard lives in the plan (layered with git's own refusal) | Routine — confirm the plan never returns `:switch` for a dirty tree (read G5 tests) |
+| 2 | "behind?" uses existing `SCM::Status#ahead/#behind` (porcelain `branch.ab`), no new rev-list boundary | Routine — but verify post-fetch `status` re-read actually reflects new `origin/<default>` (PRD §3.3 step 5 specifies `rev-list --left-right`) |
+| 3 | freshness: nil/Failure/stale-mtime all ⇒ fetch; never skip on unreadable FETCH_HEAD | Routine — matches gate intent |
+| 4 | added a 10th action `:report_error` → `status: error` (spec listed 9) | Routine — required by G8 |
+| 5 | **org-list Failure encoded as `Org(last_listed_at: nil, repo_count: 0)`** because `state/store.rb` Org has no `last_error` and was MUST NOT TOUCH | **JUDGMENT TARGET** — does G10 ("Failure **recorded in state**") hold when the only signal is `repo_count: 0`? May be INVALID, or may need a follow-up that adds `last_error` to `State::Store::Org` (a Slice-2-adjacent state change). Rule next session. |
+| 6 | engine takes injected `url_builder:` (default HTTPS `https://host/owner/name.git`); tests inject `file://` | **JUDGMENT TARGET (light)** — confirm default URL derivation matches PRD layout and G6 isn't only passing via the injected builder |
+| 7 | org expansion is sequential (not fanned out) before the per-repo barrier | Routine — acceptable design choice |
+| 8 | `:fast_forward` executed by existing `SCM#fast_forward` (which does its own rev-list); plan only decides | Routine — confirm no double-fetch / FETCH_HEAD freshness interaction |
+
+**PHASE-0 rulings (builder answered; next session confirms):** repo_plan/engine
+seam CONFIRMED; FETCH_HEAD tolerance CONFIRMED; `switch` guard in plan + git
+refusal. Also re-verify the builder's "no `--no-source`" claim against live `gh`.
 
 ## Carry-forward items (architect-tracked)
 
@@ -126,4 +155,6 @@ Slice 3 — CLI surface + config CRUD (`cli`, `cli/{repo,org,sync,status,config}
 | 2026-06-13 | builder (m3) | 1 | none (UNJUDGED) | builder: 52/0/0 | Foundation built; preserved on slice/foundation @ a016eba; integrity PASS; 7 disagreements raised |
 | 2026-06-13 | architect | 1 | a016eba (preserve) | G8 integrity PASS; rest pending | Post-flight integrity; did NOT judge gates (rule 4); deferred |
 | 2026-06-13 | architect | 1 | 7569d95 (merge) | **G0–G8 PASS → CONTINUE** | Re-ran all gates; arbitrated 7 (6 ACCEPT, 1 MODIFY); merged to main; logged CF1/CF2 |
-| 2026-06-13 | architect | 2 | freeze | n/a | Slice 2 spec'd, gates G0–G12 frozen, dispatched (1 lane) |
+| 2026-06-13 | architect | 2 | 6889a12 (freeze) | n/a | Slice 2 spec'd, gates G0–G12 frozen, dispatched (1 lane) |
+| 2026-06-13 | builder (m3) | 2 | none (UNJUDGED) | builder: 85/296/0/0/0 | Sync engine built; preserved on slice/sync-engine @ a7cbeb2; integrity PASS; 8 disagreements raised |
+| 2026-06-13 | architect | 2 | a7cbeb2 (preserve) | G12 integrity PASS; rest pending | Post-flight integrity; did NOT judge gates (rule 4); flagged JUDGMENT TARGETS #5/#6; deferred |
