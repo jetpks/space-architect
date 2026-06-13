@@ -37,14 +37,17 @@
   147/548/0/0/0), lint 0, no new gems. Full per-gate judgment + arbitration:
   `docs/lanes/slice-3-01.md §6`. **Does NOT merge until G0 passes** — tracked as
   **CF4** (top-level help/version exit-0 fix in the `CLI.run` seam).
-- **Next action (this session, then handoff):** close G0 via **CF4** — a
-  tightly-scoped corrective lane on `slice/cli`: register a top-level
-  `version` + make top-level `--help`/bare invocation print usage to **stdout**
-  and exit **0**, without regressing leaf `--help` (already 0) or the G7
-  group-node behavior (exit 1, accepted). Freeze a micro-gate
-  (`docs/gates/slice-3b.md`) before dispatch (rule 3). A *later* session judges
-  that lane (rule 4) and, on PASS, merges `slice/cli` → `main` (`--no-ff`), then
-  specs Slice 4 (launchd) folding in CF3.
+- **Next action — CF4 fix is HUMAN-INLINE (decided 2026-06-13).** The human
+  patches the top-level `--help`/`version`/bare → exit-0-to-stdout fix directly
+  on `slice/cli` in a normal session (trivial; ~5–10 lines in the `CLI.run` seam
+  at `lib/repo_tender/cli.rb:57-61` and/or a new top-level `version` command).
+  Must not regress leaf `--help` (already 0) or G7 group behavior (exit 1,
+  accepted). **Then a fresh architect session re-runs G0 only**
+  (`ruby -Ilib bin/repo-tender --help` exit 0 + usage→stdout listing the 5
+  groups; `version` exit 0; `rake test` still 147+/…/0/0/0; `standardrb` 0) and,
+  on PASS, merges `slice/cli` → `main` (`--no-ff`), then specs Slice 4 (launchd)
+  folding in CF3. No corrective builder lane / no `slice-3b` gate freeze — the
+  human owns this fix inline.
 
 ## Pointers
 
@@ -199,7 +202,7 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | CF1 | `refresh_interval` human durations (`6h`/`90m`) must parse at the **config-load layer** (PRD §3.1 documents them in the hand-editable config file), not just CLI input. Until done, PRD §3.1's `6h` example is load-incompatible. | **Slice 3** gate | Disagreement #1 ruling (MODIFY) |
 | CF2 | Forge `--no-source` invalid `gh` flag → drop it; rely on authoritative `parse_repos` filter. | ✅ **CLOSED** — Slice 2 gate G11 PASS (argv valid, verified vs live `gh`). | Slice 1 judgment |
 | CF3 | `State::Store::Org` should carry an org-list `last_error` (text), and an org-list `Failure` should **not** clobber the prior good `repo_count`/`last_listed_at` (currently `prev.orgs.merge` overwrites it with nil/0). Schema change to `state/store.rb`. Not a no-data-loss violation (repos are preserved); cosmetic state regression only. | **Slice 4** or a dedicated state slice (deferred — orthogonal to the CLI) | Slice 2 disagreement #5 ruling (ACCEPT) |
-| CF4 | Top-level `repo-tender --help`, `repo-tender version` (currently unregistered), and bare `repo-tender` must print usage/version to **stdout** and **exit 0** (gate G0). Currently all three hit Dry::CLI's no-leaf `Usage.call`→`exit(1)` path (exit 1, stderr), bypassing the `CLI.run` exit-code seam. Fix in the `CLI.run` seam / Registry; must NOT regress leaf `--help` (already 0) or G7 group no-subcommand (exit 1, accepted). **Blocks the Slice 3 merge.** | **Slice 3b** corrective lane on `slice/cli`; micro-gate frozen before dispatch | Slice 3 judgment (G0 FAIL) + disagreement #1 ruling |
+| CF4 | Top-level `repo-tender --help`, `repo-tender version` (currently unregistered), and bare `repo-tender` must print usage/version to **stdout** and **exit 0** (gate G0). Currently all three hit Dry::CLI's no-leaf `Usage.call`→`exit(1)` path (exit 1, stderr), bypassing the `CLI.run` exit-code seam. Fix in the `CLI.run` seam / Registry; must NOT regress leaf `--help` (already 0) or G7 group no-subcommand (exit 1, accepted). **Blocks the Slice 3 merge.** | **HUMAN-INLINE on `slice/cli`** (decided 2026-06-13 — trivial, no builder lane); fresh architect session then re-runs G0 + merges | Slice 3 judgment (G0 FAIL) + disagreement #1 ruling |
 
 ## Slice 1 disagreements — RULED (full reasoning: `docs/lanes/slice-1-01.md` §1)
 
@@ -224,6 +227,7 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | 2026-06-12 | `Gemfile.lock` committed | repo-tender is an installed app, not a library; reproducibility is a DoD goal |
 | 2026-06-12 | Slice 1 = 1 lane, main checkout, xhigh | Greenfield foundation can't be split disjointly; also the env canary |
 | 2026-06-13 | Slice 2 extends `scm/{client,git}.rb` (add `switch`) | Branch-switch is core to the "on default branch" evergreen invariant (G5); single lane ⇒ no parallel collision touching Slice 1 files |
+| 2026-06-13 | CF4 (G0 `--help`/`version` exit-0 fix) fixed HUMAN-INLINE, not via a corrective builder lane | Trivial ~5–10 line change in the `CLI.run` seam; skill says trivial fixes don't need the loop. Architect stays out of impl code (rule 1); a later session re-runs G0 and merges |
 | 2026-06-13 | Forge `--no-source` fix folded into Slice 2 (G11) not a Slice 1 re-dispatch | Defect isn't on any Slice 1 execution path; the engine is where the forge first runs live |
 
 ## Next slice (architect decides after Slice 3 PASS)
