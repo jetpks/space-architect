@@ -128,6 +128,10 @@ bundle exec standardrb       # exit 0
 - `docs/gates/daemon-polish.md` — Slice 5 (CF5 + CF6), frozen at `0c2302c`
   (G0–G5, fully CI-judgeable, no manual checklist). **JUDGED PASS (G0–G5, fresh
   session @ `ad97164`), merged `eceebff`.** CF5 + CF6 CLOSED. 6 disagreements ACCEPT.
+- `docs/gates/field-fixes.md` — Slice 6 (SSH transport · ^C hygiene · binstub),
+  frozen at `af847d6` (G0–G4 automated + M1–M3 human checklist). **JUDGED G0–G4
+  PASS (fresh session @ `ddbb649`); 3 disagreements ACCEPT (#1→CF7); new wart
+  CF8.** NOT yet merged — MERGE BLOCKED on human M1–M3 sign-off.
 
 ## Slice 4 — launchd daemon + log rotation (+ CF3) (RESOLVED, archived)
 
@@ -239,6 +243,7 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | CF5 | `daemon uninstall` / `stop` surface `launchctl bootout`'s `Boot-out failed: 3: No such process` (status 3) as an error line on stderr when the agent isn't currently loaded/running — the COMMON case at a 6h interval. `uninstall` still succeeds + removes the plist (cosmetic noise), but `stop` short-circuits on the bootout Failure and returns exit 1 (wrong — stopping an already-stopped job should be idempotent success). Treat launchctl "No such process" / "Could not find specified service" (status 3) as **already-not-loaded success**, not a Failure. | ✅ **CLOSED** — Slice 5 G1/G2/G3 PASS (`Agent#benign_bootout_failure?` keyed on `argv[1]=="bootout"`; `stop`/`uninstall` idempotent on status-3; non-benign still surfaces; bootstrap unaffected). Merged `eceebff`. | Slice 4 manual checklist (human) |
 | CF6 | `cli/sync.rb` `rotate_plist_logs` does `Integer(ENV["REPO_TENDER_LOG_MAX_BYTES"] \|\| DEFAULT)` with no rescue — a malformed value (e.g. `"10MB"`) raises `ArgumentError` and crashes the entire `sync` run before any repo work. Operator-set escape hatch; loud failure, no data loss. Validate/clamp the env var (fall back to the 10 MiB default + warn on parse failure). | ✅ **CLOSED** — Slice 5 G4 PASS (`Sync::Run#log_max_bytes` never raises; falls back to 10 MiB default + warns; sync no-crash integration green). Merged `eceebff`. | Slice 4 cross-model adversarial review |
 | CF7 | `State::Store.write` (`lib/repo_tender/state/store.rb:64-69`) is a **direct `File.write`, NOT temp-write+rename** — a SIGINT (or crash) landing in the kernel during the `write(2)` of `state.yaml` can leave a truncated/corrupt file. Pre-existing since Slice 1; latent. Harden to atomic temp+rename (write sibling tempfile, `File.rename`). Low probability (single small write at run end; the Slice 6 ^C rescue already prevents the common mid-engine interrupt from reaching the write). | ⏳ **OPEN** — out of scope for Slice 6 (`state/*` is MUST-NOT-TOUCH there). Future slice. | Slice 6 disagreement #1 (builder caught the gate prose's false "already atomic" claim) |
+| CF8 | `Shell.run`'s `Thread.report_on_exception` save/restore (`lib/repo_tender/shell.rb:59-69`) mutates a **process-global** flag, but `Shell.run` runs **concurrently** under `Sync{}` (fibers interleave at `Open3.capture3`'s thread-join). Architect empirically confirmed (8 overlapping runs) the global is **left `false` after concurrent runs unwind** — the last fiber's `ensure` restores its own captured `prev` (often already `false`). Does NOT defeat G3 (reader threads are born `false` before any fiber-yield, so noise stays suppressed and M2 is safe) and is benign in repo-tender's lifecycle (sync is terminal; fresh process per launchd run; zero app-owned threads created post-sync). Tidy fix (future slice): make suppression concurrency-safe — refcount the active `Shell.run` calls and only restore when the last exits, or (one-shot CLI) set `report_on_exception=false` once at startup without restoring. | ⏳ **OPEN** — non-blocking robustness wart; future slice or fold into the next `shell.rb` touch. | Slice 6 G3 architect adversarial pass (empirical concurrency probe) |
 
 ## Slice 1 disagreements — RULED (full reasoning: `docs/lanes/slice-1-01.md` §1)
 
@@ -267,16 +272,61 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | 2026-06-13 | Forge `--no-source` fix folded into Slice 2 (G11) not a Slice 1 re-dispatch | Defect isn't on any Slice 1 execution path; the engine is where the forge first runs live |
 | 2026-06-13 | DISPATCH MECHANISM: `pi` worktree isolation does NOT hold — bash cwd is not pinned to the launch dir; builders cd to whatever abs repo path is in their context (the MAIN checkout). Future parallel dispatch must bake the lane's worktree abs path into the block as the repo root + forbid the main path + forbid all git, OR run sequentially in main. (Update `dispatch.md` in the architect skill.) | First Slice 4 dispatch corrupted main's working tree this way; cost a full multi-hour run |
 
-## Next — Slice 6 (field-fixes) BUILT, post-flight PASS, awaiting JUDGMENT + manual checklist
+## Slice 6 (field-fixes) — JUDGED G0–G4 PASS @ `ddbb649`; MERGE BLOCKED on human M1–M3
 
-**Builder done (minimax-m3), UNJUDGED.** Committed to `slice/field-fixes`
-@ **`ddbb649`** (off freeze `af847d6`; `main` stays at the handoff commit
-`419e175`). **Post-flight PASS** (architect-checked this session): no builder
-commits (`git log af847d6..` = only the 2 architect commits), all 7 changed files
-in the MAY-TOUCH/Carry set, `docs/gates/` diff-clean, no new gems. **Smoke
-green** (re-ran `rake test` 229/918/0/0/0 = baseline 222/890 + 7 new tests;
-`standardrb` 0) — smoke only, NOT the gate verdict. Lane report:
-`docs/lanes/field-fixes-01.md`. STATUS: COMPLETE_WITH_CONCERNS (CF7).
+**JUDGED by a fresh session (rule 4 — the prior session dispatched + committed; this
+one only judged).** All five automated gates re-run by the architect on
+`slice/field-fixes` @ **`ddbb649`** (off freeze `af847d6`):
+
+- **G0 PASS** — `bundle install` 0; `rake test` **229/918/0/0/0**; `standardrb` 0;
+  `git diff af847d6.. -- Gemfile Gemfile.lock` empty (no new gems);
+  `ruby -W:no-experimental -Ilib bin/repo-tender --help` exit 0, all 5 groups.
+- **G1 PASS** — reproducer prints exactly `git@github.com:foo/bar.git` (scp-like
+  SSH, no `https://`/`Username`); 3 new unit tests green; G6 injection-seam
+  regression (`engine_test.rb:488` `file://` builder) **unmodified** + green.
+- **G2 PASS** — `interrupt_test.rb` 2/16 green: `Interrupt` through real `CLI.run`
+  → SystemExit **130** + single `interrupted` line + no backtrace/`open3.rb`/
+  `(IOError)`/`stream closed`; the non-interrupt guard drives a REAL
+  `sync --repo not-a-ref` through the same rescue-wrapped path → exits **1** with
+  "invalid repo reference" (not a tautology). `rescue Interrupt` is sibling-scoped
+  (`SystemExit`/`Interrupt` both `< Exception`; normal `Kernel.exit` not caught);
+  top-level help/version short-circuit *before* the `begin`.
+- **G3 PASS (suppression goal met) — but a new robustness wart → CF8.** Targeted
+  save/restore of `Thread.report_on_exception` around `Open3.capture3` in
+  `Shell.run`; `shell_test.rb` 8/21 green; static analysis (zero app-owned
+  `Thread.new` in `lib/` + dry-*/xdg; async's one thread self-silences) sound.
+  Reader threads are reliably **born `false`** (no fiber-yield between the `=false`
+  set and capture3's `Thread.new`), so the ^C noise IS suppressed and **M2 runtime
+  suppression is safe**. HOWEVER the architect empirically confirmed (8 overlapping
+  `Shell.run` under `Sync{}` + the repo's own `test_concurrent_runs_overlap_in_one_sync`)
+  that the *process-global* `Thread.report_on_exception` is **left `false` after
+  concurrent runs unwind** — fibers interleave the save/restore, last-to-unwind
+  wins. Benign in repo-tender's actual lifecycle (sync is the terminal op; launchd
+  spawns a fresh process per run; zero app-owned threads created post-sync ⇒
+  nothing's crash is hidden), so it does NOT defeat the G3 threshold and does NOT
+  block merge → logged **CF8**.
+- **G4 PASS** — `git diff --name-only af847d6..slice/field-fixes` = 9 files: 7
+  code/test all in MAY-TOUCH/Carry (`bin/repo-tender`, `cli.rb`, `shell.rb`,
+  `sync/engine.rb`, `interrupt_test.rb`, `shell_test.rb`, `engine_test.rb`) + 2
+  architect docs (`HANDOFF.md`, lane report); zero MUST-NOT-TOUCH; `docs/gates/`
+  diff-clean since freeze; `git log af847d6..` = only the 2 architect commits (no
+  builder commits); no new gems.
+
+**Diff read against intent:** SSH flip is the one-line `DEFAULT_URL_BUILDER` change
+(no new config field — scope guard honored); the ^C fix does NOT weaken error
+reporting (non-interrupt failure still exits 1, verified); no-data-loss holds for
+the interrupt path (an `Interrupt` propagates past `process_one`'s
+`rescue StandardError` before `State::Store.write` is ever reached). I am Opus 4.8
+reading a minimax-m3 build (cross-vendor already); the empirical CF8 probe WAS the
+adversarial pass — no schema/persistence/API change, so no separate cross-model
+reviewer spawned. Lane report: `docs/lanes/field-fixes-01.md`.
+
+**REMAINING BEFORE MERGE (human):** M1 (live SSH clone, no `Username` prompt),
+M2 (clean ^C mid-sync → exit 130, zero backtraces/thread-noise), M3 (installed
+`repo-tender version`/`--help` clean, no io-event warning). Merge
+`slice/field-fixes` → `main` `--no-ff` ONLY after human M1–M3 sign-off (the Slice 4
+lesson: offline gates missed live bugs). **CF7 disposition:** stays **OPEN** as a
+future `state/*` slice (out of scope here). **CF8** (new): future tidy-up, non-blocking.
 
 What landed: `Engine::DEFAULT_URL_BUILDER` HTTPS→scp-like SSH
 (`git@host:owner/name.git`); `CLI.run` `rescue Interrupt`→exit 130 + single
@@ -286,11 +336,12 @@ What landed: `Engine::DEFAULT_URL_BUILDER` HTTPS→scp-like SSH
 zero `Thread.new`, async's one internal thread self-silences); the
 `-W:no-experimental` shebang carried.
 
-**3 PHASE-0 disagreements — architect rulings (proposed; the fresh judging
-session confirms alongside the gate verdict):**
+**3 PHASE-0 disagreements — architect rulings FINAL (confirmed this judging session):**
 - **#1 ACCEPT → CF7 (do NOT widen this slice).** Builder correctly caught that
   the gate prose's "`State::Store.write` is atomic (temp+rename)" is FALSE — it's
-  a direct `File.write` (`state/store.rb:64-69`). This is a real but PRE-EXISTING
+  a direct `File.write` (architect re-verified `state/store.rb:76-77` =
+  `FileUtils.mkdir_p` + `File.write`; grep for `rename`/`Tempfile` in the file
+  returns nothing). This is a real but PRE-EXISTING
   latent risk, not introduced by Slice 6, not among the three field defects, and
   `state/*` is MUST-NOT-TOUCH. The ^C rescue already prevents the common
   (mid-engine) interrupt from ever reaching the state write (`process_one`'s
@@ -306,11 +357,8 @@ session confirms alongside the gate verdict):**
   command-enumerating tests use subprocesses, so no registry pollution; smoke
   229/918 confirms none manifested).
 
-**Fresh session must:** re-run G0–G4 itself (rule 4 — this session dispatched +
-committed), read the diff vs intent, finalize the 3 disagreement rulings, then
-hand M1–M3 (live SSH-no-prompt / clean ^C / no-warning) to the human. Merge
-`slice/field-fixes` → `main` `--no-ff` only on G0–G4 PASS + human manual sign-off.
-Decide CF7 disposition then too.
+All three rulings are now FINAL (this judging session). Merge remains BLOCKED only
+on the human M1–M3 checklist above.
 
 ---
 
@@ -385,3 +433,4 @@ richer `daemon status`.
 | 2026-06-13 | architect | 6 | af847d6 (freeze) | n/a | Slice 6 (field-fixes) spec'd from the first real `sync` on a clean machine: SSH transport default, ^C hygiene (no backtrace/thread noise, exit 130), carry the human's `-W:no-experimental` binstub shebang. Pre-checks: `pi` 0.79.2 canary green (minimax-m3 resolves, key set); shebang fix confirmed correct (RubyGems propagates it into the installed binstub on macOS; project is macOS-only so the multi-arg `env` trap is moot); SSH = one-line `DEFAULT_URL_BUILDER` flip. Gates G0–G4 + M1–M3 manual checklist frozen `af847d6`. ONE lane, main checkout. Dispatched `pi --session-id field-fixes --thinking xhigh`, block `.architect/field-fixes-01.block.md`. `bin/repo-tender` left dirty (deliverable). Did NOT judge (rule 4 — dispatched this session); fresh session judges + merges, then human runs M1–M3. |
 | 2026-06-13 | builder (m3) | 6 | none (UNJUDGED) | builder: 229/918/0/0/0 | Built all three fixes in 1 lane (main checkout): `DEFAULT_URL_BUILDER` SSH flip; `CLI.run` `rescue Interrupt`→exit 130/`interrupted`; `Shell.run` `report_on_exception` save/restore around `Open3.capture3`. Verified the Open3 IOError mechanism live before coding; static-analysis proved no app-owned threads (targeted suppression). +7 tests (3 SSH, 2 interrupt incl. real-failure-still-exits-1 guard, 2 shell suppression). 3 PHASE-0 disagreements raised. STATUS COMPLETE_WITH_CONCERNS (CF7). No commits, no out-of-scope touches, no new gems. |
 | 2026-06-13 | architect | 6 | ddbb649 (slice/field-fixes) | post-flight PASS; gates pending | Post-flight PASS (no builder commits, 7 files in MAY-TOUCH/Carry, `docs/gates/` clean, no new gems); committed builder work to `slice/field-fixes`; smoke green (re-ran 229/918/0/0/0, lint 0 — matches builder). Ruled the 3 disagreements (all ACCEPT; #1→**CF7**: builder correctly caught the gate prose's false "`State::Store.write` is temp+rename" — it's direct `File.write`; deferred, `state/*` out of scope). Did NOT judge gates (rule 4 — dispatched this build); deferred to fresh session. `main` stays `419e175`. |
+| 2026-06-13 | architect | 6 | (judgment, no merge) | **G0–G4 PASS; MERGE BLOCKED on human M1–M3** | Fresh session JUDGED Slice 6 @ `ddbb649` (rule 4 — prior session dispatched+committed). Re-ran every gate myself: G0 229/918/0/0/0, lint 0, no new gems, --help 5 groups; G1 reproducer → `git@github.com:foo/bar.git`, 3 unit tests + G6 regression green (seam unmodified); G2 interrupt_test 2/16 (SystemExit 130 + single `interrupted` + no backtrace; non-interrupt `sync --repo not-a-ref` still exits 1 with real error — not tautology); G3 shell_test 8/21, suppression targeted, reader threads born `false` (M2 safe); G4 9 files in-scope, gates clean, no builder commits. Read diff vs intent (SSH one-liner, ^C doesn't weaken errors, no-data-loss holds). Finalized 3 disagreements (all ACCEPT; #1 re-verified store.rb:76-77 direct File.write → CF7 stays OPEN). **Adversarial probe found a real concurrency wart → CF8**: `Shell.run`'s process-global `report_on_exception` save/restore leaks `false` after concurrent runs (empirically confirmed 8 overlapping runs); benign in lifecycle, non-blocking. Did NOT merge — M1–M3 (live SSH/^C/no-warning) are HUMAN-RUN; merge `--no-ff` only on human sign-off. `main` stays at handoff commit. |
