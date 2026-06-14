@@ -1638,4 +1638,153 @@ class SyncEngineTest < Minitest::Test
       end
     end
   end
+
+  # ===========================================================================
+  # GA2 — No clobber under overlap (CF10 core invariant)
+  # Pre-seed state.yaml; hold lock from an independent fd (simulates an
+  # in-flight run in the same process); call Engine#call; assert:
+  # (a) state.yaml bytes unchanged, (b) call returns without raising,
+  # (c) distinguishable "skipped" signal (bytes unchanged + Success).
+  # Then release the lock and call again: engine proceeds, writes, and
+  # prior rows are preserved (CF3 intact).
+  # ===========================================================================
+  def test_ga2_no_clobber_under_overlap
+    Dir.mktmpdir("rt-ga2-") do |base_dir|
+      with_paths(base_dir: base_dir) do |_, paths|
+        state_file = paths.state_file
+        lock_path = RepoTender::State::Lock.path_for(state_file)
+
+        # Pre-seed state.yaml with a prior row.
+        prior_key = "github.com/prior/repo"
+        prior_state = StateStore::State.new(
+          repos: {prior_key => StateStore::Repo.new(status: "clean")},
+          orgs: {}
+        )
+        FileUtils.mkdir_p(File.dirname(state_file))
+        StateStore.write(state_file, prior_state)
+        prior_bytes = File.binread(state_file)
+
+        # Simulate an in-flight run: acquire lock via an independent fd.
+        FileUtils.mkdir_p(File.dirname(lock_path))
+        in_flight = File.open(lock_path, File::RDWR | File::CREAT)
+        assert in_flight.flock(File::LOCK_EX | File::LOCK_NB),
+          "precondition: in-flight fd must acquire the lock"
+
+        begin
+          config = make_config(base_dir: base_dir, repos: [])
+          scm = StubSCM.new(status_value: clean_status)
+          result = Engine.new(scm: scm).call(config: config, paths: paths)
+
+          # (a) state.yaml bytes unchanged — the in-flight run was not clobbered
+          assert_equal prior_bytes, File.binread(state_file),
+            "GA2(a): state.yaml must be byte-unchanged when another run holds the lock"
+
+          # (b) returned without raising
+          assert result.success?,
+            "GA2(b): Engine#call must return Success (not raise) when lock is contended"
+
+          # (c) distinguishable "skipped" signal: bytes unchanged is the observable proof;
+          # result is Success (not a Failure/raise).
+        ensure
+          in_flight.flock(File::LOCK_UN)
+          in_flight.close
+        end
+
+        # After releasing the lock the engine proceeds on a second call,
+        # writes new state, and preserves prior rows (CF3 preservation intact).
+        ref = RepoRef.new(host: "github.com", owner: "new", name: "repo")
+        FileUtils.mkdir_p(File.join(base_dir, ref.host, ref.owner, ref.name))
+        config2 = make_config(base_dir: base_dir, repos: [ref])
+        scm2 = StubSCM.new(status_value: clean_status)
+        result2 = Engine.new(scm: scm2).call(config: config2, paths: paths)
+        assert result2.success?,
+          "GA2: engine must proceed and write state after lock is released"
+
+        final = StateStore.load(state_file).success
+        assert final.repos[prior_key],
+          "GA2: prior row must survive in final state (CF3 preservation intact)"
+        assert final.repos["github.com/new/repo"],
+          "GA2: new run's row must be present in final state"
+      end
+    end
+  end
+
+  # ===========================================================================
+  # GA3 — Lock released on every exit path
+  # After each scenario below, an independent flock(LOCK_EX | LOCK_NB) on
+  # the sidecar SUCCEEDS, proving the engine released its lock via ensure.
+  # (a) normal success, (b) write Failure, (c) escaping raise.
+  # ===========================================================================
+  def test_ga3a_lock_released_after_normal_success
+    Dir.mktmpdir("rt-ga3a-") do |base_dir|
+      with_paths(base_dir: base_dir) do |_, paths|
+        ref = RepoRef.new(host: "github.com", owner: "owner", name: "rep")
+        FileUtils.mkdir_p(File.join(base_dir, ref.host, ref.owner, ref.name))
+        config = make_config(base_dir: base_dir, repos: [ref])
+        scm = StubSCM.new(status_value: clean_status)
+        result = Engine.new(scm: scm).call(config: config, paths: paths)
+        assert result.success?
+
+        lock_path = RepoTender::State::Lock.path_for(paths.state_file)
+        fd = File.open(lock_path, File::RDWR | File::CREAT)
+        assert fd.flock(File::LOCK_EX | File::LOCK_NB),
+          "GA3(a): lock must be released after a successful run"
+        fd.flock(File::LOCK_UN)
+        fd.close
+      end
+    end
+  end
+
+  def test_ga3b_lock_released_after_write_failure
+    # Drive a write Failure by seeding state.yaml with an invalid status
+    # directly (bypassing Store.write validation). build_new_state preserves
+    # the bogus row via prev.repos.dup; Store.write then fails validation.
+    Dir.mktmpdir("rt-ga3b-") do |base_dir|
+      with_paths(base_dir: base_dir) do |_, paths|
+        state_file = paths.state_file
+        FileUtils.mkdir_p(File.dirname(state_file))
+        require "yaml"
+        File.write(state_file, YAML.dump({
+          "repos" => {"github.com/bad/repo" => {"status" => "bogus_status"}},
+          "orgs" => {}
+        }))
+
+        # Empty repos config: bogus prior row survives build_new_state → write fails.
+        config = make_config(base_dir: base_dir, repos: [])
+        scm = StubSCM.new(status_value: clean_status)
+        result = Engine.new(scm: scm).call(config: config, paths: paths)
+        assert result.failure?,
+          "GA3(b): engine must return Failure when Store.write validation fails"
+
+        lock_path = RepoTender::State::Lock.path_for(state_file)
+        fd = File.open(lock_path, File::RDWR | File::CREAT)
+        assert fd.flock(File::LOCK_EX | File::LOCK_NB),
+          "GA3(b): lock must be released even when write returns Failure"
+        fd.flock(File::LOCK_UN)
+        fd.close
+      end
+    end
+  end
+
+  def test_ga3c_lock_released_after_escaping_raise
+    # Reuse the RaisingOnListingStartedReporter from G9.2: listing_started
+    # raises before any rescue can catch it, propagating out of Engine#call.
+    Dir.mktmpdir("rt-ga3c-") do |base_dir|
+      with_paths(base_dir: base_dir) do |_, paths|
+        reporter = RaisingOnListingStartedReporter.new
+        config = make_config(base_dir: base_dir, repos: [])
+
+        assert_raises(RuntimeError) do
+          Engine.new(reporter: reporter).call(config: config, paths: paths)
+        end
+
+        lock_path = RepoTender::State::Lock.path_for(paths.state_file)
+        fd = File.open(lock_path, File::RDWR | File::CREAT)
+        assert fd.flock(File::LOCK_EX | File::LOCK_NB),
+          "GA3(c): lock must be released even when an exception escapes Engine#call"
+        fd.flock(File::LOCK_UN)
+        fd.close
+      end
+    end
+  end
 end
