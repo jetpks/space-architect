@@ -40,10 +40,18 @@ module RepoTender
       # methods. The `extend` is kept so class-level callers (tests,
       # future helpers) can use the short form.
 
-      # Default clone URL: github.com <host>/<owner>/<name>.git via HTTPS.
-      # Tests can inject a different builder (e.g. file:// for a local
-      # bare remote in the G6 missing-path test).
-      DEFAULT_URL_BUILDER = ->(ref) { "https://#{ref.host}/#{ref.owner}/#{ref.name}.git" }.freeze
+      # Default clone URL: scp-like SSH form `git@<host>:<owner>/<name>.git`.
+      # SSH uses the user's configured SSH keys (default
+      # `~/.ssh/id_rsa`/whatever `~/.ssh/config` resolves) with no
+      # interactive `Username for 'https://github.com':` prompt — the
+      # field defect Slice 6 fixed (the previous HTTPS default made
+      # a missing-repo clone prompt for credentials). This is the
+      # seam the Slice 2 disagreement-#6 ruling anticipated ("legit
+      # future seam (ssh/token)"). No new config field is added in
+      # this slice — the transport flip is on the default builder
+      # only; tests can still inject a different builder (e.g.
+      # file:// for a local bare remote in the G6 missing-path test).
+      DEFAULT_URL_BUILDER = ->(ref) { "git@#{ref.host}:#{ref.owner}/#{ref.name}.git" }.freeze
 
       def initialize(scm: SCM::Git.new, forge: Forge::GitHub.new,
         clock: -> { Time.now }, url_builder: DEFAULT_URL_BUILDER)

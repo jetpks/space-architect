@@ -66,4 +66,83 @@ class ShellTest < Minitest::Test
     end
     assert_match(/Async::Task/, error.message)
   end
+
+  # ---------------------------------------------------------------------------
+  # Slice 6 G3 — Open3 reader-thread noise suppression (mechanism
+  # justification). Open3.capture3's internal stdout/stderr reader
+  # threads can raise `IOError: stream closed in another thread` if
+  # the main thread is interrupted while they are mid-read (the
+  # ^C-during-a-clone scenario from the field defect). With
+  # `Thread.report_on_exception = true` (the default since Ruby
+  # 2.5), Ruby prints a multi-line backtrace for that orphaned
+  # thread. The fix brackets the `Open3.capture3` call in `Shell.run`
+  # with a save/restore of `Thread.report_on_exception = false`.
+  #
+  # This test pins the mechanism: it asserts that, during the
+  # `Open3.capture3` call, `Thread.report_on_exception` is observed
+  # to be `false`, and that the original value is restored after
+  # the call returns (success or failure). The shim around
+  # `Open3.capture3` records the value from inside the call site.
+  # ---------------------------------------------------------------------------
+  def test_shell_run_disables_thread_report_on_exception_during_open3_capture3
+    require "open3"
+    # Record the pre-call value to assert restoration at the end.
+    pre = Thread.report_on_exception
+
+    observed = {value: nil, restored: nil}
+    original = Open3.method(:capture3)
+    Open3.define_singleton_method(:capture3) do |*args, **opts, &blk|
+      # Record the value at the moment Shell.run's call is in
+      # flight — this is the exact line the production code
+      # brackets the suppression around.
+      observed[:value] = Thread.report_on_exception
+      original.call(*args, **opts, &blk)
+    end
+
+    begin
+      in_async do
+        Shell.run("true")
+      end
+      # After the call returns, the original value must be restored.
+      observed[:restored] = Thread.report_on_exception
+    ensure
+      Open3.define_singleton_method(:capture3, original)
+    end
+
+    assert_equal false, observed[:value],
+      "Thread.report_on_exception must be false during Open3.capture3 call " \
+        "(Slice 6 G3 suppression); saw #{observed[:value].inspect}"
+    assert_equal pre, observed[:restored],
+      "Thread.report_on_exception must be restored to the pre-call value " \
+        "after Shell.run returns; pre=#{pre.inspect} restored=#{observed[:restored].inspect}"
+  end
+
+  def test_shell_run_restores_thread_report_on_exception_even_when_open3_raises
+    require "open3"
+    pre = Thread.report_on_exception
+    observed = {value: nil, restored: nil}
+    original = Open3.method(:capture3)
+    Open3.define_singleton_method(:capture3) do |*args, **opts, &blk|
+      observed[:value] = Thread.report_on_exception
+      raise "simulated Open3 failure"
+    end
+
+    begin
+      in_async do
+        # The simulated raise propagates out of Shell.run. The
+        # save/restore `ensure` must still run.
+        assert_raises(RuntimeError) { Shell.run("true") }
+      end
+    ensure
+      Open3.define_singleton_method(:capture3, original)
+    end
+
+    observed[:restored] = Thread.report_on_exception
+
+    assert_equal false, observed[:value],
+      "Thread.report_on_exception must be false during the Open3.capture3 call"
+    assert_equal pre, observed[:restored],
+      "Thread.report_on_exception must be restored to the pre-call value " \
+        "even when Open3.capture3 raises; pre=#{pre.inspect} restored=#{observed[:restored].inspect}"
+  end
 end
