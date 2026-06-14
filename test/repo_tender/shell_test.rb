@@ -117,6 +117,46 @@ class ShellTest < Minitest::Test
         "after Shell.run returns; pre=#{pre.inspect} restored=#{observed[:restored].inspect}"
   end
 
+  # G8.2 + G8.3 — Refcount: no leak after concurrent runs; suppression intact
+  # during overlap. Sets Thread.report_on_exception=true beforehand, launches
+  # ≥2 genuinely overlapping Shell.run calls (each sleep 0.2s so they overlap),
+  # shims Open3.capture3 to record the flag at each in-flight call, waits for
+  # all, then asserts restoration (G8.2) and that all in-flight observations
+  # were false (G8.3).
+  def test_refcount_no_leak_and_suppression_during_concurrent_runs
+    original = Thread.report_on_exception
+    Thread.report_on_exception = true
+
+    observed = []
+    original_capture3 = Open3.method(:capture3)
+    Open3.define_singleton_method(:capture3) do |*args, **opts, &blk|
+      observed << Thread.report_on_exception
+      original_capture3.call(*args, **opts, &blk)
+    end
+
+    begin
+      in_async do
+        barrier = Async::Barrier.new
+        barrier.async { Shell.run("sh", "-c", "sleep 0.2") }
+        barrier.async { Shell.run("sh", "-c", "sleep 0.2") }
+        barrier.async { Shell.run("sh", "-c", "sleep 0.2") }
+        barrier.wait
+      end
+
+      # G8.2: restored — no leaked false after all concurrent runs complete
+      assert_equal true, Thread.report_on_exception,
+        "Thread.report_on_exception must be restored to true after concurrent Shell.run calls; was #{Thread.report_on_exception.inspect}"
+
+      # G8.3: suppression was active during every in-flight capture3 call
+      assert_equal 3, observed.size, "expected 3 capture3 observations"
+      assert observed.all? { |v| v == false },
+        "Thread.report_on_exception must be false during all in-flight Shell.run calls; saw #{observed.inspect}"
+    ensure
+      Open3.define_singleton_method(:capture3, original_capture3)
+      Thread.report_on_exception = original
+    end
+  end
+
   def test_shell_run_restores_thread_report_on_exception_even_when_open3_raises
     require "open3"
     pre = Thread.report_on_exception

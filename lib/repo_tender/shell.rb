@@ -16,6 +16,9 @@ module RepoTender
   class Shell
     extend Dry::Monads[:result]
 
+    @run_count = 0
+    @saved_roe = nil
+
     def self.run(*argv, chdir: nil, env: nil)
       raise ArgumentError, "Shell.run requires at least argv" if argv.empty?
       raise "Shell.run must be called inside an ambient Async::Task" unless Async::Task.current?
@@ -56,8 +59,16 @@ module RepoTender
       # the only thing it can raise is the IOError we explicitly
       # want to silence. The original value is restored in `ensure`
       # so we never leak the suppression past this call.
-      prev_report_on_exception = Thread.report_on_exception
-      Thread.report_on_exception = false
+      # Refcount the active Shell.run calls so the global flag is suppressed
+      # for the entire overlapping window, not just per-fiber. On 0→1: capture
+      # original and set false. On 1→0 (in ensure): restore the original.
+      # Safe without a Mutex: the reactor is single-threaded; fibers only yield
+      # at Open3.capture3's thread-join, never between these plain assignments.
+      if @run_count == 0
+        @saved_roe = Thread.report_on_exception
+        Thread.report_on_exception = false
+      end
+      @run_count += 1
       begin
         stdout, stderr, status = if full_env
           Open3.capture3(full_env, *argv, **opts)
@@ -65,7 +76,8 @@ module RepoTender
           Open3.capture3(*argv, **opts)
         end
       ensure
-        Thread.report_on_exception = prev_report_on_exception
+        @run_count -= 1
+        Thread.report_on_exception = @saved_roe if @run_count == 0
       end
 
       if status.success?
