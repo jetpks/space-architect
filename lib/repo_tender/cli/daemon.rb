@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
+require "pastel"
 require "fileutils"
 require "dry/monads"
 require "repo_tender/cli"
+require "repo_tender/ui/mode"
+require "repo_tender/cli/options"
 require "repo_tender/launchd/agent"
 require "repo_tender/launchd/plist"
 
@@ -91,13 +94,22 @@ module RepoTender
 
       class Install < Dry::CLI::Command
         include Helpers
+        include GlobalOptions
 
         desc "Install the per-user launchd agent (writes the plist + bootstrap)"
 
-        def call(**)
+        def call(plain: nil, json: nil, no_color: nil, quiet: nil, **)
           paths = CLI.make_paths
           paths.ensure!
           config = Config::Store.load(paths.config_file).success
+
+          mode = UI::Mode.resolve(
+            flags: {plain: plain, json: json, no_color: no_color, quiet: quiet},
+            env: CLI.env,
+            out: out
+          )
+          pastel = Pastel.new(enabled: mode.color)
+
           label = Launchd::Agent::DEFAULT_LABEL
           pp = plist_path(paths, label)
 
@@ -112,17 +124,25 @@ module RepoTender
             return fail_with(self, "bootstrap failed: #{format_failure(result.failure)}")
           end
 
-          out.puts "installed: #{pp}"
+          out.puts pastel.green("installed: #{pp}")
           CLI.record_outcome(Outcome.new(exit_code: 0))
         end
       end
 
       class Uninstall < Dry::CLI::Command
         include Helpers
+        include GlobalOptions
 
         desc "Uninstall the per-user launchd agent (bootout + remove the plist)"
 
-        def call(**)
+        def call(plain: nil, json: nil, no_color: nil, quiet: nil, **)
+          mode = UI::Mode.resolve(
+            flags: {plain: plain, json: json, no_color: no_color, quiet: quiet},
+            env: CLI.env,
+            out: out
+          )
+          pastel = Pastel.new(enabled: mode.color)
+
           paths = CLI.make_paths
           label = Launchd::Agent::DEFAULT_LABEL
           pp = plist_path(paths, label)
@@ -143,9 +163,9 @@ module RepoTender
 
           if File.exist?(pp)
             File.delete(pp)
-            out.puts "removed plist: #{pp}"
+            out.puts pastel.green("removed plist: #{pp}")
           else
-            out.puts "plist not present: #{pp}"
+            out.puts pastel.yellow("plist not present: #{pp}")
           end
 
           CLI.record_outcome(Outcome.new(exit_code: 0))
@@ -154,10 +174,18 @@ module RepoTender
 
       class Start < Dry::CLI::Command
         include Helpers
+        include GlobalOptions
 
         desc "Start the agent (bootstrap + enable)"
 
-        def call(**)
+        def call(plain: nil, json: nil, no_color: nil, quiet: nil, **)
+          mode = UI::Mode.resolve(
+            flags: {plain: plain, json: json, no_color: no_color, quiet: quiet},
+            env: CLI.env,
+            out: out
+          )
+          pastel = Pastel.new(enabled: mode.color)
+
           paths = CLI.make_paths
           label = Launchd::Agent::DEFAULT_LABEL
           pp = plist_path(paths, label)
@@ -167,51 +195,75 @@ module RepoTender
           if result.failure?
             return fail_with(self, "start failed: #{format_failure(result.failure)}")
           end
-          out.puts "started: #{label}"
+          out.puts pastel.green("started: #{label}")
           CLI.record_outcome(Outcome.new(exit_code: 0))
         end
       end
 
       class Stop < Dry::CLI::Command
         include Helpers
+        include GlobalOptions
 
         desc "Stop the agent (bootout + disable)"
 
-        def call(**)
+        def call(plain: nil, json: nil, no_color: nil, quiet: nil, **)
+          mode = UI::Mode.resolve(
+            flags: {plain: plain, json: json, no_color: no_color, quiet: quiet},
+            env: CLI.env,
+            out: out
+          )
+          pastel = Pastel.new(enabled: mode.color)
+
           label = Launchd::Agent::DEFAULT_LABEL
           agent = make_agent
           result = agent.stop
           if result.failure?
             return fail_with(self, "stop failed: #{format_failure(result.failure)}")
           end
-          out.puts "stopped: #{label}"
+          out.puts pastel.green("stopped: #{label}")
           CLI.record_outcome(Outcome.new(exit_code: 0))
         end
       end
 
       class Restart < Dry::CLI::Command
         include Helpers
+        include GlobalOptions
 
         desc "Restart the agent (kickstart -k)"
 
-        def call(**)
+        def call(plain: nil, json: nil, no_color: nil, quiet: nil, **)
+          mode = UI::Mode.resolve(
+            flags: {plain: plain, json: json, no_color: no_color, quiet: quiet},
+            env: CLI.env,
+            out: out
+          )
+          pastel = Pastel.new(enabled: mode.color)
+
           label = Launchd::Agent::DEFAULT_LABEL
           agent = make_agent
           result = agent.restart
           if result.failure?
             return fail_with(self, "restart failed: #{format_failure(result.failure)}")
           end
-          out.puts "restarted: #{label}"
+          out.puts pastel.green("restarted: #{label}")
           CLI.record_outcome(Outcome.new(exit_code: 0))
         end
       end
 
       class Status < Dry::CLI::Command
         include Helpers
+        include GlobalOptions
 
         desc "Print the agent's loaded/running/last-exit state"
 
-        def call(**)
+        def call(plain: nil, json: nil, no_color: nil, quiet: nil, **)
+          mode = UI::Mode.resolve(
+            flags: {plain: plain, json: json, no_color: no_color, quiet: quiet},
+            env: CLI.env,
+            out: out
+          )
+          pastel = Pastel.new(enabled: mode.color)
+
           label = Launchd::Agent::DEFAULT_LABEL
           agent = make_agent
           result = agent.status
@@ -219,11 +271,11 @@ module RepoTender
             return fail_with(self, "status failed: #{format_failure(result.failure)}")
           end
           s = result.success
-          out.puts "label: #{label}"
-          out.puts "loaded: #{s[:loaded]}"
-          out.puts "running: #{s[:running]}"
-          out.puts "pid: #{s[:pid].inspect}"
-          out.puts "last_exit: #{s[:last_exit].inspect}"
+          out.puts pastel.cyan("label: #{label}")
+          out.puts pastel.cyan("loaded: #{s[:loaded]}")
+          out.puts pastel.cyan("running: #{s[:running]}")
+          out.puts pastel.cyan("pid: #{s[:pid].inspect}")
+          out.puts pastel.cyan("last_exit: #{s[:last_exit].inspect}")
           CLI.record_outcome(Outcome.new(exit_code: 0))
         end
       end

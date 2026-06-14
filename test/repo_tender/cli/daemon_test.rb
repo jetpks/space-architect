@@ -339,6 +339,63 @@ class CLIDaemonTest < Minitest::Test
     ENV["REPO_TENDER_BIN_PATH"] = prev
   end
 
+  # ---- RC1/RC3: color in pretty mode, no color otherwise ----
+
+  def test_daemon_status_has_color_in_pretty_mode
+    with_daemon_home do |_env, _paths|
+      stub_agent(
+        status_result: Dry::Monads::Success(
+          loaded: true, running: true, pid: 4321, last_exit: 0
+        )
+      )
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = Daemon::Status.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(plain: nil, json: nil, no_color: nil, quiet: nil)
+      assert_match(/\e\[[0-9;]*m/, tty_out.string)
+      # Content is still correct
+      assert_includes tty_out.string, "loaded: true"
+    end
+  end
+
+  def test_daemon_status_no_color_with_no_color_flag
+    with_daemon_home do |_env, _paths|
+      stub_agent(
+        status_result: Dry::Monads::Success(
+          loaded: true, running: false, pid: nil, last_exit: nil
+        )
+      )
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = Daemon::Status.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(plain: nil, json: nil, no_color: true, quiet: nil)
+      refute_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
+
+  def test_daemon_stop_has_color_in_pretty_mode
+    with_daemon_home do |_env, _paths|
+      stub_agent(stop_result: Dry::Monads::Success(""))
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = Daemon::Stop.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(plain: nil, json: nil, no_color: nil, quiet: nil)
+      assert_match(/\e\[[0-9;]*m/, tty_out.string)
+      assert_includes tty_out.string, "stopped:"
+    end
+  end
+
+  def test_daemon_stop_no_color_in_non_tty
+    with_daemon_home do |_env, _paths|
+      stub_agent(stop_result: Dry::Monads::Success(""))
+      out, _err = invoke_command(Daemon::Stop)
+      refute_match(/\e\[[0-9;]*m/, out.string)
+    end
+  end
+
   # ---- Slice 5 / CF5: G1 `daemon stop` + G2 `daemon uninstall`
   #      are idempotent on a not-loaded agent. Anti-tautology:
   #      the status-3 bootout Failure enters through the

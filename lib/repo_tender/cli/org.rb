@@ -1,7 +1,10 @@
 # frozen_string_literal: true
 
+require "pastel"
 require "dry/monads"
 require "repo_tender/cli"
+require "repo_tender/ui/mode"
+require "repo_tender/cli/options"
 
 module RepoTender
   module CLI
@@ -56,6 +59,7 @@ module RepoTender
 
       class Add < Dry::CLI::Command
         include Helpers
+        include GlobalOptions
 
         desc "Add a tracked org (idempotent on host/name)"
         argument :name, required: true,
@@ -65,7 +69,14 @@ module RepoTender
         option :include_forks, type: :boolean, default: false,
           desc: "Include forks when expanding the org"
 
-        def call(name:, include_archived: false, include_forks: false, **)
+        def call(name:, include_archived: false, include_forks: false, plain: nil, json: nil, no_color: nil, quiet: nil, **)
+          mode = UI::Mode.resolve(
+            flags: {plain: plain, json: json, no_color: no_color, quiet: quiet},
+            env: CLI.env,
+            out: out
+          )
+          pastel = Pastel.new(enabled: mode.color)
+
           parsed = parse_ref(name,
             include_archived: include_archived,
             include_forks: include_forks)
@@ -76,8 +87,8 @@ module RepoTender
           config = Config::Store.load(paths.config_file).success
 
           if config.orgs.any? { |o| same_org?(o, new_ref) }
-            out.puts "already tracked: #{format_ref(new_ref)}" \
-              " (include_archived=#{new_ref.include_archived}, include_forks=#{new_ref.include_forks})"
+            out.puts pastel.yellow("already tracked: #{format_ref(new_ref)}" \
+              " (include_archived=#{new_ref.include_archived}, include_forks=#{new_ref.include_forks})")
             return CLI.record_outcome(Outcome.new(exit_code: 0))
           end
 
@@ -88,24 +99,32 @@ module RepoTender
             return fail_with(self, "failed to update config: #{format_failure(result.failure)}")
           end
 
-          out.puts "added: #{format_ref(new_ref)}" \
-            " (include_archived=#{new_ref.include_archived}, include_forks=#{new_ref.include_forks})"
+          out.puts pastel.green("added: #{format_ref(new_ref)}" \
+            " (include_archived=#{new_ref.include_archived}, include_forks=#{new_ref.include_forks})")
           CLI.record_outcome(Outcome.new(exit_code: 0))
         end
       end
 
       class Remove < Dry::CLI::Command
         include Helpers
+        include GlobalOptions
 
         desc "Remove a tracked org (host/name)"
         argument :name, required: true,
           desc: "Org identity as <name> or <host>/<name> (host defaults to github.com)"
 
-        def call(name:, **)
+        def call(name:, plain: nil, json: nil, no_color: nil, quiet: nil, **)
           # The flags don't affect the identity match for remove; we
           # match on (host, name) only. This matches the user's
           # expectation that "remove" targets the org, not the flag
           # combination they added it with.
+          mode = UI::Mode.resolve(
+            flags: {plain: plain, json: json, no_color: no_color, quiet: quiet},
+            env: CLI.env,
+            out: out
+          )
+          pastel = Pastel.new(enabled: mode.color)
+
           parsed = parse_ref(name)
           return fail_with(self, parsed.failure) if parsed.failure?
 
@@ -125,23 +144,32 @@ module RepoTender
             return fail_with(self, "failed to update config: #{format_failure(result.failure)}")
           end
 
-          out.puts "removed: #{format_ref(target)}"
+          out.puts pastel.green("removed: #{format_ref(target)}")
           CLI.record_outcome(Outcome.new(exit_code: 0))
         end
       end
 
       class List < Dry::CLI::Command
+        include GlobalOptions
+
         desc "List tracked orgs"
 
-        def call(**)
+        def call(plain: nil, json: nil, no_color: nil, quiet: nil, **)
+          mode = UI::Mode.resolve(
+            flags: {plain: plain, json: json, no_color: no_color, quiet: quiet},
+            env: CLI.env,
+            out: out
+          )
+          pastel = Pastel.new(enabled: mode.color)
+
           paths = CLI.make_paths
           config = Config::Store.load(paths.config_file).success
           if config.orgs.empty?
-            out.puts "(no tracked orgs)"
+            out.puts pastel.dim("(no tracked orgs)")
           else
             config.orgs.each do |o|
-              out.puts "#{o.host}/#{o.name}" \
-                " (include_archived=#{o.include_archived}, include_forks=#{o.include_forks})"
+              out.puts pastel.cyan("#{o.host}/#{o.name}" \
+                " (include_archived=#{o.include_archived}, include_forks=#{o.include_forks})")
             end
           end
           CLI.record_outcome(Outcome.new(exit_code: 0))

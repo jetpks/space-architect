@@ -135,4 +135,70 @@ class CLIRepoTest < Minitest::Test
       assert_equal 1, cfg.repos.size
     end
   end
+
+  # ---- RC1/RC3: color in pretty mode, no color otherwise ----
+
+  def test_repo_add_has_color_in_pretty_mode
+    with_cli_env do |_env, _home|
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::Repo::Add.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(ref: "github.com/ruby/ruby", plain: nil, json: nil, no_color: nil, quiet: nil)
+      assert_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
+
+  def test_repo_add_no_color_with_no_color_flag
+    with_cli_env do |_env, _home|
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::Repo::Add.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(ref: "github.com/ruby/ruby", plain: nil, json: nil, no_color: true, quiet: nil)
+      refute_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
+
+  def test_repo_add_no_color_with_no_color_env
+    with_cli_env do |env, _home|
+      Thread.current[:repo_tender_cli_env] = env.merge("NO_COLOR" => "1")
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::Repo::Add.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(ref: "github.com/ruby/ruby", plain: nil, json: nil, no_color: nil, quiet: nil)
+      refute_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
+
+  def test_repo_list_has_color_in_pretty_mode
+    with_cli_env do |env, _home|
+      paths = RepoTender::Paths.new(environment: env)
+      paths.ensure!
+      RepoTender::Config::Store.write(paths.config_file,
+        RepoTender::Config::Store.load(paths.config_file).success.new(
+          repos: [RepoTender::Config::RepoRef.new(host: "github.com", owner: "ruby", name: "ruby")]
+        ))
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::Repo::List.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(plain: nil, json: nil, no_color: nil, quiet: nil)
+      assert_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
+
+  def test_repo_list_no_color_in_non_tty
+    with_cli_env do |env, _home|
+      paths = RepoTender::Paths.new(environment: env)
+      paths.ensure!
+      RepoTender::Config::Store.write(paths.config_file,
+        RepoTender::Config::Store.load(paths.config_file).success.new(
+          repos: [RepoTender::Config::RepoRef.new(host: "github.com", owner: "ruby", name: "ruby")]
+        ))
+      out, _err = invoke_command(RepoTenderCLI::Repo::List)
+      refute_match(/\e\[[0-9;]*m/, out.string)
+    end
+  end
 end
