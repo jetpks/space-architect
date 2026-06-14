@@ -238,6 +238,7 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | CF4 | Top-level `repo-tender --help`, `repo-tender version`, and bare `repo-tender` must print usage/version to **stdout** and **exit 0** (gate G0). Were hitting Dry::CLI's no-leaf `Usage.call`→`exit(1)` path. | ✅ **CLOSED** — fixed inline @ `b4b2d98`, re-judged G0 PASS in a fresh session (rule 4) and merged to `main` (`87a3f4b`). Top-level `--help`/`version`/bare exit 0 to stdout; leaf/group un-regressed. | Slice 3 judgment (G0 FAIL) + disagreement #1 ruling |
 | CF5 | `daemon uninstall` / `stop` surface `launchctl bootout`'s `Boot-out failed: 3: No such process` (status 3) as an error line on stderr when the agent isn't currently loaded/running — the COMMON case at a 6h interval. `uninstall` still succeeds + removes the plist (cosmetic noise), but `stop` short-circuits on the bootout Failure and returns exit 1 (wrong — stopping an already-stopped job should be idempotent success). Treat launchctl "No such process" / "Could not find specified service" (status 3) as **already-not-loaded success**, not a Failure. | ✅ **CLOSED** — Slice 5 G1/G2/G3 PASS (`Agent#benign_bootout_failure?` keyed on `argv[1]=="bootout"`; `stop`/`uninstall` idempotent on status-3; non-benign still surfaces; bootstrap unaffected). Merged `eceebff`. | Slice 4 manual checklist (human) |
 | CF6 | `cli/sync.rb` `rotate_plist_logs` does `Integer(ENV["REPO_TENDER_LOG_MAX_BYTES"] \|\| DEFAULT)` with no rescue — a malformed value (e.g. `"10MB"`) raises `ArgumentError` and crashes the entire `sync` run before any repo work. Operator-set escape hatch; loud failure, no data loss. Validate/clamp the env var (fall back to the 10 MiB default + warn on parse failure). | ✅ **CLOSED** — Slice 5 G4 PASS (`Sync::Run#log_max_bytes` never raises; falls back to 10 MiB default + warns; sync no-crash integration green). Merged `eceebff`. | Slice 4 cross-model adversarial review |
+| CF7 | `State::Store.write` (`lib/repo_tender/state/store.rb:64-69`) is a **direct `File.write`, NOT temp-write+rename** — a SIGINT (or crash) landing in the kernel during the `write(2)` of `state.yaml` can leave a truncated/corrupt file. Pre-existing since Slice 1; latent. Harden to atomic temp+rename (write sibling tempfile, `File.rename`). Low probability (single small write at run end; the Slice 6 ^C rescue already prevents the common mid-engine interrupt from reaching the write). | ⏳ **OPEN** — out of scope for Slice 6 (`state/*` is MUST-NOT-TOUCH there). Future slice. | Slice 6 disagreement #1 (builder caught the gate prose's false "already atomic" claim) |
 
 ## Slice 1 disagreements — RULED (full reasoning: `docs/lanes/slice-1-01.md` §1)
 
@@ -266,7 +267,54 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | 2026-06-13 | Forge `--no-source` fix folded into Slice 2 (G11) not a Slice 1 re-dispatch | Defect isn't on any Slice 1 execution path; the engine is where the forge first runs live |
 | 2026-06-13 | DISPATCH MECHANISM: `pi` worktree isolation does NOT hold — bash cwd is not pinned to the launch dir; builders cd to whatever abs repo path is in their context (the MAIN checkout). Future parallel dispatch must bake the lane's worktree abs path into the block as the repo root + forbid the main path + forbid all git, OR run sequentially in main. (Update `dispatch.md` in the architect skill.) | First Slice 4 dispatch corrupted main's working tree this way; cost a full multi-hour run |
 
-## Next — Slice 6 (field-fixes) DISPATCHED, awaiting judgment
+## Next — Slice 6 (field-fixes) BUILT, post-flight PASS, awaiting JUDGMENT + manual checklist
+
+**Builder done (minimax-m3), UNJUDGED.** Committed to `slice/field-fixes`
+@ **`ddbb649`** (off freeze `af847d6`; `main` stays at the handoff commit
+`419e175`). **Post-flight PASS** (architect-checked this session): no builder
+commits (`git log af847d6..` = only the 2 architect commits), all 7 changed files
+in the MAY-TOUCH/Carry set, `docs/gates/` diff-clean, no new gems. **Smoke
+green** (re-ran `rake test` 229/918/0/0/0 = baseline 222/890 + 7 new tests;
+`standardrb` 0) — smoke only, NOT the gate verdict. Lane report:
+`docs/lanes/field-fixes-01.md`. STATUS: COMPLETE_WITH_CONCERNS (CF7).
+
+What landed: `Engine::DEFAULT_URL_BUILDER` HTTPS→scp-like SSH
+(`git@host:owner/name.git`); `CLI.run` `rescue Interrupt`→exit 130 + single
+`interrupted` line (Interrupt-only, no blanket StandardError rescue);
+`Shell.run` save/restore `Thread.report_on_exception=false` around
+`Open3.capture3` (targeted — builder verified `lib/` + all dry-*/xdg gems have
+zero `Thread.new`, async's one internal thread self-silences); the
+`-W:no-experimental` shebang carried.
+
+**3 PHASE-0 disagreements — architect rulings (proposed; the fresh judging
+session confirms alongside the gate verdict):**
+- **#1 ACCEPT → CF7 (do NOT widen this slice).** Builder correctly caught that
+  the gate prose's "`State::Store.write` is atomic (temp+rename)" is FALSE — it's
+  a direct `File.write` (`state/store.rb:64-69`). This is a real but PRE-EXISTING
+  latent risk, not introduced by Slice 6, not among the three field defects, and
+  `state/*` is MUST-NOT-TOUCH. The ^C rescue already prevents the common
+  (mid-engine) interrupt from ever reaching the state write (`process_one`'s
+  `rescue StandardError` doesn't catch `Interrupt`). Keep the slice tight →
+  **CF7** for a future slice. No measurable gate threshold depends on atomicity,
+  so the frozen gate stays judgeable as written (rule 3 — gate NOT edited).
+- **#2 ACCEPT.** A deterministic offline subprocess G3 test isn't constructible
+  without flakiness (Thread#raise doesn't interrupt the C-level `wait4`;
+  real-subprocess timing is network-dependent). The gate explicitly permitted the
+  mechanism-unit-test + static-analysis + M2-manual fallback — builder took it.
+- **#3 ACCEPT.** Throwaway registered `__interrupt_boom__` command is the right
+  deterministic in-process seam (no `unregister` API exists, but the other
+  command-enumerating tests use subprocesses, so no registry pollution; smoke
+  229/918 confirms none manifested).
+
+**Fresh session must:** re-run G0–G4 itself (rule 4 — this session dispatched +
+committed), read the diff vs intent, finalize the 3 disagreement rulings, then
+hand M1–M3 (live SSH-no-prompt / clean ^C / no-warning) to the human. Merge
+`slice/field-fixes` → `main` `--no-ff` only on G0–G4 PASS + human manual sign-off.
+Decide CF7 disposition then too.
+
+---
+
+## (superseded) Slice 6 dispatch note
 
 The five feature slices are done (PRD §7 DoD met). **Slice 6 is net-new
 post-completion scope** from the first real `repo-tender sync` on a clean
@@ -335,3 +383,5 @@ richer `daemon status`.
 | 2026-06-13 | architect | 5 | ad97164 (preserve) | integrity PASS; gates pending | Post-flight PASS (no builder commits `git log 0c2302c..` empty, 6 files + lane report in-scope, `docs/gates/` diff-clean, no new gems); committed builder work to `slice/daemon-polish`; smoke green (re-ran 222/890/0/0/0, lint 0). Did NOT judge gates (rule 4 — dispatched this build); deferred to fresh session. `main` stays `713c4f2` |
 | 2026-06-13 | architect | 5 | eceebff (merge) | **G0–G5 PASS → CONTINUE** | Fresh session judged Slice 5 @ `ad97164` (rule 4 — prior session dispatched + preserved). Re-ran all gates myself: G0 222/890/0/0/0, lint 0, no new gems, --help daemon; G1/G2 verified status-3 bootout enters the runner seam on a REAL Agent (`runner.calls` asserts `[bootout,disable]`, not a hand-set stub — Slice-4 G2 trap avoided), non-benign exits 1/surfaces noise; G3 benign mapping keyed on `argv[1]=="bootout"`, install/start bootstrap status-3 still Failure, existing argv assertions unmodified (agent_test additive); G4 `log_max_bytes` never raises + sync no-crash integration; G5 in-scope, gates clean, no builder commits. Read diff vs CF5/CF6 intent + argv-stability (no op argv changed, public Agent API unchanged). Arbitrated 6 disagreements (all ACCEPT). Low-stakes → no extra cross-model pass. Merged `slice/daemon-polish`→`main` (`--no-ff` `eceebff`), integration smoke green. **CF5 + CF6 CLOSED. PROJECT COMPLETE (PRD §7 DoD).** |
 | 2026-06-13 | architect | 6 | af847d6 (freeze) | n/a | Slice 6 (field-fixes) spec'd from the first real `sync` on a clean machine: SSH transport default, ^C hygiene (no backtrace/thread noise, exit 130), carry the human's `-W:no-experimental` binstub shebang. Pre-checks: `pi` 0.79.2 canary green (minimax-m3 resolves, key set); shebang fix confirmed correct (RubyGems propagates it into the installed binstub on macOS; project is macOS-only so the multi-arg `env` trap is moot); SSH = one-line `DEFAULT_URL_BUILDER` flip. Gates G0–G4 + M1–M3 manual checklist frozen `af847d6`. ONE lane, main checkout. Dispatched `pi --session-id field-fixes --thinking xhigh`, block `.architect/field-fixes-01.block.md`. `bin/repo-tender` left dirty (deliverable). Did NOT judge (rule 4 — dispatched this session); fresh session judges + merges, then human runs M1–M3. |
+| 2026-06-13 | builder (m3) | 6 | none (UNJUDGED) | builder: 229/918/0/0/0 | Built all three fixes in 1 lane (main checkout): `DEFAULT_URL_BUILDER` SSH flip; `CLI.run` `rescue Interrupt`→exit 130/`interrupted`; `Shell.run` `report_on_exception` save/restore around `Open3.capture3`. Verified the Open3 IOError mechanism live before coding; static-analysis proved no app-owned threads (targeted suppression). +7 tests (3 SSH, 2 interrupt incl. real-failure-still-exits-1 guard, 2 shell suppression). 3 PHASE-0 disagreements raised. STATUS COMPLETE_WITH_CONCERNS (CF7). No commits, no out-of-scope touches, no new gems. |
+| 2026-06-13 | architect | 6 | ddbb649 (slice/field-fixes) | post-flight PASS; gates pending | Post-flight PASS (no builder commits, 7 files in MAY-TOUCH/Carry, `docs/gates/` clean, no new gems); committed builder work to `slice/field-fixes`; smoke green (re-ran 229/918/0/0/0, lint 0 — matches builder). Ruled the 3 disagreements (all ACCEPT; #1→**CF7**: builder correctly caught the gate prose's false "`State::Store.write` is temp+rename" — it's direct `File.write`; deferred, `state/*` out of scope). Did NOT judge gates (rule 4 — dispatched this build); deferred to fresh session. `main` stays `419e175`. |
