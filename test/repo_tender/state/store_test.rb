@@ -195,4 +195,45 @@ class StateStoreTest < Minitest::Test
       assert_equal "clean", reloaded.repos["github.com/test/repo"].status
     end
   end
+
+  # ---- GB1 (CF11): Interrupt at rename cleans up temp, propagates, original intact ----
+  #
+  # Baseline (old bare `rescue`): `rescue` = `rescue StandardError`.
+  # `Interrupt < SignalException < Exception` — NOT a StandardError — so the
+  # old `rescue` block was never entered on Interrupt. `File.delete(tmp)` was
+  # never called, leaving a `state.yaml.tmp.<pid>` orphan.
+  #
+  # Fix (`ensure`): ensure runs on ALL exit paths. After successful rename the
+  # tmp is gone so `File.exist?(tmp)` is false (no-op). On Interrupt the
+  # ensure deletes the orphan and the exception still propagates.
+
+  def test_write_no_orphan_on_interrupt_at_rename
+    Dir.mktmpdir("store-gb1") do |dir|
+      path = File.join(dir, "state.yaml")
+      original_content = "original: preserved\n"
+      File.write(path, original_content)
+
+      state = Store::State.new(
+        repos: {"github.com/test/repo" => Store::Repo.new(status: "clean")},
+        orgs: {}
+      )
+
+      saved_rename = File.method(:rename)
+      File.define_singleton_method(:rename) { |*| raise Interrupt }
+      begin
+        assert_raises(Interrupt) { Store.write(path, state) }
+      ensure
+        File.define_singleton_method(:rename) { |*args| saved_rename.call(*args) }
+      end
+
+      # (a) Original file byte-unchanged — CF7 atomicity intact.
+      assert_equal original_content, File.read(path)
+
+      # (b) No orphaned temp file in the state dir.
+      stray = Dir.children(dir).reject { |f| f == "state.yaml" }
+      assert_empty stray, "orphaned temp files: #{stray.inspect}"
+
+      # (c) Interrupt propagated (proven by assert_raises above).
+    end
+  end
 end
