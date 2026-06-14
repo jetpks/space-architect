@@ -12,8 +12,9 @@
   Research + build-ready PRD done (`docs/research/cli-ux-interactive-daemon.md`,
   `docs/prd/cli-ux.md`). 3 slices: **A `ui-foundation`** (Mode + Reporter event
   seam + Plain/JSON renderers, NO color/animation) ✅ **JUDGED PASS & MERGED
-  `59bc565`** → **B** (interactive color + fiber-driven live progress — the novel
-  no-Threads animation, spike-gated; **NEXT**) → **C** (roll color/spinners across
+  `59bc565`** → **B `ui-interactive`** (interactive color + fiber-driven live
+  progress — the novel no-Threads animation, spike-gated) **🚧 DISPATCHED — freeze
+  `8c59784`, AWAITING JUDGMENT (rule 4)** → **C** (roll color/spinners across
   every command). Key frozen decisions: no Ruby
   Threads (one Async render fiber in B); home-grown `PlainReporter`/`JsonReporter`
   (NOT `socketry/console`); no `--daemon` flag (non-TTY autodetect); reporter
@@ -48,8 +49,29 @@
   (Slice 5 precedent). **8/8 (G0–G7) PASS → CONTINUE.** Merged
   `slice/ui-foundation` → `main` (`--no-ff` `59bc565`), integration smoke green
   (291/1068/0/0/0, lint 0). Lane report: `docs/lanes/ui-foundation-01.md`.
-  **Next: Slice B** (interactive color + fiber-driven live progress — the novel
-  no-Threads animation, spike-gated; PRD §5 Slice B).
+- **Slice B (`ui-interactive`) — SPEC'D + FROZEN + DISPATCHED 2026-06-14; NOT
+  JUDGED (rule 4 — this session dispatched).** The novel keystone:
+  `UI::InteractiveReporter` = color + in-place LIVE progress for the concurrent
+  `sync` sweep, driven by ONE Async render fiber spawned as a child of the
+  engine's Sync task — **NO Ruby Thread**. The engine event seam is ALREADY wired
+  (Slice A: attach/repo_*/run_*/detach are no-ops under NullReporter) so
+  **`sync/engine.rb` is MUST-NOT-TOUCH**; Slice B only adds
+  `ui/interactive_reporter.rb` (+ optional `ui/spinner.rb`) and the `mode.animate`
+  selection branch in `cli/sync.rb`, plus the 4 gems (`pastel`, `tty-cursor`,
+  `tty-screen`, `tty-progressbar`, `~>` pins, all MIT/no-Thread). **PHASE-0 SPIKE
+  (no prior art): `tty-progressbar::Multi` under the Async reactor vs a hand-rolled
+  `tty-cursor`+`pastel` fallback** — the builder decides and reports; the gates
+  judge behavior either way. Teardown subtlety frozen into G4: `^C` mid-run unwinds
+  the Sync task → Async cancels the render fiber → cursor-restore must live in the
+  render fiber's `ensure` (NOT a new engine `detach`, since engine.rb is frozen).
+  `UI::Mode` frozen → use real readers `mode.color`/`mode.animate` (NOT `?`
+  predicates). 1 lane, main checkout, freeze **`8c59784`**, gates **G0–G7 + M1
+  (human real-TTY smoke)** at `docs/gates/ui-interactive.md`. Builder: **Sonnet 4.6
+  via `claude -p`** (2nd such dispatch; canary green @ `claude` 2.1.177). Block
+  `.architect/ui-interactive-01.block.md`, run-log
+  `.architect/ui-interactive-01.last-run.jsonl`. **A fresh session post-flights →
+  judges G0–G7 → arbitrates PHASE-0 → hands M1 to the human → merges `--no-ff` only
+  on PASS + M1 sign-off.** CF7 + CF8 stay OPEN (state/* + shell.rb — out of scope).
 - **Goal:** keep local git clones evergreen (clean · on default branch · fresh)
   via a `dry-cli` binary + a periodic launchd `sync` sweep. macOS, GitHub-only.
 - **Slice 1 (Foundation) — DONE & MERGED 2026-06-13.** Architect re-ran all 9
@@ -191,6 +213,11 @@ bundle exec standardrb       # exit 0
   Plain/JSON, no color/anim), frozen at `8234421` (G0–G7, fully CI-judgeable, no
   manual checklist). **JUDGED PASS (G0–G7, fresh session @ `1179834`), merged
   `59bc565`.** 7 disagreements D1–D7 ACCEPT. Builder: Sonnet 4.6 via `claude -p`.
+- `docs/gates/ui-interactive.md` — CLI-UX Slice B (color + fiber-driven live
+  progress, NO Thread), frozen at `8c59784` (G0–G7 CI-judgeable + M1 human
+  real-TTY smoke). **DISPATCHED, AWAITING JUDGMENT (rule 4).** Builder: Sonnet 4.6
+  via `claude -p`. Engine seam already wired (engine.rb MUST-NOT-TOUCH); PHASE-0
+  spike decides bars vs hand-rolled.
 
 ## Slice 4 — launchd daemon + log rotation (+ CF3) (RESOLVED, archived)
 
@@ -502,4 +529,5 @@ richer `daemon status`.
 | 2026-06-14 | architect | ui-foundation (CLI-UX A) | 8234421 (freeze) | n/a | **NEW EPIC.** Research + PRD done; Slice A spec'd (Mode + Reporter event seam + Plain/JSON renderers, NO color/animation — those are B/C), gates G0–G7 frozen `8234421`. 1 lane, main checkout. **FIRST `claude -p --model claude-sonnet-4-6` dispatch** (slices 1–6 used `pi`/minimax) — `claude` 2.1.177, canary green. Block `.architect/ui-foundation-01.block.md`, run-log `.architect/ui-foundation-01.last-run.jsonl`. Did NOT judge (rule 4 — dispatched this session); fresh session post-flights → judges G0–G7 → arbitrates PHASE-0 → merges `--no-ff` only on PASS. |
 | 2026-06-14 | builder (sonnet 4.6) | ui-foundation | none (UNJUDGED) | builder: 291/1068/0/0/0 | Built Mode + Reporter event seam + NullReporter/Plain/Json + `cli/options` GlobalOptions, wired `reporter:` into `Sync::Engine` + `cli/sync.rb`, in 1 lane (main checkout, `claude -p`). 7 PHASE-0 disagreements (D1–D7, all cite real files: D1 `:fetching` not emitted/uses `:fast_forwarding`; D2 `run_finished` summary = `Hash<status,count>`; D3 byte-identical-state via StubSCM+frozen clock; D4 `--no-color` > `CLICOLOR_FORCE` precedence; **D5 `repo_failed`→`out` w/ FAILED marker not stderr**; D6 `GlobalOptions` mixin verified vs dry-cli source; D7 require ordering). STATUS COMPLETE. No commits, no out-of-scope touches, no new gems. Clean run (exit 0). |
 | 2026-06-14 | architect | ui-foundation | 1179834 (slice/ui-foundation) | post-flight PASS; gates pending | Post-flight PASS (`git log 8234421..` no builder commits; changes ⊆ Lane file set; `docs/gates/` diff-clean; no new gems; empty err log). Committed builder dirty work to `slice/ui-foundation` @ `1179834`; integration smoke green (architect re-ran 291/1068/0/0/0, `standardrb` 0). Did NOT judge gates (rule 4 — dispatched this build); deferred to a fresh session. Flagged **D5** (repo_failed stream) as a judgment target. `main` stays `541e7cd`. |
+| 2026-06-14 | architect | ui-interactive (CLI-UX B) | 8c59784 (freeze) | n/a | **Slice B spec'd + dispatched.** Grounded (no open disagreements, nothing awaiting judgment — Slice A merged last session). Confirmed the engine event seam is ALREADY wired from Slice A (engine.rb:94/126 + repo_*/run_* present, no-ops under NullReporter) ⇒ `sync/engine.rb` MUST-NOT-TOUCH; Slice B is just `ui/interactive_reporter.rb` (+ optional spinner) + `cli/sync.rb` `mode.animate` branch + 4 gems. Spec'd 1 lane (can't split disjointly; spike-gated novel work wants one coherent context), gates **G0–G7 + M1 human real-TTY smoke** frozen `8c59784` at `docs/gates/ui-interactive.md` (generalized PRD's 6 gates to be judgeable across the bars-vs-hand-rolled spike fork; baseline 291/1068/0/0/0, lint 0). No architect research fan-out (PRD already distilled discovery research; the remaining unknown is a builder PHASE-0 spike + version pins = verify-against-reality, not web research). Canary green (`claude` 2.1.177, `--model claude-sonnet-4-6` resolves). Dispatched **1 lane in main checkout, background**, block `.architect/ui-interactive-01.block.md`, run-log `.architect/ui-interactive-01.last-run.jsonl`, `ultrathink` budget. Did NOT judge (rule 4 — dispatched this session); fresh session post-flights → judges G0–G7 → arbitrates PHASE-0 → hands M1 to human → merges `--no-ff` only on PASS + M1. `main` stays at the dispatch-record commit. |
 | 2026-06-14 | architect | ui-foundation | 59bc565 (merge) | **G0–G7 PASS → CONTINUE** | Fresh session judged Slice A @ `1179834` (rule 4 — prior session dispatched + preserved). Re-ran every gate myself: G0 291/1068/0/0/0, lint 0, no new gems, --help 5 groups; G1 `Mode.resolve` table on real resolve (incl `--no-color`>`CLICOLOR_FORCE`, `NO_COLOR=""` no-op, immutability); G2 `engine_test.rb` additions-only (verified), default NullReporter, byte-identical state.yaml, engine diff keeps result tuples unchanged; G3 recording reporter + real-temp-git 4-scenario @ conc 4 — started+terminal pair per ref, terminal status == real state row, raise→repo_failed+run completes; G4 real Plain/Json reporters ANSI-free + JSON.parse-per-line; G5 `SyncRun.options` introspection (4 flags, no `:daemon`) + `sync --daemon` rejected exit 1; G6 piped subprocess ANSI-free + `synced N repo(s)` preserved + invalid-ref→stderr exit 1 (live-reproduced on 422 real repos); G7 15 files ⊆ Lane set, no MUST-NOT-TOUCH, no builder commits, gates diff-clean. Read full diff vs PRD §3/§5 + no-behavior-change invariant. Arbitrated 7 disagreements D1–D7 (all ACCEPT; D5 repo_failed→out per G4's stated-alternate-stream latitude). Low-stakes → no separate cross-model pass. Merged `slice/ui-foundation`→`main` (`--no-ff` `59bc565`), integration smoke green (291/1068/0/0/0, lint 0). **Slice B next.** |
