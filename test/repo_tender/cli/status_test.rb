@@ -84,4 +84,76 @@ class CLIStatusTest < Minitest::Test
       assert_includes stdout, "trunk"
     end
   end
+
+  # ---- RC1/RC2/RC3: color in pretty mode, byte-equal content ----
+
+  def seed_status_state(paths)
+    RepoTender::State::Store.write(paths.state_file,
+      RepoTender::State::Store::State.new(
+        repos: {
+          "github.com/ruby/ruby" => RepoTender::State::Store::Repo.new(
+            default_branch: "trunk",
+            last_fetch_at: "2026-06-12T20:01:33Z",
+            last_synced_at: "2026-06-12T20:01:34Z",
+            status: "clean",
+            last_error: nil
+          )
+        },
+        orgs: {}
+      ))
+  end
+
+  def test_status_color_in_pretty_mode
+    with_cli_env do |env, _home|
+      paths = RepoTender::Paths.new(environment: env)
+      paths.ensure!
+      seed_status_state(paths)
+
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::Status::Show.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(plain: nil, json: nil, no_color: nil, quiet: nil)
+      assert_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
+
+  def test_status_byte_identical_in_plain
+    with_cli_env do |env, _home|
+      paths = RepoTender::Paths.new(environment: env)
+      paths.ensure!
+      seed_status_state(paths)
+
+      # :plain output (non-TTY StringIO)
+      out_plain, _err = invoke_command(RepoTenderCLI::Status::Show)
+      plain_str = out_plain.string
+
+      # :pretty output (TTY)
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::Status::Show.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(plain: nil, json: nil, no_color: nil, quiet: nil)
+      pretty_str = tty_out.string
+
+      assert_match(/\e\[[0-9;]*m/, pretty_str, "pretty mode must have SGR codes")
+      assert_equal plain_str, pretty_str.gsub(/\e\[[0-9;]*m/, ""),
+        "stripping SGR from pretty must produce byte-identical plain output"
+    end
+  end
+
+  def test_status_no_color_with_no_color_flag
+    with_cli_env do |env, _home|
+      paths = RepoTender::Paths.new(environment: env)
+      paths.ensure!
+      seed_status_state(paths)
+
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::Status::Show.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(plain: nil, json: nil, no_color: true, quiet: nil)
+      refute_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
 end

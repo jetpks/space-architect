@@ -89,4 +89,46 @@ class CLIConfigTest < Minitest::Test
       assert_includes stdout, "refresh_interval: 21600"
     end
   end
+
+  # ---- RC1/RC3: color in pretty mode, no color otherwise ----
+
+  def test_config_path_has_color_in_pretty_mode
+    with_cli_env do |_env, _home|
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::ConfigCmd::Path.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(plain: nil, json: nil, no_color: nil, quiet: nil)
+      assert_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
+
+  def test_config_show_has_color_in_pretty_mode
+    with_cli_env do |_env, _home|
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::ConfigCmd::Show.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(plain: nil, json: nil, no_color: nil, quiet: nil)
+      assert_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
+
+  def test_config_show_no_color_with_no_color_flag
+    with_cli_env do |_env, _home|
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::ConfigCmd::Show.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(plain: nil, json: nil, no_color: true, quiet: nil)
+      refute_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
+
+  def test_config_show_no_color_in_non_tty
+    with_cli_env do |_env, _home|
+      out, _err = invoke_command(RepoTenderCLI::ConfigCmd::Show)
+      refute_match(/\e\[[0-9;]*m/, out.string)
+    end
+  end
 end

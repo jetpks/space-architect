@@ -133,4 +133,58 @@ class CLIOrgTest < Minitest::Test
       assert_includes stderr, "invalid org reference"
     end
   end
+
+  # ---- RC1/RC3: color in pretty mode, no color otherwise ----
+
+  def test_org_add_has_color_in_pretty_mode
+    with_cli_env do |_env, _home|
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::Org::Add.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(name: "github.com/socketry", plain: nil, json: nil, no_color: nil, quiet: nil)
+      assert_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
+
+  def test_org_add_no_color_with_no_color_flag
+    with_cli_env do |_env, _home|
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::Org::Add.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(name: "github.com/socketry", plain: nil, json: nil, no_color: true, quiet: nil)
+      refute_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
+
+  def test_org_list_has_color_in_pretty_mode
+    with_cli_env do |env, _home|
+      paths = RepoTender::Paths.new(environment: env)
+      paths.ensure!
+      RepoTender::Config::Store.write(paths.config_file,
+        RepoTender::Config::Store.load(paths.config_file).success.new(
+          orgs: [RepoTender::Config::OrgRef.new(host: "github.com", name: "socketry")]
+        ))
+      tty_out = Class.new(StringIO) { def tty? = true }.new
+      cmd = RepoTenderCLI::Org::List.new
+      cmd.instance_variable_set(:@out, tty_out)
+      cmd.instance_variable_set(:@err, StringIO.new)
+      cmd.call(plain: nil, json: nil, no_color: nil, quiet: nil)
+      assert_match(/\e\[[0-9;]*m/, tty_out.string)
+    end
+  end
+
+  def test_org_list_no_color_in_non_tty
+    with_cli_env do |env, _home|
+      paths = RepoTender::Paths.new(environment: env)
+      paths.ensure!
+      RepoTender::Config::Store.write(paths.config_file,
+        RepoTender::Config::Store.load(paths.config_file).success.new(
+          orgs: [RepoTender::Config::OrgRef.new(host: "github.com", name: "socketry")]
+        ))
+      out, _err = invoke_command(RepoTenderCLI::Org::List)
+      refute_match(/\e\[[0-9;]*m/, out.string)
+    end
+  end
 end
