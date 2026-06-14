@@ -9,7 +9,9 @@
 
 ## TL;DR
 
-**Status (2026-06-14): repo-tender is feature-complete AND state-hardened; everything is merged to `main` (@ `4556e7f`). No open slice.** Feature slices 1–6 + the CLI-UX epic (A/B/C) + cf-cleanup + state-hardening are all JUDGED PASS and merged. Carry-forwards CF1–CF11 + tty-screen are CLOSED. The only remaining item is **CF12** — two low-severity, non-blocking robustness nits surfaced by the CF10 adversarial pass; neither touches the no-data-loss invariant. There is nothing forcing a next slice.
+**Status (2026-06-14): repo-tender is feature-complete AND state-hardened; everything is on `main`. No open slice, no open carry-forwards.** Feature slices 1–6 + the CLI-UX epic (A/B/C) + cf-cleanup + state-hardening are all JUDGED PASS and merged. Carry-forwards **CF1–CF12 + tty-screen are CLOSED.** Nothing is open.
+
+- **CF12 — CLOSED (fixed inline 2026-06-14, not via the dispatch loop — human asked to fix the two small nits directly).** (a) `State::Lock.acquire` now runs `flock` *inside* the `begin/ensure` so a raising `flock` (EINTR/ENOLCK) can't leak the fd; the redundant-and-hazardous explicit `LOCK_UN` was dropped (`close` releases the lock via the OFD and can't be skipped by a raising unlock). (b) `lock.rb` docstring clarified: `LOCK_NB` is for launchd-daemon pile-up safety, not reactor yielding (the syscalls are ordinary blocking calls, sub-ms on local FS — same as the rest of `State::Store`). +1 regression test (`test_acquire_closes_fd_when_flock_raises`, spy-fd seam). Suite **379/1334/0/0/0**, lint 0; GA3 release tests still green (confirms `close`-only release).
 
 - **Last judged — slice `state-hardening` (CF10 + CF11): JUDGED PASS, merged `--no-ff` → `main` @ `4556e7f` (2026-06-14, fresh judging session).** G0 + GA1–GA5 + GB1–GB4 all PASS, re-run against the verbatim frozen `docs/gates/state-hardening.md`. Integration smoke on `main`: **378/1332/0/0/0**, `standardrb` 0, 51 gems (no new gems). Cross-model adversarial pass on CF10 confirmed the **no-data-loss invariant holds on every exit path** (release on normal/Failure/raise/Interrupt; skip path never writes; no unlink race; lockfile created on first run; no intra-run serialization). CF10 (inter-process `flock` lock across the engine load→write span) + CF11 (`ensure`-clean write temp + dead-code removal) both CLOSED. Detail: `docs/lanes/state-hardening-{A,B}.md`; verdict snapshot in the archive.
 
@@ -29,7 +31,7 @@ bundle exec rake test        # tests > 0, failures = 0, errors = 0, skips = 0
 bundle exec standardrb       # exit 0
 ```
 
-Baseline at `main` (`4556e7f`): **378/1332/0/0/0**, lint 0, 51 gems.
+Baseline at `main`: **379/1334/0/0/0**, lint 0, 51 gems.
 
 ## Standing lessons (carried forward — not re-derivable from code)
 
@@ -40,13 +42,11 @@ Baseline at `main` (`4556e7f`): **378/1332/0/0/0**, lint 0, 51 gems.
 
 ## Open carry-forwards
 
-| # | Item | Status | Lands in |
-|---|------|--------|----------|
-| CF12 | **Two low-severity nits on `State::Lock` (CF10), surfaced by the CF10 cross-model adversarial pass — neither touches no-data-loss.** **(a) fd leak if `flock` itself raises.** `State::Lock.acquire` (`state/lock.rb:37-41`) opens the fd *before* the `begin/ensure`; if `flock` raises (e.g. `EINTR` on a signal, `ENOLCK` on some filesystems) instead of returning `false`, the open fd leaks (the exception propagates before the `ensure` is established). Only on an already-aborting path; one fd on a terminating run. Fix: open the fd inside the `begin`, or wrap the flock attempt so the fd is closed on a raising flock. **(b) reactor-syscall nuance.** `LOCK_NB` makes the *lock* non-blocking, but `flock`/`File.open`/`mkdir_p`/`File.write`/`File.rename` are plain blocking syscalls with no Async scheduler hook — they run synchronously on the reactor fiber. **Pre-existing** (`state/store.rb` already does blocking File I/O on the reactor by design per `AGENTS.md`), NOT introduced by CF10; `LOCK_NB` remains the correct choice (a blocking `LOCK_EX` would hang the launchd daemon forever). Sub-ms on local FS. The `lock.rb` docstring slightly overstates "reactor-safe" — optionally soften the comment. | ⏳ **OPEN** — non-blocking; cardinal invariant intact. (a) = narrow fd-leak hardening; (b) = doc-wording / pre-existing architecture, no behavior change needed. | unscheduled — a tiny one-lane slice if/when desired |
+**None.** CF1–CF12 + tty-screen all CLOSED.
 
 ## Next slice
 
-**None scheduled.** repo-tender is feature-complete and state-hardened; all gates green on `main`. CF12 is optional polish (one small one-lane slice: fix the fd-leak in `state/lock.rb:37-41` + soften the docstring; gate = a test that injects a raising `flock` and asserts no fd leak). Spin it up only if the human wants it — there is no functional gap forcing it.
+**None scheduled.** repo-tender is feature-complete and state-hardened; all gates green on `main`, no open carry-forwards. There is no functional gap forcing further work — the next slice is whatever the human brings.
 
 ---
 

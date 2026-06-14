@@ -12,6 +12,12 @@ module RepoTender
     # The lockfile is a persistent zero-byte sentinel — never unlinked.
     # Deleting a flock'd file while another fd holds it creates a race
     # where both processes think they hold the lock on different inodes.
+    #
+    # `LOCK_NB` is for daemon safety, not reactor yielding: a blocking
+    # `LOCK_EX` would wedge a launchd tick forever behind a hung run.
+    # `flock` and the file I/O it guards are ordinary blocking syscalls
+    # with no Async scheduler hook — fine here, they're sub-millisecond
+    # on a local state dir, same as the rest of `State::Store`.
     class Lock
       NOT_ACQUIRED = :not_acquired
 
@@ -35,14 +41,16 @@ module RepoTender
         lock_path = path_for(state_file)
         FileUtils.mkdir_p(File.dirname(lock_path))
         f = File.open(lock_path, File::RDWR | File::CREAT)
-        unless f.flock(File::LOCK_EX | File::LOCK_NB)
-          f.close
-          return NOT_ACQUIRED
-        end
+        # Everything that can raise — `flock` itself can (EINTR on a
+        # signal, ENOLCK on some filesystems) — runs inside the `begin`,
+        # so the `ensure` always closes the fd (no leak). Closing the fd
+        # releases the lock (it lives on the open file description), so
+        # no explicit LOCK_UN is needed — and `close` can't be skipped
+        # by a raising unlock.
         begin
+          return NOT_ACQUIRED unless f.flock(File::LOCK_EX | File::LOCK_NB)
           yield
         ensure
-          f.flock(File::LOCK_UN)
           f.close
         end
       end

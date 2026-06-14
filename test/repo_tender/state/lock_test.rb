@@ -126,4 +126,31 @@ class StateLockTest < Minitest::Test
         "must be able to re-acquire the lock after a previous release"
     end
   end
+
+  # CF12a: if `flock` *raises* (EINTR on a signal, ENOLCK on some
+  # filesystems) instead of returning false, the fd must still be closed
+  # — no leak. `File` is a collaborator, not the unit under test
+  # (`State::Lock` is); same seam idiom as the GB1 store_test. A spy fd
+  # records `#close` and raises from `#flock`.
+  def test_acquire_closes_fd_when_flock_raises
+    Dir.mktmpdir("rt-lock-flock-raise-") do |dir|
+      state_file = File.join(dir, "state.yaml")
+      closed = false
+      spy = Object.new
+      spy.define_singleton_method(:flock) { |*| raise Errno::ENOLCK }
+      spy.define_singleton_method(:close) { closed = true }
+
+      saved_open = File.method(:open)
+      File.define_singleton_method(:open) { |*| spy }
+      begin
+        assert_raises(Errno::ENOLCK) do
+          Lock.acquire(state_file) { flunk "must not yield when flock raises" }
+        end
+      ensure
+        File.define_singleton_method(:open) { |*a, **k, &b| saved_open.call(*a, **k, &b) }
+      end
+
+      assert closed, "fd must be closed when flock raises (no leak)"
+    end
+  end
 end
