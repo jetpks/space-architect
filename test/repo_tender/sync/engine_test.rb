@@ -1471,4 +1471,171 @@ class SyncEngineTest < Minitest::Test
       end
     end
   end
+
+  # ===========================================================================
+  # G9.1 — A raising list_org is isolated; run completes and writes state (CF9).
+  # Mirrors the repo-sweep G8 guarantee. CF3: prior repo_count/last_listed_at
+  # preserved for the raising org when a prev row exists.
+  # ===========================================================================
+  def test_g9_1_raising_list_org_isolated_run_completes_state_written
+    prev_listed_at = Time.utc(2026, 1, 1, 0, 0, 0)
+
+    org_raising = OrgRef.new(host: "github.com", name: "raising-org")
+    org_ok1 = OrgRef.new(host: "github.com", name: "ok-org1")
+    org_ok2 = OrgRef.new(host: "github.com", name: "ok-org2")
+
+    ok_repo1 = RepoRef.new(host: "github.com", owner: "ok-org1", name: "lib")
+    ok_repo2 = RepoRef.new(host: "github.com", owner: "ok-org2", name: "lib")
+
+    forge = StubForge.new(response_for: lambda { |org_ref|
+      raise "simulated parse error in list_org" if org_ref.name == "raising-org"
+      repos = case org_ref.name
+      when "ok-org1" then [ok_repo1]
+      when "ok-org2" then [ok_repo2]
+      else []
+      end
+      Dry::Monads::Success(repos)
+    })
+
+    Dir.mktmpdir("rt-g9-1-") do |base_dir|
+      FileUtils.mkdir_p(File.join(base_dir, "github.com", "ok-org1", "lib"))
+      FileUtils.mkdir_p(File.join(base_dir, "github.com", "ok-org2", "lib"))
+
+      with_paths(base_dir: base_dir) do |_, paths|
+        # Seed prev state with an existing row for the raising org (CF3).
+        prev_state = StateStore::State.new(
+          repos: {},
+          orgs: {
+            "github.com/raising-org" => StateStore::Org.new(
+              last_listed_at: prev_listed_at.iso8601,
+              repo_count: 5,
+              last_error: nil
+            )
+          }
+        )
+        StateStore.write(paths.state_file, prev_state)
+
+        scm = StubSCM.new(status_value: clean_status(branch: "trunk", ahead: 0, behind: 0))
+        config = make_config(
+          base_dir: base_dir,
+          orgs: [org_raising, org_ok1, org_ok2],
+          concurrency: 3
+        )
+
+        result = Engine.new(scm: scm, forge: forge).call(config: config, paths: paths)
+        assert result.success?,
+          "Engine#call must return Success even when list_org raises: #{result.failure.inspect}"
+
+        state = StateStore.load(paths.state_file).success
+
+        # Raising org is recorded with last_error.
+        raising_row = state.orgs["github.com/raising-org"]
+        refute_nil raising_row, "raising org must have a state row"
+        refute_nil raising_row.last_error, "raising org must have last_error set"
+        assert_includes raising_row.last_error, "unhandled:"
+        assert_includes raising_row.last_error, "RuntimeError"
+        assert_includes raising_row.last_error, "simulated parse error in list_org"
+
+        # CF3: prior repo_count and last_listed_at preserved.
+        assert_equal 5, raising_row.repo_count,
+          "CF3: prior repo_count must be preserved when list_org raises"
+        assert_equal prev_listed_at.iso8601, raising_row.last_listed_at,
+          "CF3: prior last_listed_at must be preserved when list_org raises"
+
+        # Other orgs are listed normally.
+        ok1_row = state.orgs["github.com/ok-org1"]
+        refute_nil ok1_row, "ok-org1 must be recorded"
+        assert_equal 1, ok1_row.repo_count
+        assert_nil ok1_row.last_error
+
+        ok2_row = state.orgs["github.com/ok-org2"]
+        refute_nil ok2_row, "ok-org2 must be recorded"
+        assert_equal 1, ok2_row.repo_count
+
+        # Discovered repos from ok orgs are processed and in state.
+        assert state.repos["github.com/ok-org1/lib"], "ok-org1/lib must be in state"
+        assert state.repos["github.com/ok-org2/lib"], "ok-org2/lib must be in state"
+
+        # state.yaml IS written (no-data-loss invariant).
+        assert File.exist?(paths.state_file), "state.yaml must be written even when list_org raises"
+      end
+    end
+  end
+
+  # G9.1 (no-prev-row): raising list_org on first run records last_error with
+  # zero repo_count and nil last_listed_at (nothing to preserve — CF3 vacuous).
+  def test_g9_1_raising_list_org_first_run_records_error_with_zero_repo_count
+    org = OrgRef.new(host: "github.com", name: "boom-org")
+    forge = StubForge.new(response_for: lambda { |_org_ref|
+      raise ArgumentError, "nil.split (schema violation)"
+    })
+
+    Dir.mktmpdir("rt-g9-1b-") do |base_dir|
+      with_paths(base_dir: base_dir) do |_, paths|
+        config = make_config(base_dir: base_dir, orgs: [org], concurrency: 1)
+        result = Engine.new(forge: forge).call(config: config, paths: paths)
+        assert result.success?,
+          "Engine#call must return Success on first-run list_org raise: #{result.failure.inspect}"
+
+        state = StateStore.load(paths.state_file).success
+        row = state.orgs["github.com/boom-org"]
+        refute_nil row
+        assert_equal 0, row.repo_count
+        assert_nil row.last_listed_at
+        refute_nil row.last_error
+        assert_includes row.last_error, "unhandled:"
+        assert_includes row.last_error, "ArgumentError"
+        assert_includes row.last_error, "nil.split"
+      end
+    end
+  end
+
+  # ===========================================================================
+  # G9.2 — Teardown runs even on an escaping raise (Part B ensure-guard).
+  # Injection: reporter#listing_started raises, escaping the attach…detach span
+  # in Engine#call before Part A's org-fiber rescue can catch anything.
+  # The ensure guard must still invoke @reporter.detach exactly once.
+  # ===========================================================================
+
+  class RaisingOnListingStartedReporter
+    attr_reader :events
+
+    def initialize = @events = []
+
+    def attach(task) = @events << [:attach]
+    def listing_started(total:) = raise("injected raise in listing_started (G9.2)")
+    def org_listed(ref, count:) = @events << [:org_listed]
+    def listing_finished = @events << [:listing_finished]
+    def run_started(total:) = @events << [:run_started]
+    def repo_started(ref) = @events << [:repo_started]
+    def repo_phase(ref, phase) = @events << [:repo_phase]
+    def repo_finished(ref, status) = @events << [:repo_finished]
+    def repo_failed(ref, error) = @events << [:repo_failed]
+    def run_finished(summary) = @events << [:run_finished]
+    def detach = @events << [:detach]
+  end
+
+  def test_g9_2_ensure_detach_runs_on_escaping_raise_from_listing_started
+    # Injection: RaisingOnListingStartedReporter#listing_started raises,
+    # escaping the attach…detach span. Engine#call propagates the raise;
+    # the ensure guard must still call detach exactly once.
+    reporter = RaisingOnListingStartedReporter.new
+    org = OrgRef.new(host: "github.com", name: "socketry")
+    forge = RecordingForge.new(repos_per_org: 0)
+
+    Dir.mktmpdir("rt-g9-2-") do |base_dir|
+      with_paths(base_dir: base_dir) do |_, paths|
+        config = make_config(base_dir: base_dir, orgs: [org], concurrency: 1)
+
+        assert_raises(RuntimeError) do
+          Engine.new(forge: forge, reporter: reporter).call(config: config, paths: paths)
+        end
+
+        assert_equal 1, reporter.events.count { |e| e.first == :attach },
+          "attach must be called exactly once"
+        assert_equal 1, reporter.events.count { |e| e.first == :detach },
+          "detach must be called exactly once even when an exception escapes the attach…detach span"
+      end
+    end
+  end
 end
