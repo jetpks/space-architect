@@ -22,6 +22,7 @@
 - **Builder standing context:** `AGENTS.md`
 - **Per-slice evidence:** `docs/lanes/<slice>.md` · **frozen gates:** `docs/gates/<slice>.md`
 - **Full history (closed slices, decisions log, session log):** `docs/archive/handoff-history-2026-06-14.md`
+- **Raw dispatch scratch (builder blocks, spike/repro scripts, raw research findings):** `docs/archive/architect-scratch-2026-06-14.tar.gz`. The `.architect/` working dir was cleared at teardown (gitignored scratch; 256MB of `*.jsonl` transcripts discarded). Any `.architect/<file>` path cited in the lane reports / research docs (e.g. `spike_interactive.rb`, `gc3_liveness_repro.rb`, `*.block.md`) now resolves to `tar xzf docs/archive/architect-scratch-2026-06-14.tar.gz`.
 
 ## Verification gate (exact commands)
 
@@ -48,6 +49,16 @@ Baseline at `main`: **379/1334/0/0/0**, lint 0, 51 gems.
 
 **None scheduled.** repo-tender is feature-complete and state-hardened; all gates green on `main`, no open carry-forwards. There is no functional gap forcing further work — the next slice is whatever the human brings.
 
+## Teardown (2026-06-14) — PRD complete, loop wound down
+
+The PRD is complete; the architect/builder loop is wound down for this project. Final cleanup:
+
+- **`.architect/` scratch cleared.** Gitignored working dir (257MB). The ~1MB of durable text — builder dispatch blocks, the spike/repro scripts cited as gate evidence, raw research lane findings, freeze records — was archived to `docs/archive/architect-scratch-2026-06-14.tar.gz` (tracked) before deletion. The 256MB of `*.jsonl` builder transcripts were discarded (never cited as durable evidence; distilled outcomes already live in `docs/lanes/`).
+- **Salvage branch archived as a tag.** `salvage/slice-4-raw-mixed` (deliberate unmerged forensic scrap from the Slice-4 isolation failure, superseded by the merged Slice 4) → tag **`archive/slice-4-raw-mixed`** (commit `fd9ece4` preserved, reachable, reversible) and the branch ref deleted.
+- **Worktree refs pruned.** Only `main` remains as a branch.
+
+To resume work later: spec a new slice per the loop; `.architect/` is recreated on first dispatch (it's gitignored scratch). `.claude/` is untracked project config, left in place.
+
 ---
 
-*Branch hygiene 2026-06-14: `slice/state-hardening` merged to `main` and deleted post-judgment; only `main` and `salvage/slice-4-raw-mixed` (deliberate unmerged scrap from the Slice-4 isolation failure) remain.*
+*Branch hygiene 2026-06-14: `slice/state-hardening` merged to `main` and deleted post-judgment. Salvage scrap archived to tag `archive/slice-4-raw-mixed` and its branch deleted. Only `main` remains.*
