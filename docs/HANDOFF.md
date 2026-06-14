@@ -266,20 +266,43 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | 2026-06-13 | Forge `--no-source` fix folded into Slice 2 (G11) not a Slice 1 re-dispatch | Defect isn't on any Slice 1 execution path; the engine is where the forge first runs live |
 | 2026-06-13 | DISPATCH MECHANISM: `pi` worktree isolation does NOT hold — bash cwd is not pinned to the launch dir; builders cd to whatever abs repo path is in their context (the MAIN checkout). Future parallel dispatch must bake the lane's worktree abs path into the block as the repo root + forbid the main path + forbid all git, OR run sequentially in main. (Update `dispatch.md` in the architect skill.) | First Slice 4 dispatch corrupted main's working tree this way; cost a full multi-hour run |
 
-## Next — PROJECT COMPLETE
+## Next — Slice 6 (field-fixes) DISPATCHED, awaiting judgment
 
-All five slices merged (1 Foundation → 2 Sync engine → 3 CLI → 4 launchd →
-5 daemon-polish). The live launchd path is human-verified. **No frozen gate is
-open; no carry-forward is open** (CF1–CF6 all CLOSED). **PRD §7 DoD is met** —
-repo-tender keeps local clones evergreen via a `dry-cli` binary + a periodic
-launchd `sync` sweep, with idempotent daemon control and defensive log rotation.
+The five feature slices are done (PRD §7 DoD met). **Slice 6 is net-new
+post-completion scope** from the first real `repo-tender sync` on a clean
+machine — three field defects:
 
-There is no queued architect work. Any further change is net-new scope: a human
-would write a fresh PRD slice + freeze new gates. Candidate future scope (NOT
-committed, NOT gated): SCM/forge backends beyond GitHub (the interfaces are
-already decoupled), a `config` subcommand for `log_max_size`/label as real config
-fields (today env/constant), or richer `daemon status` output. Until a human
-asks, the loop is idle.
+1. **SSH transport** — `Sync::Engine::DEFAULT_URL_BUILDER` builds HTTPS, so a
+   missing-repo clone prompts `Username for 'https://github.com':`. Flip the
+   default to scp-like SSH (`git@host:owner/name.git`). SSH default only — no new
+   config field (out of scope). Realizes the Slice 2 disagreement-#6 url_builder
+   seam.
+2. **^C hygiene** — SIGINT during a clone kills `git`; Open3 reader threads dump
+   `IOError: stream closed in another thread` (report_on_exception on) and the
+   main thread has no `Interrupt` rescue → stack traces on a normal ^C. Want a
+   clean exit 130, no backtraces, no thread noise. Interrupt-only — real failures
+   must still surface.
+3. **Binstub warning** — `bin/repo-tender` `-W:no-experimental` shebang (already
+   done by the human; RubyGems propagates it into the installed binstub on macOS,
+   architect-verified). Carried into a judged commit this slice.
+
+**State:** spec'd as ONE lane in the main checkout (pi worktree isolation does
+not hold). Gates **G0–G4 + M1–M3 manual checklist** frozen at
+`docs/gates/field-fixes.md`, freeze commit **`af847d6`**. Builder block at
+`.architect/field-fixes-01.block.md`. Dispatched `pi --session-id field-fixes
+--thinking xhigh` (1 lane). `bin/repo-tender` left dirty at freeze (the slice
+deliverable; architect commits post-flight). `main` stays at `af847d6`.
+
+**This session did NOT judge (rule 4 — it dispatched).** A fresh session must:
+post-flight (no builder commits `git log af847d6..` empty, files in-scope,
+`docs/gates/` diff-clean, no new gems) → commit builder work to
+`slice/field-fixes` → re-run G0–G4 itself → read the diff vs intent → arbitrate
+PHASE-0 disagreements → then hand M1–M3 (live ^C / SSH-no-prompt / no-warning) to
+the human before merge. Merge `--no-ff` only on PASS + manual sign-off.
+
+Candidate future scope (NOT committed, NOT gated): SCM/forge backends beyond
+GitHub, configurable transport, a `config` subcommand for `log_max_size`/label,
+richer `daemon status`.
 
 ## Session log
 
@@ -311,3 +334,4 @@ asks, the loop is idle.
 | 2026-06-13 | builder (m3) | 5 | none (UNJUDGED) | builder: 222/890/0/0/0 | CF5+CF6 built in 1 lane (main checkout). `benign_bootout_failure?` keyed on `argv[1]=="bootout"` (status 3 OR stderr regex); `log_max_bytes` defensive parse (default+warn on bad value). New CLI tests drive real Agent via runner seam (anti-tautology). STATUS COMPLETE; 6 PHASE-0 disagreements raised (all within spec latitude). No commits, no out-of-scope touches, no new gems |
 | 2026-06-13 | architect | 5 | ad97164 (preserve) | integrity PASS; gates pending | Post-flight PASS (no builder commits `git log 0c2302c..` empty, 6 files + lane report in-scope, `docs/gates/` diff-clean, no new gems); committed builder work to `slice/daemon-polish`; smoke green (re-ran 222/890/0/0/0, lint 0). Did NOT judge gates (rule 4 — dispatched this build); deferred to fresh session. `main` stays `713c4f2` |
 | 2026-06-13 | architect | 5 | eceebff (merge) | **G0–G5 PASS → CONTINUE** | Fresh session judged Slice 5 @ `ad97164` (rule 4 — prior session dispatched + preserved). Re-ran all gates myself: G0 222/890/0/0/0, lint 0, no new gems, --help daemon; G1/G2 verified status-3 bootout enters the runner seam on a REAL Agent (`runner.calls` asserts `[bootout,disable]`, not a hand-set stub — Slice-4 G2 trap avoided), non-benign exits 1/surfaces noise; G3 benign mapping keyed on `argv[1]=="bootout"`, install/start bootstrap status-3 still Failure, existing argv assertions unmodified (agent_test additive); G4 `log_max_bytes` never raises + sync no-crash integration; G5 in-scope, gates clean, no builder commits. Read diff vs CF5/CF6 intent + argv-stability (no op argv changed, public Agent API unchanged). Arbitrated 6 disagreements (all ACCEPT). Low-stakes → no extra cross-model pass. Merged `slice/daemon-polish`→`main` (`--no-ff` `eceebff`), integration smoke green. **CF5 + CF6 CLOSED. PROJECT COMPLETE (PRD §7 DoD).** |
+| 2026-06-13 | architect | 6 | af847d6 (freeze) | n/a | Slice 6 (field-fixes) spec'd from the first real `sync` on a clean machine: SSH transport default, ^C hygiene (no backtrace/thread noise, exit 130), carry the human's `-W:no-experimental` binstub shebang. Pre-checks: `pi` 0.79.2 canary green (minimax-m3 resolves, key set); shebang fix confirmed correct (RubyGems propagates it into the installed binstub on macOS; project is macOS-only so the multi-arg `env` trap is moot); SSH = one-line `DEFAULT_URL_BUILDER` flip. Gates G0–G4 + M1–M3 manual checklist frozen `af847d6`. ONE lane, main checkout. Dispatched `pi --session-id field-fixes --thinking xhigh`, block `.architect/field-fixes-01.block.md`. `bin/repo-tender` left dirty (deliverable). Did NOT judge (rule 4 — dispatched this session); fresh session judges + merges, then human runs M1–M3. |
