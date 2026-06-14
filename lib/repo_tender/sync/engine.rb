@@ -12,6 +12,7 @@ require "repo_tender/forge/github"
 require "repo_tender/state/store"
 require "repo_tender/paths"
 require "repo_tender/sync/repo_plan"
+require "repo_tender/ui/reporter"
 
 module RepoTender
   module Sync
@@ -54,11 +55,13 @@ module RepoTender
       DEFAULT_URL_BUILDER = ->(ref) { "git@#{ref.host}:#{ref.owner}/#{ref.name}.git" }.freeze
 
       def initialize(scm: SCM::Git.new, forge: Forge::GitHub.new,
-        clock: -> { Time.now }, url_builder: DEFAULT_URL_BUILDER)
+        clock: -> { Time.now }, url_builder: DEFAULT_URL_BUILDER,
+        reporter: RepoTender::UI::NullReporter.new)
         @scm = scm
         @forge = forge
         @clock = clock
         @url_builder = url_builder
+        @reporter = reporter
       end
 
       # Runs one sync pass.
@@ -88,6 +91,9 @@ module RepoTender
           # name); explicit wins.
           repos_to_process = dedupe(config.repos, discovered_repos)
 
+          @reporter.attach(task, total: repos_to_process.size)
+          @reporter.run_started(total: repos_to_process.size)
+
           # Phase 3: fan out per-repo work through barrier + semaphore.
           # Results are gathered in a mutex-protected array (barrier
           # tasks run on a Fiber scheduler; shared mutation must be
@@ -111,6 +117,13 @@ module RepoTender
             end
           end
           barrier.wait
+
+          summary = results.each_with_object(Hash.new(0)) do |outcome, h|
+            _, repo, error = outcome
+            h[error ? "error" : repo.status.to_s] += 1
+          end
+          @reporter.run_finished(summary)
+          @reporter.detach
 
           # Phase 4: assemble new state, write once.
           new_state = build_new_state(state, results, org_records)
@@ -182,6 +195,8 @@ module RepoTender
         key = repo_key(repo_ref)
         path = File.join(config.base_dir, repo_ref.host, repo_ref.owner, repo_ref.name)
 
+        @reporter.repo_started(key)
+
         plan_result = RepoPlan.call(
           repo_ref: repo_ref,
           path: path,
@@ -190,7 +205,9 @@ module RepoTender
           now: now
         )
         if plan_result.failure?
-          return [key, nil, "plan call failed: #{plan_result.failure.inspect}"]
+          msg = "plan call failed: #{plan_result.failure.inspect}"
+          @reporter.repo_failed(key, msg)
+          return [key, nil, msg]
         end
         plan = plan_result.success
 
@@ -209,6 +226,7 @@ module RepoTender
 
         case plan.action
         when :clone
+          @reporter.repo_phase(key, :cloning)
           result = @scm.clone(@url_builder.call(repo_ref), path)
           if result.failure?
             final_status = "error"
@@ -226,6 +244,7 @@ module RepoTender
             final_status = "error"
             last_error = "default_branch probe failed; cannot fast-forward"
           else
+            @reporter.repo_phase(key, :fast_forwarding)
             result = @scm.fast_forward(path, default_branch)
             if result.failure?
               failure = result.failure
@@ -250,6 +269,7 @@ module RepoTender
             # git switch refuses on dirty by default per its man page;
             # if it ever refused here, that means the plan's guard was
             # bypassed — capture the error.
+            @reporter.repo_phase(key, :switching)
             result = @scm.switch(path, default_branch)
             if result.failure?
               final_status = "error"
@@ -287,12 +307,15 @@ module RepoTender
           status: final_status,
           last_error: last_error
         )
+        @reporter.repo_finished(key, final_status)
         [key, repo]
       rescue => e
         # Last-resort: any unexpected exception (e.g. Shell.run raising
         # outside an ambient task) is captured so the engine's barrier
         # completes and state is written.
-        [key, nil, "unhandled: #{e.class}: #{e.message}"]
+        msg = "unhandled: #{e.class}: #{e.message}"
+        @reporter.repo_failed(key, msg)
+        [key, nil, msg]
       end
 
       # Assembles the new State from the in-memory prev state + the
