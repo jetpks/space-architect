@@ -19,6 +19,7 @@ class InteractiveReporterTest < Minitest::Test
     [IR.new(out, mode: mode, cadence: cadence), out]
   end
 
+  # Drive the reporter through a mixed run: 1 clean, 1 dirty, 1 failed.
   def drive_reporter(reporter)
     reporter.run_started(total: REFS.size)
     REFS.each { |ref| reporter.repo_started(ref) }
@@ -99,7 +100,6 @@ class InteractiveReporterTest < Minitest::Test
     Sync do |task|
       reporter.attach(task, total: 1)
       reporter.repo_started(REFS[0])
-      # Let the loop spin exactly a few times, then stop
       sleep 0.05
       reporter.repo_finished(REFS[0], "clean")
       reporter.run_finished("clean" => 1)
@@ -112,10 +112,28 @@ class InteractiveReporterTest < Minitest::Test
   end
 
   # ===========================================================================
-  # G3 — N concurrent indicators advance independently; single-writer
+  # GC1 — Bounded output: clean repos produce zero persistent lines;
+  #        persistent count is independent of the clean count.
   # ===========================================================================
 
-  def test_g3_all_repos_appear_in_output
+  def test_gc1_clean_repos_produce_no_persistent_lines
+    reporter, out = make_reporter
+
+    Sync do |task|
+      reporter.attach(task, total: 1)
+      reporter.run_started(total: 1)
+      reporter.repo_started(REFS[0])
+      reporter.repo_finished(REFS[0], "clean")
+      reporter.run_finished("clean" => 1)
+      reporter.detach
+    end
+
+    # Only the summary line ends with \n; a clean repo adds no persistent line.
+    assert_equal 1, out.string.count("\n"),
+      "a run with one clean repo must emit exactly 1 newline (the summary)"
+  end
+
+  def test_gc1_nonclean_repos_each_produce_one_persistent_line
     reporter, out = make_reporter
 
     Sync do |task|
@@ -123,14 +141,53 @@ class InteractiveReporterTest < Minitest::Test
       drive_reporter(reporter)
     end
 
-    REFS.each do |ref|
-      short = ref.split("/").last(2).join("/")
-      assert_includes out.string, short,
-        "output must contain indicator for #{short}"
-    end
+    # 1 dirty (persistent ⚠) + 1 failed (persistent ✗) + 1 summary = 3 newlines.
+    # 1 clean repo produces NO persistent line.
+    assert_equal 3, out.string.count("\n"),
+      "expected 2 persistent lines + 1 summary = 3 newlines total"
   end
 
-  def test_g3_output_has_one_cr_per_repo_per_repaint
+  def test_gc1_persistent_count_independent_of_clean_count
+    nonclean = [
+      ["github.com/o/dirty1", "dirty"],
+      ["github.com/o/diverged1", "diverged"],
+      ["github.com/o/wrong1", "wrong_branch"],
+      ["github.com/o/detached1", "detached"]
+    ]
+
+    counts = [50, 5].map do |n_clean|
+      out = StringIO.new
+      mode = Mode.new(color: false, animate: true, quiet: false, format: :pretty)
+      reporter = IR.new(out, mode: mode, cadence: 0.01)
+
+      Sync do |task|
+        total = n_clean + nonclean.size
+        reporter.attach(task, total: total)
+        reporter.run_started(total: total)
+        n_clean.times do |i|
+          ref = "github.com/o/clean-#{i}"
+          reporter.repo_started(ref)
+          reporter.repo_finished(ref, "clean")
+        end
+        nonclean.each do |ref, status|
+          reporter.repo_started(ref)
+          reporter.repo_finished(ref, status)
+        end
+        reporter.run_finished({})
+        reporter.detach
+      end
+
+      # persistent lines = total \n - 1 (summary)
+      out.string.count("\n") - 1
+    end
+
+    assert_equal counts[0], counts[1],
+      "persistent line count must not depend on clean count (50-clean: #{counts[0]}, 5-clean: #{counts[1]})"
+    assert_equal nonclean.size, counts[0],
+      "expected #{nonclean.size} persistent lines, got #{counts[0]}"
+  end
+
+  def test_gc1_no_cursor_up_in_output
     reporter, out = make_reporter
 
     Sync do |task|
@@ -138,13 +195,15 @@ class InteractiveReporterTest < Minitest::Test
       drive_reporter(reporter)
     end
 
-    # Each indicator line is written with a leading \r (column-reset).
-    # At minimum one repaint covers all 3 repos → at least 3 \r chars.
-    assert out.string.count("\r") >= REFS.size,
-      "expected at least #{REFS.size} \\r characters (one per repo per repaint)"
+    refute_match(/\e\[\d+A/, out.string,
+      "compact renderer must not emit cursor-up (\\e[<n>A) sequences")
   end
 
-  def test_g3_terminal_states_visible_in_final_output
+  # ===========================================================================
+  # GC2 — Live counter, correct tallies, correct persistent set
+  # ===========================================================================
+
+  def test_gc2_status_line_contains_counter_and_tallies
     reporter, out = make_reporter
 
     Sync do |task|
@@ -153,9 +212,128 @@ class InteractiveReporterTest < Minitest::Test
     end
 
     result = out.string
-    assert_includes result, "clean"
-    assert_includes result, "dirty"
-    assert_includes result, "failed"
+    assert_match(/synced \d+\/#{REFS.size}/, result,
+      "output must contain a status line with X/total counter")
+    assert_match(/✓\s+\d+/, result, "output must contain ✓ tally")
+    assert_match(/⚠\s+\d+/, result, "output must contain ⚠ tally")
+    assert_match(/✗\s+\d+/, result, "output must contain ✗ tally")
+  end
+
+  def test_gc2_nonclean_persistent_lines_have_correct_content
+    reporter, out = make_reporter
+
+    Sync do |task|
+      reporter.attach(task, total: REFS.size)
+      drive_reporter(reporter)
+    end
+
+    result = out.string
+    # dirty repo gets ⚠ persistent line with its ref and status
+    assert_match(/⚠.*repo-b.*dirty/, result,
+      "dirty repo must produce a ⚠ persistent line with ref and status")
+    # failed repo gets ✗ persistent line with its error
+    assert_match(/✗.*repo-c.*switch failed/, result,
+      "failed repo must produce a ✗ persistent line with ref and error")
+  end
+
+  def test_gc2_clean_repo_has_no_persistent_line
+    reporter, out = make_reporter
+
+    Sync do |task|
+      reporter.attach(task, total: REFS.size)
+      drive_reporter(reporter)
+    end
+
+    # The clean repo (repo-a) must not appear in a ⚠ or ✗ persistent line.
+    persistent_lines = out.string.split("\n").select { |l| l.match?(/[⚠✗]/) }
+    refute persistent_lines.any? { |l| l.include?("repo-a") },
+      "clean repo must not appear in any persistent line (found: #{persistent_lines.inspect})"
+  end
+
+  def test_gc2_final_summary_emitted_at_detach
+    reporter, out = make_reporter
+
+    Sync do |task|
+      reporter.attach(task, total: REFS.size)
+      drive_reporter(reporter)
+    end
+
+    # The last \n-terminated line (before cursor-show) is the summary.
+    lines = out.string.split("\n")
+    assert lines.any? { |l| l.include?("synced") && l.include?("clean") && l.include?("failed") },
+      "final summary line must be emitted at detach (lines: #{lines.inspect})"
+  end
+
+  def test_gc2_tallies_match_outcomes
+    refs_clean = %w[github.com/o/c1 github.com/o/c2]
+    refs_nonclean = [["github.com/o/d1", "dirty"], ["github.com/o/w1", "wrong_branch"]]
+    refs_failed = [["github.com/o/f1", "boom"]]
+    all_refs = refs_clean + refs_nonclean.map(&:first) + refs_failed.map(&:first)
+
+    reporter, out = make_reporter
+
+    Sync do |task|
+      reporter.attach(task, total: all_refs.size)
+      reporter.run_started(total: all_refs.size)
+      refs_clean.each { |r|
+        reporter.repo_started(r)
+        reporter.repo_finished(r, "clean")
+      }
+      refs_nonclean.each { |r, s|
+        reporter.repo_started(r)
+        reporter.repo_finished(r, s)
+      }
+      refs_failed.each { |r, e|
+        reporter.repo_started(r)
+        reporter.repo_failed(r, e)
+      }
+      reporter.run_finished({})
+      reporter.detach
+    end
+
+    result = out.string
+    # Persistent lines: 2 nonclean + 1 failed = 3, plus 1 summary = 4 newlines
+    assert_equal 4, result.count("\n"),
+      "expected 3 persistent + 1 summary newlines, got #{result.count("\n")}"
+    # Check that both nonclean refs appear as ⚠ lines
+    assert_match(/⚠.*d1.*dirty/, result)
+    assert_match(/⚠.*w1.*wrong_branch/, result)
+    # Failed ref appears as ✗ line
+    assert_match(/✗.*f1.*boom/, result)
+    # Summary reflects all outcomes
+    assert_match(/synced #{all_refs.size}\/#{all_refs.size}/, result)
+  end
+
+  # ===========================================================================
+  # GC3 — Counter advances DURING the run (deterministic intermediate values)
+  # ===========================================================================
+
+  def test_gc3_counter_advances_intermediate_values
+    refs = (0..3).map { |i| "github.com/o/r#{i}" }
+    reporter, out = make_reporter(cadence: 0.01)
+
+    Sync do |task|
+      reporter.attach(task, total: refs.size)
+      reporter.run_started(total: refs.size)
+
+      # Staggered completions: 20ms, 40ms, 60ms, 80ms.
+      # Render cadence is 10ms → fires between completions.
+      workers = refs.each_with_index.map do |ref, i|
+        task.async do
+          sleep 0.02 * (i + 1)
+          reporter.repo_started(ref)
+          reporter.repo_finished(ref, "clean")
+        end
+      end
+      workers.each(&:wait)
+
+      reporter.run_finished("clean" => refs.size)
+      reporter.detach
+    end
+
+    frames = out.string.scan(/synced (\d+)\/#{refs.size}/).map { |m| m[0].to_i }
+    assert frames.any? { |x| x > 0 && x < refs.size },
+      "counter must show intermediate values (> 0 and < #{refs.size}) before final tick; saw: #{frames.inspect}"
   end
 
   # ===========================================================================
@@ -169,8 +347,6 @@ class InteractiveReporterTest < Minitest::Test
       reporter.attach(task, total: 2)
       reporter.repo_started(REFS[0])
 
-      # Simulate interrupt: stop the render task mid-run by stopping
-      # the subtask that contains the render fiber
       stopper = task.async do
         sleep 0.05
         reporter.instance_variable_get(:@render_task)&.stop
@@ -191,7 +367,7 @@ class InteractiveReporterTest < Minitest::Test
 
       render_task = reporter.instance_variable_get(:@render_task)
       render_task&.stop
-      sleep 0.02  # let the ensure run
+      sleep 0.02
     end
 
     render_task = reporter.instance_variable_get(:@render_task)
@@ -212,12 +388,10 @@ class InteractiveReporterTest < Minitest::Test
     end
 
     result = out.string
-    # SGR color codes are \e[Nm where N is 30-37, 90-97 (fg) or 1;, 2; etc.
-    # Cursor movement codes (\e[?25l, \e[?25h, \e[NA) are permitted.
-    # Strip cursor-movement escapes and assert no color-SGR remains.
+    # Strip cursor-control escapes (hide/show; no cursor-up in compact model).
     stripped = result
-      .gsub(/\e\[\?25[lh]/, "")   # cursor hide/show
-      .gsub(/\e\[\d+A/, "")       # cursor up
+      .gsub(/\e\[\?25[lh]/, "")
+      .gsub(/\e\[\d+A/, "")
     refute_match(/\e\[[\d;]*m/, stripped,
       "no SGR color codes when mode.color == false; cursor movement codes are OK")
   end
@@ -249,7 +423,6 @@ class InteractiveReporterTest < Minitest::Test
       reporter.detach
     end
 
-    # Must contain cursor movement (animate=true) even with color off
     assert_includes out.string, "\e[?25l",
       "cursor-hide must be emitted even when color is off (animate still true)"
     assert_includes out.string, "\e[?25h",

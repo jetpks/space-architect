@@ -2,75 +2,76 @@
 
 require "pastel"
 require "tty-cursor"
-require "tty-screen"
 
 module RepoTender
   module UI
-    # Colorful, in-place, live progress renderer for `sync`.
+    # Compact, single-line live progress renderer for `sync`.
     # Driven by one render-loop fiber spawned as a child of the engine task
     # via `attach(task, total:)` — NO Ruby Thread.
     #
+    # Output model:
+    #   - One live status line, rewritten in place via \r + \e[K (never cursor.up(n)).
+    #   - Persistent scrollback lines for NON-CLEAN repos only, emitted once each.
+    #   - Clean repos increment the tally only — zero persistent lines.
+    #   - Total output: O(non_clean + failed + constant), never O(N repos).
+    #
     # Invariants:
     #   - The render fiber is the sole writer to `out`; worker fibers only
-    #     mutate per-repo indicator state via the reporter event methods.
+    #     mutate tally/queue state via the reporter event methods.
     #   - `Kernel#sleep` inside the render fiber yields to the reactor
     #     (cooperative scheduling). Never Thread.new.
     #   - On `^C`, the scheduler cancels the child render fiber; its `ensure`
     #     block restores the cursor unconditionally.
     class InteractiveReporter
       FRAMES = %w[⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏].freeze
-      PHASE_LABELS = {
-        cloning: "cloning",
-        fast_forwarding: "fast-forwarding",
-        switching: "switching"
-      }.freeze
-      LABEL_WIDTH = 32
 
-      # @param out    [IO]      destination stream (real TTY in prod; StringIO in tests)
-      # @param mode   [UI::Mode] resolved output mode
-      # @param cadence [Float]  seconds between repaints (injectable for tests)
       def initialize(out, mode:, cadence: 0.1)
         @out = out
         @pastel = Pastel.new(enabled: mode.color)
-        @refs = []
-        @indicators = {}
-        @render_task = nil
-        @done = false
-        @frame_idx = 0
         @cadence = cadence
+        @total = 0
+        @finished = 0
+        @clean_count = 0
+        @nonclean_count = 0
+        @failed_count = 0
+        @pending_lines = []
+        @frame_idx = 0
+        @done = false
+        @render_task = nil
       end
 
-      # Spawn the render-loop fiber as a child of `task`. Called by the engine
-      # before `run_started`, while still inside the `Sync{}` block.
       def attach(task, total:)
+        @total = total
         @render_task = task.async { render_loop }
       end
 
-      # Signal the render loop to exit, wait for the final repaint, and restore
-      # the terminal. Called by the engine after `run_finished`.
       def detach
         @done = true
         @render_task&.wait
         @render_task = nil
       end
 
-      def run_started(total:) = nil
-
-      def repo_started(ref)
-        @refs << ref unless @indicators.key?(ref)
-        @indicators[ref] = {status: :started, phase: nil, final: nil}
+      def run_started(total:)
+        @total = total
       end
 
-      def repo_phase(ref, phase)
-        @indicators[ref]&.merge!(status: :phase, phase: phase)
-      end
+      def repo_started(ref) = nil
+      def repo_phase(ref, phase) = nil
 
       def repo_finished(ref, status)
-        @indicators[ref]&.merge!(status: :done, final: status.to_s)
+        @finished += 1
+        if status.to_s == "clean"
+          @clean_count += 1
+        else
+          @nonclean_count += 1
+          @pending_lines << "#{@pastel.yellow("⚠")} #{ref}  #{status}"
+        end
       end
 
       def repo_failed(ref, error)
-        @indicators[ref]&.merge!(status: :failed, error: error.to_s)
+        @finished += 1
+        @failed_count += 1
+        @pending_lines << "#{@pastel.red("✗")} #{ref}  #{error}"
       end
 
       def run_finished(summary) = nil
@@ -78,69 +79,40 @@ module RepoTender
       private
 
       def render_loop
-        initialized = false
-        n = 0
+        @out.write(TTY::Cursor.hide)
+        @out.flush
 
-        begin
-          @out.write(TTY::Cursor.hide)
-          @out.flush
-
-          loop do
-            n = @refs.size
-
-            if n > 0
-              @out.write(TTY::Cursor.up(n)) if initialized
-              width = [TTY::Screen.width, 40].max
-              @refs.each { |ref| @out.write("\r#{format_line(ref).ljust(width)}\n") }
-              @out.flush
-              initialized = true
-            end
-
-            @frame_idx += 1
-            break if @done
-            sleep @cadence
-          end
-        ensure
-          @out.write(TTY::Cursor.show)
-          @out.puts
-          @out.flush
+        loop do
+          render_tick
+          @frame_idx += 1
+          break if @done
+          sleep @cadence
         end
+      ensure
+        pending = @pending_lines.slice!(0, @pending_lines.length)
+        @out.write("\r\e[K")
+        pending.each { |line| @out.write("#{line}\n") }
+        @out.write("#{build_summary_line}\n")
+        @out.write(TTY::Cursor.show)
+        @out.flush
       end
 
-      def format_line(ref)
-        ind = @indicators[ref] || {status: :waiting}
-        label = ref_label(ref)
-        frame = FRAMES[@frame_idx % FRAMES.length]
-
-        case ind[:status]
-        when :waiting
-          "  #{@pastel.dim("○")} #{label} #{@pastel.dim("waiting")}"
-        when :started
-          "  #{@pastel.yellow(frame)} #{label} #{@pastel.yellow("started")}"
-        when :phase
-          phase_str = PHASE_LABELS[ind[:phase]] || ind[:phase].to_s.tr("_", " ")
-          "  #{@pastel.yellow(frame)} #{label} #{@pastel.cyan(phase_str)}"
-        when :done
-          "  #{@pastel.green("✓")} #{label} #{colorize_status(ind[:final], ind[:final])}"
-        when :failed
-          "  #{@pastel.red("✗")} #{label} #{@pastel.red("failed")}"
-        else
-          "  ? #{label}"
+      def render_tick
+        pending = @pending_lines.slice!(0, @pending_lines.length)
+        if pending.any?
+          @out.write("\r\e[K")
+          pending.each { |line| @out.write("#{line}\n") }
         end
+        @out.write("\r\e[K#{build_status_line}")
       end
 
-      def colorize_status(text, status)
-        case status
-        when "clean" then @pastel.green(text)
-        when "error" then @pastel.red(text)
-        else @pastel.yellow(text)
-        end
+      def build_status_line
+        frame = @pastel.cyan(FRAMES[@frame_idx % FRAMES.length])
+        "#{frame} synced #{@finished}/#{@total}   #{@pastel.green("✓")} #{@clean_count}   #{@pastel.yellow("⚠")} #{@nonclean_count}   #{@pastel.red("✗")} #{@failed_count}"
       end
 
-      def ref_label(ref)
-        parts = ref.split("/")
-        raw = parts.last(2).join("/")
-        (raw.length > LABEL_WIDTH) ? "#{raw[0, LABEL_WIDTH - 3]}..." : raw.ljust(LABEL_WIDTH)
+      def build_summary_line
+        "synced #{@finished}/#{@total}   #{@pastel.green("✓")} #{@clean_count} clean   #{@pastel.yellow("⚠")} #{@nonclean_count} non-clean   #{@pastel.red("✗")} #{@failed_count} failed"
       end
     end
   end
