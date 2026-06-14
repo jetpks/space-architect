@@ -139,4 +139,60 @@ class StateStoreTest < Minitest::Test
       assert_equal 41, org.repo_count
     end
   end
+
+  # ---- G7.1 (CF7): mid-write failure never corrupts existing state.yaml ----
+
+  def test_write_atomic_midwrite_failure_leaves_original_intact
+    Dir.mktmpdir("store-cf7-g71") do |dir|
+      path = File.join(dir, "state.yaml")
+      original_content = "original: preserved\n"
+      File.write(path, original_content)
+
+      state = Store::State.new(
+        repos: {"github.com/test/repo" => Store::Repo.new(status: "clean")},
+        orgs: {}
+      )
+
+      # Patch File.rename on its singleton class to raise before the atomic
+      # swap completes — simulates a crash between write(tmp) and rename.
+      saved_rename = File.method(:rename)
+      File.define_singleton_method(:rename) { |*| raise Errno::ENOSPC, "injected failure" }
+      begin
+        assert_raises(Errno::ENOSPC) { Store.write(path, state) }
+      ensure
+        File.define_singleton_method(:rename) { |*args| saved_rename.call(*args) }
+      end
+
+      # Original file byte-identical — never truncated.
+      assert_equal original_content, File.read(path)
+
+      # No stray temp file left behind after rescue cleanup.
+      stray = Dir.children(dir).reject { |f| f == "state.yaml" }
+      assert_empty stray
+    end
+  end
+
+  # ---- G7.2 (CF7): same-dir temp, atomic rename, no stray files ----
+
+  def test_write_uses_same_dir_temp_no_stray_files
+    Dir.mktmpdir("store-cf7-g72") do |dir|
+      path = File.join(dir, "state.yaml")
+
+      state = Store::State.new(
+        repos: {"github.com/test/repo" => Store::Repo.new(status: "clean")},
+        orgs: {}
+      )
+
+      result = Store.write(path, state)
+      assert result.success?
+
+      # Only state.yaml in the directory — no stray .tmp.* files.
+      assert_equal ["state.yaml"], Dir.children(dir).sort
+
+      # Content is correct and reloadable.
+      reloaded = Store.load(path).success
+      assert_equal ["github.com/test/repo"], reloaded.repos.keys
+      assert_equal "clean", reloaded.repos["github.com/test/repo"].status
+    end
+  end
 end
