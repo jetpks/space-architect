@@ -90,12 +90,24 @@
   integration smoke green (222/890/0/0/0). **CF5 + CF6 CLOSED.** Full detail:
   `docs/lanes/daemon-polish-01.md`.
 - **PROJECT COMPLETE (PRD §7 DoD met).** All four feature slices (1→2→3→4) merged
-  and the live launchd path human-verified; both carry-forward follow-ups (CF5,
-  CF6) closed. No frozen gate is open; no carry-forward item is open. repo-tender
+  and the live launchd path human-verified; CF5 + CF6 closed. repo-tender
   is feature-complete: `dry-cli` binary + config CRUD + sync engine (evergreen
   invariant, no-data-loss) + launchd daemon (install/uninstall/start/stop/restart/
   status, idempotent) + log rotation. Any further work is net-new scope a human
   would spec as a fresh PRD slice.
+- **Slice 6 (field-fixes) — JUDGED PASS & MERGED 2026-06-13 (`0b20502`).**
+  Post-completion field-fixes from the first real `sync` on a clean machine: SSH
+  transport default (`git@host:owner/name.git`, no `Username` prompt), ^C hygiene
+  (`rescue Interrupt`→exit 130, no backtrace/thread-noise), and the
+  `-W:no-experimental` binstub shebang carried into a judged commit. Fresh session
+  re-ran G0–G4 (**229/918/0/0/0**, lint 0, no new gems), read the diff vs intent,
+  finalized 3 disagreements (all ACCEPT; #1 caught a false "atomic write" claim in
+  the gate prose → CF7). Human ran M1–M3 live (SSH/^C/no-warning) → PASS. Merged
+  `--no-ff`, integration smoke green. **Two OPEN non-blocking carry-forwards remain:
+  CF7** (`State::Store.write` not atomic — latent, `state/*` out of scope) and
+  **CF8** (`Shell.run` global `report_on_exception` leaks `false` under concurrency
+  — benign in the one-shot/launchd lifecycle). Both are tidy-ups for a future slice,
+  not data-loss/correctness blockers.
 
 ## Pointers
 
@@ -130,8 +142,8 @@ bundle exec standardrb       # exit 0
   session @ `ad97164`), merged `eceebff`.** CF5 + CF6 CLOSED. 6 disagreements ACCEPT.
 - `docs/gates/field-fixes.md` — Slice 6 (SSH transport · ^C hygiene · binstub),
   frozen at `af847d6` (G0–G4 automated + M1–M3 human checklist). **JUDGED G0–G4
-  PASS (fresh session @ `ddbb649`); 3 disagreements ACCEPT (#1→CF7); new wart
-  CF8.** NOT yet merged — MERGE BLOCKED on human M1–M3 sign-off.
+  PASS (fresh session @ `ddbb649`) + human M1–M3 PASS → merged `0b20502`.** 3
+  disagreements ACCEPT (#1→CF7). New wart CF8 (non-blocking). Integration smoke green.
 
 ## Slice 4 — launchd daemon + log rotation (+ CF3) (RESOLVED, archived)
 
@@ -272,7 +284,7 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | 2026-06-13 | Forge `--no-source` fix folded into Slice 2 (G11) not a Slice 1 re-dispatch | Defect isn't on any Slice 1 execution path; the engine is where the forge first runs live |
 | 2026-06-13 | DISPATCH MECHANISM: `pi` worktree isolation does NOT hold — bash cwd is not pinned to the launch dir; builders cd to whatever abs repo path is in their context (the MAIN checkout). Future parallel dispatch must bake the lane's worktree abs path into the block as the repo root + forbid the main path + forbid all git, OR run sequentially in main. (Update `dispatch.md` in the architect skill.) | First Slice 4 dispatch corrupted main's working tree this way; cost a full multi-hour run |
 
-## Slice 6 (field-fixes) — JUDGED G0–G4 PASS @ `ddbb649`; MERGE BLOCKED on human M1–M3
+## Slice 6 (field-fixes) — JUDGED PASS & MERGED `0b20502` (2026-06-13)
 
 **JUDGED by a fresh session (rule 4 — the prior session dispatched + committed; this
 one only judged).** All five automated gates re-run by the architect on
@@ -321,12 +333,16 @@ reading a minimax-m3 build (cross-vendor already); the empirical CF8 probe WAS t
 adversarial pass — no schema/persistence/API change, so no separate cross-model
 reviewer spawned. Lane report: `docs/lanes/field-fixes-01.md`.
 
-**REMAINING BEFORE MERGE (human):** M1 (live SSH clone, no `Username` prompt),
-M2 (clean ^C mid-sync → exit 130, zero backtraces/thread-noise), M3 (installed
-`repo-tender version`/`--help` clean, no io-event warning). Merge
-`slice/field-fixes` → `main` `--no-ff` ONLY after human M1–M3 sign-off (the Slice 4
-lesson: offline gates missed live bugs). **CF7 disposition:** stays **OPEN** as a
-future `state/*` slice (out of scope here). **CF8** (new): future tidy-up, non-blocking.
+**HUMAN M1–M3 — PASS 2026-06-13** (sign-off on the judged branch `ddbb649`): M1
+live SSH clone with no `Username for 'https://github.com':` prompt; M2 clean ^C
+mid-sync → exit 130, zero backtraces / no `stream closed in another thread`; M3
+installed `repo-tender version`/`--help` clean, exit 0, no io-event warning.
+
+**MERGED** `slice/field-fixes` → `main` (`--no-ff` **`0b20502`**); integration
+smoke green (`rake test` 229/918/0/0/0, `standardrb` 0, `--help` 5 groups, SSH
+default live). **CF7 disposition:** stays **OPEN** as a future `state/*` slice
+(out of scope here). **CF8** (new): OPEN, non-blocking future tidy-up. Both are
+benign latent robustness nits, not data-loss/correctness blockers.
 
 What landed: `Engine::DEFAULT_URL_BUILDER` HTTPS→scp-like SSH
 (`git@host:owner/name.git`); `CLI.run` `rescue Interrupt`→exit 130 + single
@@ -434,3 +450,5 @@ richer `daemon status`.
 | 2026-06-13 | builder (m3) | 6 | none (UNJUDGED) | builder: 229/918/0/0/0 | Built all three fixes in 1 lane (main checkout): `DEFAULT_URL_BUILDER` SSH flip; `CLI.run` `rescue Interrupt`→exit 130/`interrupted`; `Shell.run` `report_on_exception` save/restore around `Open3.capture3`. Verified the Open3 IOError mechanism live before coding; static-analysis proved no app-owned threads (targeted suppression). +7 tests (3 SSH, 2 interrupt incl. real-failure-still-exits-1 guard, 2 shell suppression). 3 PHASE-0 disagreements raised. STATUS COMPLETE_WITH_CONCERNS (CF7). No commits, no out-of-scope touches, no new gems. |
 | 2026-06-13 | architect | 6 | ddbb649 (slice/field-fixes) | post-flight PASS; gates pending | Post-flight PASS (no builder commits, 7 files in MAY-TOUCH/Carry, `docs/gates/` clean, no new gems); committed builder work to `slice/field-fixes`; smoke green (re-ran 229/918/0/0/0, lint 0 — matches builder). Ruled the 3 disagreements (all ACCEPT; #1→**CF7**: builder correctly caught the gate prose's false "`State::Store.write` is temp+rename" — it's direct `File.write`; deferred, `state/*` out of scope). Did NOT judge gates (rule 4 — dispatched this build); deferred to fresh session. `main` stays `419e175`. |
 | 2026-06-13 | architect | 6 | (judgment, no merge) | **G0–G4 PASS; MERGE BLOCKED on human M1–M3** | Fresh session JUDGED Slice 6 @ `ddbb649` (rule 4 — prior session dispatched+committed). Re-ran every gate myself: G0 229/918/0/0/0, lint 0, no new gems, --help 5 groups; G1 reproducer → `git@github.com:foo/bar.git`, 3 unit tests + G6 regression green (seam unmodified); G2 interrupt_test 2/16 (SystemExit 130 + single `interrupted` + no backtrace; non-interrupt `sync --repo not-a-ref` still exits 1 with real error — not tautology); G3 shell_test 8/21, suppression targeted, reader threads born `false` (M2 safe); G4 9 files in-scope, gates clean, no builder commits. Read diff vs intent (SSH one-liner, ^C doesn't weaken errors, no-data-loss holds). Finalized 3 disagreements (all ACCEPT; #1 re-verified store.rb:76-77 direct File.write → CF7 stays OPEN). **Adversarial probe found a real concurrency wart → CF8**: `Shell.run`'s process-global `report_on_exception` save/restore leaks `false` after concurrent runs (empirically confirmed 8 overlapping runs); benign in lifecycle, non-blocking. Did NOT merge — M1–M3 (live SSH/^C/no-warning) are HUMAN-RUN; merge `--no-ff` only on human sign-off. `main` stays at handoff commit. |
+| 2026-06-13 | human | 6 | (manual checklist) | **M1–M3 PASS** | Ran the live checklist on `ddbb649`: M1 SSH clone no username prompt; M2 clean ^C → exit 130, zero backtraces; M3 installed `version`/`--help` clean, no io-event warning. Sign-off recorded in the Slice 6 section |
+| 2026-06-13 | architect | 6 | 0b20502 (merge) | **G0–G4 PASS + manual PASS → CONTINUE** | Merged `slice/field-fixes` → `main` (`--no-ff` `0b20502`) on human M1–M3 sign-off; clean auto-merge (HANDOFF kept main's judged version, no conflict markers/dupes); integration smoke green (229/918/0/0/0, lint 0, --help 5 groups, SSH default live). CF7 + CF8 remain OPEN (benign future tidy-ups). |
