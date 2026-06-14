@@ -3,6 +3,10 @@
 require "dry/monads"
 require "repo_tender/cli"
 require "repo_tender/cli/repo"  # for Repo::Helpers.parse_ref
+require "repo_tender/cli/options"
+require "repo_tender/ui/mode"
+require "repo_tender/ui/plain_reporter"
+require "repo_tender/ui/json_reporter"
 
 module RepoTender
   module CLI
@@ -17,10 +21,12 @@ module RepoTender
     # sync/engine.rb in this slice.
     module Sync
       class Run < Dry::CLI::Command
+        include GlobalOptions
+
         desc "Run one sync pass (use --repo to scope to a single tracked repo)"
         option :repo, desc: "Scope to a single tracked repo (host/owner/name)"
 
-        def call(repo: nil, **)
+        def call(repo: nil, plain: nil, json: nil, no_color: nil, quiet: nil, **)
           paths = CLI.make_paths
           paths.ensure!
           config = Config::Store.load(paths.config_file).success
@@ -54,7 +60,18 @@ module RepoTender
             out.puts "scoping sync to: #{Repo::Helpers.format_ref(found)}"
           end
 
-          result = RepoTender::Sync::Engine.new.call(config: config, paths: paths)
+          mode = UI::Mode.resolve(
+            flags: {plain: plain, json: json, no_color: no_color, quiet: quiet},
+            env: CLI.env,
+            out: out
+          )
+          reporter = if mode.format == :json
+            UI::JsonReporter.new(out)
+          else
+            UI::PlainReporter.new(out, mode: mode)
+          end
+
+          result = RepoTender::Sync::Engine.new(reporter: reporter).call(config: config, paths: paths)
           if result.failure?
             return fail_with(self, "sync failed: #{format_failure(result.failure)}")
           end

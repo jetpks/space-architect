@@ -872,4 +872,320 @@ class SyncEngineTest < Minitest::Test
     refute_includes url, "Username", "default URL must not include 'Username'"
     assert url.start_with?("git@"), "default URL must start with 'git@' (scp-like SSH form)"
   end
+
+  # ===========================================================================
+  # Slice A (ui-foundation) — G2: default NullReporter produces byte-identical
+  # state.yaml to an explicit NullReporter injection. Uses StubSCM + frozen
+  # clock to eliminate timestamp variance between runs.
+  # ===========================================================================
+
+  def test_reporter_default_nullreporter_produces_byte_identical_state_yaml
+    fixed_time = Time.utc(2026, 6, 13, 12, 0, 0)
+    clock = -> { fixed_time }
+    ref = RepoRef.new(host: "github.com", owner: "owner", name: "rep")
+    good = clean_status(branch: "trunk", ahead: 0, behind: 0)
+
+    content_default = Dir.mktmpdir("rt-g2a-") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "github.com", "owner", "rep"))
+      with_paths(base_dir: dir) do |_, paths|
+        scm = StubSCM.new(status_value: good, default_branch_value: "trunk", last_fetch_value: nil)
+        result = Engine.new(scm: scm, clock: clock).call(
+          config: make_config(base_dir: dir, repos: [ref]), paths: paths
+        )
+        assert result.success?, "run failed: #{result.failure.inspect}"
+        File.read(paths.state_file)
+      end
+    end
+
+    content_explicit = Dir.mktmpdir("rt-g2b-") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "github.com", "owner", "rep"))
+      with_paths(base_dir: dir) do |_, paths|
+        scm = StubSCM.new(status_value: good, default_branch_value: "trunk", last_fetch_value: nil)
+        result = Engine.new(scm: scm, clock: clock, reporter: RepoTender::UI::NullReporter.new).call(
+          config: make_config(base_dir: dir, repos: [ref]), paths: paths
+        )
+        assert result.success?, "run failed: #{result.failure.inspect}"
+        File.read(paths.state_file)
+      end
+    end
+
+    assert_equal content_default, content_explicit,
+      "engine with default NullReporter must produce byte-identical state.yaml to explicit NullReporter"
+  end
+
+  # ===========================================================================
+  # Slice A (ui-foundation) — G3: engine emits correct event sequence.
+  # Recording reporter captures events; assertions on pairing/set by ref key,
+  # not fixed cross-repo ordering (concurrent fibers interleave).
+  # ===========================================================================
+
+  class RecordingReporter
+    attr_reader :events
+
+    def initialize = @events = []
+
+    def run_started(total:) = @events << [:run_started, {total: total}]
+    def repo_started(ref) = @events << [:repo_started, ref]
+    def repo_phase(ref, phase) = @events << [:repo_phase, ref, phase]
+    def repo_finished(ref, status) = @events << [:repo_finished, ref, status]
+    def repo_failed(ref, error) = @events << [:repo_failed, ref, error]
+    def run_finished(summary) = @events << [:run_finished, summary]
+    def attach(task, total:) = @events << [:attach, {total: total}]
+    def detach = @events << [:detach]
+  end
+
+  def test_g3_engine_emits_attach_run_started_repo_pairs_run_finished_detach
+    reporter = RecordingReporter.new
+    ref = RepoRef.new(host: "github.com", owner: "owner", name: "myrep")
+    good = clean_status(branch: "trunk", ahead: 0, behind: 0)
+
+    Dir.mktmpdir("rt-g3-") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "github.com", "owner", "myrep"))
+      with_paths(base_dir: dir) do |_, paths|
+        scm = StubSCM.new(status_value: good, default_branch_value: "trunk", last_fetch_value: nil)
+        result = Engine.new(scm: scm, reporter: reporter).call(
+          config: make_config(base_dir: dir, repos: [ref]), paths: paths
+        )
+        assert result.success?
+
+        evs = reporter.events
+        # attach is first, run_started is second
+        assert_equal :attach, evs.first.first
+        assert_equal :run_started, evs[1].first
+        assert_equal 1, evs[1][1][:total]
+        # detach is last, run_finished is second-to-last
+        assert_equal :detach, evs.last.first
+        assert_equal :run_finished, evs[-2].first
+        # attach + detach each appear exactly once
+        assert_equal 1, evs.count { |e| e.first == :attach }
+        assert_equal 1, evs.count { |e| e.first == :detach }
+        # repo has a started + terminal pair
+        key = "github.com/owner/myrep"
+        assert_equal 1, evs.count { |e| e.first == :repo_started && e[1] == key }
+        terminal = evs.count { |e| (e.first == :repo_finished || e.first == :repo_failed) && e[1] == key }
+        assert_equal 1, terminal
+      end
+    end
+  end
+
+  def test_g3_repo_finished_status_matches_state_row
+    reporter = RecordingReporter.new
+    ref = RepoRef.new(host: "github.com", owner: "owner", name: "myrep")
+    good = clean_status(branch: "trunk", ahead: 0, behind: 0)
+
+    Dir.mktmpdir("rt-g3-match-") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "github.com", "owner", "myrep"))
+      with_paths(base_dir: dir) do |_, paths|
+        scm = StubSCM.new(status_value: good, default_branch_value: "trunk", last_fetch_value: nil)
+        result = Engine.new(scm: scm, reporter: reporter).call(
+          config: make_config(base_dir: dir, repos: [ref]), paths: paths
+        )
+        assert result.success?
+
+        key = "github.com/owner/myrep"
+        ev = reporter.events.find { |e| e.first == :repo_finished && e[1] == key }
+        refute_nil ev, "expected repo_finished event for #{key}"
+
+        state = StateStore.load(paths.state_file).success
+        assert_equal state.repos[key].status, ev[2],
+          "reporter status must match state row status"
+      end
+    end
+  end
+
+  def test_g3_repo_that_raises_emits_repo_failed_and_run_completes
+    reporter = RecordingReporter.new
+    ref = RepoRef.new(host: "github.com", owner: "owner", name: "boom")
+
+    Dir.mktmpdir("rt-g3-raise-") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "github.com", "owner", "boom"))
+      with_paths(base_dir: dir) do |_, paths|
+        scm = StubSCM.new(
+          status_value: clean_status,
+          raise_on: RuntimeError.new("forced raise for g3")
+        )
+        result = Engine.new(scm: scm, reporter: reporter).call(
+          config: make_config(base_dir: dir, repos: [ref]), paths: paths
+        )
+        assert result.success?, "engine must complete even when a repo raises"
+
+        key = "github.com/owner/boom"
+        # repo_failed must be emitted (not repo_finished)
+        assert reporter.events.any? { |e| e.first == :repo_failed && e[1] == key },
+          "expected repo_failed for #{key} after unhandled raise"
+        refute reporter.events.any? { |e| e.first == :repo_finished && e[1] == key },
+          "expected no repo_finished for #{key} after unhandled raise"
+        # run still completes with run_finished + detach
+        assert reporter.events.any? { |e| e.first == :run_finished }
+        assert reporter.events.any? { |e| e.first == :detach }
+      end
+    end
+  end
+
+  def test_g3_four_scenario_run_emits_correct_pairs
+    # {fast-forward, dirty, missing-clone, diverged} — all 4 scenarios.
+    # Uses real git repos to verify end-to-end event+state parity.
+    reporter = RecordingReporter.new
+
+    Dir.mktmpdir("rt-g3-4s-bares-") do |bares|
+      Dir.mktmpdir("rt-g3-4s-base-") do |base_dir|
+        with_paths(base_dir: base_dir) do |_env, paths|
+          refs = []
+
+          # ---- Repo A: clean+behind → fast-forward (status: clean) ----
+          bare_a = File.join(bares, "a.git")
+          system("git", "init", "-b", "trunk", "--bare", bare_a, exception: true, out: File::NULL)
+          work_a = File.join(bares, "work_a")
+          system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work_a, exception: true, out: File::NULL)
+          in_async do
+            Shell.run("git", "remote", "add", "origin", bare_a, chdir: work_a)
+            Shell.run("git", "config", "user.email", "t@t.com", chdir: work_a)
+            Shell.run("git", "config", "user.name", "T", chdir: work_a)
+            File.write(File.join(work_a, "README.md"), "a\n")
+            Shell.run("git", "add", ".", chdir: work_a)
+            Shell.run("git", "commit", "-qm", "init", chdir: work_a)
+            Shell.run("git", "push", "-q", "-u", "origin", "trunk", chdir: work_a)
+          end
+          # Push a second commit from a second clone, leaving work_a one behind
+          work_a2 = File.join(bares, "work_a2")
+          system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work_a2, exception: true, out: File::NULL)
+          in_async do
+            Shell.run("git", "remote", "add", "origin", bare_a, chdir: work_a2)
+            Shell.run("git", "config", "user.email", "t@t.com", chdir: work_a2)
+            Shell.run("git", "config", "user.name", "T", chdir: work_a2)
+            Shell.run("git", "pull", "-q", "origin", "trunk", chdir: work_a2)
+            File.write(File.join(work_a2, "extra.md"), "extra\n")
+            Shell.run("git", "add", ".", chdir: work_a2)
+            Shell.run("git", "commit", "-qm", "extra", chdir: work_a2)
+            Shell.run("git", "push", "-q", "origin", "trunk", chdir: work_a2)
+            # Rewind work_a's local branch to be behind
+            parent_sha = Shell.run("git", "rev-parse", "HEAD~1", chdir: work_a2).success.strip
+            Shell.run("git", "update-ref", "refs/heads/trunk", parent_sha, chdir: work_a)
+          end
+          ref_a = RepoRef.new(host: "github.com", owner: "o", name: "repo-a")
+          path_a = File.join(base_dir, "github.com", "o", "repo-a")
+          FileUtils.mkdir_p(File.dirname(path_a))
+          FileUtils.cp_r(work_a, path_a)
+          refs << ref_a
+
+          # ---- Repo B: dirty (status: dirty) ----
+          bare_b = File.join(bares, "b.git")
+          system("git", "init", "-b", "trunk", "--bare", bare_b, exception: true, out: File::NULL)
+          work_b = File.join(bares, "work_b")
+          system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work_b, exception: true, out: File::NULL)
+          in_async do
+            Shell.run("git", "remote", "add", "origin", bare_b, chdir: work_b)
+            Shell.run("git", "config", "user.email", "t@t.com", chdir: work_b)
+            Shell.run("git", "config", "user.name", "T", chdir: work_b)
+            File.write(File.join(work_b, "README.md"), "b\n")
+            Shell.run("git", "add", ".", chdir: work_b)
+            Shell.run("git", "commit", "-qm", "init", chdir: work_b)
+            Shell.run("git", "push", "-q", "-u", "origin", "trunk", chdir: work_b)
+          end
+          ref_b = RepoRef.new(host: "github.com", owner: "o", name: "repo-b")
+          path_b = File.join(base_dir, "github.com", "o", "repo-b")
+          FileUtils.mkdir_p(File.dirname(path_b))
+          FileUtils.cp_r(work_b, path_b)
+          File.write(File.join(path_b, "dirty.txt"), "x")  # make it dirty
+          refs << ref_b
+
+          # ---- Repo C: missing path → clone (status: clean) ----
+          bare_c = File.join(bares, "c.git")
+          system("git", "init", "-b", "trunk", "--bare", bare_c, exception: true, out: File::NULL)
+          work_c = File.join(bares, "work_c")
+          system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work_c, exception: true, out: File::NULL)
+          in_async do
+            Shell.run("git", "remote", "add", "origin", bare_c, chdir: work_c)
+            Shell.run("git", "config", "user.email", "t@t.com", chdir: work_c)
+            Shell.run("git", "config", "user.name", "T", chdir: work_c)
+            File.write(File.join(work_c, "README.md"), "c\n")
+            Shell.run("git", "add", ".", chdir: work_c)
+            Shell.run("git", "commit", "-qm", "init", chdir: work_c)
+            Shell.run("git", "push", "-q", "-u", "origin", "trunk", chdir: work_c)
+          end
+          ref_c = RepoRef.new(host: "github.com", owner: "o", name: "repo-c")
+          # Do NOT copy work_c to base_dir — engine will clone it
+          refs << ref_c
+
+          # ---- Repo D: diverged ----
+          bare_d = File.join(bares, "d.git")
+          system("git", "init", "-b", "trunk", "--bare", bare_d, exception: true, out: File::NULL)
+          work_d = File.join(bares, "work_d")
+          system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work_d, exception: true, out: File::NULL)
+          in_async do
+            Shell.run("git", "remote", "add", "origin", bare_d, chdir: work_d)
+            Shell.run("git", "config", "user.email", "t@t.com", chdir: work_d)
+            Shell.run("git", "config", "user.name", "T", chdir: work_d)
+            File.write(File.join(work_d, "README.md"), "d\n")
+            Shell.run("git", "add", ".", chdir: work_d)
+            Shell.run("git", "commit", "-qm", "init", chdir: work_d)
+            Shell.run("git", "push", "-q", "-u", "origin", "trunk", chdir: work_d)
+          end
+          # Push a remote commit
+          work_d2 = File.join(bares, "work_d2")
+          system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work_d2, exception: true, out: File::NULL)
+          in_async do
+            Shell.run("git", "remote", "add", "origin", bare_d, chdir: work_d2)
+            Shell.run("git", "config", "user.email", "t@t.com", chdir: work_d2)
+            Shell.run("git", "config", "user.name", "T", chdir: work_d2)
+            Shell.run("git", "pull", "-q", "origin", "trunk", chdir: work_d2)
+            File.write(File.join(work_d2, "remote.md"), "remote\n")
+            Shell.run("git", "add", ".", chdir: work_d2)
+            Shell.run("git", "commit", "-qm", "remote", chdir: work_d2)
+            Shell.run("git", "push", "-q", "origin", "trunk", chdir: work_d2)
+          end
+          ref_d = RepoRef.new(host: "github.com", owner: "o", name: "repo-d")
+          path_d = File.join(base_dir, "github.com", "o", "repo-d")
+          FileUtils.mkdir_p(File.dirname(path_d))
+          FileUtils.cp_r(work_d, path_d)
+          # Add a local commit to make it diverged
+          in_async do
+            File.write(File.join(path_d, "local.md"), "local\n")
+            Shell.run("git", "add", ".", chdir: path_d)
+            Shell.run("git", "commit", "-qm", "local", chdir: path_d)
+          end
+          refs << ref_d
+
+          url_builder = lambda { |r|
+            bare = File.join(bares, "#{r.name.split("-").last}.git")
+            "file://#{bare}"
+          }
+
+          config = make_config(base_dir: base_dir, repos: refs, concurrency: 4)
+          result = Engine.new(reporter: reporter, url_builder: url_builder).call(
+            config: config, paths: paths
+          )
+          assert result.success?, "engine failed: #{result.failure.inspect}"
+
+          state = StateStore.load(paths.state_file).success
+          evs = reporter.events
+
+          # Structural checks: attach first, run_started second, run_finished penultimate, detach last
+          assert_equal :attach, evs.first.first
+          assert_equal :run_started, evs[1].first
+          assert_equal 4, evs[1][1][:total]
+          assert_equal :run_finished, evs[-2].first
+          assert_equal :detach, evs.last.first
+
+          # Every repo has exactly one started + one terminal pair; terminal status matches state
+          refs.each do |ref|
+            key = "github.com/o/#{ref.name}"
+            n_started = evs.count { |e| e.first == :repo_started && e[1] == key }
+            assert_equal 1, n_started, "#{key}: expected 1 repo_started, got #{n_started}"
+
+            n_terminal = evs.count { |e|
+              (e.first == :repo_finished || e.first == :repo_failed) && e[1] == key
+            }
+            assert_equal 1, n_terminal, "#{key}: expected 1 terminal event, got #{n_terminal}"
+
+            finished_ev = evs.find { |e| e.first == :repo_finished && e[1] == key }
+            if finished_ev
+              assert_equal state.repos[key]&.status, finished_ev[2],
+                "#{key}: reporter status must match state row"
+            end
+          end
+        end
+      end
+    end
+  end
 end

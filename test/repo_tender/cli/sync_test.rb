@@ -304,4 +304,65 @@ class CLISyncTest < Minitest::Test
       refute_nil state.repos["github.com/bar/repo1"], "repo1 missing — sync crashed before writing state"
     end
   end
+
+  # ---- Slice A (ui-foundation) G6: subprocess stdout is ANSI-free when
+  #      piped (non-TTY); synced N repo(s) summary preserved; exit unchanged ----
+
+  def test_g6_sync_subprocess_stdout_is_ansi_free_when_piped
+    with_engine_home_2_repos do |env, paths, base_dir, refs|
+      config = Config.new(
+        base_dir: base_dir,
+        refresh_interval: 3600,
+        concurrency: 2,
+        repos: refs,
+        orgs: []
+      )
+      RepoTender::Config::Store.write(paths.config_file, config)
+
+      # Open3.capture3 captures stdout as a string (non-TTY) — the launchd condition
+      stdout, _stderr, status = run_cli_subprocess(env: env, args: ["sync"])
+      assert status.success?, "sync subprocess should exit 0; got #{status.exitstatus}"
+      refute_includes stdout, "\e[", "stdout must be ANSI-free when piped"
+      refute_includes stdout, "\x1b[", "stdout must be ANSI-free when piped"
+      assert_includes stdout, "synced 2 repo(s)", "synced summary line must be preserved"
+    end
+  end
+
+  def test_g6_sync_subprocess_exit_and_state_unchanged_from_pre_slice
+    # Regression: exit codes and state.yaml write behavior are unchanged.
+    with_engine_home_2_repos do |env, paths, base_dir, refs|
+      config = Config.new(
+        base_dir: base_dir,
+        refresh_interval: 3600,
+        concurrency: 2,
+        repos: refs,
+        orgs: []
+      )
+      RepoTender::Config::Store.write(paths.config_file, config)
+
+      _stdout, _stderr, status = run_cli_subprocess(env: env, args: ["sync"])
+      assert status.success?
+      state = RepoTender::State::Store.load(paths.state_file).success
+      assert_equal 2, state.repos.size
+      assert state.repos["github.com/foo/repo0"]
+      assert state.repos["github.com/bar/repo1"]
+    end
+  end
+
+  def test_g6_sync_repo_invalid_ref_exits_nonzero_when_piped
+    with_engine_home_2_repos do |env, paths, base_dir, refs|
+      config = Config.new(
+        base_dir: base_dir,
+        refresh_interval: 3600,
+        concurrency: 2,
+        repos: refs,
+        orgs: []
+      )
+      RepoTender::Config::Store.write(paths.config_file, config)
+
+      _stdout, stderr, status = run_cli_subprocess(env: env, args: ["sync", "--repo", "not-a-ref"])
+      refute status.success?, "invalid repo ref should exit non-zero"
+      assert_includes stderr, "invalid repo reference"
+    end
+  end
 end
