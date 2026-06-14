@@ -159,18 +159,92 @@ class SyncEngineTest < Minitest::Test
   end
 
   # A Forge stub for the G10 tests.
+  # check_authenticated returns Success by default; list_org uses response_for.
   class StubForge
     attr_reader :list_org_calls
     attr_accessor :response_for
 
-    def initialize(response_for:)
+    def initialize(response_for:, auth: :ok)
       @response_for = response_for
+      @auth = auth
       @list_org_calls = 0
+    end
+
+    def check_authenticated
+      if @auth == :ok
+        Dry::Monads::Success(:authenticated)
+      else
+        Dry::Monads::Failure({reason: @auth.to_s})
+      end
     end
 
     def list_org(org_ref)
       @list_org_calls += 1
       @response_for.call(org_ref)
+    end
+  end
+
+  # SlowForge for the GS1 concurrency test.
+  # list_org sleeps `delay` seconds and records max in-flight count.
+  class SlowForge
+    attr_reader :max_seen, :auth_calls, :list_org_calls
+
+    def initialize(delay: 0.05, repos_per_org: 2)
+      @delay = delay
+      @repos_per_org = repos_per_org
+      @counter = 0
+      @max_seen = 0
+      @lock = Mutex.new
+      @auth_calls = 0
+      @list_org_calls = 0
+    end
+
+    def check_authenticated
+      @lock.synchronize { @auth_calls += 1 }
+      Dry::Monads::Success(:authenticated)
+    end
+
+    def list_org(org_ref)
+      @lock.synchronize do
+        @counter += 1
+        @max_seen = [@max_seen, @counter].max
+        @list_org_calls += 1
+      end
+      sleep @delay
+      @lock.synchronize { @counter -= 1 }
+      repos = @repos_per_org.times.map do |i|
+        RepoRef.new(host: org_ref.host, owner: org_ref.name, name: "repo#{i}")
+      end
+      Dry::Monads::Success(repos)
+    end
+  end
+
+  # RecordingForge for the GS2 auth-once test.
+  class RecordingForge
+    attr_reader :auth_calls, :list_org_calls
+
+    def initialize(repos_per_org: 1, auth_result: :ok)
+      @auth_calls = 0
+      @list_org_calls = 0
+      @repos_per_org = repos_per_org
+      @auth_result = auth_result
+    end
+
+    def check_authenticated
+      @auth_calls += 1
+      if @auth_result == :ok
+        Dry::Monads::Success(:authenticated)
+      else
+        Dry::Monads::Failure({reason: @auth_result.to_s})
+      end
+    end
+
+    def list_org(org_ref)
+      @list_org_calls += 1
+      repos = @repos_per_org.times.map do |i|
+        RepoRef.new(host: org_ref.host, owner: org_ref.name, name: "repo#{i}")
+      end
+      Dry::Monads::Success(repos)
     end
   end
 
@@ -924,13 +998,16 @@ class SyncEngineTest < Minitest::Test
 
     def initialize = @events = []
 
+    def attach(task) = @events << [:attach]
+    def listing_started(total:) = @events << [:listing_started, {total: total}]
+    def org_listed(ref, count:) = @events << [:org_listed, ref, count]
+    def listing_finished = @events << [:listing_finished]
     def run_started(total:) = @events << [:run_started, {total: total}]
     def repo_started(ref) = @events << [:repo_started, ref]
     def repo_phase(ref, phase) = @events << [:repo_phase, ref, phase]
     def repo_finished(ref, status) = @events << [:repo_finished, ref, status]
     def repo_failed(ref, error) = @events << [:repo_failed, ref, error]
     def run_finished(summary) = @events << [:run_finished, summary]
-    def attach(task, total:) = @events << [:attach, {total: total}]
     def detach = @events << [:detach]
   end
 
@@ -949,13 +1026,30 @@ class SyncEngineTest < Minitest::Test
         assert result.success?
 
         evs = reporter.events
-        # attach is first, run_started is second
-        assert_equal :attach, evs.first.first
-        assert_equal :run_started, evs[1].first
-        assert_equal 1, evs[1][1][:total]
-        # detach is last, run_finished is second-to-last
-        assert_equal :detach, evs.last.first
-        assert_equal :run_finished, evs[-2].first
+        # Phase order: attach → listing_started → listing_finished → run_started → … → run_finished → detach
+        idx_attach = evs.index { |e| e.first == :attach }
+        idx_listing_started = evs.index { |e| e.first == :listing_started }
+        idx_listing_finished = evs.index { |e| e.first == :listing_finished }
+        idx_run_started = evs.index { |e| e.first == :run_started }
+        idx_run_finished = evs.index { |e| e.first == :run_finished }
+        idx_detach = evs.index { |e| e.first == :detach }
+
+        refute_nil idx_attach, "attach must be emitted"
+        refute_nil idx_listing_started, "listing_started must be emitted"
+        refute_nil idx_listing_finished, "listing_finished must be emitted"
+        refute_nil idx_run_started, "run_started must be emitted"
+        refute_nil idx_run_finished, "run_finished must be emitted"
+        refute_nil idx_detach, "detach must be emitted"
+
+        assert idx_attach < idx_listing_started, "attach must precede listing_started"
+        assert idx_listing_started < idx_listing_finished, "listing_started must precede listing_finished"
+        assert idx_listing_finished < idx_run_started, "listing_finished must precede run_started"
+        assert idx_run_started < idx_run_finished, "run_started must precede run_finished"
+        assert idx_run_finished < idx_detach, "run_finished must precede detach"
+
+        run_started_ev = evs[idx_run_started]
+        assert_equal 1, run_started_ev[1][:total]
+
         # attach + detach each appear exactly once
         assert_equal 1, evs.count { |e| e.first == :attach }
         assert_equal 1, evs.count { |e| e.first == :detach }
@@ -1160,12 +1254,20 @@ class SyncEngineTest < Minitest::Test
           state = StateStore.load(paths.state_file).success
           evs = reporter.events
 
-          # Structural checks: attach first, run_started second, run_finished penultimate, detach last
-          assert_equal :attach, evs.first.first
-          assert_equal :run_started, evs[1].first
-          assert_equal 4, evs[1][1][:total]
-          assert_equal :run_finished, evs[-2].first
-          assert_equal :detach, evs.last.first
+          # Phase order: attach → listing_started → listing_finished → run_started → … → run_finished → detach
+          idx_attach = evs.index { |e| e.first == :attach }
+          idx_listing_started = evs.index { |e| e.first == :listing_started }
+          idx_listing_finished = evs.index { |e| e.first == :listing_finished }
+          idx_run_started = evs.index { |e| e.first == :run_started }
+          idx_run_finished = evs.index { |e| e.first == :run_finished }
+          idx_detach = evs.index { |e| e.first == :detach }
+
+          assert idx_attach < idx_listing_started, "attach before listing_started"
+          assert idx_listing_started < idx_listing_finished, "listing_started before listing_finished"
+          assert idx_listing_finished < idx_run_started, "listing_finished before run_started"
+          assert idx_run_started < idx_run_finished, "run_started before run_finished"
+          assert idx_run_finished < idx_detach, "run_finished before detach"
+          assert_equal 4, evs[idx_run_started][1][:total]
 
           # Every repo has exactly one started + one terminal pair; terminal status matches state
           refs.each do |ref|
@@ -1185,6 +1287,187 @@ class SyncEngineTest < Minitest::Test
             end
           end
         end
+      end
+    end
+  end
+
+  # ===========================================================================
+  # GS1 — Org expansion is CONCURRENT (SlowForge + max-in-flight assertion)
+  # ===========================================================================
+  def test_gs1_org_expansion_is_concurrent
+    n_orgs = 4
+    delay = 0.05
+    slow_forge = SlowForge.new(delay: delay, repos_per_org: 1)
+    orgs = n_orgs.times.map { |i| OrgRef.new(host: "github.com", name: "org#{i}") }
+
+    Dir.mktmpdir("rt-gs1-") do |base_dir|
+      with_paths(base_dir: base_dir) do |_, paths|
+        config = make_config(base_dir: base_dir, orgs: orgs, concurrency: n_orgs)
+        scm = StubSCM.new(status_value: clean_status)
+
+        t0 = Time.now
+        result = Engine.new(scm: scm, forge: slow_forge).call(config: config, paths: paths)
+        elapsed = Time.now - t0
+
+        assert result.success?, "engine failed: #{result.failure.inspect}"
+        assert slow_forge.max_seen > 1,
+          "max in-flight list_org calls must be > 1 (got #{slow_forge.max_seen}); org expansion is still sequential"
+        # Wall-time must be less than (N-1)*delay — proving fan-out
+        assert elapsed < (n_orgs - 1) * delay,
+          "wall-time #{elapsed.round(2)}s must be < #{((n_orgs - 1) * delay).round(2)}s (sequential would be #{(n_orgs * delay).round(2)}s)"
+      end
+    end
+  end
+
+  # ===========================================================================
+  # GS2 — check_authenticated called EXACTLY ONCE regardless of org count;
+  #        list_org does no auth; auth Failure records all orgs failed (CF3)
+  #        without crash.
+  # ===========================================================================
+  def test_gs2_check_authenticated_called_exactly_once_for_five_orgs
+    forge = RecordingForge.new(repos_per_org: 0)
+    orgs = 5.times.map { |i| OrgRef.new(host: "github.com", name: "org#{i}") }
+
+    Dir.mktmpdir("rt-gs2-") do |base_dir|
+      with_paths(base_dir: base_dir) do |_, paths|
+        config = make_config(base_dir: base_dir, orgs: orgs, concurrency: 4)
+        result = Engine.new(forge: forge).call(config: config, paths: paths)
+        assert result.success?
+        assert_equal 1, forge.auth_calls,
+          "check_authenticated must be invoked exactly once (got #{forge.auth_calls})"
+        assert_equal 5, forge.list_org_calls,
+          "list_org must be called once per org when auth succeeds (got #{forge.list_org_calls})"
+      end
+    end
+  end
+
+  def test_gs2_auth_failure_records_all_orgs_failed_no_list_org_called
+    forge = RecordingForge.new(repos_per_org: 1, auth_result: "gh not authenticated")
+    org = OrgRef.new(host: "github.com", name: "someorg")
+
+    Dir.mktmpdir("rt-gs2-auth-") do |base_dir|
+      # Seed a repo that was listed in a prior successful run
+      FileUtils.mkdir_p(File.join(base_dir, "github.com", "explicit", "rep"))
+      with_paths(base_dir: base_dir) do |_, paths|
+        explicit = RepoRef.new(host: "github.com", owner: "explicit", name: "rep")
+        config = make_config(base_dir: base_dir, repos: [explicit], orgs: [org], concurrency: 2)
+        scm = StubSCM.new(
+          status_value: clean_status(branch: "trunk", ahead: 0, behind: 0),
+          next_status_value: clean_status(branch: "trunk", ahead: 0, behind: 0)
+        )
+        result = Engine.new(scm: scm, forge: forge).call(config: config, paths: paths)
+        assert result.success?, "engine must not abort on auth failure: #{result.failure.inspect}"
+        assert_equal 1, forge.auth_calls, "check_authenticated must be called exactly once"
+        assert_equal 0, forge.list_org_calls, "list_org must NOT be called on auth failure"
+
+        state = StateStore.load(paths.state_file).success
+        org_row = state.orgs["github.com/someorg"]
+        refute_nil org_row
+        refute_nil org_row.last_error, "org must have last_error recorded on auth failure"
+        assert_includes org_row.last_error, "gh not authenticated"
+        # Explicit repo still processed
+        assert state.repos["github.com/explicit/rep"], "explicit repo must be processed even on org auth failure"
+      end
+    end
+  end
+
+  # ===========================================================================
+  # GS3 — discovered repo set is order-independent identical to sequential
+  #        baseline; explicit-wins dedupe unchanged by concurrency
+  # ===========================================================================
+  def test_gs3_concurrent_expansion_discovers_same_set_as_sequential
+    orgs = 3.times.map { |i| OrgRef.new(host: "github.com", name: "org#{i}") }
+    expected_repos = orgs.each_with_index.flat_map do |org, i|
+      [RepoRef.new(host: "github.com", owner: org.name, name: "repo#{i}")]
+    end
+
+    forge = StubForge.new(response_for: lambda { |org_ref|
+      idx = org_ref.name.delete_prefix("org").to_i
+      Dry::Monads::Success([RepoRef.new(host: "github.com", owner: org_ref.name, name: "repo#{idx}")])
+    })
+
+    Dir.mktmpdir("rt-gs3-") do |base_dir|
+      with_paths(base_dir: base_dir) do |_, paths|
+        config = make_config(base_dir: base_dir, orgs: orgs, concurrency: 4)
+        scm = StubSCM.new(status_value: clean_status)
+        result = Engine.new(scm: scm, forge: forge).call(config: config, paths: paths)
+        assert result.success?
+        state = StateStore.load(paths.state_file).success
+        discovered_keys = state.repos.keys.to_set
+        expected_keys = expected_repos.map { |r| "#{r.host}/#{r.owner}/#{r.name}" }.to_set
+        assert_equal expected_keys, discovered_keys,
+          "concurrent expansion must discover the same repo set as sequential"
+      end
+    end
+  end
+
+  # ===========================================================================
+  # GS4 — Listing events in phase order (with recording reporter over a run
+  #        that has real orgs)
+  # ===========================================================================
+  def test_gs4_listing_events_in_phase_order
+    reporter = RecordingReporter.new
+    org = OrgRef.new(host: "github.com", name: "socketry")
+    discovered = [RepoRef.new(host: "github.com", owner: "socketry", name: "lib0")]
+    forge = StubForge.new(response_for: ->(_o) { Dry::Monads::Success(discovered) })
+
+    Dir.mktmpdir("rt-gs4-") do |base_dir|
+      FileUtils.mkdir_p(File.join(base_dir, "github.com", "socketry", "lib0"))
+      with_paths(base_dir: base_dir) do |_, paths|
+        scm = StubSCM.new(status_value: clean_status(branch: "trunk", ahead: 0, behind: 0))
+        config = make_config(base_dir: base_dir, orgs: [org], concurrency: 2)
+        result = Engine.new(scm: scm, forge: forge, reporter: reporter).call(config: config, paths: paths)
+        assert result.success?
+
+        evs = reporter.events
+        names = evs.map(&:first)
+
+        idx_attach = names.index(:attach)
+        idx_listing_started = names.index(:listing_started)
+        idx_listing_finished = names.index(:listing_finished)
+        idx_run_started = names.index(:run_started)
+        idx_run_finished = names.index(:run_finished)
+        idx_detach = names.index(:detach)
+
+        # Phase order
+        assert idx_attach < idx_listing_started, "attach before listing_started"
+        assert idx_listing_started < idx_listing_finished, "listing_started before listing_finished"
+        assert idx_listing_finished < idx_run_started, "listing_finished before run_started"
+        assert idx_run_started < idx_run_finished, "run_started before run_finished"
+        assert idx_run_finished < idx_detach, "run_finished before detach"
+
+        # listing_started carries org count
+        ls_ev = evs[idx_listing_started]
+        assert_equal 1, ls_ev[1][:total], "listing_started total must equal org count"
+
+        # exactly one org_listed event per org
+        org_listed_evs = evs.select { |e| e.first == :org_listed }
+        assert_equal 1, org_listed_evs.size, "expected 1 org_listed event"
+        assert_equal "socketry", org_listed_evs.first[1].name
+        assert_equal 1, org_listed_evs.first[2], "org_listed count must equal discovered repos"
+
+        # run_started total equals discovered repo count (after dedupe)
+        assert_equal 1, evs[idx_run_started][1][:total]
+      end
+    end
+  end
+
+  def test_gs4_listing_started_with_zero_orgs_emits_no_org_listed
+    reporter = RecordingReporter.new
+    ref = RepoRef.new(host: "github.com", owner: "owner", name: "rep")
+
+    Dir.mktmpdir("rt-gs4-zero-") do |base_dir|
+      FileUtils.mkdir_p(File.join(base_dir, "github.com", "owner", "rep"))
+      with_paths(base_dir: base_dir) do |_, paths|
+        scm = StubSCM.new(status_value: clean_status(branch: "trunk", ahead: 0, behind: 0))
+        config = make_config(base_dir: base_dir, repos: [ref], orgs: [], concurrency: 2)
+        result = Engine.new(scm: scm, reporter: reporter).call(config: config, paths: paths)
+        assert result.success?
+
+        evs = reporter.events
+        assert evs.any? { |e| e.first == :listing_started && e[1][:total] == 0 }
+        assert evs.any? { |e| e.first == :listing_finished }
+        assert_equal 0, evs.count { |e| e.first == :org_listed }
       end
     end
   end

@@ -13,8 +13,16 @@ module RepoTender
     class Client
       extend Dry::Monads[:result]
 
+      # Returns Success(:authenticated) or Failure({reason:}).
+      # Called ONCE by the engine before fanning out org listings.
+      def check_authenticated
+        raise NotImplementedError
+      end
+
       # Returns Success([RepoRef, ...]) or Failure. Honors the
       # include_archived / include_forks flags on the OrgRef.
+      # Does NOT perform authentication — the engine calls
+      # check_authenticated first.
       def list_org(org_ref)
         raise NotImplementedError
       end

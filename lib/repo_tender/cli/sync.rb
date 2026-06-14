@@ -7,6 +7,7 @@ require "repo_tender/cli/options"
 require "repo_tender/ui/mode"
 require "repo_tender/ui/plain_reporter"
 require "repo_tender/ui/json_reporter"
+require "repo_tender/ui/interactive_reporter"
 
 module RepoTender
   module CLI
@@ -67,6 +68,8 @@ module RepoTender
           )
           reporter = if mode.format == :json
             UI::JsonReporter.new(out)
+          elsif mode.animate
+            UI::InteractiveReporter.new(out, mode: mode)
           else
             UI::PlainReporter.new(out, mode: mode)
           end

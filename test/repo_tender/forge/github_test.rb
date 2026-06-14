@@ -103,19 +103,33 @@ class ForgeGitHubTest < Minitest::Test
     assert_equal ["cli", "go-gh", "octocat"], names
   end
 
-  def test_unauthenticated_surfaces_failure
+  # GS2: check_authenticated is now PUBLIC and called by the engine once before
+  # listing. list_org no longer authenticates per-call.
+  def test_check_authenticated_is_public
+    shell = StubShell.new(auth_text: "  ✓ Logged in to github.com account test (keyring)\n")
+    gh = GitHub.new(shell: shell)
+    assert gh.public_methods.include?(:check_authenticated),
+      "check_authenticated must be a public method on Forge::GitHub"
+  end
+
+  def test_check_authenticated_returns_success_when_logged_in
+    shell = StubShell.new(auth_text: "  ✓ Logged in to github.com account test (keyring)\n")
+    gh = GitHub.new(shell: shell)
+    result = gh.check_authenticated
+    assert result.success?
+  end
+
+  def test_check_authenticated_returns_failure_when_not_logged_in
     shell = StubShell.new(
-      auth_text: "You are not logged into any GitHub hosts. Run gh auth login to authenticate.\n",
-      repo_listing_json: "[]"
+      auth_text: "You are not logged into any GitHub hosts. Run gh auth login to authenticate.\n"
     )
     gh = GitHub.new(shell: shell)
-    org = OrgRef.new(name: "cli")
-    result = gh.list_org(org)
+    result = gh.check_authenticated
     assert result.failure?, "unauthenticated should fail closed"
     assert_includes result.failure[:reason], "gh not authenticated"
   end
 
-  def test_invokes_auth_status_before_repo_list
+  def test_list_org_does_not_call_auth_status
     json = File.read(FIXTURE_PATH)
     shell = StubShell.new(
       auth_text: "  ✓ Logged in to github.com account test (keyring)\n",
@@ -124,10 +138,12 @@ class ForgeGitHubTest < Minitest::Test
     gh = GitHub.new(shell: shell)
     org = OrgRef.new(name: "cli")
     gh.list_org(org)
-    # First call is auth status, second is repo list.
-    assert_equal "auth", shell.captured_argv[0][1]
-    assert_equal "status", shell.captured_argv[0][2]
-    assert_equal "repo", shell.captured_argv[1][1]
+    # list_org must NOT invoke gh auth status — the engine does that once
+    auth_calls = shell.captured_argv.select { |a| a[0..2] == ["gh", "auth", "status"] }
+    assert_empty auth_calls, "list_org must not call gh auth status (engine handles auth-once)"
+    # Only one call: the repo list
+    assert_equal 1, shell.captured_argv.size
+    assert_equal "repo", shell.captured_argv[0][1]
   end
 
   def test_passes_correct_json_fields
@@ -139,7 +155,8 @@ class ForgeGitHubTest < Minitest::Test
     gh = GitHub.new(shell: shell)
     org = OrgRef.new(name: "cli")
     gh.list_org(org)
-    repo_argv = shell.captured_argv[1]
+    # list_org no longer calls auth; captured_argv[0] is the repo list
+    repo_argv = shell.captured_argv[0]
     assert_includes repo_argv, "--json"
     fields = repo_argv[repo_argv.index("--json") + 1]
     %w[nameWithOwner defaultBranchRef isArchived isFork].each do |f|

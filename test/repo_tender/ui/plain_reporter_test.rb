@@ -38,7 +38,7 @@ class PlainReporterTest < Minitest::Test
 
   def test_attach_and_detach_produce_no_output
     r = make_reporter
-    r.attach(nil, total: 5)
+    r.attach(nil)
     r.detach
     assert_empty @out.string, "attach/detach must produce no output"
   end
@@ -75,5 +75,44 @@ class PlainReporterTest < Minitest::Test
     assert_equal 2, lines.size
     assert lines.any? { |l| l.include?("github.com/a/b") && l.include?("clean") }
     assert lines.any? { |l| l.include?("github.com/c/d") && l.include?("dirty") }
+  end
+
+  # GS5: output is immediately flushed on non-TTY (sync=true at construction)
+  def test_out_sync_is_true_after_construction
+    make_reporter
+    assert @out.sync, "PlainReporter must set @out.sync = true for immediate non-TTY flush"
+  end
+
+  # GS5: listing events
+  def test_listing_started_emits_org_count_line
+    r = make_reporter
+    r.listing_started(total: 3)
+    assert_includes @out.string, "3"
+    assert_includes @out.string, "org"
+    refute_includes @out.string, "\e[", "listing_started must be ANSI-free"
+  end
+
+  def test_org_listed_success_emits_name_and_count
+    r = make_reporter
+    org_ref = RepoTender::Config::OrgRef.new(host: "github.com", name: "socketry")
+    r.org_listed(org_ref, count: 42)
+    assert_includes @out.string, "socketry"
+    assert_includes @out.string, "42"
+    refute_includes @out.string, "\e["
+  end
+
+  def test_org_listed_failure_emits_failed_marker
+    r = make_reporter
+    org_ref = RepoTender::Config::OrgRef.new(host: "github.com", name: "badorg")
+    r.org_listed(org_ref, count: nil)
+    assert_includes @out.string, "badorg"
+    assert_includes @out.string, "FAILED"
+    refute_includes @out.string, "\e["
+  end
+
+  def test_listing_finished_produces_no_output
+    r = make_reporter
+    r.listing_finished
+    assert_empty @out.string
   end
 end

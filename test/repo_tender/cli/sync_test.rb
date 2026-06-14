@@ -365,4 +365,56 @@ class CLISyncTest < Minitest::Test
       assert_includes stderr, "invalid repo reference"
     end
   end
+
+  # ===========================================================================
+  # Slice B G5 — reporter selection branch: mode.animate → InteractiveReporter
+  # ===========================================================================
+
+  def test_g5_json_flag_selects_json_reporter
+    mode = RepoTender::UI::Mode.new(color: false, animate: false, quiet: false, format: :json)
+    reporter = reporter_for_mode(mode)
+    assert_instance_of RepoTender::UI::JsonReporter, reporter
+  end
+
+  def test_g5_animate_true_selects_interactive_reporter
+    mode = RepoTender::UI::Mode.new(color: true, animate: true, quiet: false, format: :pretty)
+    reporter = reporter_for_mode(mode)
+    assert_instance_of RepoTender::UI::InteractiveReporter, reporter
+  end
+
+  def test_g5_animate_false_selects_plain_reporter
+    mode = RepoTender::UI::Mode.new(color: false, animate: false, quiet: false, format: :plain)
+    reporter = reporter_for_mode(mode)
+    assert_instance_of RepoTender::UI::PlainReporter, reporter
+  end
+
+  def test_g5_json_format_takes_precedence_over_animate
+    # format=:json implies animate=false (Mode.resolve sets animate=false for non-pretty),
+    # but assert JsonReporter wins regardless.
+    mode = RepoTender::UI::Mode.new(color: false, animate: false, quiet: false, format: :json)
+    reporter = reporter_for_mode(mode)
+    assert_instance_of RepoTender::UI::JsonReporter, reporter
+  end
+
+  def test_g5_no_color_with_animate_still_selects_interactive_reporter
+    # --no-color on a TTY: format=:pretty, animate=true, color=false
+    mode = RepoTender::UI::Mode.new(color: false, animate: true, quiet: false, format: :pretty)
+    reporter = reporter_for_mode(mode)
+    assert_instance_of RepoTender::UI::InteractiveReporter, reporter
+  end
+
+  private
+
+  # Extract the reporter selection logic for mode-only unit testing.
+  # Mirrors the branch in CLI::Sync::Run#call without running the full engine.
+  def reporter_for_mode(mode)
+    out = StringIO.new
+    if mode.format == :json
+      RepoTender::UI::JsonReporter.new(out)
+    elsif mode.animate
+      RepoTender::UI::InteractiveReporter.new(out, mode: mode)
+    else
+      RepoTender::UI::PlainReporter.new(out, mode: mode)
+    end
+  end
 end

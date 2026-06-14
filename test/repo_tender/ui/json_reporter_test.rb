@@ -91,8 +91,50 @@ class JsonReporterTest < Minitest::Test
 
   def test_attach_and_detach_produce_no_output
     r = make_reporter
-    r.attach(nil, total: 3)
+    r.attach(nil)
     r.detach
     assert_empty @out.string
+  end
+
+  # GS5: output is immediately flushed on non-TTY (sync=true at construction)
+  def test_out_sync_is_true_after_construction
+    make_reporter
+    assert @out.sync, "JsonReporter must set @out.sync = true for immediate non-TTY flush"
+  end
+
+  # GS5: listing events emit parseable JSON objects
+  def test_listing_started_emits_json_with_total
+    r = make_reporter
+    r.listing_started(total: 5)
+    obj = JSON.parse(lines.last)
+    assert_equal "listing_started", obj["event"]
+    assert_equal 5, obj["total"]
+  end
+
+  def test_org_listed_emits_json_with_org_and_count
+    r = make_reporter
+    org_ref = RepoTender::Config::OrgRef.new(host: "github.com", name: "socketry")
+    r.org_listed(org_ref, count: 42)
+    obj = JSON.parse(lines.last)
+    assert_equal "org_listed", obj["event"]
+    assert_equal "socketry", obj["org"]
+    assert_equal 42, obj["count"]
+  end
+
+  def test_org_listed_failure_emits_null_count
+    r = make_reporter
+    org_ref = RepoTender::Config::OrgRef.new(host: "github.com", name: "badorg")
+    r.org_listed(org_ref, count: nil)
+    obj = JSON.parse(lines.last)
+    assert_equal "org_listed", obj["event"]
+    assert_equal "badorg", obj["org"]
+    assert_nil obj["count"]
+  end
+
+  def test_listing_finished_emits_json_event
+    r = make_reporter
+    r.listing_finished
+    obj = JSON.parse(lines.last)
+    assert_equal "listing_finished", obj["event"]
   end
 end
