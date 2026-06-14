@@ -49,7 +49,15 @@ Baseline at `main` (`56ba350`): **364/1302/0/0/0**, lint 0.
 
 ## Next slice — `state-hardening` (CF10 + CF11)
 
-*Spec + gates being prepared this session; freeze + dispatch recorded below once frozen.*
+**SPEC'D + GATES FROZEN this session (2026-06-14). Dispatch + post-flight recorded once the lanes complete (rule 4: a fresh session judges).** Gates: `docs/gates/state-hardening.md`. One slice, **two disjoint worktree-isolated lanes** (file sets checked — zero overlap), dispatched in parallel.
+
+- **Objective.** Close the two remaining open carry-forwards, both `state.yaml` durability hardening. **CF10** (HIGH-STAKES): no inter-process lock → overlapping `sync` runs clobber each other's rows (last-writer-wins). **CF11** (cosmetic): `State::Store.write` orphans a temp file on `Interrupt`, and `State::Store.update` is dead code.
+- **Lane A — CF10.** Non-blocking advisory lock (`flock(LOCK_EX|LOCK_NB)`) on a sidecar lockfile, held across the engine's load→write span (`Engine#call:91→142`); an overlapping run **bails cleanly without writing** (never clobbers), releases on every exit path (incl. raise/Interrupt via `ensure`). New `state/lock.rb` + `engine.rb` + require wiring. Gates **GA1–GA5**. Files: `state/lock.rb` (new), `sync/engine.rb`, `lib/repo_tender.rb`, `state/lock_test.rb` (new), `sync/engine_test.rb`.
+- **Lane B — CF11.** `ensure`-clean the temp in `State::Store.write` so a non-`StandardError` interrupt can't orphan `state.yaml.tmp.<pid>` (CF7 intact); delete dead `State::Store.update`. Gates **GB1–GB4**. Files: `state/store.rb`, `state/store_test.rb`.
+- **Lane plan / disjointness.** Lane A owns `engine.rb` + `state/lock.rb` + `lib/repo_tender.rb`; Lane B owns `state/store.rb`. No file overlap → parallel worktrees merge clean. `status.rb` reads state but never writes → needs no lock (untouched).
+- **Why one slice / two lanes** (human-confirmed): closely-related one-subsystem work; CF11 too small for its own slice (would be an inline fix), but a parallel lane gives it a real Interrupt-injection test + dead-code-removal suite check at ~zero extra wall-clock; risk-isolated (a CF11 bug fails only Lane B; CF10 still gets the cross-model pass).
+- **Effort:** Lane A `ultrathink` (novel concurrency + the no-data-loss invariant); Lane B `think harder` (small, tightly specified, but the Interrupt-injection test wants care).
+- **Judging session (next, fresh):** post-flight both lanes (no commits, scope ⊆ declared set, gates rule-3 clean) → re-run G0/GA*/GB* → **cross-model adversarial pass on CF10** → arbitrate PHASE-0 → merge each passing lane → integrate onto `slice/state-hardening` → integration smoke after each merge.
 
 ---
 
