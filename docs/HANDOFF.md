@@ -8,309 +8,19 @@
 
 ## TL;DR
 
-- **🚧 Slice `cf-cleanup` (CF7 + CF8 + CF9) — BUILT + INTEGRATED on `slice/cf-cleanup`,
-  POST-FLIGHT PASS; GATES PENDING (rule 4 — this session dispatched it, cannot judge).**
-  Three non-blocking robustness carry-forwards taken in **3 parallel disjoint lanes**
-  (one file each, zero overlap): **CF7** atomic `State::Store.write` (same-dir temp +
-  `File.rename`, never truncate live `state.yaml`); **CF8** refcount the
-  `report_on_exception` suppression in `Shell.run` so it can't leak `false` under
-  concurrent fibers; **CF9** last-resort `rescue` on the org fan-out (CF3-preserving
-  failed-row, mirrors `process_one`'s G8) + `ensure`-guarded `@reporter.detach`.
-  Freeze **`5106b7b`** (gates `RC`→`G7.x`/`G8.x`/`G9.x` at `docs/gates/cf-cleanup.md`,
-  committed before dispatch). Builders: **Sonnet 4.6 via `claude -p`**, one fresh
-  context per lane, worktree-isolated. **Dispatch note:** the first fan-out died — a
-  backgrounded *launcher* spawned the three builders via shell `&` and exited,
-  orphaning them (all killed simultaneously 12:44, no `result` events, partial work);
-  re-dispatched via `claude -p --continue` with **each lane as its own harness-tracked
-  background task** (can't be orphaned), which resumed the killed sessions and finished
-  the work. **Post-flight integrity PASS (all 3):** no builder commits
-  (`git log 5106b7b..` empty in each worktree); each touched ONLY its declared
-  {lib file, test file, lane report}; test diffs **additions-only** (07 +56/−0, 08
-  +40/−0, 09 +167/−0 — the anti-gaming check); `docs/gates/` diff-clean; gemspec +
-  `Gemfile.lock` byte-unchanged (no new gems); cross-lane MUST-NOT-TOUCH respected
-  (`config/store.rb` untouched by 07; no entrypoint by 08; `store.rb`/`shell.rb`/`scm`/
-  `forge` untouched by 09). Committed each lane on its branch, merged `--no-ff`
-  sequentially onto `slice/cf-cleanup` (`280cdf5`→`20777e5`, `af3c75f`→`601c110`,
-  `e74d7e3`→`5da95e8`) — **zero merge conflicts** (confirms the lanes were truly
-  disjoint). Integration smoke after each merge + final: **364 runs / 1302 assertions /
-  0F / 0E / 0S**, `standardrb` 0; combined `lib/` diff +76/−45 across the 3 files.
-  **DID NOT judge gates (rule 4).** **JUDGMENT TARGETS for the fresh session** @
-  `slice/cf-cleanup` `5da95e8`: re-run G7.0–G7.4 / G8.0–G8.4 / G9.0–G9.4 against the
-  frozen `docs/gates/cf-cleanup.md`; **CF7 + CF9 are higher-stakes (persistence /
-  engine concurrency) → run the cross-model adversarial diff pass**; read each
-  production diff vs intent — CF7's `File.rename` targets a **same-dir** sibling (not
-  `Dir.tmpdir`; cross-device raises EXDEV) and the rescue deletes the temp + re-raises;
-  CF8 used the **refcount-inside-`Shell.run`** path (NOT the rejected set-once-at-startup)
-  and the two existing `report_on_exception` tests pass unchanged; CF9's rescue
-  **preserves CF3** (prior `repo_count`/`last_listed_at`, not zeroed) and the happy-path
-  event order is unchanged. **Merge `slice/cf-cleanup` → `main` only on a PASS/CONTINUE
-  verdict there.** No human gate (all three are headless-testable — no animation/TTY
-  behavior). Lane reports: `docs/lanes/cf-cleanup-{07,08,09}.md`. Builder costs:
-  07 $0.72 / 24 turns, 08 $0.42 / 12 turns, 09 $1.06 / 24 turns.
-- **✅ Slice C `color-rollout` — JUDGED RC0–RC6 PASS → CONTINUE & MERGED `--no-ff`
-  to `main` 2026-06-14. 🎉 CLI-UX EPIC COMPLETE (PRD §7 DoD met).** Fresh session
-  (dispatched none — rule 4 clear) judged at `slice/color-rollout` `4782c85` against
-  the frozen gates. Re-ran the suite myself: **358/1258/0/0/0**, `standardrb` 0,
-  `--help` 5 groups. **RC0** suite green + tty-screen drop (gemspec diff = only that
-  line; lock drops it + nothing else → 2 gems); **RC1** every command color-ON
-  (TTY-double → `:pretty`) + color-OFF (`--no-color`/`NO_COLOR`/non-TTY) with the
-  SGR regex on **real `cmd.call` output**; **RC2** `status` byte-identical in
-  `:plain` (existing tests unchanged) + `plain == pretty.gsub(SGR,"")` (only the
-  STATUS cell colorized via a clean status→color map); **RC3** confirmations colored
-  `:pretty`/byte-identical `:plain`, stderr errors (`fail_with`) untouched; **RC4**
-  all 5 cli test files **+N/−0** (pure additions — the anti-gaming check); **RC5**
-  color via the frozen `UI::Mode.resolve(flags:, env: CLI.env, out: out)`, reads
-  `mode.color`; **RC6** files ⊆ MAY-TOUCH, no builder commits, MUST-NOT-TOUCH
-  (`mode.rb`/reporters/`engine`/`cli/sync.rb`/`cli.rb`/`shell.rb`) byte-unchanged,
-  gates clean. Read the production diffs vs intent (idiomatic per-command
-  `Pastel.new(enabled: mode.color)`; byte-compat preserved). Low-stakes display-only
-  → no separate cross-model pass (ui-foundation precedent). **0 PHASE-0
-  disagreements.** No human gate (no animation/real-terminal-only behavior — SGR is
-  headless-testable). Merged clean (slice strictly ahead of freeze `c0701ee`),
-  integration smoke green (re-ran 358/1258/0/0/0, lint 0, tty-screen absent from
-  lock). **CLI-UX epic Slices A+B+C all merged — every command colorful
-  interactively, ANSI-free when piped/`--plain`/`--json`/`NO_COLOR`/under launchd;
-  `sync` fiber-driven live progress; no Ruby Thread.** CF7/CF8/CF9 stay OPEN
-  (non-blocking future tidy-ups). Lane report: `docs/lanes/color-rollout-01.md`.
-  Builder design: per-command `Pastel.new(enabled: mode.color)` (no shared helper),
-  full `GlobalOptions` mixin, stderr unstyled. Mechanical color
-  rollout: apply `UI::Mode` + `pastel` to the non-sync commands
-  (`repo`/`org`/`status`/`config`/`daemon`), gated on `mode.color` exactly like
-  `cli/sync.rb`. Confirmations colored in `:pretty`, **byte-identical in `:plain`**;
-  `status` STATUS cell colored in `:pretty`, byte-identical in `:plain`
-  (SGR-strip == plain). **SPINNER DROPPED as moot** (architect finding, human
-  confirmed): `org add/list` are local config ops (no `gh`), `sync --repo` already
-  animates via Slice B — no op needs a spinner. **Also folded in: drop the dead
-  `tty-screen` dep → 2 gems** (the only gemspec/lock change). 1 lane, main
-  checkout, freeze recorded below, gates **RC0–RC6** at `docs/gates/color-rollout.md`.
-  Builder: Sonnet 4.6 via `claude -p` (canary green @ `claude` 2.1.177), block
-  `.architect/color-rollout-01.block.md`, run-log
-  `.architect/color-rollout-01.last-run.jsonl`, `think harder` budget. **MUST-NOT-TOUCH:
-  `ui/mode.rb` + all reporters + `sync/engine.rb` + `cli/sync.rb` (Slices A/B done).**
-  **A fresh session post-flights → judges RC0–RC6 → arbitrates PHASE-0 → hands the
-  optional real-TTY eyeball to the human → merges `--no-ff` only on PASS.** CF7 +
-  CF8 + CF9 stay OPEN (future slices). After this, the CLI-UX epic DoD (PRD §7) is met.
-- **✅ CLI-UX-RESPONSIVENESS BRANCH (Slice B `ui-interactive` + corrective `compact`
-  + `sync-startup`) — JUDGED PASS → CONTINUE & MERGED `--no-ff` to `main`
-  2026-06-14.** Fresh session (dispatched none of these — rule 4 clear) judged the
-  whole `slice/ui-interactive` stack against the frozen contracts. **Integrity (all
-  3 slices):** no builder commits; per-slice file scope respected; `engine.rb`
-  byte-unchanged through ui-interactive+compact; `state/store.rb`/`scm/*`/`shell.rb`
-  byte-unchanged across the branch; gates rule-3 clean; gemspec adds exactly the 3
-  amended gems. **Suite (architect-run @ HEAD):** `rake test` **338/1213/0/0/0**,
-  `standardrb` 0, `--help` 5 groups. **ui-interactive G0–G7** PASS (G3 superseded by
-  compact; G0 amended 4→3 gems per logged human ruling; spike chose hand-rolled
-  `tty-cursor`+`pastel`, verified). **compact GC1–GC3 + carried** PASS (bounded
-  output, single-line `\r\e[K`, tallies, live tick deterministic + empirical
-  16-tick repro). **sync-startup GS0–GS7 + carried** PASS — HIGH-STAKES, ran the
-  mandated cross-model adversarial pass: GS1 concurrent (max-in-flight>1, walltime),
-  GS2 auth-once (=1), GS3 isolation+CF3+dedupe(explicit-wins)+discovered-set==
-  sequential, GS4 phase order, GS5 flush, GS6 two-phase. Re-ran load-bearing tests
-  myself + confirmed non-tautological (real reactor / SlowForge / RecordingForge /
-  real `state.yaml`). **14 PHASE-0 disagreements (0+5+9) all ACCEPT.** **Human M1
-  end-to-end real-TTY smoke PASS** (operator sign-off). Merged clean (zero
-  conflicts; main was a doc-only narrative branch). **CLI-UX epic Slices A+B done;
-  Slice C (roll color/spinners across the other commands) is the only remaining
-  CLI-UX scope, net-new.** New non-blocking carry-forward **CF9** (org fan-out lacks
-  the repo-sweep's last-resort rescue; pre-existing, non-data-loss) + **tty-screen
-  dead-dep** (drop→2 gems, trivial) — both below.
-- **🆕 NEW EPIC — CLI UX (interactive vs daemon, animated & informative output).**
-  Research + build-ready PRD done (`docs/research/cli-ux-interactive-daemon.md`,
-  `docs/prd/cli-ux.md`). 3 slices: **A `ui-foundation`** (Mode + Reporter event
-  seam + Plain/JSON renderers, NO color/animation) ✅ **JUDGED PASS & MERGED
-  `59bc565`** → **B `ui-interactive`** (interactive color + fiber-driven live
-  progress — the novel no-Threads animation, spike-gated) **🚧 DISPATCHED — freeze
-  `8c59784`, AWAITING JUDGMENT (rule 4)** → **C** (roll color/spinners across
-  every command). Key frozen decisions: no Ruby
-  Threads (one Async render fiber in B); home-grown `PlainReporter`/`JsonReporter`
-  (NOT `socketry/console`); no `--daemon` flag (non-TTY autodetect); reporter
-  injected into the engine like `scm:`/`forge:`, default `NullReporter`.
-- **Slice A (`ui-foundation`) — JUDGED PASS & MERGED 2026-06-14 (`59bc565`).**
-  Mode + Reporter event seam + `NullReporter`/`PlainReporter`/`JsonReporter` +
-  `cli/options` GlobalOptions, `reporter:` DI into `Sync::Engine` + `cli/sync.rb`.
-  Freeze `8234421`, gates G0–G7 at `docs/gates/ui-foundation.md`. **FIRST `claude
-  -p --model claude-sonnet-4-6` build** (slices 1–6 used `pi`/minimax). **Fresh
-  session judged @ `1179834` (rule 4 — prior session dispatched + preserved):**
-  re-ran every gate myself — **G0** suite **291/1068/0/0/0**, `standardrb` 0, no
-  new gems, `--help` 5 groups; **G1** `Mode.resolve` table-driven on the real
-  resolve (all rows incl `--no-color` > `CLICOLOR_FORCE`, `NO_COLOR=""` no-op,
-  immutability raises); **G2** `engine_test.rb` **additions-only** (verified),
-  default `NullReporter`, byte-identical `state.yaml` (StubSCM+frozen clock), and
-  the engine diff keeps every result tuple unchanged (no-op reporter calls only);
-  **G3** recording reporter + real-temp-git 4-scenario {ff,dirty,clone,diverged}
-  @ concurrency 4 — one started+terminal pair per ref, terminal status **==** the
-  real `state.yaml` row, raise→`repo_failed` + run completes; **G4** real
-  Plain/Json reporters fed events → ANSI-free (`no \e[`) + `JSON.parse` per line;
-  **G5** `SyncRun.options` introspection (4 flags registered, `:daemon` absent) +
-  `sync --daemon` rejected exit 1; **G6** piped subprocess ANSI-free + `synced N
-  repo(s)` preserved + invalid-ref→stderr exit 1 (**live-reproduced on 422 real
-  repos**); **G7** 15 files all ⊆ Lane set, no MUST-NOT-TOUCH, no builder commits,
-  `docs/gates/` diff-clean, no new gems. Read the full diff vs PRD §3/§5 + the
-  no-behavior-change invariant. **7 PHASE-0 disagreements D1–D7 all ACCEPT** —
-  notably **D5** (`Plain`/`Json` send `repo_failed` to `out` with a `FAILED`
-  marker, not stderr): gate G4 explicitly permits a stated alternate stream;
-  domain events stay on one parseable stream while CLI-level errors still go to
-  stderr (invalid-ref verified). Low-stakes (additive, `NullReporter` default,
-  byte-identical state, no persistence/schema) → no separate cross-model pass
-  (Slice 5 precedent). **8/8 (G0–G7) PASS → CONTINUE.** Merged
-  `slice/ui-foundation` → `main` (`--no-ff` `59bc565`), integration smoke green
-  (291/1068/0/0/0, lint 0). Lane report: `docs/lanes/ui-foundation-01.md`.
-- **Slice B (`ui-interactive`) — SPEC'D + FROZEN + DISPATCHED 2026-06-14; NOT
-  JUDGED (rule 4 — this session dispatched).** The novel keystone:
-  `UI::InteractiveReporter` = color + in-place LIVE progress for the concurrent
-  `sync` sweep, driven by ONE Async render fiber spawned as a child of the
-  engine's Sync task — **NO Ruby Thread**. The engine event seam is ALREADY wired
-  (Slice A: attach/repo_*/run_*/detach are no-ops under NullReporter) so
-  **`sync/engine.rb` is MUST-NOT-TOUCH**; Slice B only adds
-  `ui/interactive_reporter.rb` (+ optional `ui/spinner.rb`) and the `mode.animate`
-  selection branch in `cli/sync.rb`, plus the 4 gems (`pastel`, `tty-cursor`,
-  `tty-screen`, `tty-progressbar`, `~>` pins, all MIT/no-Thread). **PHASE-0 SPIKE
-  (no prior art): `tty-progressbar::Multi` under the Async reactor vs a hand-rolled
-  `tty-cursor`+`pastel` fallback** — the builder decides and reports; the gates
-  judge behavior either way. Teardown subtlety frozen into G4: `^C` mid-run unwinds
-  the Sync task → Async cancels the render fiber → cursor-restore must live in the
-  render fiber's `ensure` (NOT a new engine `detach`, since engine.rb is frozen).
-  `UI::Mode` frozen → use real readers `mode.color`/`mode.animate` (NOT `?`
-  predicates). 1 lane, main checkout, freeze **`8c59784`**, gates **G0–G7 + M1
-  (human real-TTY smoke)** at `docs/gates/ui-interactive.md`. Builder: **Sonnet 4.6
-  via `claude -p`** (2nd such dispatch; canary green @ `claude` 2.1.177). Block
-  `.architect/ui-interactive-01.block.md`, run-log
-  `.architect/ui-interactive-01.last-run.jsonl`. **A fresh session post-flights →
-  judges G0–G7 → arbitrates PHASE-0 → hands M1 to the human → merges `--no-ff` only
-  on PASS + M1 sign-off.** CF7 + CF8 stay OPEN (state/* + shell.rb — out of scope).
-- **Slice B build — DONE (builder), POST-FLIGHT PASS, PRESERVED `2eab644`; GATES
-  PENDING (rule 4 — this session dispatched it, so it cannot judge).** Builder
-  (Sonnet 4.6 via `claude -p`, 82 turns, $3.23, exit 0) built
-  `ui/interactive_reporter.rb` + the `cli/sync.rb` `mode.animate` branch + 4 gems
-  in 1 lane (main checkout). **Post-flight integrity PASS:** `git log 8c59784..` no
-  builder commits; changes ⊆ frozen lane set (gemspec, Gemfile.lock, cli/sync.rb,
-  sync_test.rb extended; interactive_reporter.rb + its test new; no `spinner.rb` —
-  design didn't need it, allowed); **`sync/engine.rb` byte-unchanged**;
-  `docs/gates/` diff-clean; gemspec adds **exactly** the 4 gems (`~>` pinned).
-  Committed builder dirty work to `slice/ui-interactive` @ **`2eab644`**;
-  integration smoke green (architect re-ran **309/1105/0/0/0**, `standardrb` 0 —
-  matches builder). **Did NOT judge gates (rule 4).** **JUDGMENT TARGETS for the
-  fresh session:** (1) **Spike chose the hand-rolled `tty-cursor`+`pastel`
-  renderer** (the PRD-blessed fallback), NOT `tty-progressbar::Multi` — verify the
-  spike evidence (clean in-place repaint, cursor-restore via the render fiber's
-  `ensure` on task-stop, thread delta 0) and that the chosen design satisfies
-  G1–G4. (2) **✅ RESOLVED via human ruling 2026-06-14 — dropped the unused
-  `tty-progressbar` dep.** It was the COMPLETE_WITH_CONCERNS issue: declared only
-  to satisfy G0's "4 gems" but unused by the hand-rolled renderer (zero refs in
-  lib/test/bin) and the sole cause of the `unicode-display_width` 3.2.0→2.6.0
-  downgrade. Removed from the gemspec; `bundle update unicode-display_width`
-  restored 3.2.0 (+ unicode-emoji). Slice now adds **3** gems (pastel, tty-cursor,
-  tty-screen); the `Gemfile.lock` diff vs freeze is **purely additive** (+pastel
-  +tty-color +tty-cursor +tty-screen), unicode deps unchanged from freeze; suite
-  still 309/1105/0/0/0, lint 0. Architect inline fix (CF4 precedent) @ **`362829a`**
-  on `slice/ui-interactive`. **Frozen gate G0 NOT edited (rule 3) — its "exactly 4
-  gems" is AMENDED to "3 gems (tty-progressbar dropped)" by this logged human
-  ruling; the judge quotes the frozen gate + the amendment and reconciles.**
-  (3) Confirm G4 cursor-restore lives in the fiber `ensure` (engine.rb frozen) and
-  the Slice-6 exit-130 path is un-regressed. Lane report:
-  `docs/lanes/ui-interactive-01.md`. **`slice/ui-interactive` HEAD now `362829a`;**
-  `main` stays at the post-flight commit.
-- **Goal:** keep local git clones evergreen (clean · on default branch · fresh)
-  via a `dry-cli` binary + a periodic launchd `sync` sweep. macOS, GitHub-only.
-- **Slice 1 (Foundation) — DONE & MERGED 2026-06-13.** Architect re-ran all 9
-  gates (G0–G8 PASS: `rake test` 52/152/0/0/0, `standardrb` 0, `bundle` 0),
-  arbitrated the 7 disagreements (6 ACCEPT, 1 MODIFY), merged `slice/foundation`
-  → `main` (`7569d95`), integration smoke green. One latent defect logged
-  (forge `--no-source`), folded into Slice 2 (gate G11).
-- **Slice 2 (Sync engine) — JUDGED PASS & MERGED 2026-06-13.** Architect re-ran
-  all 13 gates (G0–G12 **PASS**: `rake test` 85/296/0/0/0, `standardrb` 0,
-  `bundle` 0, no new gems), read the diff against PRD §3.3/§5 + the no-data-loss
-  invariant (G3/G4/G5-dirty all assert byte-integrity), re-verified `gh` argv vs
-  live `gh` 2.93 (CF2 closed), arbitrated all 8 disagreements (8 ACCEPT, 1 with
-  a carry-forward CF3). Slice-level verdict **CONTINUE**. Merged
-  `slice/sync-engine` → `main` (`--no-ff`; merge sha in session log), integration smoke green.
-- **Slice 3 (CLI + config CRUD + CF1) — JUDGED PASS & MERGED 2026-06-13.**
-  Full judgment over two sessions: a prior session judged G1–G9 PASS, G0 FAIL
-  (partial) — top-level `--help`/`version`/bare exited 1 to stderr instead of 0
-  to stdout (builder's "`--help`→exit 0" was false HEARSAY, rule 4 caught it) —
-  and raised **CF4**. CF4 fixed inline @ `b4b2d98` (`CLI.run` intercepts the
-  exact top-level argv forms before Dry::CLI, reusing `Dry::CLI::Usage`). This
-  (fresh) session re-judged **G0 only** (rule 4 — fix's author ≠ judge): re-ran
-  the suite (**152/575/0/0/0**), `standardrb` 0, `bundle` 0, no new gems, and the
-  executable sub-clause itself — top-level `--help`/`version`/bare all exit **0**
-  with usage→**stdout** (5 groups); leaf `sync --help` (0/stdout) + group `repo`
-  (1/stderr, G7-accepted) un-regressed; read the CF4 diff (sound, minimal, touches
-  only `cli.rb`+test). Protected set + `docs/gates/` diff-clean since freeze
-  `3e72e16`; no builder commits. **G0 PASS → 10/10 → CONTINUE.** Merged
-  `slice/cli` → `main` (`--no-ff` `87a3f4b`), integration smoke green. Full detail:
-  `docs/lanes/slice-3-01.md`. **CF4 CLOSED.**
-- **Slice 4 (launchd + CF3) — JUDGED PASS & MERGED 2026-06-13 (`a0c44be`).**
-  Built (combined single lane in main, freeze `153ead2`, dispatch base `d6f1587`)
-  after a first dispatch failed on `pi` worktree isolation (raw parked on
-  `salvage/slice-4-raw-mixed` `fd9ece4`). The human's manual real-Mac checklist
-  caught **2 real runtime bugs the offline DI gates missed** — `Launchd::Agent#run`
-  dropped `launchctl` from argv (ENOENT; the G2 test *codified* the bug), and
-  `Resolve.detect_bin_path` raised via `Gem.bin_path` in a source checkout — both
-  fixed inline @ `ce92ce9` (G2 argv assertions corrected, +2 regression tests).
-  **This (fresh) session judged @ `ce92ce9` (rule 4 — the prior session dispatched
-  the build AND the inline fix):** re-ran every gate myself — **G0** suite
-  **198/811/0/0/0**, `standardrb` 0, `bundle` 0 / no new gems, `--help` lists
-  `daemon`; **G1** `plutil -lint` OK on a real generated plist (abs paths, no
-  `KeepAlive`, no `~`/`$HOME`); **G2** corrected argv (`launchctl` as argv[0])
-  matches the real `ShellRunner`→`Shell.run`→`Open3` path; **G3/G4** DI-double
-  effects confirmed against the live path by the human checklist; **G5**
-  byte-preserving rename, no-op wiring leaves Slice-3 `--repo` scoping intact;
-  **G6/G7** CF3 no-data-loss holds (preserve `repo_count`/`last_listed_at`, set
-  `last_error`, repos preserved, run doesn't abort), Slice 2 G10 still green;
-  **G8** file set in-scope, `docs/gates/` diff-clean since freeze, no builder
-  commits. Heeded the G2 lesson — re-checked every DI-double gate against the
-  production code, not just the test. Arbitrated the **6 PHASE-0 disagreements
-  (all ACCEPT)**; ran a **cross-model adversarial diff pass (no merge-blockers)**.
-  **8/8 (G0–G8) PASS + manual checklist PASS → CONTINUE.** Merged
-  `slice/launchd` → `main` (`--no-ff` `a0c44be`), integration smoke green
-  (198/811/0/0/0). **CF3 CLOSED.** Full detail: `docs/lanes/slice-4-01.md`;
-  manual sign-off + remaining warts archived below.
-- **Slice 5 (daemon-polish: CF5 + CF6) — JUDGED PASS & MERGED 2026-06-13
-  (`eceebff`).** One combined lane in the main checkout (the `pi`
-  worktree-isolation lesson), freeze `0c2302c`. **CF5** = `daemon stop`/`uninstall`
-  idempotent when the agent is already not-loaded (map a `bootout` status-3 / "No
-  such process" Failure to Success in `stop`+`uninstall` only; bootstrap
-  unaffected). **CF6** = harden `REPO_TENDER_LOG_MAX_BYTES` parsing so a malformed
-  value falls back to the 10 MiB default instead of crashing `sync`. **This (fresh)
-  session judged @ `ad97164` (rule 4 — prior session dispatched + preserved it):**
-  re-ran every gate myself — **G0** suite **222/890/0/0/0**, `standardrb` 0,
-  `bundle` 0 / no new gems, `--help` lists `daemon`; **G1/G2** `daemon
-  stop`/`uninstall` idempotent on a status-3 bootout — **verified the Failure
-  enters through the runner seam on a REAL `Agent`** (`make_recording_agent` builds
-  `Agent.new(runner:)`, `stub_make_agent` overrides only the factory; `runner.calls`
-  asserts the real `[bootout, disable]` argv — NOT a hand-set stub, the Slice-4 G2
-  anti-tautology trap avoided), non-benign (status 1) still exits 1 / surfaces
-  noise; **G3** benign mapping keyed on `argv[1] == "bootout"` (status 3 OR stderr
-  regex), `install`/`start` bootstrap status-3 still Failure (regression guard
-  green), existing argv assertions unmodified (agent_test purely additive); **G4**
-  `log_max_bytes` never raises across a wide input set + sync no-crash integration
-  (`REPO_TENDER_LOG_MAX_BYTES="10MB"` → exit 0); **G5** in-scope, `docs/gates/`
-  diff-clean, no builder commits. Read the production diff against CF5/CF6 intent +
-  the launchctl-argv-stability constraint (no op's argv changed; public `Agent` API
-  unchanged). Arbitrated the **6 PHASE-0 disagreements (all ACCEPT)**. Low-stakes
-  (no persistence/schema/API) → no extra cross-model pass. **6/6 (G0–G5) PASS →
-  CONTINUE.** Merged `slice/daemon-polish` → `main` (`--no-ff` `eceebff`),
-  integration smoke green (222/890/0/0/0). **CF5 + CF6 CLOSED.** Full detail:
-  `docs/lanes/daemon-polish-01.md`.
-- **PROJECT COMPLETE (PRD §7 DoD met).** All four feature slices (1→2→3→4) merged
-  and the live launchd path human-verified; CF5 + CF6 closed. repo-tender
-  is feature-complete: `dry-cli` binary + config CRUD + sync engine (evergreen
-  invariant, no-data-loss) + launchd daemon (install/uninstall/start/stop/restart/
-  status, idempotent) + log rotation. Any further work is net-new scope a human
-  would spec as a fresh PRD slice.
-- **Slice 6 (field-fixes) — JUDGED PASS & MERGED 2026-06-13 (`0b20502`).**
-  Post-completion field-fixes from the first real `sync` on a clean machine: SSH
-  transport default (`git@host:owner/name.git`, no `Username` prompt), ^C hygiene
-  (`rescue Interrupt`→exit 130, no backtrace/thread-noise), and the
-  `-W:no-experimental` binstub shebang carried into a judged commit. Fresh session
-  re-ran G0–G4 (**229/918/0/0/0**, lint 0, no new gems), read the diff vs intent,
-  finalized 3 disagreements (all ACCEPT; #1 caught a false "atomic write" claim in
-  the gate prose → CF7). Human ran M1–M3 live (SSH/^C/no-warning) → PASS. Merged
-  `--no-ff`, integration smoke green. **Two OPEN non-blocking carry-forwards remain:
-  CF7** (`State::Store.write` not atomic — latent, `state/*` out of scope) and
-  **CF8** (`Shell.run` global `report_on_exception` leaks `false` under concurrency
-  — benign in the one-shot/launchd lifecycle). Both are tidy-ups for a future slice,
-  not data-loss/correctness blockers.
+**Status (2026-06-14): repo-tender is feature-complete; every epic is merged to `main`. No open gate, no blocking carry-forward.** Detail for each finished slice lives in `docs/lanes/<slice>.md` and the Session log below — this section is the table of contents.
+
+- **Latest — slice `cf-cleanup` (CF7+CF8+CF9): JUDGED 15/15 gates PASS → CONTINUE & MERGED `--no-ff` `274ef3d`.**
+  Three robustness carry-forwards in 3 disjoint worktree-isolated lanes: **CF7** atomic `State::Store.write` (same-dir temp + `File.rename`, EXDEV-safe); **CF8** refcount the `report_on_exception` suppression inside `Shell.run` (single-reactor-safe, no Mutex; set-once-at-startup pre-rejected); **CF9** org fan-out last-resort `rescue` (CF3-preserving failed row, mirrors `process_one`) + `ensure`-guarded `detach`. Fresh session re-ran every gate @ `5da95e8`: suite **364/1302/0/0/0**, lint 0, no new gems, test diffs additions-only (07 +56/−0, 08 +40/−0, 09 +167/−0), per-lane scope disjoint, **zero builder commits**, gates rule-3 clean; cross-model adversarial pass on CF7+CF9 → **no issues vs intent**. Integration smoke on merged `main`: 364/1302/0/0/0, lint 0. Lane reports: `docs/lanes/cf-cleanup-{07,08,09}.md`. **New non-blocking notes CF10/CF11 logged in the ledger** (cross-process state lost-update; SIGINT temp-orphan + dead `State::Store.update`).
+
+- **Done & merged (full detail in the Session log + lane reports):**
+  - **Feature slices 1→6** — Foundation · Sync engine · CLI · launchd · daemon-polish · field-fixes. `dry-cli` binary + config CRUD + sync engine (evergreen invariant, no-data-loss) + launchd daemon (idempotent install/uninstall/start/stop/restart/status) + log rotation. PRD §7 DoD met.
+  - **CLI-UX epic A+B+C** — Mode + Reporter event seam + Plain/JSON renderers (A `ui-foundation`) → fiber-driven live `sync` progress with **NO Ruby Thread** (B `ui-interactive` + `compact` + `sync-startup`) → color rollout across every command (C `color-rollout`). Colorful interactively; ANSI-free when piped / `--plain` / `--json` / `NO_COLOR` / under launchd. PRD §7 DoD met.
+
+- **Carry-forwards:** CF1–CF9 + tty-screen all **CLOSED**. **CF10** (no inter-process lock on `state.yaml` → last-writer-wins clobber under overlapping `sync` runs) and **CF11** (SIGINT temp-orphan in `State::Store.write` + dead `State::Store.update`) are **new, non-blocking** — see the Carry-forward ledger.
+
+- **Next:** no open slice. Any further work is net-new scope a human would spec as a fresh PRD slice.
+
 
 ## Pointers
 
@@ -558,16 +268,18 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 
 | # | Item | Where it lands | From |
 |---|------|----------------|------|
-| CF1 | `refresh_interval` human durations (`6h`/`90m`) must parse at the **config-load layer** (PRD §3.1 documents them in the hand-editable config file), not just CLI input. Until done, PRD §3.1's `6h` example is load-incompatible. | **Slice 3** gate | Disagreement #1 ruling (MODIFY) |
+| CF1 | `refresh_interval` human durations (`6h`/`90m`) must parse at the **config-load layer** (PRD §3.1 documents them in the hand-editable config file), not just CLI input. Until done, PRD §3.1's `6h` example is load-incompatible. | ✅ **CLOSED** — `Config::Duration.parse` normalizes `6h`/`90m`/`45s`/`30d` (+ bare integer) → seconds at the **config-load layer** (`config/duration.rb`); `test_store_load_normalizes_6h_to_21600` proves a hand-edited `refresh_interval: 6h` round-trips. Merged in Slice 3. | Disagreement #1 ruling (MODIFY) |
 | CF2 | Forge `--no-source` invalid `gh` flag → drop it; rely on authoritative `parse_repos` filter. | ✅ **CLOSED** — Slice 2 gate G11 PASS (argv valid, verified vs live `gh`). | Slice 1 judgment |
 | CF3 | `State::Store::Org` should carry an org-list `last_error` (text), and an org-list `Failure` should **not** clobber the prior good `repo_count`/`last_listed_at` (currently `prev.orgs.merge` overwrites it with nil/0). Schema change to `state/store.rb`. Not a no-data-loss violation (repos are preserved); cosmetic state regression only. | ✅ **CLOSED** — Slice 4 G6/G7 PASS (`Org#last_error` round-trips; `expand_orgs` preserves prior good `repo_count`/`last_listed_at` + sets `last_error`; repos preserved; Slice 2 G10 green). Merged `a0c44be`. | Slice 2 disagreement #5 ruling (ACCEPT) |
 | CF4 | Top-level `repo-tender --help`, `repo-tender version`, and bare `repo-tender` must print usage/version to **stdout** and **exit 0** (gate G0). Were hitting Dry::CLI's no-leaf `Usage.call`→`exit(1)` path. | ✅ **CLOSED** — fixed inline @ `b4b2d98`, re-judged G0 PASS in a fresh session (rule 4) and merged to `main` (`87a3f4b`). Top-level `--help`/`version`/bare exit 0 to stdout; leaf/group un-regressed. | Slice 3 judgment (G0 FAIL) + disagreement #1 ruling |
 | CF5 | `daemon uninstall` / `stop` surface `launchctl bootout`'s `Boot-out failed: 3: No such process` (status 3) as an error line on stderr when the agent isn't currently loaded/running — the COMMON case at a 6h interval. `uninstall` still succeeds + removes the plist (cosmetic noise), but `stop` short-circuits on the bootout Failure and returns exit 1 (wrong — stopping an already-stopped job should be idempotent success). Treat launchctl "No such process" / "Could not find specified service" (status 3) as **already-not-loaded success**, not a Failure. | ✅ **CLOSED** — Slice 5 G1/G2/G3 PASS (`Agent#benign_bootout_failure?` keyed on `argv[1]=="bootout"`; `stop`/`uninstall` idempotent on status-3; non-benign still surfaces; bootstrap unaffected). Merged `eceebff`. | Slice 4 manual checklist (human) |
 | CF6 | `cli/sync.rb` `rotate_plist_logs` does `Integer(ENV["REPO_TENDER_LOG_MAX_BYTES"] \|\| DEFAULT)` with no rescue — a malformed value (e.g. `"10MB"`) raises `ArgumentError` and crashes the entire `sync` run before any repo work. Operator-set escape hatch; loud failure, no data loss. Validate/clamp the env var (fall back to the 10 MiB default + warn on parse failure). | ✅ **CLOSED** — Slice 5 G4 PASS (`Sync::Run#log_max_bytes` never raises; falls back to 10 MiB default + warns; sync no-crash integration green). Merged `eceebff`. | Slice 4 cross-model adversarial review |
-| CF7 | `State::Store.write` (`lib/repo_tender/state/store.rb:64-69`) is a **direct `File.write`, NOT temp-write+rename** — a SIGINT (or crash) landing in the kernel during the `write(2)` of `state.yaml` can leave a truncated/corrupt file. Pre-existing since Slice 1; latent. Harden to atomic temp+rename (write sibling tempfile, `File.rename`). Low probability (single small write at run end; the Slice 6 ^C rescue already prevents the common mid-engine interrupt from reaching the write). | 🚧 **BUILT (UNJUDGED)** — lane `cf-cleanup-07` on `slice/cf-cleanup` (freeze `5106b7b`): same-dir temp + `File.rename`, rescue deletes temp + re-raises; +56/−0 tests (ENOSPC mid-write injection proves original survives). Gates G7.x pending fresh-session judgment. | Slice 6 disagreement #1 (builder caught the gate prose's false "already atomic" claim) |
-| CF8 | `Shell.run`'s `Thread.report_on_exception` save/restore (`lib/repo_tender/shell.rb:59-69`) mutates a **process-global** flag, but `Shell.run` runs **concurrently** under `Sync{}` (fibers interleave at `Open3.capture3`'s thread-join). Architect empirically confirmed (8 overlapping runs) the global is **left `false` after concurrent runs unwind** — the last fiber's `ensure` restores its own captured `prev` (often already `false`). Does NOT defeat G3 (reader threads are born `false` before any fiber-yield, so noise stays suppressed and M2 is safe) and is benign in repo-tender's lifecycle (sync is terminal; fresh process per launchd run; zero app-owned threads created post-sync). Tidy fix (future slice): make suppression concurrency-safe — refcount the active `Shell.run` calls and only restore when the last exits, or (one-shot CLI) set `report_on_exception=false` once at startup without restoring. | 🚧 **BUILT (UNJUDGED)** — lane `cf-cleanup-08` on `slice/cf-cleanup` (freeze `5106b7b`): **refcount-inside-`Shell.run`** (set-once-at-startup pre-rejected — out of lane + mutates a gem-consumer global); no Mutex, justified by the single-reactor cooperative-fiber model; +40/−0 tests (3 overlapping runs → global restored to `true`, suppression `false` during overlap), the 2 existing tests pass unchanged. Gates G8.x pending judgment. | Slice 6 G3 architect adversarial pass (empirical concurrency probe) |
-| CF9 | The concurrent org fan-out in `Engine#expand_orgs` (`sync/engine.rb:193-223`) lacks the last-resort `rescue => e` that the repo sweep's `process_one` has (`:371-377`). A `list_org` that **raises** (vs returns `Failure`) — e.g. `gh` emitting schema-violating JSON so `parse_repos` hits `nil.split`/`KeyError` (`github.rb:84`) — propagates through `inner.wait` → `org_barrier.wait` → out of `Engine#call` as a raw raise, aborting all other orgs + the entire repo sweep and writing no state. Compounded by `@reporter.detach` not being `ensure`-guarded now that `attach` fires before expansion (`:96`/`:139`). **NOT a regression** (the old sequential `expand_orgs` had the identical no-rescue gap; raise-path outcome unchanged) and **NOT a no-data-loss violation** (no write reached → on-disk `state.yaml` untouched). The gated isolation is about `Result.Failure`, which IS handled (GS2/GS3/G10 green). Low probability (`gh` violating its own JSON schema). Fix (future slice): give the org fiber the same rescue→recorded-failed-row treatment as `process_one`, and wrap the attach…detach span in `ensure`. | 🚧 **BUILT (UNJUDGED)** — lane `cf-cleanup-09` on `slice/cf-cleanup` (freeze `5106b7b`): org-fiber last-resort `rescue` records a CF3-preserving failed row + `ensure`-guarded `detach`; +167/−0 tests (raising `list_org` → Success returned, CF3 counts preserved, other orgs/repos processed, state written; first-run raise → repo_count 0; reporter-raise → detach still fires once). Gates G9.x pending judgment. | sync-startup judgment — cross-model adversarial pass (finding #1/#7) |
-| tty-screen dead-dep | `tty-screen` is declared in the gemspec (one of the 3 amended gems) but **unused** (zero refs in `lib`/`test`/`bin` — the width require was dropped in the compact rewrite, compact disagreement #4). Analogous to the `tty-progressbar` drop (human ruling 2026-06-14). Not a gate failure (G0/GS0 require *no new gems beyond the declared set*, satisfied). Recommend a trivial human-inline drop → 2 gems (pastel, tty-cursor), making the lock leaner. Defer if a future width-truncation feature (long ✗ error lines wrapping — see below) would reintroduce it. | ⏳ **OPEN** — cosmetic/cleanliness, non-blocking. Trivial inline drop or keep for width-truncation. | compact + sync-startup judgment targets |
+| CF7 | `State::Store.write` (`lib/repo_tender/state/store.rb:64-69`) is a **direct `File.write`, NOT temp-write+rename** — a SIGINT (or crash) landing in the kernel during the `write(2)` of `state.yaml` can leave a truncated/corrupt file. Pre-existing since Slice 1; latent. Harden to atomic temp+rename (write sibling tempfile, `File.rename`). Low probability (single small write at run end; the Slice 6 ^C rescue already prevents the common mid-engine interrupt from reaching the write). | ✅ **CLOSED** — JUDGED G7.0–G7.4 PASS → merged `274ef3d` (2026-06-14). Same-dir temp + `File.rename` (EXDEV-safe), rescue deletes temp + re-raises; +56/−0 tests (ENOSPC mid-write injection proves original survives). Architect re-ran all gates + cross-model adversarial pass: no issues vs intent. | Slice 6 disagreement #1 (builder caught the gate prose's false "already atomic" claim) |
+| CF8 | `Shell.run`'s `Thread.report_on_exception` save/restore (`lib/repo_tender/shell.rb:59-69`) mutates a **process-global** flag, but `Shell.run` runs **concurrently** under `Sync{}` (fibers interleave at `Open3.capture3`'s thread-join). Architect empirically confirmed (8 overlapping runs) the global is **left `false` after concurrent runs unwind** — the last fiber's `ensure` restores its own captured `prev` (often already `false`). Does NOT defeat G3 (reader threads are born `false` before any fiber-yield, so noise stays suppressed and M2 is safe) and is benign in repo-tender's lifecycle (sync is terminal; fresh process per launchd run; zero app-owned threads created post-sync). Tidy fix (future slice): make suppression concurrency-safe — refcount the active `Shell.run` calls and only restore when the last exits, or (one-shot CLI) set `report_on_exception=false` once at startup without restoring. | ✅ **CLOSED** — JUDGED G8.0–G8.4 PASS → merged `274ef3d` (2026-06-14). **refcount-inside-`Shell.run`** (set-once-at-startup pre-rejected — out of lane + mutates a gem-consumer global); no Mutex, justified by the single-reactor cooperative-fiber model; +40/−0 tests (3 overlapping runs → global restored to `true`, suppression `false` during overlap — a distinguishing test: old code ends `false`), the 2 existing tests pass unchanged. | Slice 6 G3 architect adversarial pass (empirical concurrency probe) |
+| CF9 | The concurrent org fan-out in `Engine#expand_orgs` (`sync/engine.rb:193-223`) lacks the last-resort `rescue => e` that the repo sweep's `process_one` has (`:371-377`). A `list_org` that **raises** (vs returns `Failure`) — e.g. `gh` emitting schema-violating JSON so `parse_repos` hits `nil.split`/`KeyError` (`github.rb:84`) — propagates through `inner.wait` → `org_barrier.wait` → out of `Engine#call` as a raw raise, aborting all other orgs + the entire repo sweep and writing no state. Compounded by `@reporter.detach` not being `ensure`-guarded now that `attach` fires before expansion (`:96`/`:139`). **NOT a regression** (the old sequential `expand_orgs` had the identical no-rescue gap; raise-path outcome unchanged) and **NOT a no-data-loss violation** (no write reached → on-disk `state.yaml` untouched). The gated isolation is about `Result.Failure`, which IS handled (GS2/GS3/G10 green). Low probability (`gh` violating its own JSON schema). Fix (future slice): give the org fiber the same rescue→recorded-failed-row treatment as `process_one`, and wrap the attach…detach span in `ensure`. | ✅ **CLOSED** — JUDGED G9.0–G9.4 PASS → merged `274ef3d` (2026-06-14). Org-fiber last-resort `rescue` (mirrors `process_one`) records a CF3-preserving failed row + `ensure`-guarded `detach` (exactly-once on success/write-failure-return/escaping-raise); +167/−0 tests (raising `list_org` → Success returned, CF3 counts preserved, other orgs/repos processed, state written; first-run raise → repo_count 0; reporter-raise → detach still fires once). Architect re-ran all gates + cross-model adversarial pass: no issues vs intent. | sync-startup judgment — cross-model adversarial pass (finding #1/#7) |
+| tty-screen dead-dep | `tty-screen` is declared in the gemspec (one of the 3 amended gems) but **unused** (zero refs in `lib`/`test`/`bin` — the width require was dropped in the compact rewrite, compact disagreement #4). Analogous to the `tty-progressbar` drop (human ruling 2026-06-14). Not a gate failure (G0/GS0 require *no new gems beyond the declared set*, satisfied). Recommend a trivial human-inline drop → 2 gems (pastel, tty-cursor), making the lock leaner. Defer if a future width-truncation feature (long ✗ error lines wrapping — see below) would reintroduce it. | ✅ **CLOSED** — dropped in Slice C `color-rollout` (RC0 PASS); gemspec/lock now the lean set (`pastel`, `tty-cursor`). Merged `a2e6b26`. | compact + sync-startup judgment targets |
+| CF10 | **No inter-process lock on `state.yaml`.** CF7 made each write atomic (no torn file), but two overlapping `sync` processes (launchd `StartInterval` tick fires mid-run, OR an operator runs `repo-tender sync` while the scheduled job runs) each `State::Store.load` → build → atomic-rename independently → **last-writer-wins whole-file clobber** (lost org/repo rows; the file is always a *complete valid* emit, just stale). No `flock`/lockfile anywhere. Pre-existing; surfaced (not introduced) by the CF7 adversarial pass. Fix (future slice): `flock(LOCK_EX)` a sidecar lockfile around the load→write span in `Sync::Engine#call`, or `O_EXCL` pidfile. | ⏳ **OPEN** — non-blocking; atomicity holds (no corruption), only staleness under concurrent runs. | cf-cleanup CF7 cross-model adversarial pass (2026-06-14) |
+| CF11 | **`State::Store.write` temp-orphan on SIGINT + dead `State::Store.update`.** The bare `rescue` in `write` catches only `StandardError`, so an `Interrupt`/non-`StandardError` landing between `File.write(tmp)` and `File.rename` skips the `File.delete(tmp)` cleanup → leaves a harmless `state.yaml.tmp.<pid>` orphan (live file uncorrupted — CF7 intent intact). Also: `State::Store.update` has **zero callers** (grep lib/exe/bin/test) — dead code. Fix (future slice): `rescue Exception`/`ensure`-clean the temp; delete `State::Store.update`. | ⏳ **OPEN** — cosmetic (orphan temp) + dead-code removal, non-blocking. | cf-cleanup CF7 cross-model adversarial pass (2026-06-14) |
 
 ## Slice 1 disagreements — RULED (full reasoning: `docs/lanes/slice-1-01.md` §1)
 
@@ -785,3 +497,4 @@ richer `daemon status`.
 | 2026-06-14 | architect | color-rollout (CLI-UX C) | (merge, this commit) | **RC0–RC6 PASS → CONTINUE + merged** | **Fresh session judged Slice C @ `slice/color-rollout` `4782c85` (rule 4 — dispatched none).** Re-ran the suite myself: **358/1258/0/0/0**, `standardrb` 0, `--help` 5 groups. **RC0** PASS (suite green; gemspec diff = only the tty-screen removal; lock drops tty-screen + nothing else → 2 gems). **RC1** PASS — opened the new color tests in all 5 cli test files: color-ON driven by a `StringIO` subclass whose `tty?==true` → real `UI::Mode.resolve` → `:pretty`, SGR regex `/\e\[[0-9;]*m/` asserted on real `cmd.call` output; color-OFF via `--no-color`, `NO_COLOR` (through the `CLI.env` seam), and non-TTY — non-tautological. **RC2** PASS — `status` byte-identical in `:plain` (existing `status_test.rb` unchanged) + a test asserting `plain == pretty.gsub(SGR,"")`; production colorizes ONLY the STATUS cell via a `STATUS_COLORS` map (clean→green, dirty/diverged/wrong_branch/detached→yellow, error→red). **RC3** PASS — confirmations colored in `:pretty`, byte-identical in `:plain`; `fail_with`/stderr errors untouched. **RC4** PASS — `git diff c0701ee.. -- test/repo_tender/cli/*_test.rb` = **+N/−0 on all 5 files** (pure additions, zero existing-body edits — the anti-gaming/byte-compat gate). **RC5** PASS — each command resolves `UI::Mode.resolve(flags:, env: CLI.env, out: out)` and reads `mode.color`; no re-implemented precedence. **RC6** PASS — files ⊆ MAY-TOUCH, no builder commits (`git log c0701ee..` = 2 architect commits only), MUST-NOT-TOUCH (`ui/mode.rb`/all reporters/`sync/engine.rb`/`cli/sync.rb`/`cli.rb`/`shell.rb`/`repo_plan.rb`) byte-unchanged, `docs/gates/` clean. Read the production diffs vs intent (idiomatic per-command `Pastel.new(enabled: mode.color)`; byte-compat preserved). Low-stakes display-only (no persistence/schema/API) → no separate cross-model pass (ui-foundation/Slice-5 precedent). No human gate (SGR fully headless-testable; no animation). 0 PHASE-0 disagreements. Merged `slice/color-rollout` → `main` (`--no-ff`); clean (slice strictly ahead of freeze `c0701ee`, zero conflicts); integration smoke green (re-ran 358/1258/0/0/0, lint 0, --help 5 groups, tty-screen absent from lock). **🎉 CLI-UX EPIC COMPLETE (PRD §7 DoD).** CF7/CF8/CF9 remain OPEN (non-blocking future tidy-ups). |
 | 2026-06-14 | architect | ui-foundation | 59bc565 (merge) | **G0–G7 PASS → CONTINUE** | Fresh session judged Slice A @ `1179834` (rule 4 — prior session dispatched + preserved). Re-ran every gate myself: G0 291/1068/0/0/0, lint 0, no new gems, --help 5 groups; G1 `Mode.resolve` table on real resolve (incl `--no-color`>`CLICOLOR_FORCE`, `NO_COLOR=""` no-op, immutability); G2 `engine_test.rb` additions-only (verified), default NullReporter, byte-identical state.yaml, engine diff keeps result tuples unchanged; G3 recording reporter + real-temp-git 4-scenario @ conc 4 — started+terminal pair per ref, terminal status == real state row, raise→repo_failed+run completes; G4 real Plain/Json reporters ANSI-free + JSON.parse-per-line; G5 `SyncRun.options` introspection (4 flags, no `:daemon`) + `sync --daemon` rejected exit 1; G6 piped subprocess ANSI-free + `synced N repo(s)` preserved + invalid-ref→stderr exit 1 (live-reproduced on 422 real repos); G7 15 files ⊆ Lane set, no MUST-NOT-TOUCH, no builder commits, gates diff-clean. Read full diff vs PRD §3/§5 + no-behavior-change invariant. Arbitrated 7 disagreements D1–D7 (all ACCEPT; D5 repo_failed→out per G4's stated-alternate-stream latitude). Low-stakes → no separate cross-model pass. Merged `slice/ui-foundation`→`main` (`--no-ff` `59bc565`), integration smoke green (291/1068/0/0/0, lint 0). **Slice B next.** |
 | 2026-06-14 | architect | cf-cleanup (CF7+CF8+CF9) | 5da95e8 (slice/cf-cleanup) | post-flight PASS; gates pending (rule 4) | Spec'd 3 disjoint carry-forwards as one slice, **3 parallel worktree-isolated lanes** (file sets checked: zero overlap). Froze gates G7.x/G8.x/G9.x @ `docs/gates/cf-cleanup.md` and committed (`5106b7b`) before dispatch. **First fan-out died:** a backgrounded launcher spawned the builders via shell `&` then exited → orphaned, all 3 killed at 12:44 (no `result` events, partial work). Re-dispatched via `claude -p --continue`, **each lane its own harness-tracked background task** (orphan-proof) — resumed the killed sessions and finished. **Post-flight PASS (all 3):** no builder commits; each touched only its {lib, test, lane-report}; test diffs additions-only (07 +56/−0, 08 +40/−0, 09 +167/−0); gemspec/lock byte-unchanged (no new gems); gates diff-clean; cross-lane MUST-NOT-TOUCH respected. Committed each lane on its branch, merged `--no-ff` sequentially onto `slice/cf-cleanup` — **zero conflicts** (lanes truly disjoint). Integration smoke (after each merge + final): **364/1302/0/0/0**, lint 0; combined `lib/` diff +76/−45. CF8 = refcount-inside-`Shell.run` (set-once-at-startup pre-rejected); CF7 = same-dir temp + `File.rename` (EXDEV-safe); CF9 = CF3-preserving org rescue + `ensure` detach. **Did NOT judge (rule 4 — dispatched this build).** Fresh session judges G7/G8/G9 @ `5da95e8`, runs the cross-model adversarial pass on CF7+CF9, merges `--no-ff` only on PASS. Costs: 07 $0.72/24t, 08 $0.42/12t, 09 $1.06/24t. `main` stays `5106b7b`. |
+| 2026-06-14 | architect | cf-cleanup (CF7+CF8+CF9) | 274ef3d (merge) | **15/15 (G7.0–G7.4·G8.0–G8.4·G9.0–G9.4) PASS → CONTINUE + merged** | Fresh session JUDGED `slice/cf-cleanup` @ `5da95e8` (rule 4 — prior session dispatched). Re-ran every gate myself: suite **364/1302/0/0/0**, `standardrb` 0, no new gems. Anti-gaming: all 3 test files additions-only (07 +56/−0, 08 +40/−0, 09 +167/−0). Integrity: lineage freeze→3 builder-raw→3 `--no-ff` merges, **zero stray builder commits** (`git log 5106b7b..` per lane = 1 architect preserve commit each), per-lane scope disjoint (07 store.rb-only/`config/store.rb` byte-unchanged; 08 shell.rb-only/no entrypoint; 09 engine.rb-only), `docs/gates/` rule-3 clean. Read each production diff vs intent: **CF7** same-dir `path.tmp.<pid>` (no EXDEV) + `File.write`/`File.rename`/rescue-cleanup, emit/validate/early-return untouched; **CF8** class-ivar refcount (mandated, not set-once), distinguishing concurrency test; **CF9** rescue mirrors Failure branch (CF3-preserved), `begin…ensure detach` exactly-once on all 3 paths, G9.2 proves detach-on-escape. **Cross-model adversarial pass on CF7+CF9** (mandated, higher-stakes): NO REAL ISSUES vs frozen intent — surfaced 2 pre-existing non-blocking notes → **CF10** (cross-process lost-update) + **CF11** (SIGINT temp-orphan + dead `State::Store.update`). 0 PHASE-0 disagreements (lanes pre-frozen/mandated; lane 08 explicitly none — logged as minor process note). Merged `slice/cf-cleanup` → `main` (`--no-ff` `274ef3d`); clean auto-merge (slice touched only code+lane-reports; main's lone divergent commit was doc-only). Integration smoke on merged tree green: 364/1302/0/0/0, lint 0, `--help` all groups. CF7/CF8/CF9 + tty-screen CLOSED. |
