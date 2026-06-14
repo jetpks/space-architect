@@ -24,10 +24,48 @@ module RepoTender
       opts = {}
       opts[:chdir] = chdir if chdir
       # Open3.capture3: env is a leading hash positional arg, not a kwarg.
-      stdout, stderr, status = if full_env
-        Open3.capture3(full_env, *argv, **opts)
-      else
-        Open3.capture3(*argv, **opts)
+      #
+      # Open3.capture3 spawns the child with two internal reader
+      # threads (one for stdout, one for stderr; see
+      # `rubylibdir/open3.rb` ~L644: `out_reader = Thread.new { o.read }`
+      # / `err_reader = Thread.new { e.read }`). When the `popen3`
+      # block exits via exception (e.g. the user ^C'd mid-Shell.run
+      # via SIGINT), `popen_run`'s ensure closes the read pipes from
+      # the main thread while those reader threads are still inside
+      # `o.read` / `e.read`. The mid-read close races with the reader
+      # and raises `IOError: stream closed in another thread` in the
+      # reader thread. With the default `Thread.report_on_exception
+      # = true` (since Ruby 2.5), Ruby prints a multi-line backtrace
+      # to stderr for that orphaned thread — exactly the noise
+      # Slice 6 G3 silences.
+      #
+      # We bracket the `Open3.capture3` call with a save/restore of
+      # `Thread.report_on_exception = false`. This is targeted
+      # because, at this code site, the ONLY threads in flight are:
+      #   * the main thread (this method's caller);
+      #   * Async's internal `io_select` thread
+      #     (`async/lib/async/scheduler.rb` L425) — which silences
+      #     its own report (`Thread.current.report_on_exception =
+      #     false` on that thread, not globally);
+      #   * the Open3 reader threads (the source of the noise).
+      # `lib/` has zero `Thread.new` calls; `dry-cli`, `dry-monads`,
+      # `dry-validation`, `dry-struct`, `dry-types`, `dry-schema`,
+      # `xdg` have none either (verified Slice 6 PHASE 0). So we are
+      # NOT hiding any app-owned worker-thread crashes — the only
+      # thread that can raise here is the Open3 reader thread, and
+      # the only thing it can raise is the IOError we explicitly
+      # want to silence. The original value is restored in `ensure`
+      # so we never leak the suppression past this call.
+      prev_report_on_exception = Thread.report_on_exception
+      Thread.report_on_exception = false
+      begin
+        stdout, stderr, status = if full_env
+          Open3.capture3(full_env, *argv, **opts)
+        else
+          Open3.capture3(*argv, **opts)
+        end
+      ensure
+        Thread.report_on_exception = prev_report_on_exception
       end
 
       if status.success?

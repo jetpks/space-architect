@@ -65,14 +65,34 @@ module RepoTender
     # Entrypoint. Called by bin/repo-tender. Intercepts the top-level
     # help/version forms (stdout, exit 0), otherwise hands argv to
     # Dry::CLI for command dispatch and translates the last Outcome to
-    # a process exit code.
+    # a process exit code. A `Interrupt` raised from inside command
+    # dispatch (most commonly: a SIGINT during a long-running
+    # `Shell.run`, e.g. at a `git` username prompt or mid-clone) is
+    # caught here and mapped to a clean exit code 130 (128 + SIGINT)
+    # with a single human line on stderr — the G2 ^C-hygiene fix
+    # (Slice 6). The reader-thread `IOError` noise that Open3 emits
+    # in the same scenario is suppressed at the `Shell.run` seam
+    # (see `lib/repo_tender/shell.rb`).
     def self.run(argv, stdout, stderr)
       return print_usage(stdout) if TOP_LEVEL_HELP.include?(argv)
       return print_version(stdout) if VERSION_REQUEST.include?(argv)
 
-      Dry::CLI.new(Registry).call(arguments: argv, out: stdout, err: stderr)
-      outcome = last_outcome
-      Kernel.exit(outcome&.exit_code || 0)
+      begin
+        Dry::CLI.new(Registry).call(arguments: argv, out: stdout, err: stderr)
+        outcome = last_outcome
+        Kernel.exit(outcome&.exit_code || 0)
+      rescue Interrupt
+        # Map a user ^C to a clean exit-130 with a single human line.
+        # `Kernel.exit` raises `SystemExit` (callers/tests can rescue
+        # it to inspect the status). The `at_exit` handlers run,
+        # stdio is flushed, the process exits with code 130. We do
+        # NOT blanket-rescue `StandardError` and we do NOT make
+        # non-interrupt failures exit 0 (the outcome-translation path
+        # above is unchanged for the happy / non-Interrupt failure
+        # paths).
+        stderr.puts "interrupted"
+        Kernel.exit(130)
+      end
     end
 
     # Render the top-level command-group listing (reusing Dry::CLI's

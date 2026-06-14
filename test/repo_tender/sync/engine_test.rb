@@ -843,4 +843,33 @@ class SyncEngineTest < Minitest::Test
       end
     end
   end
+
+  # ===========================================================================
+  # Slice 6 G1 — DEFAULT_URL_BUILDER emits scp-like SSH form
+  # (`git@<host>:<owner>/<name>.git`). The previous HTTPS form
+  # made a missing-repo clone prompt for
+  # `Username for 'https://github.com':`; SSH uses the user's
+  # configured SSH keys with no interactive prompt. The url_builder
+  # injection seam (G6) is unchanged — tests can still inject
+  # `->(_r) { "file://#{bare}" }` for offline clones.
+  # ===========================================================================
+  def test_default_url_builder_emits_scp_like_ssh_form_for_github
+    ref = RepoRef.new(host: "github.com", owner: "foo", name: "bar")
+    assert_equal "git@github.com:foo/bar.git",
+      Engine::DEFAULT_URL_BUILDER.call(ref)
+  end
+
+  def test_default_url_builder_emits_scp_like_ssh_form_for_ghe_style_host
+    ref = RepoRef.new(host: "git.example.com", owner: "acme", name: "widget")
+    assert_equal "git@git.example.com:acme/widget.git",
+      Engine::DEFAULT_URL_BUILDER.call(ref)
+  end
+
+  def test_default_url_builder_does_not_contain_https
+    ref = RepoRef.new(host: "github.com", owner: "foo", name: "bar")
+    url = Engine::DEFAULT_URL_BUILDER.call(ref)
+    refute_includes url, "https://", "default URL must not be HTTPS (no Username prompt)"
+    refute_includes url, "Username", "default URL must not include 'Username'"
+    assert url.start_with?("git@"), "default URL must start with 'git@' (scp-like SSH form)"
+  end
 end
