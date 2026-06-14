@@ -26,4 +26,8 @@ Gem::Specification.new do |spec|
   spec.add_dependency "dry-types", "~> 1.9"
   spec.add_dependency "dry-validation", "~> 1.11"
   spec.add_dependency "xdg", "~> 10.2"
+  spec.add_dependency "pastel", "~> 0.8"
+  spec.add_dependency "tty-cursor", "~> 0.7"
+  spec.add_dependency "tty-screen", "~> 0.8"
+  spec.add_dependency "tty-progressbar", "~> 0.18"
 end
