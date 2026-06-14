@@ -88,17 +88,22 @@
   renderer** (the PRD-blessed fallback), NOT `tty-progressbar::Multi` — verify the
   spike evidence (clean in-place repaint, cursor-restore via the render fiber's
   `ensure` on task-stop, thread delta 0) and that the chosen design satisfies
-  G1–G4. (2) **`STATUS: COMPLETE_WITH_CONCERNS` — `tty-progressbar` is declared in
-  the gemspec but UNUSED** by the chosen renderer, and it is the sole cause of the
-  `unicode-display_width` 3.2.0→2.6.0 downgrade (+ `unicode-emoji` removed); 2.6.0
-  still satisfies standard's `>= 2.4.0` and all tests/lint pass. Rule on the
-  dead-dep: keep it (literal G0 "4 gems"; keeps the door open) vs **drop the unused
-  `tty-progressbar`** (the renderer uses only pastel+tty-cursor+tty-screen; dropping
-  it likely reverts the downgrade and clears the concern). G0's *intent* was "the
-  gems the renderer needs" — lean toward dropping, but it may warrant a quick human
-  call. (3) Confirm G4 cursor-restore lives in the fiber `ensure` (engine.rb
-  frozen) and the Slice-6 exit-130 path is un-regressed. Lane report:
-  `docs/lanes/ui-interactive-01.md`. `main` stays at the dispatch-record commit.
+  G1–G4. (2) **✅ RESOLVED via human ruling 2026-06-14 — dropped the unused
+  `tty-progressbar` dep.** It was the COMPLETE_WITH_CONCERNS issue: declared only
+  to satisfy G0's "4 gems" but unused by the hand-rolled renderer (zero refs in
+  lib/test/bin) and the sole cause of the `unicode-display_width` 3.2.0→2.6.0
+  downgrade. Removed from the gemspec; `bundle update unicode-display_width`
+  restored 3.2.0 (+ unicode-emoji). Slice now adds **3** gems (pastel, tty-cursor,
+  tty-screen); the `Gemfile.lock` diff vs freeze is **purely additive** (+pastel
+  +tty-color +tty-cursor +tty-screen), unicode deps unchanged from freeze; suite
+  still 309/1105/0/0/0, lint 0. Architect inline fix (CF4 precedent) @ **`362829a`**
+  on `slice/ui-interactive`. **Frozen gate G0 NOT edited (rule 3) — its "exactly 4
+  gems" is AMENDED to "3 gems (tty-progressbar dropped)" by this logged human
+  ruling; the judge quotes the frozen gate + the amendment and reconciles.**
+  (3) Confirm G4 cursor-restore lives in the fiber `ensure` (engine.rb frozen) and
+  the Slice-6 exit-130 path is un-regressed. Lane report:
+  `docs/lanes/ui-interactive-01.md`. **`slice/ui-interactive` HEAD now `362829a`;**
+  `main` stays at the post-flight commit.
 - **Goal:** keep local git clones evergreen (clean · on default branch · fresh)
   via a `dry-cli` binary + a periodic launchd `sync` sweep. macOS, GitHub-only.
 - **Slice 1 (Foundation) — DONE & MERGED 2026-06-13.** Architect re-ran all 9
@@ -242,11 +247,13 @@ bundle exec standardrb       # exit 0
   `59bc565`.** 7 disagreements D1–D7 ACCEPT. Builder: Sonnet 4.6 via `claude -p`.
 - `docs/gates/ui-interactive.md` — CLI-UX Slice B (color + fiber-driven live
   progress, NO Thread), frozen at `8c59784` (G0–G7 CI-judgeable + M1 human
-  real-TTY smoke). **BUILT + POST-FLIGHT PASS + PRESERVED `2eab644`; GATES PENDING
-  (rule 4).** Builder: Sonnet 4.6 via `claude -p`. engine.rb byte-unchanged; spike
-  chose hand-rolled `tty-cursor`+`pastel` (not tty-progressbar::Multi). Judgment
-  targets: dead `tty-progressbar` dep (→ unicode-display_width downgrade), spike
-  evidence, G4 ensure-teardown. Smoke 309/1105/0/0/0, lint 0.
+  real-TTY smoke). **BUILT + POST-FLIGHT PASS + PRESERVED `2eab644` → dep-drop
+  `362829a`; GATES PENDING (rule 4).** Builder: Sonnet 4.6 via `claude -p`.
+  engine.rb byte-unchanged; spike chose hand-rolled `tty-cursor`+`pastel` (not
+  tty-progressbar::Multi). **G0 amended (human ruling): drop unused
+  `tty-progressbar` → 3 gems, lock purely additive (gate file NOT edited, rule 3).**
+  Open judgment targets: spike evidence vs G1–G4, G4 `ensure`-teardown + Slice-6
+  exit-130. Smoke 309/1105/0/0/0, lint 0.
 
 ## Slice 4 — launchd daemon + log rotation (+ CF3) (RESOLVED, archived)
 
@@ -385,6 +392,7 @@ FETCH_HEAD tolerance (nil/Failure/stale → fetch, never skip on absent);
 | 2026-06-13 | Slice 2 extends `scm/{client,git}.rb` (add `switch`) | Branch-switch is core to the "on default branch" evergreen invariant (G5); single lane ⇒ no parallel collision touching Slice 1 files |
 | 2026-06-13 | CF4 (G0 `--help`/`version` exit-0 fix) fixed HUMAN-INLINE, not via a corrective builder lane | Trivial ~5–10 line change in the `CLI.run` seam; skill says trivial fixes don't need the loop. Architect stays out of impl code (rule 1); a later session re-runs G0 and merges |
 | 2026-06-13 | Forge `--no-source` fix folded into Slice 2 (G11) not a Slice 1 re-dispatch | Defect isn't on any Slice 1 execution path; the engine is where the forge first runs live |
+| 2026-06-14 | Slice B: drop the unused `tty-progressbar` dep; G0's "exactly 4 gems" AMENDED to 3 (pastel, tty-cursor, tty-screen). Fixed HUMAN-INLINE on `slice/ui-interactive` @ `362829a`, NOT a corrective builder lane (CF4 precedent — trivial config change). Frozen gate file NOT edited (rule 3); amendment lives in this log + the build bullet for the judging session to reconcile | The spike chose the PRD-blessed hand-rolled `tty-cursor`+`pastel` renderer, so `tty-progressbar` was declared-but-unused (zero code refs) and the sole cause of a `unicode-display_width` 3.2.0→2.6.0 downgrade. Dropping it makes the lock diff purely additive and clears the COMPLETE_WITH_CONCERNS note. Architect stays out of impl code (rule 1); a fresh session still owns the gate verdict (rule 4) |
 | 2026-06-13 | DISPATCH MECHANISM: `pi` worktree isolation does NOT hold — bash cwd is not pinned to the launch dir; builders cd to whatever abs repo path is in their context (the MAIN checkout). Future parallel dispatch must bake the lane's worktree abs path into the block as the repo root + forbid the main path + forbid all git, OR run sequentially in main. (Update `dispatch.md` in the architect skill.) | First Slice 4 dispatch corrupted main's working tree this way; cost a full multi-hour run |
 
 ## Slice 6 (field-fixes) — JUDGED PASS & MERGED `0b20502` (2026-06-13)
@@ -561,4 +569,5 @@ richer `daemon status`.
 | 2026-06-14 | architect | ui-interactive (CLI-UX B) | 8c59784 (freeze) | n/a | **Slice B spec'd + dispatched.** Grounded (no open disagreements, nothing awaiting judgment — Slice A merged last session). Confirmed the engine event seam is ALREADY wired from Slice A (engine.rb:94/126 + repo_*/run_* present, no-ops under NullReporter) ⇒ `sync/engine.rb` MUST-NOT-TOUCH; Slice B is just `ui/interactive_reporter.rb` (+ optional spinner) + `cli/sync.rb` `mode.animate` branch + 4 gems. Spec'd 1 lane (can't split disjointly; spike-gated novel work wants one coherent context), gates **G0–G7 + M1 human real-TTY smoke** frozen `8c59784` at `docs/gates/ui-interactive.md` (generalized PRD's 6 gates to be judgeable across the bars-vs-hand-rolled spike fork; baseline 291/1068/0/0/0, lint 0). No architect research fan-out (PRD already distilled discovery research; the remaining unknown is a builder PHASE-0 spike + version pins = verify-against-reality, not web research). Canary green (`claude` 2.1.177, `--model claude-sonnet-4-6` resolves). Dispatched **1 lane in main checkout, background**, block `.architect/ui-interactive-01.block.md`, run-log `.architect/ui-interactive-01.last-run.jsonl`, `ultrathink` budget. Did NOT judge (rule 4 — dispatched this session); fresh session post-flights → judges G0–G7 → arbitrates PHASE-0 → hands M1 to human → merges `--no-ff` only on PASS + M1. `main` stays at the dispatch-record commit. |
 | 2026-06-14 | builder (sonnet 4.6) | ui-interactive | none (UNJUDGED) | builder: 309/1105/0/0/0 | Built `ui/interactive_reporter.rb` (hand-rolled `tty-cursor`+`pastel` multi-line renderer — spike chose the PRD fallback over `tty-progressbar::Multi`) + `cli/sync.rb` `mode.animate` selection branch + 4 gems, 1 lane (main checkout, `claude -p`, 82 turns, $3.23, exit 0). One render fiber via `task.async`; cursor-restore in the fiber `ensure` (verified on task-stop: cursor-show emitted, thread delta 0). No `spinner.rb` (design didn't need it). **0 PHASE-0 disagreements** (spec sound; confirmed `mode.color`/`mode.animate` readers + traced Async child-ensure-on-cancel through scheduler source). STATUS **COMPLETE_WITH_CONCERNS**: `tty-progressbar` declared-but-unused (added only to satisfy G0's "4 gems"); it forces `unicode-display_width` 3.2.0→2.6.0 (+`unicode-emoji` removed); 2.6.0 satisfies standard, all tests/lint green. No commits, no out-of-scope touches, engine.rb unchanged. |
 | 2026-06-14 | architect | ui-interactive | 2eab644 (slice/ui-interactive) | post-flight PASS; gates pending | Post-flight PASS (`git log 8c59784..` no builder commits; changes ⊆ frozen lane set; `sync/engine.rb` byte-unchanged; `docs/gates/` diff-clean; gemspec adds exactly 4 gems `~>`-pinned). Committed builder dirty work to `slice/ui-interactive` @ `2eab644`; integration smoke green (re-ran 309/1105/0/0/0, `standardrb` 0 — matches builder). Did NOT judge gates (rule 4 — dispatched this build); deferred to a fresh session. Flagged 3 judgment targets: (1) spike→hand-rolled decision + evidence vs G1–G4; (2) **dead `tty-progressbar` dep** → unicode-display_width downgrade (keep-vs-drop ruling; lean drop, maybe human call); (3) G4 `ensure`-teardown + Slice-6 exit-130 un-regressed. `main` stays `01d0fe8`. |
+| 2026-06-14 | architect (inline fix) | ui-interactive | 362829a (slice/ui-interactive) | smoke 309/1105/0/0/0, lint 0 | Human ruled: drop the unused `tty-progressbar` dep. Verified zero refs (lib/test/bin), removed the gemspec line, `bundle update unicode-display_width` restored 3.2.0; slice now adds 3 gems, `Gemfile.lock` diff vs freeze purely additive (+pastel +tty-color +tty-cursor +tty-screen). Suite 309/1105/0/0/0, standardrb 0. Architect inline fix (CF4 precedent); frozen gate G0 NOT edited (rule 3) — "4 gems"→"3 gems" amendment logged in decisions + build bullet. Did NOT judge (rule 4 — dispatched this build); fresh session reconciles the amendment + renders the verdict. |
 | 2026-06-14 | architect | ui-foundation | 59bc565 (merge) | **G0–G7 PASS → CONTINUE** | Fresh session judged Slice A @ `1179834` (rule 4 — prior session dispatched + preserved). Re-ran every gate myself: G0 291/1068/0/0/0, lint 0, no new gems, --help 5 groups; G1 `Mode.resolve` table on real resolve (incl `--no-color`>`CLICOLOR_FORCE`, `NO_COLOR=""` no-op, immutability); G2 `engine_test.rb` additions-only (verified), default NullReporter, byte-identical state.yaml, engine diff keeps result tuples unchanged; G3 recording reporter + real-temp-git 4-scenario @ conc 4 — started+terminal pair per ref, terminal status == real state row, raise→repo_failed+run completes; G4 real Plain/Json reporters ANSI-free + JSON.parse-per-line; G5 `SyncRun.options` introspection (4 flags, no `:daemon`) + `sync --daemon` rejected exit 1; G6 piped subprocess ANSI-free + `synced N repo(s)` preserved + invalid-ref→stderr exit 1 (live-reproduced on 422 real repos); G7 15 files ⊆ Lane set, no MUST-NOT-TOUCH, no builder commits, gates diff-clean. Read full diff vs PRD §3/§5 + no-behavior-change invariant. Arbitrated 7 disagreements D1–D7 (all ACCEPT; D5 repo_failed→out per G4's stated-alternate-stream latitude). Low-stakes → no separate cross-model pass. Merged `slice/ui-foundation`→`main` (`--no-ff` `59bc565`), integration smoke green (291/1068/0/0/0, lint 0). **Slice B next.** |
