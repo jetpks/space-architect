@@ -74,7 +74,14 @@ module RepoTender
         return validation if validation.failure?
 
         FileUtils.mkdir_p(File.dirname(path))
-        File.write(path, emit(state))
+        tmp = "#{path}.tmp.#{Process.pid}"
+        begin
+          File.write(tmp, emit(state))
+          File.rename(tmp, path)
+        rescue
+          File.delete(tmp) if File.exist?(tmp)
+          raise
+        end
         Success(state)
       end
 
