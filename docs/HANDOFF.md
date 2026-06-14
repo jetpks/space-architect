@@ -17,17 +17,26 @@
   Threads (one Async render fiber in B); home-grown `PlainReporter`/`JsonReporter`
   (NOT `socketry/console`); no `--daemon` flag (non-TTY autodetect); reporter
   injected into the engine like `scm:`/`forge:`, default `NullReporter`.
-- **Slice A (`ui-foundation`) — FROZEN `8234421` & DISPATCHED 2026-06-14, NOT YET
-  JUDGED.** Gates G0–G7 at `docs/gates/ui-foundation.md`. 1 lane, main checkout.
-  **FIRST `claude -p --model claude-sonnet-4-6` dispatch** (slices 1–6 used
-  `pi`/minimax; canary green). Builder block `.architect/ui-foundation-01.block.md`;
-  lane report → `docs/lanes/ui-foundation-01.md`. **This session DISPATCHED → did
-  NOT judge (rule 4).** A FRESH session must: post-flight (`git log 8234421..`
-  has no builder commits; changed files ⊆ the gate's Lane file set; `docs/gates/`
-  diff-clean; no new gems) → commit builder dirty work to `slice/ui-foundation`
-  off `8234421` → re-run G0–G7 itself → read the diff vs PRD §3/§5 + the
-  no-engine-behavior-change invariant (G2: `engine_test.rb` unmodified) →
-  arbitrate PHASE-0 disagreements → merge `--no-ff` only on PASS.
+- **Slice A (`ui-foundation`) — BUILT & PRESERVED on `slice/ui-foundation` @
+  `1179834`; POST-FLIGHT PASS; GATES NOT YET JUDGED (2026-06-14).** Freeze
+  `8234421`, gates G0–G7 at `docs/gates/ui-foundation.md`. **FIRST `claude -p
+  --model claude-sonnet-4-6` build** (slices 1–6 used `pi`/minimax; canary green)
+  → STATUS COMPLETE, builder-reported 291/1068/0/0/0. **Post-flight PASS:** no
+  builder commits (`git log 8234421..` = only architect `541e7cd`); all changes ⊆
+  the gate's Lane file set (5 narrow extends + new `ui/*`, `cli/options.rb`,
+  tests); `docs/gates/` diff-clean; no new gems; clean run (exit 0, empty err
+  log). Builder dirty work committed to `slice/ui-foundation` @ `1179834`;
+  **integration smoke green — architect re-ran 291/1068/0/0/0, `standardrb` 0**
+  (smoke only, NOT a gate verdict). **This session dispatched + preserved → did
+  NOT judge (rule 4).** A FRESH session must: re-run G0–G7 itself + open each
+  named test (anti-tautology) → read diff vs PRD §3/§5 + the
+  no-engine-behavior-change invariant (G2: `engine_test.rb` additions-only) →
+  rule the **7 PHASE-0 disagreements D1–D7** (lane report; notably **D5**:
+  `PlainReporter`/`JsonReporter` send `repo_failed` to `out` with a `FAILED`
+  marker, NOT stderr — diverges from the block's clig.dev "errors→stderr" steer,
+  though G4 permitted a stated alternative stream) → merge `slice/ui-foundation`
+  `--no-ff` to `main` only on PASS. `main` stays `541e7cd`. Lane report:
+  `docs/lanes/ui-foundation-01.md`.
 - **Goal:** keep local git clones evergreen (clean · on default branch · fresh)
   via a `dry-cli` binary + a periodic launchd `sync` sweep. macOS, GitHub-only.
 - **Slice 1 (Foundation) — DONE & MERGED 2026-06-13.** Architect re-ran all 9
@@ -167,8 +176,9 @@ bundle exec standardrb       # exit 0
   disagreements ACCEPT (#1→CF7). New wart CF8 (non-blocking). Integration smoke green.
 - `docs/gates/ui-foundation.md` — CLI-UX Slice A (Mode + Reporter seam +
   Plain/JSON, no color/anim), frozen at `8234421` (G0–G7, fully CI-judgeable, no
-  manual checklist). **DISPATCHED 2026-06-14, NOT YET JUDGED** — fresh session
-  judges + merges. Builder: Sonnet 4.6 via `claude -p`.
+  manual checklist). **BUILT & PRESERVED `slice/ui-foundation` @ `1179834`,
+  post-flight PASS, smoke green (291/1068/0/0/0); GATES NOT YET JUDGED** — fresh
+  session re-runs G0–G7, rules D1–D7, merges. Builder: Sonnet 4.6 via `claude -p`.
 
 ## Slice 4 — launchd daemon + log rotation (+ CF3) (RESOLVED, archived)
 
@@ -478,3 +488,5 @@ richer `daemon status`.
 | 2026-06-13 | human | 6 | (manual checklist) | **M1–M3 PASS** | Ran the live checklist on `ddbb649`: M1 SSH clone no username prompt; M2 clean ^C → exit 130, zero backtraces; M3 installed `version`/`--help` clean, no io-event warning. Sign-off recorded in the Slice 6 section |
 | 2026-06-13 | architect | 6 | 0b20502 (merge) | **G0–G4 PASS + manual PASS → CONTINUE** | Merged `slice/field-fixes` → `main` (`--no-ff` `0b20502`) on human M1–M3 sign-off; clean auto-merge (HANDOFF kept main's judged version, no conflict markers/dupes); integration smoke green (229/918/0/0/0, lint 0, --help 5 groups, SSH default live). CF7 + CF8 remain OPEN (benign future tidy-ups). |
 | 2026-06-14 | architect | ui-foundation (CLI-UX A) | 8234421 (freeze) | n/a | **NEW EPIC.** Research + PRD done; Slice A spec'd (Mode + Reporter event seam + Plain/JSON renderers, NO color/animation — those are B/C), gates G0–G7 frozen `8234421`. 1 lane, main checkout. **FIRST `claude -p --model claude-sonnet-4-6` dispatch** (slices 1–6 used `pi`/minimax) — `claude` 2.1.177, canary green. Block `.architect/ui-foundation-01.block.md`, run-log `.architect/ui-foundation-01.last-run.jsonl`. Did NOT judge (rule 4 — dispatched this session); fresh session post-flights → judges G0–G7 → arbitrates PHASE-0 → merges `--no-ff` only on PASS. |
+| 2026-06-14 | builder (sonnet 4.6) | ui-foundation | none (UNJUDGED) | builder: 291/1068/0/0/0 | Built Mode + Reporter event seam + NullReporter/Plain/Json + `cli/options` GlobalOptions, wired `reporter:` into `Sync::Engine` + `cli/sync.rb`, in 1 lane (main checkout, `claude -p`). 7 PHASE-0 disagreements (D1–D7, all cite real files: D1 `:fetching` not emitted/uses `:fast_forwarding`; D2 `run_finished` summary = `Hash<status,count>`; D3 byte-identical-state via StubSCM+frozen clock; D4 `--no-color` > `CLICOLOR_FORCE` precedence; **D5 `repo_failed`→`out` w/ FAILED marker not stderr**; D6 `GlobalOptions` mixin verified vs dry-cli source; D7 require ordering). STATUS COMPLETE. No commits, no out-of-scope touches, no new gems. Clean run (exit 0). |
+| 2026-06-14 | architect | ui-foundation | 1179834 (slice/ui-foundation) | post-flight PASS; gates pending | Post-flight PASS (`git log 8234421..` no builder commits; changes ⊆ Lane file set; `docs/gates/` diff-clean; no new gems; empty err log). Committed builder dirty work to `slice/ui-foundation` @ `1179834`; integration smoke green (architect re-ran 291/1068/0/0/0, `standardrb` 0). Did NOT judge gates (rule 4 — dispatched this build); deferred to a fresh session. Flagged **D5** (repo_failed stream) as a judgment target. `main` stays `541e7cd`. |
