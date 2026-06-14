@@ -1,12 +1,33 @@
 # HANDOFF — repo-tender
 
-> Repo memory for the Architect Loop. Builder (minimax-m3 via pi) writes raw
-> evidence; architect (Opus 4.8) writes rulings and verdicts. Not in this file =
-> didn't happen. Keep this a short table of contents — archive finished-slice
-> detail into the slice's lane report, not here.
+> Repo memory for the Architect Loop. Builder (Sonnet 4.6 via `claude -p` as of
+> the CLI-UX epic; slices 1–6 used minimax-m3 via `pi`) writes raw evidence;
+> architect (Opus 4.8) writes rulings and verdicts. Not in this file = didn't
+> happen. Keep this a short table of contents — archive finished-slice detail
+> into the slice's lane report, not here.
 
 ## TL;DR
 
+- **🆕 NEW EPIC — CLI UX (interactive vs daemon, animated & informative output).**
+  Research + build-ready PRD done (`docs/research/cli-ux-interactive-daemon.md`,
+  `docs/prd/cli-ux.md`). 3 slices: **A `ui-foundation`** (Mode + Reporter event
+  seam + Plain/JSON renderers, NO color/animation) → **B** (interactive color +
+  fiber-driven live progress — the novel no-Threads animation, spike-gated) →
+  **C** (roll color/spinners across every command). Key frozen decisions: no Ruby
+  Threads (one Async render fiber in B); home-grown `PlainReporter`/`JsonReporter`
+  (NOT `socketry/console`); no `--daemon` flag (non-TTY autodetect); reporter
+  injected into the engine like `scm:`/`forge:`, default `NullReporter`.
+- **Slice A (`ui-foundation`) — FROZEN `8234421` & DISPATCHED 2026-06-14, NOT YET
+  JUDGED.** Gates G0–G7 at `docs/gates/ui-foundation.md`. 1 lane, main checkout.
+  **FIRST `claude -p --model claude-sonnet-4-6` dispatch** (slices 1–6 used
+  `pi`/minimax; canary green). Builder block `.architect/ui-foundation-01.block.md`;
+  lane report → `docs/lanes/ui-foundation-01.md`. **This session DISPATCHED → did
+  NOT judge (rule 4).** A FRESH session must: post-flight (`git log 8234421..`
+  has no builder commits; changed files ⊆ the gate's Lane file set; `docs/gates/`
+  diff-clean; no new gems) → commit builder dirty work to `slice/ui-foundation`
+  off `8234421` → re-run G0–G7 itself → read the diff vs PRD §3/§5 + the
+  no-engine-behavior-change invariant (G2: `engine_test.rb` unmodified) →
+  arbitrate PHASE-0 disagreements → merge `--no-ff` only on PASS.
 - **Goal:** keep local git clones evergreen (clean · on default branch · fresh)
   via a `dry-cli` binary + a periodic launchd `sync` sweep. macOS, GitHub-only.
 - **Slice 1 (Foundation) — DONE & MERGED 2026-06-13.** Architect re-ran all 9
@@ -144,6 +165,10 @@ bundle exec standardrb       # exit 0
   frozen at `af847d6` (G0–G4 automated + M1–M3 human checklist). **JUDGED G0–G4
   PASS (fresh session @ `ddbb649`) + human M1–M3 PASS → merged `0b20502`.** 3
   disagreements ACCEPT (#1→CF7). New wart CF8 (non-blocking). Integration smoke green.
+- `docs/gates/ui-foundation.md` — CLI-UX Slice A (Mode + Reporter seam +
+  Plain/JSON, no color/anim), frozen at `8234421` (G0–G7, fully CI-judgeable, no
+  manual checklist). **DISPATCHED 2026-06-14, NOT YET JUDGED** — fresh session
+  judges + merges. Builder: Sonnet 4.6 via `claude -p`.
 
 ## Slice 4 — launchd daemon + log rotation (+ CF3) (RESOLVED, archived)
 
@@ -452,3 +477,4 @@ richer `daemon status`.
 | 2026-06-13 | architect | 6 | (judgment, no merge) | **G0–G4 PASS; MERGE BLOCKED on human M1–M3** | Fresh session JUDGED Slice 6 @ `ddbb649` (rule 4 — prior session dispatched+committed). Re-ran every gate myself: G0 229/918/0/0/0, lint 0, no new gems, --help 5 groups; G1 reproducer → `git@github.com:foo/bar.git`, 3 unit tests + G6 regression green (seam unmodified); G2 interrupt_test 2/16 (SystemExit 130 + single `interrupted` + no backtrace; non-interrupt `sync --repo not-a-ref` still exits 1 with real error — not tautology); G3 shell_test 8/21, suppression targeted, reader threads born `false` (M2 safe); G4 9 files in-scope, gates clean, no builder commits. Read diff vs intent (SSH one-liner, ^C doesn't weaken errors, no-data-loss holds). Finalized 3 disagreements (all ACCEPT; #1 re-verified store.rb:76-77 direct File.write → CF7 stays OPEN). **Adversarial probe found a real concurrency wart → CF8**: `Shell.run`'s process-global `report_on_exception` save/restore leaks `false` after concurrent runs (empirically confirmed 8 overlapping runs); benign in lifecycle, non-blocking. Did NOT merge — M1–M3 (live SSH/^C/no-warning) are HUMAN-RUN; merge `--no-ff` only on human sign-off. `main` stays at handoff commit. |
 | 2026-06-13 | human | 6 | (manual checklist) | **M1–M3 PASS** | Ran the live checklist on `ddbb649`: M1 SSH clone no username prompt; M2 clean ^C → exit 130, zero backtraces; M3 installed `version`/`--help` clean, no io-event warning. Sign-off recorded in the Slice 6 section |
 | 2026-06-13 | architect | 6 | 0b20502 (merge) | **G0–G4 PASS + manual PASS → CONTINUE** | Merged `slice/field-fixes` → `main` (`--no-ff` `0b20502`) on human M1–M3 sign-off; clean auto-merge (HANDOFF kept main's judged version, no conflict markers/dupes); integration smoke green (229/918/0/0/0, lint 0, --help 5 groups, SSH default live). CF7 + CF8 remain OPEN (benign future tidy-ups). |
+| 2026-06-14 | architect | ui-foundation (CLI-UX A) | 8234421 (freeze) | n/a | **NEW EPIC.** Research + PRD done; Slice A spec'd (Mode + Reporter event seam + Plain/JSON renderers, NO color/animation — those are B/C), gates G0–G7 frozen `8234421`. 1 lane, main checkout. **FIRST `claude -p --model claude-sonnet-4-6` dispatch** (slices 1–6 used `pi`/minimax) — `claude` 2.1.177, canary green. Block `.architect/ui-foundation-01.block.md`, run-log `.architect/ui-foundation-01.last-run.jsonl`. Did NOT judge (rule 4 — dispatched this session); fresh session post-flights → judges G0–G7 → arbitrates PHASE-0 → merges `--no-ff` only on PASS. |
