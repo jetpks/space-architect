@@ -78,17 +78,10 @@ module RepoTender
         begin
           File.write(tmp, emit(state))
           File.rename(tmp, path)
-        rescue
+        ensure
           File.delete(tmp) if File.exist?(tmp)
-          raise
         end
         Success(state)
-      end
-
-      def self.update(path)
-        state = load(path).success
-        new_state = yield(state)
-        write(path, new_state)
       end
 
       def self.validate(state)

@@ -10,6 +10,7 @@ require "repo_tender/config/model"
 require "repo_tender/scm/git"
 require "repo_tender/forge/github"
 require "repo_tender/state/store"
+require "repo_tender/state/lock"
 require "repo_tender/paths"
 require "repo_tender/sync/repo_plan"
 require "repo_tender/ui/reporter"
@@ -84,67 +85,85 @@ module RepoTender
           semaphore = Async::Semaphore.new(config.concurrency, parent: task)
           barrier = Async::Barrier.new
 
-          # State is loaded once at the start (or initialized empty for
-          # a missing state.yaml). A new State object is built from
-          # the run's outcomes and written atomically at the end. Per-
-          # repo state rows that did not change are preserved.
-          state = State::Store.load(paths.state_file).success
-          now = @clock.call
+          # Acquire an exclusive advisory lock on the sidecar lockfile
+          # BEFORE loading state. Held across the entire load→write span
+          # so an overlapping run never writes and cannot clobber the
+          # in-flight run's data (CF10). Non-blocking: if another run
+          # holds the lock we bail cleanly rather than blocking forever
+          # (a blocked launchd tick would pile up on every subsequent
+          # StartInterval fire).
+          lock_result = State::Lock.acquire(paths.state_file) do
+            # State is loaded once at the start (or initialized empty for
+            # a missing state.yaml). A new State object is built from
+            # the run's outcomes and written atomically at the end. Per-
+            # repo state rows that did not change are preserved.
+            state = State::Store.load(paths.state_file).success
+            now = @clock.call
 
-          # Attach the reporter before expansion so the render fiber is
-          # alive during listing (GS4: attach fires before listing_started).
-          @reporter.attach(task)
-          begin
-            # Phase 1: org expansion (concurrent; per-org failures isolated).
-            # CF3 (Slice 4 Lane 02) passes the prev state's org map so an
-            # org-list Failure can preserve the prior good repo_count +
-            # last_listed_at instead of clobbering with 0/nil.
-            org_records, discovered_repos = expand_orgs(config, now, prev_orgs: state.orgs, task: task, semaphore: semaphore)
+            # Attach the reporter before expansion so the render fiber is
+            # alive during listing (GS4: attach fires before listing_started).
+            @reporter.attach(task)
+            begin
+              # Phase 1: org expansion (concurrent; per-org failures isolated).
+              # CF3 (Slice 4 Lane 02) passes the prev state's org map so an
+              # org-list Failure can preserve the prior good repo_count +
+              # last_listed_at instead of clobbering with 0/nil.
+              org_records, discovered_repos = expand_orgs(config, now, prev_orgs: state.orgs, task: task, semaphore: semaphore)
 
-            # Phase 2: dedupe explicit + discovered repos by (host, owner,
-            # name); explicit wins.
-            repos_to_process = dedupe(config.repos, discovered_repos)
+              # Phase 2: dedupe explicit + discovered repos by (host, owner,
+              # name); explicit wins.
+              repos_to_process = dedupe(config.repos, discovered_repos)
 
-            @reporter.run_started(total: repos_to_process.size)
+              @reporter.run_started(total: repos_to_process.size)
 
-            # Phase 3: fan out per-repo work through barrier + semaphore.
-            # Results are gathered in a mutex-protected array (barrier
-            # tasks run on a Fiber scheduler; shared mutation must be
-            # serialized). Each result is a [key, Repo | nil, error] tuple
-            # (see process_one for the shape).
-            results_mutex = Mutex.new
-            results = []
+              # Phase 3: fan out per-repo work through barrier + semaphore.
+              # Results are gathered in a mutex-protected array (barrier
+              # tasks run on a Fiber scheduler; shared mutation must be
+              # serialized). Each result is a [key, Repo | nil, error] tuple
+              # (see process_one for the shape).
+              results_mutex = Mutex.new
+              results = []
 
-            repos_to_process.each do |repo_ref|
-              barrier.async do
-                # `semaphore.async` spawns a child task and returns its
-                # Task handle. The barrier only tracks this outer task;
-                # if we don't `.wait` on the inner task, `barrier.wait`
-                # would return before the per-repo work finishes and
-                # `build_new_state` would see an empty results array.
-                inner = semaphore.async do
-                  outcome = process_one(repo_ref, config, now)
-                  results_mutex.synchronize { results << outcome }
+              repos_to_process.each do |repo_ref|
+                barrier.async do
+                  # `semaphore.async` spawns a child task and returns its
+                  # Task handle. The barrier only tracks this outer task;
+                  # if we don't `.wait` on the inner task, `barrier.wait`
+                  # would return before the per-repo work finishes and
+                  # `build_new_state` would see an empty results array.
+                  inner = semaphore.async do
+                    outcome = process_one(repo_ref, config, now)
+                    results_mutex.synchronize { results << outcome }
+                  end
+                  inner.wait
                 end
-                inner.wait
               end
+              barrier.wait
+
+              summary = results.each_with_object(Hash.new(0)) do |outcome, h|
+                _, repo, error = outcome
+                h[error ? "error" : repo.status.to_s] += 1
+              end
+              @reporter.run_finished(summary)
+
+              # Phase 4: assemble new state, write once.
+              new_state = build_new_state(state, results, org_records)
+              write_result = State::Store.write(paths.state_file, new_state)
+              if write_result.failure?
+                write_result
+              else
+                Dry::Monads::Success(new_state)
+              end
+            ensure
+              @reporter.detach
             end
-            barrier.wait
+          end
 
-            summary = results.each_with_object(Hash.new(0)) do |outcome, h|
-              _, repo, error = outcome
-              h[error ? "error" : repo.status.to_s] += 1
-            end
-            @reporter.run_finished(summary)
-
-            # Phase 4: assemble new state, write once.
-            new_state = build_new_state(state, results, org_records)
-            write_result = State::Store.write(paths.state_file, new_state)
-            return write_result if write_result.failure?
-
-            Dry::Monads::Success(new_state)
-          ensure
-            @reporter.detach
+          if lock_result == State::Lock::NOT_ACQUIRED
+            warn "repo-tender: skipped — another sync in progress"
+            Dry::Monads::Success(State::Store.load(paths.state_file).success)
+          else
+            lock_result
           end
         end
       end
