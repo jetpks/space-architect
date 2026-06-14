@@ -45,7 +45,7 @@ class InteractiveReporterTest < Minitest::Test
 
     Sync do |task|
       threads_before = Thread.list.size
-      reporter.attach(task, total: REFS.size)
+      reporter.attach(task)
       drive_reporter(reporter)
       threads_after = Thread.list.size
     end
@@ -69,7 +69,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, = make_reporter
 
     Sync do |task|
-      reporter.attach(task, total: 1)
+      reporter.attach(task)
       reporter.run_started(total: 1)
       reporter.run_finished({})
       reporter.detach
@@ -83,7 +83,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter
 
     Sync do |task|
-      reporter.attach(task, total: 1)
+      reporter.attach(task)
       reporter.repo_started(REFS[0])
       reporter.repo_finished(REFS[0], "clean")
       reporter.run_finished("clean" => 1)
@@ -98,7 +98,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, = make_reporter(cadence: 0.01)
 
     Sync do |task|
-      reporter.attach(task, total: 1)
+      reporter.attach(task)
       reporter.repo_started(REFS[0])
       sleep 0.05
       reporter.repo_finished(REFS[0], "clean")
@@ -120,7 +120,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter
 
     Sync do |task|
-      reporter.attach(task, total: 1)
+      reporter.attach(task)
       reporter.run_started(total: 1)
       reporter.repo_started(REFS[0])
       reporter.repo_finished(REFS[0], "clean")
@@ -137,7 +137,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter
 
     Sync do |task|
-      reporter.attach(task, total: REFS.size)
+      reporter.attach(task)
       drive_reporter(reporter)
     end
 
@@ -162,7 +162,7 @@ class InteractiveReporterTest < Minitest::Test
 
       Sync do |task|
         total = n_clean + nonclean.size
-        reporter.attach(task, total: total)
+        reporter.attach(task)
         reporter.run_started(total: total)
         n_clean.times do |i|
           ref = "github.com/o/clean-#{i}"
@@ -191,7 +191,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter
 
     Sync do |task|
-      reporter.attach(task, total: REFS.size)
+      reporter.attach(task)
       drive_reporter(reporter)
     end
 
@@ -207,7 +207,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter
 
     Sync do |task|
-      reporter.attach(task, total: REFS.size)
+      reporter.attach(task)
       drive_reporter(reporter)
     end
 
@@ -223,7 +223,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter
 
     Sync do |task|
-      reporter.attach(task, total: REFS.size)
+      reporter.attach(task)
       drive_reporter(reporter)
     end
 
@@ -240,7 +240,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter
 
     Sync do |task|
-      reporter.attach(task, total: REFS.size)
+      reporter.attach(task)
       drive_reporter(reporter)
     end
 
@@ -254,7 +254,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter
 
     Sync do |task|
-      reporter.attach(task, total: REFS.size)
+      reporter.attach(task)
       drive_reporter(reporter)
     end
 
@@ -273,7 +273,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter
 
     Sync do |task|
-      reporter.attach(task, total: all_refs.size)
+      reporter.attach(task)
       reporter.run_started(total: all_refs.size)
       refs_clean.each { |r|
         reporter.repo_started(r)
@@ -313,7 +313,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter(cadence: 0.01)
 
     Sync do |task|
-      reporter.attach(task, total: refs.size)
+      reporter.attach(task)
       reporter.run_started(total: refs.size)
 
       # Staggered completions: 20ms, 40ms, 60ms, 80ms.
@@ -344,7 +344,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter
 
     Sync do |task|
-      reporter.attach(task, total: 2)
+      reporter.attach(task)
       reporter.repo_started(REFS[0])
 
       stopper = task.async do
@@ -362,7 +362,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, = make_reporter
 
     Sync do |task|
-      reporter.attach(task, total: 1)
+      reporter.attach(task)
       reporter.repo_started(REFS[0])
 
       render_task = reporter.instance_variable_get(:@render_task)
@@ -383,7 +383,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter(color: false)
 
     Sync do |task|
-      reporter.attach(task, total: REFS.size)
+      reporter.attach(task)
       drive_reporter(reporter)
     end
 
@@ -400,7 +400,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter(color: true)
 
     Sync do |task|
-      reporter.attach(task, total: 1)
+      reporter.attach(task)
       reporter.repo_started(REFS[0])
       reporter.repo_finished(REFS[0], "clean")
       reporter.run_finished("clean" => 1)
@@ -415,7 +415,7 @@ class InteractiveReporterTest < Minitest::Test
     reporter, out = make_reporter(color: false, cadence: 0.01)
 
     Sync do |task|
-      reporter.attach(task, total: 1)
+      reporter.attach(task)
       reporter.repo_started(REFS[0])
       sleep 0.05
       reporter.repo_finished(REFS[0], "clean")
@@ -427,5 +427,111 @@ class InteractiveReporterTest < Minitest::Test
       "cursor-hide must be emitted even when color is off (animate still true)"
     assert_includes out.string, "\e[?25h",
       "cursor-show must be emitted even when color is off"
+  end
+
+  # ===========================================================================
+  # GS6 — Two-phase: listing then sweep; both under one attach/detach.
+  # ===========================================================================
+
+  def test_gs6_listing_phase_emits_per_org_persistent_lines
+    reporter, out = make_reporter(cadence: 0.01)
+    orgs = [
+      RepoTender::Config::OrgRef.new(host: "github.com", name: "org-a"),
+      RepoTender::Config::OrgRef.new(host: "github.com", name: "org-b")
+    ]
+
+    Sync do |task|
+      reporter.attach(task)
+      reporter.listing_started(total: orgs.size)
+      orgs.each_with_index do |org, i|
+        reporter.org_listed(org, count: (i + 1) * 10)
+      end
+      reporter.listing_finished
+      reporter.run_started(total: 1)
+      reporter.repo_started(REFS[0])
+      reporter.repo_finished(REFS[0], "clean")
+      reporter.run_finished("clean" => 1)
+      reporter.detach
+    end
+
+    result = out.string
+    # Persistent listing lines: one per org
+    assert_match(/org-a/, result, "org-a must appear in listing output")
+    assert_match(/org-b/, result, "org-b must appear in listing output")
+    assert_match(/10/, result, "org-a count (10) must appear")
+    assert_match(/20/, result, "org-b count (20) must appear")
+    # Sweep summary still appears
+    assert_match(/synced/, result, "sweep summary must appear after listing phase")
+  end
+
+  def test_gs6_listing_phase_failure_org_emits_failed_line
+    reporter, out = make_reporter(cadence: 0.01)
+    org = RepoTender::Config::OrgRef.new(host: "github.com", name: "bad-org")
+
+    Sync do |task|
+      reporter.attach(task)
+      reporter.listing_started(total: 1)
+      reporter.org_listed(org, count: nil)
+      reporter.listing_finished
+      reporter.run_started(total: 0)
+      reporter.run_finished({})
+      reporter.detach
+    end
+
+    result = out.string
+    assert_match(/bad-org/, result)
+    assert_match(/FAILED/, result)
+  end
+
+  def test_gs6_render_fiber_alive_across_both_phases
+    reporter, = make_reporter(cadence: 0.01)
+    org = RepoTender::Config::OrgRef.new(host: "github.com", name: "myorg")
+
+    Sync do |task|
+      reporter.attach(task)
+      render_task_during_listing = reporter.instance_variable_get(:@render_task)
+      refute_nil render_task_during_listing, "render task must be alive during listing phase"
+
+      reporter.listing_started(total: 1)
+      reporter.org_listed(org, count: 5)
+      reporter.listing_finished
+      reporter.run_started(total: 1)
+
+      render_task_during_sweep = reporter.instance_variable_get(:@render_task)
+      assert_equal render_task_during_listing, render_task_during_sweep,
+        "same render task must be alive across both phases (no re-attach)"
+
+      reporter.repo_finished(REFS[0], "clean")
+      reporter.run_finished("clean" => 1)
+      reporter.detach
+    end
+
+    assert_nil reporter.instance_variable_get(:@render_task), "render task must be nil after detach"
+  end
+
+  def test_gs6_listing_output_bounded_by_org_count_not_repo_count
+    # O(orgs) persistent lines in listing phase, O(non_clean) in sweep phase
+    n_orgs = 3
+    orgs = n_orgs.times.map { |i| RepoTender::Config::OrgRef.new(host: "github.com", name: "org#{i}") }
+    n_clean_repos = 20  # many clean repos, zero persistent sweep lines
+
+    reporter, out = make_reporter(cadence: 0.01)
+
+    Sync do |task|
+      reporter.attach(task)
+      reporter.listing_started(total: n_orgs)
+      orgs.each { |org| reporter.org_listed(org, count: 5) }
+      reporter.listing_finished
+      reporter.run_started(total: n_clean_repos)
+      n_clean_repos.times do |i|
+        reporter.repo_finished("github.com/o/clean#{i}", "clean")
+      end
+      reporter.run_finished("clean" => n_clean_repos)
+      reporter.detach
+    end
+
+    # n_orgs persistent listing lines + 1 summary = n_orgs + 1 newlines
+    assert_equal n_orgs + 1, out.string.count("\n"),
+      "output must be O(orgs + non_clean), not O(repos). Expected #{n_orgs + 1} newlines (#{n_orgs} listing + 1 summary)"
   end
 end

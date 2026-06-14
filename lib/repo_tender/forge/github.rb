@@ -10,8 +10,9 @@ module RepoTender
     # `gh repo list <org> --json …` implementation of Forge::Client.
     #
     # Per AGENTS.md gotcha, `gh` can silently fall back to
-    # unauthenticated (60 req/hr). We probe `gh auth status` first and
-    # surface a clear Failure rather than risking the rate-limit wall.
+    # unauthenticated (60 req/hr). We probe `gh auth status` once
+    # (via the engine calling check_authenticated before listing)
+    # and surface a clear Failure rather than risking the rate-limit wall.
     class GitHub < Client
       # Default page size for `gh repo list`. Matches gh's own --limit
       # cap; orgs with >1000 repos are out of scope for Slice 1.
@@ -21,11 +22,28 @@ module RepoTender
         @shell = shell
       end
 
+      # Probe `gh auth status`. On stderr the unauthenticated case is
+      # obvious: "You are not logged into any GitHub hosts." We treat
+      # that exact phrase as Failure; otherwise Success.
+      #
+      # Public so the engine can call it once before fanning out org
+      # listings. `list_org` no longer authenticates per-call.
+      def check_authenticated
+        # `gh auth status` writes a human-friendly summary to stdout
+        # and exits 0 when authenticated, 1 when not. We also fail
+        # when the binary is missing (status 127 from the shell).
+        result = @shell.run("gh", "auth", "status")
+        return result if result.failure?
+
+        if result.success.include?("not logged into any GitHub hosts")
+          Dry::Monads::Failure({reason: "gh not authenticated; run `gh auth login` first"})
+        else
+          Dry::Monads::Success(:authenticated)
+        end
+      end
+
       def list_org(org_ref)
         return Dry::Monads::Failure({org: org_ref.name, reason: "missing org name"}) if org_ref.name.nil? || org_ref.name.empty?
-
-        auth = check_authenticated
-        return auth if auth.failure?
 
         argv = build_argv(org_ref)
         result = @shell.run(*argv)
@@ -52,23 +70,6 @@ module RepoTender
       end
 
       private
-
-      # Probe `gh auth status`. On stderr the unauthenticated case is
-      # obvious: "You are not logged into any GitHub hosts." We treat
-      # that exact phrase as Failure; otherwise Success.
-      def check_authenticated
-        # `gh auth status` writes a human-friendly summary to stdout
-        # and exits 0 when authenticated, 1 when not. We also fail
-        # when the binary is missing (status 127 from the shell).
-        result = @shell.run("gh", "auth", "status")
-        return result if result.failure?
-
-        if result.success.include?("not logged into any GitHub hosts")
-          Dry::Monads::Failure({reason: "gh not authenticated; run `gh auth login` first"})
-        else
-          Dry::Monads::Success(:authenticated)
-        end
-      end
 
       # Parses gh's JSON output into RepoRef structs, honoring
       # include_archived / include_forks (the CLI flags are advisory;

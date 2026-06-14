@@ -31,6 +31,17 @@ module RepoTender
     #         (the :skip_fresh plan short-circuits the SCM.fetch).
     #   G10 — OrgRef expansion via the injected forge; an org-list
     #         Failure is recorded and does not abort the run.
+    #
+    # sync-startup gate wiring (GS1–GS6):
+    #   GS1 — expand_orgs fans org listings out concurrently via
+    #         Async::Barrier + Async::Semaphore(config.concurrency).
+    #   GS2 — forge.check_authenticated called ONCE before fan-out;
+    #         on auth Failure all orgs recorded failed, no list_org.
+    #   GS3 — CF3 / G10 resilience preserved (per-org failure isolated,
+    #         prior repo_count/last_listed_at preserved on failure).
+    #   GS4 — reporter events: attach → listing_started → org_listed*
+    #         → listing_finished → run_started → repo* → run_finished
+    #         → detach.
     class Engine
       extend Dry::Monads[:result]
 
@@ -80,18 +91,20 @@ module RepoTender
           state = State::Store.load(paths.state_file).success
           now = @clock.call
 
-          # Phase 1: org expansion (sequential; per-org failures isolated).
-          # see disagreement #7. CF3 (Slice 4 Lane 02) passes the
-          # prev state's org map so an org-list `Failure` can
-          # preserve the prior good `repo_count` + `last_listed_at`
-          # instead of clobbering with `0`/`nil`.
-          org_records, discovered_repos = expand_orgs(config, now, prev_orgs: state.orgs)
+          # Attach the reporter before expansion so the render fiber is
+          # alive during listing (GS4: attach fires before listing_started).
+          @reporter.attach(task)
+
+          # Phase 1: org expansion (concurrent; per-org failures isolated).
+          # CF3 (Slice 4 Lane 02) passes the prev state's org map so an
+          # org-list Failure can preserve the prior good repo_count +
+          # last_listed_at instead of clobbering with 0/nil.
+          org_records, discovered_repos = expand_orgs(config, now, prev_orgs: state.orgs, task: task, semaphore: semaphore)
 
           # Phase 2: dedupe explicit + discovered repos by (host, owner,
           # name); explicit wins.
           repos_to_process = dedupe(config.repos, discovered_repos)
 
-          @reporter.attach(task, total: repos_to_process.size)
           @reporter.run_started(total: repos_to_process.size)
 
           # Phase 3: fan out per-repo work through barrier + semaphore.
@@ -136,34 +149,80 @@ module RepoTender
 
       private
 
-      # Expands each OrgRef into RepoRefs via the injected forge. On
-      # list_org Failure, the org is recorded with the prior good
-      # `repo_count` + `last_listed_at` preserved (looked up from
-      # `prev_orgs`) and a non-nil `last_error` set to the
-      # failure's reason — CF3 (Slice 4 Lane 02). On the first-ever
-      # run for an org, `prev_orgs[key]` is nil and we fall back to
-      # `last_listed_at: nil, repo_count: 0, last_error: <reason>`.
-      def expand_orgs(config, now, prev_orgs: {})
+      # Expands each OrgRef into RepoRefs via the injected forge.
+      # Authenticates ONCE before the fan-out (GS2). On auth Failure,
+      # records all orgs failed without calling list_org (CF3 preserved).
+      # On per-org list_org Failure, the org is recorded with the prior
+      # good repo_count + last_listed_at preserved (CF3), last_error set.
+      # Fan-out is concurrent via Async::Barrier + Async::Semaphore
+      # (GS1: wall-time bounded by slowest org, not sum-of-orgs).
+      def expand_orgs(config, now, prev_orgs:, task:, semaphore:)
         org_records = {}
         discovered = []
-        config.orgs.each do |org_ref|
-          result = @forge.list_org(org_ref)
-          key = org_key(org_ref)
-          if result.success?
-            org_records[key] = State::Store::Org.new(
-              last_listed_at: now,
-              repo_count: result.success.length
-            )
-            discovered.concat(result.success)
-          else
+        org_mutex = Mutex.new
+
+        @reporter.listing_started(total: config.orgs.size)
+
+        if config.orgs.empty?
+          @reporter.listing_finished
+          return [org_records, discovered]
+        end
+
+        auth = @forge.check_authenticated
+        if auth.failure?
+          # Auth failed once — record all orgs as failed without listing.
+          config.orgs.each do |org_ref|
+            key = org_key(org_ref)
             prev = prev_orgs[key]
             org_records[key] = State::Store::Org.new(
               last_listed_at: prev&.last_listed_at,
               repo_count: prev&.repo_count || 0,
-              last_error: format_org_failure(result.failure)
+              last_error: format_org_failure(auth.failure)
             )
+            @reporter.org_listed(org_ref, count: nil)
+          end
+          @reporter.listing_finished
+          return [org_records, discovered]
+        end
+
+        # Fan out: one fiber per org, bounded by the same semaphore used
+        # for the repo sweep (GS1). A separate org_barrier keeps the
+        # listing phase isolated from the repo sweep.
+        org_barrier = Async::Barrier.new
+
+        config.orgs.each do |org_ref|
+          org_barrier.async do
+            inner = semaphore.async do
+              result = @forge.list_org(org_ref)
+              key = org_key(org_ref)
+              if result.success?
+                repos = result.success
+                row = State::Store::Org.new(
+                  last_listed_at: now,
+                  repo_count: repos.length
+                )
+                org_mutex.synchronize do
+                  org_records[key] = row
+                  discovered.concat(repos)
+                end
+                @reporter.org_listed(org_ref, count: repos.length)
+              else
+                prev = prev_orgs[key]
+                row = State::Store::Org.new(
+                  last_listed_at: prev&.last_listed_at,
+                  repo_count: prev&.repo_count || 0,
+                  last_error: format_org_failure(result.failure)
+                )
+                org_mutex.synchronize { org_records[key] = row }
+                @reporter.org_listed(org_ref, count: nil)
+              end
+            end
+            inner.wait
           end
         end
+        org_barrier.wait
+
+        @reporter.listing_finished
         [org_records, discovered]
       end
 
