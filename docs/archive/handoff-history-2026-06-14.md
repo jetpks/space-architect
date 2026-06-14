@@ -11,6 +11,29 @@
 
 ---
 
+## Verdict snapshot — slice `state-hardening` (CF10 + CF11) — JUDGED 2026-06-14 (fresh session)
+
+**VERDICT: PASS / CONTINUE → merged `--no-ff` to `main` @ `4556e7f`.** Judged on `slice/state-hardening` @ `1f61914`, freeze `a1cba9d`. CF10 + CF11 CLOSED. Two non-gated low-severity nits → CF12 (live handoff).
+
+| Gate | Verdict | Evidence |
+|------|---------|----------|
+| G0 (suite/lint/gems) | **PASS** | 378/1332/0/0/0; `standardrb` 0; 51 gems; no Gemfile/lock/gemspec diff since freeze; existing test files `+N/−0` (store_test +41/−0, engine_test +149/−0) |
+| Rule 3 (gates diff-clean) | **PASS** | `git diff a1cba9d..1f61914 -- docs/gates/` empty |
+| No builder commits | **PASS** | all 4 commits authored `architect <eric@ebj.dev>` (2 lane commits + 2 `--no-ff` merges) |
+| Scope (GA5/GB4) | **PASS** | 9 files changed = Lane A's 6 ∪ Lane B's 3, zero overlap, no out-of-bounds |
+| GA1 (lock wraps load→write) | **PASS** | `acquire` wraps the whole block; `path_for` exposed; `mkdir_p` first; `File::CREAT`; never `unlink`ed (`lock.rb`) |
+| GA2 (no clobber under overlap) | **PASS** | `engine_test` holds real `flock` from independent fd, asserts `state.yaml` **binread bytes unchanged** + Success; release → 2nd run proceeds, prior+new rows both present (CF3) — non-tautological |
+| GA3 (release on all paths) | **PASS** | a/b/c (normal / real write-Failure via invalid seeded row / real escaping raise) each prove release by independent-fd reacquisition |
+| GA4 (intra-run concurrency unchanged) | **PASS** | full suite green incl. G7/G8/G9/G10/GS1/CF3; engine_test `+149/−0` (existing bodies unmodified) |
+| GB1 (temp cleaned on Interrupt) | **PASS** | injects real `Interrupt` at `File.rename` against real on-disk `state.yaml`; asserts original byte-unchanged, no orphan, propagation; red-on-old (`rescue StandardError` misses `Interrupt`), green-on-new (`ensure`) |
+| GB2 (dead `update` removed) | **PASS** | deleted; zero non-`Config` `.update` callers confirmed by grep |
+| GB3 (write still atomic, CF7 intact) | **PASS** | store_test `+41/−0` (CF7 tests unmodified & green); same-dir temp + rename preserved |
+| Cross-model adversarial pass (CF10, mandated) | **PASS on the invariant** | fresh-context reviewer, file:line evidence: claims 1–5 HOLD (release-all-paths, skip-never-writes, no-unlink-race, first-run-create, no-intra-run-serialization). 2 non-data-loss findings → CF12: (a) fd-leak if `flock` *raises* (`lock.rb:37-41`, pre-`ensure`); (b) `LOCK_NB` doesn't make surrounding File syscalls fiber-aware — pre-existing per `AGENTS.md`, `LOCK_NB` is the correct choice |
+
+**PHASE-0 disagreements arbitrated:** Lane A raised 2, both **ACCEPT** — (1) `cli/sync.rb` needs no change (`NOT_ACQUIRED` → `Success(current_state)`, exit 0 idempotent, matches the spec steer); (2) `return write_result if …failure?` → `if/else` (a non-local `return` from a block yielded across an Async fiber raises `LocalJumpError`; rewriting as the block's tail expression is behavior-equivalent — verified in the diff). Lane B raised 0 (correct — nothing contestable in a `rescue`→`ensure` swap + dead-code delete).
+
+---
+
 # HANDOFF — repo-tender (as of 2026-06-14, pre-cleanup)
 
 > Repo memory for the Architect Loop. Builder (Sonnet 4.6 via `claude -p` as of
