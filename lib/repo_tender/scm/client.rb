@@ -67,6 +67,18 @@ module RepoTender
       def switch(path, branch)
         raise NotImplementedError
       end
+
+      # Sync an unborn (empty) local clone. Called when the repo has no
+      # commits (`status.unborn? == true`) and the working tree is clean.
+      # Returns Success(:empty) when the remote has no branches (valid
+      # empty clone; no mutation). Returns Success(:fast_forwarded) when
+      # the remote has gained commits and the local clone was advanced to
+      # them. Returns Failure on a real network/probe error (the
+      # empty-vs-error distinction is made via `git ls-remote --heads
+      # origin`: exit 0 = definitive answer; non-zero = real error).
+      def sync_empty(path)
+        raise NotImplementedError
+      end
     end
   end
 end

@@ -9,7 +9,17 @@
 
 ## TL;DR
 
-**Status (2026-06-14): repo-tender is feature-complete AND state-hardened; everything is on `main`. No open slice, no open carry-forwards.** Feature slices 1–6 + the CLI-UX epic (A/B/C) + cf-cleanup + state-hardening are all JUDGED PASS and merged. Carry-forwards **CF1–CF12 + tty-screen are CLOSED.** Nothing is open.
+**Status (2026-06-14): slice `sync-fixes` BUILT + integrated on `slice/sync-fixes` @ `71ad0f0`; READY FOR JUDGING (rule 4 — a FRESH session judges, NOT the one that dispatched).** Two disjoint bug-fix lanes from an interactive `sync` run, both COMPLETE, post-flight PASS (no builder commits, in-bounds writes only), merged `--no-ff` with no conflicts. Integration smoke on `slice/sync-fixes`: **398/1404/0/0/0, standardrb 0, 51 gems** (baseline `main` was 379/1334). Frozen gates: `docs/gates/sync-fixes.md`. Lane evidence: `docs/lanes/sync-fixes-{A,B}.md`. **NOT yet merged to `main` — that happens only on a PASS/CONTINUE verdict next session.**
+
+- **Lane A (`ui-listing-order`) — COMPLETE.** `InteractiveReporter#render_sweep_tick` now flushes leftover `@pending_org_lines` as a contiguous block at the listing→sweep transition, so the last org's listing line (e.g. `✓ ioquatix 174 repo(s)`) stays with the org block instead of being reprinted after the sweep `⚠` lines. +1 regression test (fails pre-fix, passes post-fix). Touched only `ui/interactive_reporter.rb` + its test.
+
+- **Lane B (`empty-repo`) — COMPLETE_WITH_CONCERNS.** Empty (no-commit) remotes no longer report `error`. `Status#unborn?` detects `# branch.oid (initial)`; `RepoPlan` short-circuits unborn repos before the `default_branch` probe (which fails `Cannot determine remote HEAD` on an empty remote — the root cause). New `SCM#sync_empty` (`ls-remote --heads` → `fetch` → `merge --ff-only`) returns `:empty` (remote also empty, no mutation) or `:fast_forwarded` (remote gained commits); engine maps both to `clean`. **Unborn + dirty (uncommitted local files) is NEVER mutated → `dirty` (no-data-loss / cardinal invariant).** Real failures still surface as `error`. +18 tests, all against REAL on-disk git.
+
+- **⚠ FROZEN GATE-COMMAND DEFECT (architect's error, caught by Lane B PHASE 0 — judge must route around it).** The Lane B gate command in `docs/gates/sync-fixes.md` is `bundle exec ruby -Itest a.rb b.rb c.rb d.rb`. In Ruby, `ruby file1 file2 …` runs ONLY `file1`; the rest become `ARGV` (verified: `ruby /tmp/ta.rb /tmp/tb.rb` ran only ta.rb). So that command exercises only `status_test.rb` (9 runs), NOT all four suites. **The gate file is frozen and read-only (rule 3) — it was NOT edited.** When judging Lane B, measure GB1–GB5 via `bundle exec rake test` (G0, authoritative, subsumes all lane B tests) and/or each file run **individually**: `status_test.rb` 9·14·0·0·0 · `git_test.rb` 17·48·0·0·0 · `repo_plan_test.rb` 19·48·0·0·0 · `engine_test.rb` 42·259·0·0·0. Rule the four-file command **INVALID-as-written**; the underlying gates remain measurable and PASS in the lane report.
+
+- **Lane B residual concerns (cosmetic, for the judge to weigh — not blockers):** (1) `:report_dirty` handler re-probes `default_branch` on an unborn dirty repo → one wasted `set-head -a` network call (harmless; GB4 still passes). (2) `sync_empty` resolves `default_branch` and the engine re-probes it after success → one redundant probe. Both match the spec as written; candidate CF if the judge wants them tightened.
+
+**Prior status (still true): feature slices 1–6 + CLI-UX epic + cf-cleanup + state-hardening all JUDGED PASS and merged to `main`. CF1–CF12 + tty-screen CLOSED.**
 
 - **CF12 — CLOSED (fixed inline 2026-06-14, not via the dispatch loop — human asked to fix the two small nits directly).** (a) `State::Lock.acquire` now runs `flock` *inside* the `begin/ensure` so a raising `flock` (EINTR/ENOLCK) can't leak the fd; the redundant-and-hazardous explicit `LOCK_UN` was dropped (`close` releases the lock via the OFD and can't be skipped by a raising unlock). (b) `lock.rb` docstring clarified: `LOCK_NB` is for launchd-daemon pile-up safety, not reactor yielding (the syscalls are ordinary blocking calls, sub-ms on local FS — same as the rest of `State::Store`). +1 regression test (`test_acquire_closes_fd_when_flock_raises`, spy-fd seam). Suite **379/1334/0/0/0**, lint 0; GA3 release tests still green (confirms `close`-only release).
 
@@ -43,11 +53,18 @@ Baseline at `main`: **379/1334/0/0/0**, lint 0, 51 gems.
 
 ## Open carry-forwards
 
-**None.** CF1–CF12 + tty-screen all CLOSED.
+**None open as numbered CFs.** CF1–CF12 + tty-screen all CLOSED. (Two cosmetic Lane B residuals listed in the TL;DR are candidate CFs the judge may open or wave through.)
 
-## Next slice
+## Next slice / open work
 
-**None scheduled.** repo-tender is feature-complete and state-hardened; all gates green on `main`, no open carry-forwards. There is no functional gap forcing further work — the next slice is whatever the human brings.
+**`slice/sync-fixes` is BUILT and awaiting JUDGMENT (fresh session).** Procedure for the judging session:
+
+1. `git diff f208d46..slice/sync-fixes` read in full against `docs/gates/sync-fixes.md` intent.
+2. Run G0 (`bundle exec rake test` → ≥ 398, 0F/0E/0S), GL (`standardrb` 0), GG (51 gems). For Lane B GB1–GB5 use `rake test` + per-file runs (the four-file gate command is INVALID-as-written — see TL;DR).
+3. **Cross-tier adversarial pass on the Lane B diff** (high-stakes: touches the no-data-loss cardinal invariant). The load-bearing property is GB4 — an unborn repo with uncommitted local files must NEVER be fetched/merged. Confirm with file:line evidence that no path reaches `sync_empty`/`merge --ff-only` when `status.unborn? && !status.clean?` (the `RepoPlan` guard routes those to `:report_dirty`).
+4. Per-gate PASS/FAIL/INVALID, then one KILL/CONTINUE. On PASS/CONTINUE: merge `slice/sync-fixes --no-ff` → `main`, delete the lane branches (`lane/sync-fixes-A`, `lane/sync-fixes-B`), archive lane detail, update this TL;DR.
+
+Dispatch record: freeze `f208d46`; builder run-logs at `.architect/wt/sync-fixes-{A,B}.last-run.jsonl` (gitignored); builder blocks at `.architect/wt/sync-fixes-{A,B}.block.md`.
 
 ## Teardown (2026-06-14) — PRD complete, loop wound down
 

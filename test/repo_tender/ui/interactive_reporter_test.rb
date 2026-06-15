@@ -534,4 +534,46 @@ class InteractiveReporterTest < Minitest::Test
     assert_equal n_orgs + 1, out.string.count("\n"),
       "output must be O(orgs + non_clean), not O(repos). Expected #{n_orgs + 1} newlines (#{n_orgs} listing + 1 summary)"
   end
+
+  # ===========================================================================
+  # GA1 + GA2 — Last org line must precede sweep ⚠ lines (ordering regression)
+  # ===========================================================================
+
+  def test_ga1_ga2_last_org_line_precedes_sweep_lines
+    reporter, out = make_reporter(cadence: 0.01)
+    orgs = [
+      RepoTender::Config::OrgRef.new(host: "github.com", name: "first-org"),
+      RepoTender::Config::OrgRef.new(host: "github.com", name: "last-org")
+    ]
+    dirty_ref = "github.com/owner/dirty-repo"
+
+    Sync do |task|
+      reporter.attach(task)
+      # No sleep between events: the render fiber never ticks until detach
+      # yields via @render_task.wait. Both org lines remain in @pending_org_lines
+      # when run_started flips @phase to :sweep — the exact bug scenario.
+      reporter.listing_started(total: orgs.size)
+      orgs.each_with_index { |org, i| reporter.org_listed(org, count: (i + 1) * 10) }
+      reporter.listing_finished
+      reporter.run_started(total: 1)
+      reporter.repo_finished(dirty_ref, "dirty")
+      reporter.run_finished("dirty" => 1)
+      reporter.detach
+    end
+
+    # Strip all ANSI escape sequences, convert \r to \n, split into lines.
+    cleaned = out.string
+      .gsub(/\e\[\?\d+[lh]/, "")   # cursor hide/show: \e[?25l, \e[?25h
+      .gsub(/\e\[[\d;]*[A-Za-z]/, "") # CSI sequences: \e[K, \e[nA, SGR, etc.
+      .tr("\r", "\n")
+    lines = cleaned.split("\n").map(&:strip).reject(&:empty?)
+
+    last_org_idx = lines.rindex { |l| l.include?("last-org") }
+    sweep_idx = lines.index { |l| l.include?("dirty") }
+
+    refute_nil last_org_idx, "last-org must appear in output; lines=#{lines.inspect}"
+    refute_nil sweep_idx, "dirty sweep line must appear in output; lines=#{lines.inspect}"
+    assert last_org_idx < sweep_idx,
+      "last org line (idx=#{last_org_idx}) must precede sweep ⚠ line (idx=#{sweep_idx})\nlines:\n#{lines.join("\n")}"
+  end
 end
