@@ -5,18 +5,31 @@ require_relative "lib/repo_tender/version"
 Gem::Specification.new do |spec|
   spec.name = "repo-tender"
   spec.version = RepoTender::VERSION
-  spec.authors = ["jetpks"]
+  spec.authors = ["Eric Jacobs"]
+  spec.email = ["eric@ebj.dev"]
+
   spec.summary = "Keep local git clones evergreen (clean · on default branch · fetched within refresh_interval)"
   spec.description = "A dry-cli binary plus a periodic launchd-invoked sync sweep. macOS-only, GitHub-only (behind decoupled SCM/forge interfaces). Never mutates a dirty/diverged repo."
+  spec.homepage = "https://github.com/jetpks/repo-tender"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 4.0.5"
+  spec.metadata = {
+    "bug_tracker_uri" => "https://github.com/jetpks/repo-tender/issues",
+    "homepage_uri" => "https://github.com/jetpks/repo-tender",
+    "source_code_uri" => "https://github.com/jetpks/repo-tender"
+  }
 
-  spec.files = Dir.chdir(__dir__) do
-    Dir["lib/**/*.rb", "bin/**/*", "README.md", "LICENSE.txt", "repo-tender.gemspec"].select { |f| File.file?(f) }
-  end
-  spec.require_paths = ["lib"]
+  spec.files = Dir[
+    "lib/**/*.rb",
+    "bin/**/*",
+    "README.md",
+    "LICENSE.txt",
+    "repo-tender.gemspec"
+  ]
   spec.bindir = "bin"
   spec.executables = ["repo-tender"]
+  spec.require_paths = ["lib"]
+
+  spec.required_ruby_version = ">= 4.0.5"
 
   spec.add_dependency "async", "~> 2.39"
   spec.add_dependency "dry-cli", "~> 1.4"

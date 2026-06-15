@@ -1,0 +1,70 @@
+---
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  source-gem:
+    name: Build gem
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - name: Build gem
+        run: bundle exec rake build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-gem
+          path: pkg/*.gem
+
+  release:
+    name: Publish to RubyGems
+    needs:
+      - source-gem
+    runs-on: ubuntu-latest
+    # Skip publishing on workflow_dispatch; tag pushes are the canonical
+    # release trigger. Use `workflow_dispatch` to dry-run the build.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: pkg
+          merge-multiple: true
+
+      - name: Push gems to RubyGems
+        env:
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
+        run: |
+          set -e
+          for gem in pkg/*.gem; do
+            echo "Pushing $gem"
+            gem push "$gem"
+          done
+
+      - name: Attach gems to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pkg/*.gem
+          generate_release_notes: true
+</content>
