@@ -160,6 +160,11 @@ module RepoTender
       end
 
       def render_sweep_tick
+        org_pending = @pending_org_lines.slice!(0, @pending_org_lines.length)
+        if org_pending.any?
+          @out.write("\r\e[K")
+          org_pending.each { |line| @out.write("#{line}\n") }
+        end
         pending = @pending_lines.slice!(0, @pending_lines.length)
         if pending.any?
           @out.write("\r\e[K")
