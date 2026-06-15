@@ -60,7 +60,14 @@ today's implementations.
 
 ## Installation 📦
 
-Not on RubyGems yet — install from source! 🛠️
+We're on RubyGems! 🎉
+
+```bash
+gem install repo-tender
+repo-tender --help
+```
+
+Prefer to hack on it? Install from source instead: 🛠️
 
 ```bash
 git clone git@github.com:jetpks/repo-tender.git
@@ -77,8 +84,7 @@ Make sure `gh` is logged in (otherwise org listing drops to an anonymous
 gh auth status
 ```
 
-Pop `bin/repo-tender` on your `PATH` (or alias it) and you're off! Every example
-below uses `bin/repo-tender`; use `repo-tender` if you've aliased it. 🎀
+And you're off! 🎀
 
 ## Features ✨
 
@@ -97,10 +103,10 @@ below uses `bin/repo-tender`; use `repo-tender` if you've aliased it. 🎀
 Repos are named `host/owner/name`:
 
 ```bash
-bin/repo-tender repo add github.com/ruby/ruby
+repo-tender repo add github.com/ruby/ruby
 # => added: github.com/ruby/ruby
 
-bin/repo-tender repo list
+repo-tender repo list
 # => github.com/ruby/ruby
 ```
 
@@ -110,14 +116,14 @@ Orgs expand to their member repos at sync time (archived repos and forks are
 excluded by default):
 
 ```bash
-bin/repo-tender org add socketry              # host defaults to github.com
-bin/repo-tender org add github.com/socketry   # equivalent, explicit host
+repo-tender org add socketry              # host defaults to github.com
+repo-tender org add github.com/socketry   # equivalent, explicit host
 ```
 
 ### Sync everything now ⚡
 
 ```bash
-bin/repo-tender sync
+repo-tender sync
 ```
 
 Clones what's missing, fast-forwards what's clean-and-behind, and reports
@@ -127,7 +133,7 @@ Clones what's missing, fast-forwards what's clean-and-behind, and reports
 ### Check your repos' health 🩺
 
 ```bash
-bin/repo-tender status
+repo-tender status
 ```
 
 ```
@@ -144,20 +150,20 @@ github.com/ruby/ruby            dirty   trunk           2026-06-14T20:01:36Z  20
 Install a per-user launchd agent that runs `sync` every `refresh_interval`:
 
 ```bash
-bin/repo-tender daemon install
-bin/repo-tender daemon status
+repo-tender daemon install
+repo-tender daemon status
 ```
 
 macOS now syncs your repos in the background. Tear it down anytime:
 
 ```bash
-bin/repo-tender daemon stop
-bin/repo-tender daemon uninstall
+repo-tender daemon stop
+repo-tender daemon uninstall
 ```
 
 ### Tune it 🎛️
 
-Find your config, then edit it (`bin/repo-tender config path`):
+Find your config, then edit it (`repo-tender config path`):
 
 ```yaml
 base_dir: ~/src/evergreen   # where clones live (pick your own!)
@@ -166,15 +172,15 @@ concurrency: 8              # max parallel git/gh operations per run
 ```
 
 ```bash
-bin/repo-tender config show   # see the effective, validated config
+repo-tender config show   # see the effective, validated config
 ```
 
 ### Output for robots 🤓
 
 ```bash
-bin/repo-tender sync --json    # one JSON object per event line (12-factor!)
-bin/repo-tender sync --plain   # one plain line per event, no color
-bin/repo-tender status --json
+repo-tender sync --json    # one JSON object per event line (12-factor!)
+repo-tender sync --plain   # one plain line per event, no color
+repo-tender status --json
 ```
 
 `--no-color` and `--quiet`/`-q` work everywhere; color auto-disables off a TTY.
