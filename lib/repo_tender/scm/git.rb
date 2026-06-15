@@ -133,6 +133,36 @@ module RepoTender
         end
       end
 
+      # Handle an unborn (empty) local clone. If the remote has no
+      # branches, the repo is already a valid empty clone — return
+      # Success(:empty) with no mutation. If the remote has gained
+      # commits, fetch and fast-forward the unborn branch into them.
+      #
+      # `git ls-remote --heads origin` is the authoritative
+      # empty-vs-error discriminator: exit 0 + empty stdout means the
+      # remote truly has no branches; exit 0 + output means it has
+      # commits; non-zero exit means a real network/probe error.
+      def sync_empty(path)
+        ls = Shell.run("git", "ls-remote", "--heads", "origin", chdir: path)
+        return ls if ls.failure?
+
+        return Dry::Monads::Success(:empty) if ls.success.strip.empty?
+
+        fetch_result = fetch(path)
+        return fetch_result if fetch_result.failure?
+
+        branch_result = default_branch(path)
+        return branch_result if branch_result.failure?
+
+        upstream = "origin/#{branch_result.success}"
+        merge = Shell.run("git", "merge", "--ff-only", upstream, chdir: path)
+        if merge.success?
+          Dry::Monads::Success(:fast_forwarded)
+        else
+          Dry::Monads::Failure({path: path, reason: "ff merge into unborn branch failed", stderr: merge.failure[:stderr]})
+        end
+      end
+
       private
 
       # `git symbolic-ref --short refs/remotes/origin/HEAD` returns
@@ -164,14 +194,15 @@ module RepoTender
         ahead = 0
         behind = 0
         detached = false
+        unborn = false
         entries = []
 
         output.each_line do |raw|
           line = raw.chomp
           next if line.empty?
           case line
-          when /\A# branch\.oid /
-            # ignored — the SHA itself isn't a dirty signal
+          when /\A# branch\.oid (.+)/
+            unborn = (Regexp.last_match(1) == "(initial)")
           when /\A# branch\.head (.+)/
             branch = Regexp.last_match(1)
             detached = (branch == "(detached)")
@@ -192,7 +223,8 @@ module RepoTender
           ahead: ahead,
           behind: behind,
           detached: detached,
-          entries: entries
+          entries: entries,
+          unborn: unborn
         )
       end
     end

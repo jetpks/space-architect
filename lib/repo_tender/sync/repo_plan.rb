@@ -24,6 +24,7 @@ module RepoTender
     #   :switch              → status "clean" (after; the source status was wrong_branch/detached)
     #   :skip_fresh          → status "clean"
     #   :up_to_date          → status "clean"
+    #   :sync_empty          → status "clean" (empty clone of empty/unborn remote)
     #   :report_dirty        → status "dirty"
     #   :report_diverged     → status "diverged"
     #   :report_wrong_branch → status "wrong_branch"
@@ -64,6 +65,29 @@ module RepoTender
           return report_error(repo_ref, "status probe failed: #{status_result.failure.inspect}")
         end
         scm_status = status_result.success
+
+        # 2b. Unborn (empty) repo? No commits exist anywhere on the
+        #     local clone. Skip the `current_branch` / `default_branch`
+        #     probes — both would succeed but `default_branch` calls
+        #     `git remote set-head origin -a` which exits non-zero on an
+        #     empty remote ("Cannot determine remote HEAD"), turning a
+        #     valid empty clone into a false :report_error. Delegate the
+        #     remote-has-commits? check to the engine's sync_empty call.
+        if scm_status.unborn?
+          if scm_status.clean?
+            return Success(Plan.new(
+              action: :sync_empty,
+              status: "clean",
+              reason: "empty repository (no commits yet)"
+            ))
+          else
+            return Success(Plan.new(
+              action: :report_dirty,
+              status: "dirty",
+              reason: "empty repository with uncommitted local files; not touching"
+            ))
+          end
+        end
 
         # 3. Current branch + default branch.
         current_result = scm.current_branch(path)

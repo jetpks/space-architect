@@ -30,4 +30,33 @@ class SCMStatusTest < Minitest::Test
     assert_equal 0, s.ahead
     assert_equal 0, s.behind
   end
+
+  # GB1 — unborn? reflects the (initial) oid signal from porcelain-v2.
+  def test_unborn_defaults_false
+    s = Status.new(clean: true, branch: "trunk")
+    refute s.unborn?
+  end
+
+  def test_unborn_true_when_set
+    s = Status.new(clean: true, branch: "trunk", unborn: true)
+    assert s.unborn?
+  end
+
+  def test_unborn_false_when_real_sha
+    s = Status.new(clean: true, branch: "trunk", unborn: false)
+    refute s.unborn?
+  end
+
+  def test_unborn_clean_repo_is_clean_and_unborn
+    s = Status.new(clean: true, branch: "trunk", unborn: true)
+    assert s.clean?
+    assert s.unborn?
+    refute s.detached?
+  end
+
+  def test_unborn_dirty_repo_is_dirty_and_unborn
+    s = Status.new(clean: false, branch: "trunk", unborn: true, entries: ["? file.txt"])
+    refute s.clean?
+    assert s.unborn?
+  end
 end

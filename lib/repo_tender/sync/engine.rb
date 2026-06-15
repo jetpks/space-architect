@@ -370,6 +370,16 @@ module RepoTender
               final_status = "clean"
             end
           end
+        when :sync_empty
+          result = @scm.sync_empty(path)
+          if result.failure?
+            final_status = "error"
+            last_error = "empty-repo sync failed: #{result.failure.inspect}"
+          else
+            final_status = "clean"
+            # nil-safe: still-empty remote → default_branch returns Failure
+            default_branch = @scm.default_branch(path).value_or { nil }
+          end
         when :skip_fresh, :up_to_date
           # No SCM side effect. State is already "clean". Probe
           # default_branch for the state record (cheap — cached on

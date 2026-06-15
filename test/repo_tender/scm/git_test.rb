@@ -197,4 +197,77 @@ class SCMGitTest < Minitest::Test
       assert_equal :fast_forwarded, result.success
     end
   end
+
+  # ---- GB1: parse_porcelain_v2 sets unborn: correctly ----
+
+  def test_status_unborn_true_on_empty_clone
+    with_empty_repo do |_bare, clone|
+      git = Git.new
+      result = git.status(clone)
+      assert result.success?, "status failed on empty clone: #{result.failure.inspect}"
+      assert result.success.unborn?, "expected unborn? true on empty clone"
+      assert result.success.clean?, "expected clean? true on empty clone with no files"
+    end
+  end
+
+  def test_status_unborn_false_on_committed_repo
+    with_trunk_repo do |_bare, clone|
+      seed_initial_commit(clone)
+      git = Git.new
+      result = git.status(clone)
+      assert result.success?
+      refute result.success.unborn?, "expected unborn? false on a repo with commits"
+    end
+  end
+
+  # ---- GB2: sync_empty returns :empty when remote has no branches ----
+
+  def test_sync_empty_returns_empty_when_remote_has_no_commits
+    with_empty_repo do |_bare, clone|
+      git = Git.new
+      result = git.sync_empty(clone)
+      assert result.success?, "sync_empty failed: #{result.failure.inspect}"
+      assert_equal :empty, result.success
+
+      # No mutation: HEAD is still unborn.
+      status = git.status(clone)
+      assert status.success.unborn?, "clone should still be unborn after sync_empty(:empty)"
+      assert status.success.clean?
+    end
+  end
+
+  # ---- GB3: sync_empty fast-forwards when remote gains commits ----
+
+  def test_sync_empty_fast_forwards_when_remote_gains_commits
+    with_empty_repo do |bare, clone|
+      push_first_commit_to_bare(bare, content: "hello\n", filename: "README.md")
+
+      git = Git.new
+      result = git.sync_empty(clone)
+      assert result.success?, "sync_empty failed after remote gained commits: #{result.failure.inspect}"
+      assert_equal :fast_forwarded, result.success
+
+      # Clone now has the file and a resolved HEAD.
+      assert File.exist?(File.join(clone, "README.md")),
+        "README.md should be present after fast-forward into unborn branch"
+      assert_equal "hello\n", File.read(File.join(clone, "README.md"))
+
+      status = git.status(clone)
+      assert status.success?, "status failed after fast-forward"
+      refute status.success.unborn?, "clone should no longer be unborn after fast-forward"
+      assert status.success.clean?
+    end
+  end
+
+  # ---- GB5: sync_empty propagates real network failure ----
+
+  def test_sync_empty_returns_failure_on_bad_remote
+    with_empty_repo do |_bare, clone|
+      # Point origin at a non-existent path so ls-remote fails.
+      Shell.run("git", "remote", "set-url", "origin", "/tmp/does-not-exist-#{Process.pid}.git", chdir: clone)
+      git = Git.new
+      result = git.sync_empty(clone)
+      assert result.failure?, "expected Failure for unreachable remote, got #{result.success.inspect}"
+    end
+  end
 end
