@@ -13,7 +13,9 @@ module RepoTender
     #   run_started(total:)         # N repos about to be processed
     #   repo_started(ref)           # work begins on ref ("host/owner/name" string)
     #   repo_phase(ref, phase)      # :cloning | :fast_forwarding | :switching
-    #   repo_finished(ref, status)  # final status string (matches state row)
+    #   repo_finished(ref, status, action:, commits: 0)
+    #                               # final status string (matches state row);
+    #                               # action: realized-action Symbol; commits: Integer
     #   repo_failed(ref, error)     # failure string (plan error or unhandled raise)
     #   run_finished(summary)       # Hash<String,Integer> status→count
     #   detach                      # stop render fiber, restore terminal
@@ -37,7 +39,7 @@ module RepoTender
       def run_started(total:) = nil
       def repo_started(ref) = nil
       def repo_phase(ref, phase) = nil
-      def repo_finished(ref, status) = nil
+      def repo_finished(ref, status, action:, commits: 0) = nil
       def repo_failed(ref, error) = nil
       def run_finished(summary) = nil
       def detach = nil

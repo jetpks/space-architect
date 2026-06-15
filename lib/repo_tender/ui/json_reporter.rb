@@ -25,7 +25,7 @@ module RepoTender
       def run_started(total:) = emit(event: "run_started", total: total)
       def repo_started(ref) = emit(event: "repo_started", ref: ref)
       def repo_phase(ref, phase) = emit(event: "repo_phase", ref: ref, phase: phase)
-      def repo_finished(ref, status) = emit(event: "repo_finished", ref: ref, status: status)
+      def repo_finished(ref, status, action:, commits: 0) = emit(event: "repo_finished", ref: ref, status: status, action: action, commits: commits)
       def repo_failed(ref, error) = emit(event: "repo_failed", ref: ref, error: error.to_s)
       def run_finished(summary) = emit(event: "run_finished", summary: summary)
 

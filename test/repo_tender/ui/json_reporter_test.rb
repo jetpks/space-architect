@@ -25,7 +25,7 @@ class JsonReporterTest < Minitest::Test
     r.run_started(total: 2)
     r.repo_started("github.com/foo/bar")
     r.repo_phase("github.com/foo/bar", :cloning)
-    r.repo_finished("github.com/foo/bar", "clean")
+    r.repo_finished("github.com/foo/bar", "clean", action: :cloned)
     r.run_finished({"clean" => 1})
     parsed_lines.each_with_index do |obj, i|
       assert obj.is_a?(Hash), "line #{i} should parse to a Hash"
@@ -34,12 +34,14 @@ class JsonReporterTest < Minitest::Test
 
   def test_repo_finished_has_event_ref_status_and_timestamp
     r = make_reporter
-    r.repo_finished("github.com/foo/bar", "clean")
+    r.repo_finished("github.com/foo/bar", "clean", action: :cloned, commits: 0)
     obj = JSON.parse(lines.last)
     assert_equal "repo_finished", obj["event"]
     assert_equal "github.com/foo/bar", obj["ref"]
     assert_equal "clean", obj["status"]
     assert obj.key?("t"), "must include timestamp key 't'"
+    assert_equal "cloned", obj["action"]
+    assert_equal 0, obj["commits"]
   end
 
   def test_repo_failed_has_event_ref_and_error
@@ -83,7 +85,7 @@ class JsonReporterTest < Minitest::Test
     r.run_started(total: 1)
     r.repo_started("github.com/foo/bar")
     r.repo_phase("github.com/foo/bar", :cloning)
-    r.repo_finished("github.com/foo/bar", "clean")
+    r.repo_finished("github.com/foo/bar", "clean", action: :cloned)
     r.run_finished({"clean" => 1})
     assert_equal 5, lines.size
     assert_equal 5, parsed_lines.size
