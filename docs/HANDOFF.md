@@ -9,15 +9,21 @@
 
 ## TL;DR
 
-**Status (2026-06-14): slice `sync-fixes` BUILT + integrated on `slice/sync-fixes` @ `71ad0f0`; READY FOR JUDGING (rule 4 — a FRESH session judges, NOT the one that dispatched).** Two disjoint bug-fix lanes from an interactive `sync` run, both COMPLETE, post-flight PASS (no builder commits, in-bounds writes only), merged `--no-ff` with no conflicts. Integration smoke on `slice/sync-fixes`: **398/1404/0/0/0, standardrb 0, 51 gems** (baseline `main` was 379/1334). Frozen gates: `docs/gates/sync-fixes.md`. Lane evidence: `docs/lanes/sync-fixes-{A,B}.md`. **NOT yet merged to `main` — that happens only on a PASS/CONTINUE verdict next session.**
+**Status (2026-06-14): slice `sync-fixes` JUDGED PASS → merged `--no-ff` to `main` @ `585ccba` (fresh judging session, rule 4 satisfied).** Both lanes' gates re-run against the verbatim frozen `docs/gates/sync-fixes.md`; integration smoke on `main`: **398/1404/0/0/0, standardrb 0, 51 gems** (baseline was 379/1334). Lane + slice branches deleted. Lane evidence retained at `docs/lanes/sync-fixes-{A,B}.md`; frozen gates at `docs/gates/sync-fixes.md`.
 
-- **Lane A (`ui-listing-order`) — COMPLETE.** `InteractiveReporter#render_sweep_tick` now flushes leftover `@pending_org_lines` as a contiguous block at the listing→sweep transition, so the last org's listing line (e.g. `✓ ioquatix 174 repo(s)`) stays with the org block instead of being reprinted after the sweep `⚠` lines. +1 regression test (fails pre-fix, passes post-fix). Touched only `ui/interactive_reporter.rb` + its test.
+**Per-gate verdicts (this session, measured by the architect):**
+- **G0** `rake test` → 398/1404/0/0/0 → **PASS** (≥ 379 + new, strictly >379).
+- **GL** `standardrb` → exit 0 → **PASS**. · **GG** 51 gems → **PASS** (unchanged).
+- **GA1/GA2/GA3** `interactive_reporter_test.rb` 25 runs 0F/0E → **PASS** (org block contiguous, precedes sweep lines; pre-fix fail / post-fix pass confirmed in lane report).
+- **GB1–GB5** measured per-file (`status` 9 · `git` 17 · `repo_plan` 19 · `engine` 42, all 0F/0E) + `rake test` → **PASS**.
+- **Lane B four-file gate command → INVALID-as-written** (architect's freeze defect, caught by Lane B PHASE 0): `ruby a b c d` runs only `a`; `b c d` become `ARGV`. Gate file was **not** edited (rule 3 clean). Underlying gates measured via `rake` + per-file, all PASS.
+- **GB4 (no-data-loss cardinal invariant) — traced to file:line:** `:sync_empty` is produced only at `repo_plan.rb:79` under `unborn? && clean?`; `@scm.sync_empty` (the only fetch+`merge --ff-only`) is called only at `engine.rb:374 when :sync_empty`. Unborn **+dirty** → `:report_dirty` (`engine.rb:388`, no SCM mutation). GB4 test asserts byte-identical file, `dirty`, nil error, HEAD still `(initial)`. Invariant holds.
 
-- **Lane B (`empty-repo`) — COMPLETE_WITH_CONCERNS.** Empty (no-commit) remotes no longer report `error`. `Status#unborn?` detects `# branch.oid (initial)`; `RepoPlan` short-circuits unborn repos before the `default_branch` probe (which fails `Cannot determine remote HEAD` on an empty remote — the root cause). New `SCM#sync_empty` (`ls-remote --heads` → `fetch` → `merge --ff-only`) returns `:empty` (remote also empty, no mutation) or `:fast_forwarded` (remote gained commits); engine maps both to `clean`. **Unborn + dirty (uncommitted local files) is NEVER mutated → `dirty` (no-data-loss / cardinal invariant).** Real failures still surface as `error`. +18 tests, all against REAL on-disk git.
+**Slice-level call: CONTINUE / PASS.**
 
-- **⚠ FROZEN GATE-COMMAND DEFECT (architect's error, caught by Lane B PHASE 0 — judge must route around it).** The Lane B gate command in `docs/gates/sync-fixes.md` is `bundle exec ruby -Itest a.rb b.rb c.rb d.rb`. In Ruby, `ruby file1 file2 …` runs ONLY `file1`; the rest become `ARGV` (verified: `ruby /tmp/ta.rb /tmp/tb.rb` ran only ta.rb). So that command exercises only `status_test.rb` (9 runs), NOT all four suites. **The gate file is frozen and read-only (rule 3) — it was NOT edited.** When judging Lane B, measure GB1–GB5 via `bundle exec rake test` (G0, authoritative, subsumes all lane B tests) and/or each file run **individually**: `status_test.rb` 9·14·0·0·0 · `git_test.rb` 17·48·0·0·0 · `repo_plan_test.rb` 19·48·0·0·0 · `engine_test.rb` 42·259·0·0·0. Rule the four-file command **INVALID-as-written**; the underlying gates remain measurable and PASS in the lane report.
-
-- **Lane B residual concerns (cosmetic, for the judge to weigh — not blockers):** (1) `:report_dirty` handler re-probes `default_branch` on an unborn dirty repo → one wasted `set-head -a` network call (harmless; GB4 still passes). (2) `sync_empty` resolves `default_branch` and the engine re-probes it after success → one redundant probe. Both match the spec as written; candidate CF if the judge wants them tightened.
+**Arbitration of the two Lane B residual concerns (judge's ruling):**
+1. `:report_dirty` re-probes `default_branch` on unborn dirty → one harmless local `set-head -a` call. **WAVE THROUGH** (won't-fix) — no correctness/safety impact, GB4 passes; not worth a CF on a wound-down loop.
+2. `sync_empty` + engine double-probe `default_branch` after success → one redundant read. **WAVE THROUGH** — harmless, matches spec as written.
 
 **Prior status (still true): feature slices 1–6 + CLI-UX epic + cf-cleanup + state-hardening all JUDGED PASS and merged to `main`. CF1–CF12 + tty-screen CLOSED.**
 
@@ -50,21 +56,15 @@ Baseline at `main`: **379/1334/0/0/0**, lint 0, 51 gems.
 - **Worktree isolation must be enforced in the block.** A past `pi` dispatch escaped its worktree and corrupted the main checkout (cwd not pinned). Bake the lane's worktree **absolute path** into the block as the repo root, forbid the main path, forbid all `git`. Post-flight always verifies `git -C <worktree> log <freeze>..` is empty (no builder commits).
 - **High-stakes slices (schema/persistence/concurrency/API/security) get a cross-model adversarial pass at judgment** — a fresh-context reviewer prompted to break confidence on the invariants, file:line evidence only. (state-hardening CF10 followed this; it cleanly separated the cardinal invariant from two cosmetic nits — see CF12.)
 - **No-data-loss is the cardinal invariant** (PRD §1): never mutate a dirty/diverged repo; state writes must not lose prior good rows.
+- **Never freeze a multi-file `ruby a.rb b.rb c.rb` gate command.** Ruby runs only the first file; the rest become `ARGV`. The `sync-fixes` Lane B gate command was frozen this way and was INVALID-as-written (silently ran 9/87 tests). For multi-suite gates use `bundle exec rake test`, or one `ruby -Itest <file>` command **per** file, or `ruby -Itest -e 'Dir["..."].each{require ...}'`.
 
 ## Open carry-forwards
 
-**None open as numbered CFs.** CF1–CF12 + tty-screen all CLOSED. (Two cosmetic Lane B residuals listed in the TL;DR are candidate CFs the judge may open or wave through.)
+**None open as numbered CFs.** CF1–CF12 + tty-screen all CLOSED. The two cosmetic Lane B residuals were **waved through** at judgment (see TL;DR arbitration) — not opened as CFs.
 
 ## Next slice / open work
 
-**`slice/sync-fixes` is BUILT and awaiting JUDGMENT (fresh session).** Procedure for the judging session:
-
-1. `git diff f208d46..slice/sync-fixes` read in full against `docs/gates/sync-fixes.md` intent.
-2. Run G0 (`bundle exec rake test` → ≥ 398, 0F/0E/0S), GL (`standardrb` 0), GG (51 gems). For Lane B GB1–GB5 use `rake test` + per-file runs (the four-file gate command is INVALID-as-written — see TL;DR).
-3. **Cross-tier adversarial pass on the Lane B diff** (high-stakes: touches the no-data-loss cardinal invariant). The load-bearing property is GB4 — an unborn repo with uncommitted local files must NEVER be fetched/merged. Confirm with file:line evidence that no path reaches `sync_empty`/`merge --ff-only` when `status.unborn? && !status.clean?` (the `RepoPlan` guard routes those to `:report_dirty`).
-4. Per-gate PASS/FAIL/INVALID, then one KILL/CONTINUE. On PASS/CONTINUE: merge `slice/sync-fixes --no-ff` → `main`, delete the lane branches (`lane/sync-fixes-A`, `lane/sync-fixes-B`), archive lane detail, update this TL;DR.
-
-Dispatch record: freeze `f208d46`; builder run-logs at `.architect/wt/sync-fixes-{A,B}.last-run.jsonl` (gitignored); builder blocks at `.architect/wt/sync-fixes-{A,B}.block.md`.
+**None.** `slice/sync-fixes` JUDGED PASS and merged to `main` @ `585ccba`; branches deleted. PRD complete; loop wound down (see Teardown). `main` not pushed to `origin` — leave that to the human. To resume later, spec a new slice per the loop.
 
 ## Teardown (2026-06-14) — PRD complete, loop wound down
 
