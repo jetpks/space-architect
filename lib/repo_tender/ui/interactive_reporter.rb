@@ -206,7 +206,12 @@ module RepoTender
 
       def build_status_line
         frame = @pastel.cyan(FRAMES[@frame_idx % FRAMES.length])
-        base = "#{frame} synced #{@finished}/#{@total}   #{@pastel.green("✓")} #{@clean_count}   #{@pastel.yellow("⚠")} #{@nonclean_count}   #{@pastel.red("✗")} #{@failed_count}"
+        # Right-justify every counter to the digit-width of @total (the cap on
+        # all of them) so the in-flight suffix sits at a fixed column instead of
+        # drifting right as counts cross digit boundaries. Padding is invisible
+        # leading spaces.
+        w = @total.to_s.length
+        base = "#{frame} synced #{@finished.to_s.rjust(w)}/#{@total}   #{@pastel.green("✓")} #{@clean_count.to_s.rjust(w)}   #{@pastel.yellow("⚠")} #{@nonclean_count.to_s.rjust(w)}   #{@pastel.red("✗")} #{@failed_count.to_s.rjust(w)}"
         "#{base}#{build_in_flight_suffix}"
       end
 

@@ -717,4 +717,41 @@ class InteractiveReporterTest < Minitest::Test
     refute_match(/owner\/repo-07/, terminal,
       "individual cloned names must NOT appear in terminal block above threshold")
   end
+
+  # ===========================================================================
+  # Status-line counters are width-padded so the in-flight suffix doesn't drift
+  # ===========================================================================
+
+  def test_status_line_counters_padded_so_in_flight_column_is_fixed
+    reporter, out = make_reporter(color: false, cadence: 0.01)
+
+    Sync do |task|
+      reporter.attach(task)
+      reporter.run_started(total: 100)  # 3-digit total → counters pad to width 3
+      reporter.repo_started("github.com/owner/in-flight")  # long-lived in-flight
+      sleep 0.03  # capture a frame while finished == 0 (single digit, padded)
+      15.times do |i|
+        reporter.repo_started("github.com/owner/done-#{i}")
+        reporter.repo_finished("github.com/owner/done-#{i}", "clean", action: :up_to_date)
+      end
+      sleep 0.03  # capture a frame while finished == 15 (two digits)
+      reporter.repo_finished("github.com/owner/in-flight", "clean", action: :up_to_date)
+      reporter.run_finished("clean" => 16)
+      reporter.detach
+    end
+
+    frames = out.string.scan(/\r\e\[K([^\r\n]*)/).map(&:first)
+    marked = frames.select { |f| f.include?("·") }
+
+    # Both a single-digit and a two-digit finished-count frame must be present,
+    # right-justified to the total's width (3) — otherwise the test is vacuous.
+    assert marked.any? { |f| f.include?("synced   0/100") },
+      "finished count must be right-justified to 3 cols ('synced   0/100')\n#{marked.join("\n")}"
+    assert marked.any? { |f| f.include?("synced  15/100") },
+      "finished count must be right-justified to 3 cols ('synced  15/100')\n#{marked.join("\n")}"
+
+    cols = marked.map { |f| f.index("·") }.uniq
+    assert_equal 1, cols.size,
+      "in-flight '·' marker must sit at a fixed column regardless of count digit-width\n#{marked.join("\n")}"
+  end
 end
