@@ -1,20 +1,16 @@
-# Reference
+# Reference 📘
 
-Complete, information-oriented catalogue of `repo-tender`'s command surface,
-configuration, state, files, and behaviour. For learning and task guidance see
-the [README](../README.md). This page describes; it does not teach.
+Everything `repo-tender` can do, in detail — commands, configuration, state,
+files, and exit codes. The [README](../README.md) is the friendly tour 🌲; this
+is the lookup table. 🔎
 
 Version: 0.1.0.
-
----
 
 ## Synopsis
 
 ```
 repo-tender <command> [subcommand] [arguments] [options]
 ```
-
-Top-level commands:
 
 | Command | Purpose |
 |---------|---------|
@@ -28,11 +24,9 @@ Top-level commands:
 Top-level forms that print and exit 0: `repo-tender`, `--help`, `-h`, `help`
 (usage); `version`, `--version` (the version string).
 
----
-
 ## Global options
 
-Accepted by every command. They select the output mode.
+Accepted by every command — they select the output mode.
 
 | Option | Effect |
 |--------|--------|
@@ -43,8 +37,6 @@ Accepted by every command. They select the output mode.
 | `--help`, `-h` | Print command help and exit 0. |
 
 See [Output modes](#output-modes) for resolution rules.
-
----
 
 ## Commands
 
@@ -106,8 +98,8 @@ Run one sync pass over every tracked repo (explicit + org-expanded).
 | `--repo=VALUE` | Scope the pass to a single tracked repo (`host/owner/name`). |
 | *(global options)* | `--plain`, `--json`, `--no-color`, `--quiet`/`-q`. |
 
-**What a pass does, per repo** (local-first; see
-[Local-first evaluation](../README.md#local-first-evaluation)):
+**What a pass does, per repo** (local-first; see the README's
+[How it works](../README.md)):
 
 - **Missing** path → `git clone` into `$BASE_DIR/host/owner/name`.
 - **Clean + behind** → `git fetch` then `git merge --ff-only`.
@@ -161,8 +153,6 @@ The plist is written to `~/Library/LaunchAgents/<label>.plist`.
 | `daemon status` | Parse `launchctl print`/`list` (loaded? running? last exit) + show last-run state. |
 
 See [launchd plist](#launchd-plist) for the generated job's shape.
-
----
 
 ## Configuration
 
@@ -253,8 +243,6 @@ The `status` field per repo (and the `STATUS` column):
 | `missing` | Path not present on disk. | Cloned. |
 | `error` | An operation failed (see `last_error`). | Recorded; run continues. |
 
----
-
 ## Files & locations
 
 | Path | What |
@@ -266,8 +254,6 @@ The `status` field per repo (and the `STATUS` column):
 | `~/Library/LaunchAgents/io.github.jetpks.repo-tender.sync.plist` | The scheduled job. |
 
 XDG overrides (`$XDG_CONFIG_HOME`, `$XDG_STATE_HOME`) are honored when set.
-
----
 
 ## launchd plist
 
@@ -288,8 +274,6 @@ No `KeepAlive` — this is a periodic job, not a resident daemon. All paths are
 absolute (`~`/`$HOME` resolved). Ruby runs via `mise exec` (not `mise activate`,
 which is broken non-interactively). The plist validates under `plutil -lint`.
 
----
-
 ## Output modes
 
 The active mode is resolved per command from flags, environment, and whether
@@ -302,8 +286,6 @@ stdout is a TTY:
   not a TTY.
 - `--quiet`/`-q` suppresses non-essential output.
 
----
-
 ## Exit codes
 
 | Code | Meaning |
@@ -312,12 +294,10 @@ stdout is a TTY:
 | `1` | A `Failure` occurred (message on stderr). |
 | `130` | Interrupted by `SIGINT` (`^C`); prints `interrupted` on stderr. |
 
----
-
 ## See also
 
-- [README](../README.md) — tutorial, how-to guides, explanation.
-- [`AGENTS.md`](../AGENTS.md) — build conventions and toolchain.
-- [`docs/prd/repo-tender.md`](prd/repo-tender.md) — full design (PRD).
-- [`docs/research/repo-tender.md`](research/repo-tender.md) — evidence ledger.
+- [README](../README.md) 🌲 — the friendly tour
+- [`AGENTS.md`](../AGENTS.md) 🤝 — build conventions and toolchain
+- [`docs/prd/repo-tender.md`](prd/repo-tender.md) 🏗️ — full design (PRD)
+- [`docs/research/repo-tender.md`](research/repo-tender.md) 🔬 — evidence ledger
 </content>
