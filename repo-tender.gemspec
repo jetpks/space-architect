@@ -8,8 +8,11 @@ Gem::Specification.new do |spec|
   spec.authors = ["Eric Jacobs"]
   spec.email = ["eric@ebj.dev"]
 
-  spec.summary = "Keep local git clones evergreen (clean · on default branch · fetched within refresh_interval)"
-  spec.description = "A dry-cli binary plus a periodic launchd-invoked sync sweep. macOS-only, GitHub-only (behind decoupled SCM/forge interfaces). Never mutates a dirty/diverged repo."
+  spec.summary = "Keep your local git clones forever evergreen 🌲 — clean, on default branch, and freshly fetched!"
+  spec.description = "A dry-cli binary plus a periodic launchd sync sweep that keeps every tracked repo " \
+    "(and whole GitHub orgs!) clean, on its default branch, and up to date — so anything downstream can " \
+    "clone from local disk instantly. macOS-only, GitHub-only (behind decoupled SCM/forge interfaces). " \
+    "Never destroys your work: dirty or diverged repos are reported, never touched. ヽ(•‿•)ノ✨"
   spec.homepage = "https://github.com/jetpks/repo-tender"
   spec.license = "MIT"
   spec.metadata = {
