@@ -9,14 +9,16 @@ module RepoTender
     #
     # A working tree is "clean" iff the only porcelain-v2 lines are the
     # `# branch.*` header lines. Any `1`/`2`/`u`/`?`/`!` line is dirty.
-    Status = Data.define(:clean, :branch, :upstream, :ahead, :behind, :detached, :entries) do
-      def initialize(clean:, branch: nil, upstream: nil, ahead: 0, behind: 0, detached: false, entries: [])
+    Status = Data.define(:clean, :branch, :upstream, :ahead, :behind, :detached, :entries, :unborn) do
+      def initialize(clean:, branch: nil, upstream: nil, ahead: 0, behind: 0, detached: false, entries: [], unborn: false)
         super
       end
 
       def clean? = clean
 
       def detached? = detached
+
+      def unborn? = unborn
     end
   end
 end

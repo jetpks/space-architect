@@ -68,4 +68,43 @@ module TestHelpers
       Shell.run("git", "push", "-q", "-u", "origin", "trunk", chdir: clone)
     end
   end
+
+  # Set up a real EMPTY bare git remote + a working clone with zero commits.
+  # The bare remote's default branch is `trunk` (consistent with
+  # with_trunk_repo). The clone has an unborn HEAD — no commits exist
+  # anywhere. Yields paths to the bare and the clone inside an in_async
+  # block (Shell.run is available throughout).
+  def with_empty_repo
+    Dir.mktmpdir("repo-tender-empty-") do |dir|
+      bare = File.join(dir, "bare.git")
+      clone = File.join(dir, "clone")
+      system("git", "init", "-b", "trunk", "--bare", bare, exception: true, out: File::NULL)
+      system("git", "-c", "init.defaultBranch=trunk", "init", "-q", clone, exception: true, out: File::NULL)
+      in_async do
+        Shell.run("git", "remote", "add", "origin", bare, chdir: clone)
+        Shell.run("git", "config", "user.email", "test@example.com", chdir: clone)
+        Shell.run("git", "config", "user.name", "Test", chdir: clone)
+        yield(bare, clone)
+      end
+    end
+  end
+
+  # Push a commit to a bare remote from a new seeder clone.
+  # Used in GB3 tests to simulate the remote gaining its first commit(s)
+  # after an initially empty clone is already set up.
+  def push_first_commit_to_bare(bare, content: "hello\n", filename: "README.md", message: "first commit")
+    Dir.mktmpdir("repo-tender-seeder-") do |sdir|
+      seeder = File.join(sdir, "seeder")
+      system("git", "-c", "init.defaultBranch=trunk", "init", "-q", seeder, exception: true, out: File::NULL)
+      in_async do
+        Shell.run("git", "remote", "add", "origin", bare, chdir: seeder)
+        Shell.run("git", "config", "user.email", "test@example.com", chdir: seeder)
+        Shell.run("git", "config", "user.name", "Test", chdir: seeder)
+        File.write(File.join(seeder, filename), content)
+        Shell.run("git", "add", ".", chdir: seeder)
+        Shell.run("git", "commit", "-qm", message, chdir: seeder)
+        Shell.run("git", "push", "-q", "origin", "trunk", chdir: seeder)
+      end
+    end
+  end
 end

@@ -109,6 +109,12 @@ class SyncEngineTest < Minitest::Test
       @fast_forward_calls += 1
       Dry::Monads::Success(@fast_forward_value)
     end
+
+    def sync_empty(path)
+      raise @raise_on if @raise_on
+      return Dry::Monads::Failure({path: path, reason: "stub: sync_empty failed"}) if @fail_paths.include?(path)
+      Dry::Monads::Success(:empty)
+    end
   end
 
   # A SlowSCM for the G7 concurrency test. Increments a shared
@@ -1784,6 +1790,156 @@ class SyncEngineTest < Minitest::Test
           "GA3(c): lock must be released even when an exception escapes Engine#call"
         fd.flock(File::LOCK_UN)
         fd.close
+      end
+    end
+  end
+
+  # ===========================================================================
+  # GB2 — Empty remote → status: clean, last_error: nil (real git)
+  # ===========================================================================
+  def test_gb2_empty_repo_engine_yields_clean_not_error
+    with_engine_home do |paths, base_dir, state_file|
+      with_empty_repo do |_bare, clone|
+        ref = RepoRef.new(host: "github.com", owner: "empty", name: "proj")
+        repo_path = File.join(base_dir, ref.host, ref.owner, ref.name)
+        FileUtils.mkdir_p(File.dirname(repo_path))
+        FileUtils.cp_r(clone, repo_path)
+
+        config = make_config(base_dir: base_dir, repos: [ref])
+        result = Engine.new.call(config: config, paths: paths)
+        assert result.success?, "engine failed on empty repo: #{result.failure.inspect}"
+
+        state = StateStore.load(state_file).success
+        row = state.repos["github.com/empty/proj"]
+        refute_nil row, "empty repo must have a state row"
+        assert_equal "clean", row.status,
+          "empty repo must report status: clean (not error)"
+        assert_nil row.last_error, "empty repo must not have last_error"
+      end
+    end
+  end
+
+  # ===========================================================================
+  # GB3 — Empty clone + remote gains commits → fast-forwarded to clean (real git)
+  # ===========================================================================
+  def test_gb3_empty_clone_fast_forwards_when_remote_gains_commits
+    with_engine_home do |paths, base_dir, state_file|
+      with_empty_repo do |bare, clone|
+        ref = RepoRef.new(host: "github.com", owner: "empty", name: "proj")
+        repo_path = File.join(base_dir, ref.host, ref.owner, ref.name)
+        FileUtils.mkdir_p(File.dirname(repo_path))
+        FileUtils.cp_r(clone, repo_path)
+
+        # First run: empty remote → status: clean
+        config = make_config(base_dir: base_dir, repos: [ref])
+        result1 = Engine.new.call(config: config, paths: paths)
+        assert result1.success?, "first engine run failed: #{result1.failure.inspect}"
+        row1 = StateStore.load(state_file).success.repos["github.com/empty/proj"]
+        assert_equal "clean", row1.status
+        assert_nil row1.default_branch, "default_branch should be nil for still-empty remote"
+
+        # Remote gains its first commit.
+        push_first_commit_to_bare(bare, content: "hello\n", filename: "README.md")
+
+        # Second run: should fetch + fast-forward.
+        result2 = Engine.new.call(config: config, paths: paths)
+        assert result2.success?, "second engine run failed: #{result2.failure.inspect}"
+
+        state2 = StateStore.load(state_file).success
+        row2 = state2.repos["github.com/empty/proj"]
+        refute_nil row2
+        assert_equal "clean", row2.status,
+          "after gaining commits, status must be clean"
+        assert_equal "trunk", row2.default_branch,
+          "default_branch must be resolved after fast-forward"
+
+        # File is on disk.
+        assert File.exist?(File.join(repo_path, "README.md")),
+          "README.md must be present after fast-forward into unborn branch"
+        assert_equal "hello\n", File.read(File.join(repo_path, "README.md"))
+
+        # git log resolves.
+        log = Shell.run("git", "log", "--oneline", chdir: repo_path)
+        assert log.success?, "git log must succeed after fast-forward"
+        assert_includes log.success, "first commit"
+      end
+    end
+  end
+
+  # ===========================================================================
+  # GB4 — Unborn+dirty → never mutated, files intact, status: dirty (real git)
+  # ===========================================================================
+  def test_gb4_unborn_dirty_never_mutated_files_intact
+    with_engine_home do |paths, base_dir, state_file|
+      with_empty_repo do |_bare, clone|
+        ref = RepoRef.new(host: "github.com", owner: "empty", name: "proj")
+        repo_path = File.join(base_dir, ref.host, ref.owner, ref.name)
+        FileUtils.mkdir_p(File.dirname(repo_path))
+        FileUtils.cp_r(clone, repo_path)
+
+        # Drop an untracked file — the GB4 cardinal test.
+        sentinel_path = File.join(repo_path, "do_not_delete.txt")
+        sentinel_content = "precious local work #{Process.pid}\n"
+        File.write(sentinel_path, sentinel_content)
+
+        config = make_config(base_dir: base_dir, repos: [ref])
+        result = Engine.new.call(config: config, paths: paths)
+        assert result.success?, "engine failed: #{result.failure.inspect}"
+
+        state = StateStore.load(state_file).success
+        row = state.repos["github.com/empty/proj"]
+        refute_nil row
+        assert_equal "dirty", row.status,
+          "GB4: unborn dirty repo must report status: dirty"
+        assert_nil row.last_error,
+          "GB4: dirty is an observation, not an error — last_error must be nil"
+
+        # The file is byte-for-byte intact — no mutation occurred.
+        assert File.exist?(sentinel_path),
+          "GB4: untracked file must survive — no mutation on unborn dirty repo"
+        assert_equal sentinel_content, File.read(sentinel_path),
+          "GB4: file contents must be unchanged — byte-for-byte integrity"
+
+        # HEAD is still unborn.
+        in_async do
+          status_out = Shell.run("git", "status", "--porcelain=v2", "--branch", chdir: repo_path)
+          assert status_out.success?
+          assert_includes status_out.success, "branch.oid (initial)",
+            "GB4: HEAD must still be unborn after run on dirty unborn repo"
+        end
+      end
+    end
+  end
+
+  # ===========================================================================
+  # GB5 — Real errors stay errors (non-empty repo with real probe failure)
+  # ===========================================================================
+  def test_gb5_real_error_stays_error_not_swallowed_by_empty_path
+    with_engine_home do |paths, base_dir, state_file|
+      with_trunk_repo do |_bare, clone|
+        seed_initial_commit(clone)
+        ref = RepoRef.new(host: "github.com", owner: "ruby", name: "ruby")
+        repo_path = File.join(base_dir, ref.host, ref.owner, ref.name)
+        FileUtils.mkdir_p(File.dirname(repo_path))
+        FileUtils.cp_r(clone, repo_path)
+
+        # Point origin at a non-existent remote to force a fetch error.
+        in_async do
+          Shell.run("git", "remote", "set-url", "origin",
+            "/tmp/does-not-exist-#{Process.pid}.git", chdir: repo_path)
+        end
+
+        config = make_config(base_dir: base_dir, repos: [ref])
+        result = Engine.new.call(config: config, paths: paths)
+        assert result.success?, "engine must not abort even on a fetch error"
+
+        state = StateStore.load(state_file).success
+        row = state.repos["github.com/ruby/ruby"]
+        refute_nil row
+        assert_equal "error", row.status,
+          "GB5: a real fetch failure on a non-empty repo must remain status: error"
+        refute_nil row.last_error,
+          "GB5: last_error must be set on a real fetch failure"
       end
     end
   end

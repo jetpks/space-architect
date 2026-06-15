@@ -84,6 +84,10 @@ class SyncRepoPlanTest < Minitest::Test
       @fast_forward_calls += 1
       Dry::Monads::Success(@fast_forward_value)
     end
+
+    def sync_empty(_path)
+      Dry::Monads::Success(:empty)
+    end
   end
 
   def clean_status(branch: "trunk", upstream: "origin/trunk", ahead: 0, behind: 0)
@@ -320,6 +324,67 @@ class SyncRepoPlanTest < Minitest::Test
       ).success
       assert_equal :switch, plan.action
       assert_equal "wrong_branch", plan.status
+    end
+  end
+
+  # ---- GB2 (stub): unborn clean → :sync_empty ----
+
+  def test_unborn_clean_returns_sync_empty
+    unborn_clean = Status.new(clean: true, branch: "trunk", unborn: true)
+    scm = StubSCM.new(status_value: unborn_clean)
+    plan = RepoPlan.call(
+      repo_ref: repo_ref, path: "/tmp", scm: scm, refresh_interval: 3600
+    ).success
+    assert_equal :sync_empty, plan.action
+    assert_equal "clean", plan.status
+    assert_equal 0, scm.current_branch_calls,
+      "unborn path must not call current_branch (default_branch would fail on empty remote)"
+    assert_equal 0, scm.default_branch_calls,
+      "unborn path must not call default_branch (exits non-zero on empty remote)"
+  end
+
+  # ---- GB4 (stub): unborn dirty → :report_dirty, no mutation ----
+
+  def test_unborn_dirty_returns_report_dirty
+    unborn_dirty = Status.new(clean: false, branch: "trunk", unborn: true,
+      entries: ["? local.txt"])
+    scm = StubSCM.new(status_value: unborn_dirty)
+    plan = RepoPlan.call(
+      repo_ref: repo_ref, path: "/tmp", scm: scm, refresh_interval: 3600
+    ).success
+    assert_equal :report_dirty, plan.action
+    assert_equal "dirty", plan.status
+    assert_equal 0, scm.current_branch_calls, "unborn dirty path must not call current_branch"
+    assert_equal 0, scm.default_branch_calls, "unborn dirty path must not call default_branch"
+    assert_equal 0, scm.fetch_calls, "unborn dirty path must not fetch"
+  end
+
+  # ---- GB2 (real git): unborn clean → :sync_empty ----
+
+  def test_real_empty_repo_returns_sync_empty
+    with_empty_repo do |_bare, clone|
+      scm = RepoTender::SCM::Git.new
+      plan = RepoPlan.call(
+        repo_ref: repo_ref, path: clone, scm: scm, refresh_interval: 3600,
+        now: Time.now
+      ).success
+      assert_equal :sync_empty, plan.action, "empty repo should plan :sync_empty, not :report_error"
+      assert_equal "clean", plan.status
+    end
+  end
+
+  # ---- GB4 (real git): unborn dirty → :report_dirty ----
+
+  def test_real_empty_repo_with_untracked_file_returns_report_dirty
+    with_empty_repo do |_bare, clone|
+      File.write(File.join(clone, "local.txt"), "do not touch me\n")
+      scm = RepoTender::SCM::Git.new
+      plan = RepoPlan.call(
+        repo_ref: repo_ref, path: clone, scm: scm, refresh_interval: 3600,
+        now: Time.now
+      ).success
+      assert_equal :report_dirty, plan.action, "unborn dirty should plan :report_dirty"
+      assert_equal "dirty", plan.status
     end
   end
 end
