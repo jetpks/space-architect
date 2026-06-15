@@ -300,4 +300,3 @@ stdout is a TTY:
 - [`AGENTS.md`](../AGENTS.md) 🤝 — build conventions and toolchain
 - [`docs/prd/repo-tender.md`](prd/repo-tender.md) 🏗️ — full design (PRD)
 - [`docs/research/repo-tender.md`](research/repo-tender.md) 🔬 — evidence ledger
-</content>

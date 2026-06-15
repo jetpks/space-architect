@@ -249,4 +249,3 @@ Available as open source under the terms of the [MIT License](LICENSE.txt).
 ---
 
 Made with 💖 and a deep distrust of `reset --hard`, by Eric 🌲
-</content>

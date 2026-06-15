@@ -33,4 +33,3 @@ jobs:
 
       - name: Lint (standardrb)
         run: bundle exec standardrb
-</content>

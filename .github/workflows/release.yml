@@ -67,4 +67,3 @@ jobs:
         with:
           files: pkg/*.gem
           generate_release_notes: true
-</content>
