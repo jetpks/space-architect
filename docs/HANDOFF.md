@@ -9,7 +9,11 @@
 
 ## TL;DR
 
-**Status (2026-06-14): loop re-spun for slice `interactive-status` — DISPATCHED, awaiting builder + next-session judging.** Gates frozen at `docs/gates/interactive-status.md` (freeze base `6ea0711`, baseline 398/1404/0/0/0, lint 0, `bundle list` 53). Scope: (1) flash the in-flight repo on the rewritten sweep status line (via already-emitted `repo_started`/`repo_phase`); (2) richer end-of-run summary — aggregate git-stats breakdown + **real** pulled-commit count + added-repos list that collapses to a count above a volume threshold (`ADDED_LIST_THRESHOLD = 10`). One lane (`interactive-status-01`, main checkout) — the change is one cohesive `repo_finished` signature contract spanning SCM/engine/4 reporters; splitting would break lane independence. Design decisions confirmed with the human: real commit counts (touches `SCM::Git#fast_forward` Success payload: symbol→integer commits) + volume-threshold (not org-first-sync join). **Do not judge in this session (rule 4).**
+**Status (2026-06-14): slice `interactive-status` BUILT + INTEGRATED to `slice/interactive-status` @ `1e2785a` — AWAITING FRESH-SESSION JUDGING (rule 4; built + post-flighted in the dispatching session).** `main` untouched at the freeze `a2a254f`. Gates frozen at `docs/gates/interactive-status.md` (baseline 398/1404/0/0/0). Scope delivered: (1) flash the most-recently-started in-flight repo on the rewritten sweep status line (via already-emitted `repo_started`/`repo_phase`); (2) end-of-run aggregate git-stats breakdown + **real** pulled-commit count + added-repos list collapsing to a count above `ADDED_LIST_THRESHOLD = 10`. Shared contracts: `repo_finished(ref, status, action:, commits:)` across all 4 reporters; `SCM::Git#fast_forward` Success payload symbol→Integer (commits pulled); engine maps each `plan.action`→realized action+commits.
+
+**Architect post-flight (this session, integrity only — NOT the gate verdict):** no builder commits (`git log a2a254f..1e2785a` = the one architect lane commit only); `docs/gates/` diff clean; all builder writes confined to the 12 declared files; diff read against spec intent = faithful (SCM/engine/reporter mapping correct, no-data-loss guards untouched). Architect's own gate runs on the tree: **G0 407/1458/0/0/0** (+9 over baseline), **GL exit 0**, **GG 53 gems**; G4 3 runs / G5 2 runs all 0F/0E. **Caveat:** the builder (`claude -p`) overflowed its 200k context (`Prompt is too long`) *after* G4/G5 passed but before writing its lane report — `docs/lanes/interactive-status-01.md` is **architect-reconstructed** (marked as such), and no PHASE 0 disagreement record persisted (process gap to weigh).
+
+**NEXT (fresh) SESSION — judge `slice/interactive-status`:** re-run G0–G5 verbatim against the frozen `docs/gates/interactive-status.md`; re-read the diff vs spec intent (note this is a UI + thin observe/display slice — the cardinal no-data-loss invariant must be untouched; confirm `fast_forward` still `merge --ff-only` + Fails on divergence). On PASS/CONTINUE, merge `--no-ff` to `main` and delete the branch. The missing PHASE 0 record + architect-reconstructed lane report are the two things to scrutinize beyond the gates.
 
 **Prior status (2026-06-14): slice `sync-fixes` JUDGED PASS → merged `--no-ff` to `main` @ `585ccba` (fresh judging session, rule 4 satisfied).** Both lanes' gates re-run against the verbatim frozen `docs/gates/sync-fixes.md`; integration smoke on `main`: **398/1404/0/0/0, standardrb 0, 51 gems** (baseline was 379/1334). Lane + slice branches deleted. Lane evidence retained at `docs/lanes/sync-fixes-{A,B}.md`; frozen gates at `docs/gates/sync-fixes.md`.
 
@@ -66,14 +70,7 @@ Baseline at `main`: **379/1334/0/0/0**, lint 0, 51 gems.
 
 ## Next slice / open work
 
-**In flight: slice `interactive-status` (DISPATCHED 2026-06-14).** Freeze base `6ea0711`; gates at `docs/gates/interactive-status.md`. One lane, dispatched in the main checkout (builder block at `.architect/interactive-status-01.block.md`); builder writes raw evidence to `docs/lanes/interactive-status-01.md`. **Next architect session:** post-flight (builder made no commits: `git log 6ea0711..` empty; `git diff` on `docs/gates/` clean; writes confined to the declared file set), then run G0–G5 verbatim and judge. Merge to `main` only on PASS/CONTINUE.
-
-Declared file-touch set for the lane (writes outside this set FAIL the lane):
-- `lib/repo_tender/scm/git.rb`, `lib/repo_tender/scm/client.rb`
-- `lib/repo_tender/sync/engine.rb`
-- `lib/repo_tender/ui/interactive_reporter.rb`, `lib/repo_tender/ui/reporter.rb`, `lib/repo_tender/ui/plain_reporter.rb`, `lib/repo_tender/ui/json_reporter.rb`
-- `test/repo_tender/scm/git_test.rb`, `test/repo_tender/sync/engine_test.rb`, `test/repo_tender/ui/interactive_reporter_test.rb`, `test/repo_tender/ui/json_reporter_test.rb`, `test/repo_tender/ui/plain_reporter_test.rb`
-- `docs/lanes/interactive-status-01.md` (lane report)
+**Awaiting judging: slice `interactive-status` on `slice/interactive-status` @ `1e2785a`** (built + integrated 2026-06-14; freeze `a2a254f`; gates at `docs/gates/interactive-status.md`; evidence at `docs/lanes/interactive-status-01.md`). A fresh architect session judges G0–G5 and, on PASS/CONTINUE, merges `--no-ff` to `main`. See the TL;DR for the post-flight summary and the two scrutiny items (missing PHASE 0 record; architect-reconstructed lane report after builder context overflow).
 
 `main` not pushed to `origin` — leave that to the human.
 
