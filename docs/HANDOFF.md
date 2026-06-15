@@ -9,7 +9,9 @@
 
 ## TL;DR
 
-**Status (2026-06-14): slice `sync-fixes` JUDGED PASS → merged `--no-ff` to `main` @ `585ccba` (fresh judging session, rule 4 satisfied).** Both lanes' gates re-run against the verbatim frozen `docs/gates/sync-fixes.md`; integration smoke on `main`: **398/1404/0/0/0, standardrb 0, 51 gems** (baseline was 379/1334). Lane + slice branches deleted. Lane evidence retained at `docs/lanes/sync-fixes-{A,B}.md`; frozen gates at `docs/gates/sync-fixes.md`.
+**Status (2026-06-14): loop re-spun for slice `interactive-status` — DISPATCHED, awaiting builder + next-session judging.** Gates frozen at `docs/gates/interactive-status.md` (freeze base `6ea0711`, baseline 398/1404/0/0/0, lint 0, `bundle list` 53). Scope: (1) flash the in-flight repo on the rewritten sweep status line (via already-emitted `repo_started`/`repo_phase`); (2) richer end-of-run summary — aggregate git-stats breakdown + **real** pulled-commit count + added-repos list that collapses to a count above a volume threshold (`ADDED_LIST_THRESHOLD = 10`). One lane (`interactive-status-01`, main checkout) — the change is one cohesive `repo_finished` signature contract spanning SCM/engine/4 reporters; splitting would break lane independence. Design decisions confirmed with the human: real commit counts (touches `SCM::Git#fast_forward` Success payload: symbol→integer commits) + volume-threshold (not org-first-sync join). **Do not judge in this session (rule 4).**
+
+**Prior status (2026-06-14): slice `sync-fixes` JUDGED PASS → merged `--no-ff` to `main` @ `585ccba` (fresh judging session, rule 4 satisfied).** Both lanes' gates re-run against the verbatim frozen `docs/gates/sync-fixes.md`; integration smoke on `main`: **398/1404/0/0/0, standardrb 0, 51 gems** (baseline was 379/1334). Lane + slice branches deleted. Lane evidence retained at `docs/lanes/sync-fixes-{A,B}.md`; frozen gates at `docs/gates/sync-fixes.md`.
 
 **Per-gate verdicts (this session, measured by the architect):**
 - **G0** `rake test` → 398/1404/0/0/0 → **PASS** (≥ 379 + new, strictly >379).
@@ -64,7 +66,16 @@ Baseline at `main`: **379/1334/0/0/0**, lint 0, 51 gems.
 
 ## Next slice / open work
 
-**None.** `slice/sync-fixes` JUDGED PASS and merged to `main` @ `585ccba`; branches deleted. PRD complete; loop wound down (see Teardown). `main` not pushed to `origin` — leave that to the human. To resume later, spec a new slice per the loop.
+**In flight: slice `interactive-status` (DISPATCHED 2026-06-14).** Freeze base `6ea0711`; gates at `docs/gates/interactive-status.md`. One lane, dispatched in the main checkout (builder block at `.architect/interactive-status-01.block.md`); builder writes raw evidence to `docs/lanes/interactive-status-01.md`. **Next architect session:** post-flight (builder made no commits: `git log 6ea0711..` empty; `git diff` on `docs/gates/` clean; writes confined to the declared file set), then run G0–G5 verbatim and judge. Merge to `main` only on PASS/CONTINUE.
+
+Declared file-touch set for the lane (writes outside this set FAIL the lane):
+- `lib/repo_tender/scm/git.rb`, `lib/repo_tender/scm/client.rb`
+- `lib/repo_tender/sync/engine.rb`
+- `lib/repo_tender/ui/interactive_reporter.rb`, `lib/repo_tender/ui/reporter.rb`, `lib/repo_tender/ui/plain_reporter.rb`, `lib/repo_tender/ui/json_reporter.rb`
+- `test/repo_tender/scm/git_test.rb`, `test/repo_tender/sync/engine_test.rb`, `test/repo_tender/ui/interactive_reporter_test.rb`, `test/repo_tender/ui/json_reporter_test.rb`, `test/repo_tender/ui/plain_reporter_test.rb`
+- `docs/lanes/interactive-status-01.md` (lane report)
+
+`main` not pushed to `origin` — leave that to the human.
 
 ## Teardown (2026-06-14) — PRD complete, loop wound down
 
