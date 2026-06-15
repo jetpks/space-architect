@@ -31,7 +31,7 @@ class SyncEngineTest < Minitest::Test
 
     def initialize(status_value:, current_branch_value: "trunk",
       default_branch_value: "trunk", last_fetch_value: nil,
-      next_status_value: nil, fetch_value: :ok,
+      next_status_value: nil, fetch_value: :ok, fast_forward_value: 1,
       fail_paths: [], raise_on: nil)
       @status_value = status_value
       @current_branch_value = current_branch_value
@@ -41,7 +41,7 @@ class SyncEngineTest < Minitest::Test
       @fetch_value = fetch_value
       @switch_value = :ok
       @clone_value = :ok
-      @fast_forward_value = :fast_forwarded
+      @fast_forward_value = fast_forward_value  # Integer: commits pulled (0 = up to date)
       @fail_paths = fail_paths.to_set
       @status_calls = 0
       @fetch_calls = 0
@@ -1011,7 +1011,7 @@ class SyncEngineTest < Minitest::Test
     def run_started(total:) = @events << [:run_started, {total: total}]
     def repo_started(ref) = @events << [:repo_started, ref]
     def repo_phase(ref, phase) = @events << [:repo_phase, ref, phase]
-    def repo_finished(ref, status) = @events << [:repo_finished, ref, status]
+    def repo_finished(ref, status, action:, commits: 0) = @events << [:repo_finished, ref, status, action, commits]
     def repo_failed(ref, error) = @events << [:repo_failed, ref, error]
     def run_finished(summary) = @events << [:run_finished, summary]
     def detach = @events << [:detach]
@@ -1940,6 +1940,87 @@ class SyncEngineTest < Minitest::Test
           "GB5: a real fetch failure on a non-empty repo must remain status: error"
         refute_nil row.last_error,
           "GB5: last_error must be set on a real fetch failure"
+      end
+    end
+  end
+
+  # ===========================================================================
+  # G5 — engine plumbs realized action + commits to repo_finished
+  # ===========================================================================
+
+  def test_g5_fast_forwarded_repo_reported_with_action_and_commits
+    reporter = RecordingReporter.new
+    ref = RepoRef.new(host: "github.com", owner: "owner", name: "ff-repo")
+    behind_status = clean_status(branch: "trunk", ahead: 0, behind: 1)
+
+    Dir.mktmpdir("rt-g5-ff-") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "github.com", "owner", "ff-repo"))
+      with_paths(base_dir: dir) do |_, paths|
+        scm = StubSCM.new(
+          status_value: behind_status,
+          default_branch_value: "trunk",
+          fast_forward_value: 3
+        )
+        result = Engine.new(scm: scm, reporter: reporter).call(
+          config: make_config(base_dir: dir, repos: [ref]), paths: paths
+        )
+        assert result.success?, "engine failed: #{result.failure.inspect}"
+
+        key = "github.com/owner/ff-repo"
+        ev = reporter.events.find { |e| e.first == :repo_finished && e[1] == key }
+        refute_nil ev, "expected repo_finished event for #{key}"
+        assert_equal :fast_forwarded, ev[3], "expected action :fast_forwarded, got #{ev[3].inspect}"
+        assert_equal 3, ev[4], "expected commits 3, got #{ev[4].inspect}"
+      end
+    end
+  end
+
+  def test_g5_cloned_repo_reported_with_action_cloned
+    reporter = RecordingReporter.new
+    ref = RepoRef.new(host: "github.com", owner: "owner", name: "new-repo")
+
+    Dir.mktmpdir("rt-g5-clone-") do |dir|
+      # path does NOT exist → RepoPlan returns :clone
+      with_paths(base_dir: dir) do |_, paths|
+        scm = StubSCM.new(status_value: clean_status)
+        result = Engine.new(scm: scm, reporter: reporter).call(
+          config: make_config(base_dir: dir, repos: [ref]), paths: paths
+        )
+        assert result.success?, "engine failed: #{result.failure.inspect}"
+
+        key = "github.com/owner/new-repo"
+        ev = reporter.events.find { |e| e.first == :repo_finished && e[1] == key }
+        refute_nil ev, "expected repo_finished event for #{key}"
+        assert_equal :cloned, ev[3], "expected action :cloned, got #{ev[3].inspect}"
+        assert_equal 0, ev[4], "expected commits 0, got #{ev[4].inspect}"
+      end
+    end
+  end
+
+  def test_g5_up_to_date_repo_reported_with_action_up_to_date
+    reporter = RecordingReporter.new
+    ref = RepoRef.new(host: "github.com", owner: "owner", name: "current-repo")
+    up_to_date_status = clean_status(branch: "trunk", ahead: 0, behind: 0)
+
+    Dir.mktmpdir("rt-g5-utd-") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "github.com", "owner", "current-repo"))
+      with_paths(base_dir: dir) do |_, paths|
+        # fast_forward_value: 0 → up_to_date action
+        scm = StubSCM.new(
+          status_value: up_to_date_status,
+          default_branch_value: "trunk",
+          fast_forward_value: 0
+        )
+        result = Engine.new(scm: scm, reporter: reporter).call(
+          config: make_config(base_dir: dir, repos: [ref]), paths: paths
+        )
+        assert result.success?, "engine failed: #{result.failure.inspect}"
+
+        key = "github.com/owner/current-repo"
+        ev = reporter.events.find { |e| e.first == :repo_finished && e[1] == key }
+        refute_nil ev, "expected repo_finished event for #{key}"
+        assert_equal :up_to_date, ev[3], "expected action :up_to_date, got #{ev[3].inspect}"
+        assert_equal 0, ev[4], "expected commits 0, got #{ev[4].inspect}"
       end
     end
   end

@@ -77,7 +77,7 @@ module RepoTender
         end
 
         if right == 0
-          return Dry::Monads::Success(:up_to_date)
+          return Dry::Monads::Success(0)
         end
 
         # Do the fetch (cheap; FETCH_HEAD mtime hint logic can skip this
@@ -87,7 +87,7 @@ module RepoTender
 
         merge = Shell.run("git", "merge", "--ff-only", upstream, chdir: path)
         if merge.success?
-          Dry::Monads::Success(:fast_forwarded)
+          Dry::Monads::Success(right)
         else
           # On --ff-only failure, git leaves the working tree and local
           # commits intact — the test asserts this.

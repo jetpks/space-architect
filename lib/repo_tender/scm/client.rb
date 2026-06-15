@@ -47,6 +47,9 @@ module RepoTender
 
       # `git merge --ff-only origin/<default>`. Returns Failure if the
       # local branch has diverged (left count > 0) — never resets.
+      # On Success: returns Integer commit count pulled.
+      #   0  → already up to date (no merge performed)
+      #   N  → fast-forwarded N commits
       def fast_forward(path, default_branch)
         raise NotImplementedError
       end

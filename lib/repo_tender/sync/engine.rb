@@ -313,6 +313,8 @@ module RepoTender
 
         final_status = plan.status
         last_error = nil
+        realized_action = nil
+        realized_commits = 0
 
         case plan.action
         when :clone
@@ -321,18 +323,21 @@ module RepoTender
           if result.failure?
             final_status = "error"
             last_error = "clone failed: #{result.failure.inspect}"
+            realized_action = :error
           else
             # The clone succeeded; the repo is now "clean" (a fresh
             # clone has no local changes). Re-probe default_branch on
             # the now-cloned path.
             final_status = "clean"
             default_branch = @scm.default_branch(path).value_or { nil }
+            realized_action = :cloned
           end
         when :fast_forward
           default_branch = @scm.default_branch(path).value_or { nil }
           if default_branch.nil?
             final_status = "error"
             last_error = "default_branch probe failed; cannot fast-forward"
+            realized_action = :error
           else
             @reporter.repo_phase(key, :fast_forwarding)
             result = @scm.fast_forward(path, default_branch)
@@ -342,10 +347,15 @@ module RepoTender
                 # G4: divergence is not an error — it's a state.
                 final_status = "diverged"
                 last_error = failure[:reason].to_s
+                realized_action = :diverged
               else
                 final_status = "error"
                 last_error = failure.inspect
+                realized_action = :error
               end
+            else
+              realized_commits = result.success
+              realized_action = (realized_commits > 0) ? :fast_forwarded : :up_to_date
             end
           end
         when :switch
@@ -353,6 +363,7 @@ module RepoTender
           if default_branch.nil?
             final_status = "error"
             last_error = "default_branch probe failed; cannot switch"
+            realized_action = :error
           else
             # The plan only returns :switch for a clean tree (gate G5;
             # disagreement #1), so this scm.switch is on a clean tree.
@@ -364,10 +375,12 @@ module RepoTender
             if result.failure?
               final_status = "error"
               last_error = result.failure.inspect
+              realized_action = :error
             else
               # The switch succeeded; the repo is now on the default
               # branch with a clean tree.
               final_status = "clean"
+              realized_action = :switched
             end
           end
         when :sync_empty
@@ -375,8 +388,11 @@ module RepoTender
           if result.failure?
             final_status = "error"
             last_error = "empty-repo sync failed: #{result.failure.inspect}"
+            realized_action = :error
           else
             final_status = "clean"
+            # empty-repo commit counts are not tracked (commits: 0 always)
+            realized_action = :up_to_date
             # nil-safe: still-empty remote → default_branch returns Failure
             default_branch = @scm.default_branch(path).value_or { nil }
           end
@@ -385,18 +401,25 @@ module RepoTender
           # default_branch for the state record (cheap — cached on
           # first call).
           default_branch = @scm.default_branch(path).value_or { nil }
-        when :report_dirty, :report_diverged, :report_wrong_branch,
-          :report_detached
-          # The plan already classified the status; these are
-          # *observations* about the repo, not error conditions.
-          # last_error stays nil so the state row reads cleanly.
-          # Probe default_branch for the state record.
+          realized_action = :up_to_date
+        when :report_dirty
           default_branch = @scm.default_branch(path).value_or { nil }
+          realized_action = :dirty
+        when :report_diverged
+          default_branch = @scm.default_branch(path).value_or { nil }
+          realized_action = :diverged
+        when :report_wrong_branch
+          default_branch = @scm.default_branch(path).value_or { nil }
+          realized_action = :wrong_branch
+        when :report_detached
+          default_branch = @scm.default_branch(path).value_or { nil }
+          realized_action = :detached
         when :report_error
           # The plan classified a probe failure; the diagnostic goes
           # into last_error. Don't re-probe default_branch — the path
           # may not exist or the probe may still fail.
           last_error = plan.reason
+          realized_action = :error
         end
 
         last_fetch = @scm.last_fetch_at(path).value_or { nil }
@@ -407,7 +430,7 @@ module RepoTender
           status: final_status,
           last_error: last_error
         )
-        @reporter.repo_finished(key, final_status)
+        @reporter.repo_finished(key, final_status, action: realized_action, commits: realized_commits)
         [key, repo]
       rescue => e
         # Last-resort: any unexpected exception (e.g. Shell.run raising

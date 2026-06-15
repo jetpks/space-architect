@@ -39,7 +39,7 @@ module RepoTender
 
       def repo_phase(ref, phase) = nil
 
-      def repo_finished(ref, status)
+      def repo_finished(ref, status, action:, commits: 0)
         @out.puts "#{ref}\t#{status}"
       end
 

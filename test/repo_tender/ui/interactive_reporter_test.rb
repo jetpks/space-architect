@@ -19,14 +19,14 @@ class InteractiveReporterTest < Minitest::Test
     [IR.new(out, mode: mode, cadence: cadence), out]
   end
 
-  # Drive the reporter through a mixed run: 1 clean, 1 dirty, 1 failed.
+  # Drive the reporter through a mixed run: 1 cloned (clean), 1 dirty, 1 failed.
   def drive_reporter(reporter)
     reporter.run_started(total: REFS.size)
     REFS.each { |ref| reporter.repo_started(ref) }
     reporter.repo_phase(REFS[0], :cloning)
-    reporter.repo_finished(REFS[0], "clean")
+    reporter.repo_finished(REFS[0], "clean", action: :cloned, commits: 0)
     reporter.repo_phase(REFS[1], :fast_forwarding)
-    reporter.repo_finished(REFS[1], "dirty")
+    reporter.repo_finished(REFS[1], "dirty", action: :dirty, commits: 0)
     reporter.repo_phase(REFS[2], :switching)
     reporter.repo_failed(REFS[2], "switch failed")
     reporter.run_finished("clean" => 1, "dirty" => 1, "error" => 1)
@@ -85,7 +85,7 @@ class InteractiveReporterTest < Minitest::Test
     Sync do |task|
       reporter.attach(task)
       reporter.repo_started(REFS[0])
-      reporter.repo_finished(REFS[0], "clean")
+      reporter.repo_finished(REFS[0], "clean", action: :up_to_date)
       reporter.run_finished("clean" => 1)
       reporter.detach
     end
@@ -101,7 +101,7 @@ class InteractiveReporterTest < Minitest::Test
       reporter.attach(task)
       reporter.repo_started(REFS[0])
       sleep 0.05
-      reporter.repo_finished(REFS[0], "clean")
+      reporter.repo_finished(REFS[0], "clean", action: :up_to_date)
       reporter.run_finished("clean" => 1)
       reporter.detach
     end
@@ -123,14 +123,15 @@ class InteractiveReporterTest < Minitest::Test
       reporter.attach(task)
       reporter.run_started(total: 1)
       reporter.repo_started(REFS[0])
-      reporter.repo_finished(REFS[0], "clean")
+      reporter.repo_finished(REFS[0], "clean", action: :up_to_date)
       reporter.run_finished("clean" => 1)
       reporter.detach
     end
 
-    # Only the summary line ends with \n; a clean repo adds no persistent line.
-    assert_equal 1, out.string.count("\n"),
-      "a run with one clean repo must emit exactly 1 newline (the summary)"
+    # Terminal block: summary + breakdown (up-to-date 1) = 2 newlines;
+    # a clean repo adds no persistent line, no added-repos block.
+    assert_equal 2, out.string.count("\n"),
+      "a run with one clean repo must emit 2 newlines (summary + breakdown)"
   end
 
   def test_gc1_nonclean_repos_each_produce_one_persistent_line
@@ -141,18 +142,18 @@ class InteractiveReporterTest < Minitest::Test
       drive_reporter(reporter)
     end
 
-    # 1 dirty (persistent ⚠) + 1 failed (persistent ✗) + 1 summary = 3 newlines.
-    # 1 clean repo produces NO persistent line.
-    assert_equal 3, out.string.count("\n"),
-      "expected 2 persistent lines + 1 summary = 3 newlines total"
+    # drive_reporter: 1 cloned (clean, no persistent), 1 dirty (⚠), 1 failed (✗).
+    # Terminal: 2 persistent + 1 summary + 1 breakdown + 2 added-repos lines = 6 newlines.
+    assert_equal 6, out.string.count("\n"),
+      "expected 2 persistent + 1 summary + 1 breakdown + 2 added-repos = 6 newlines total"
   end
 
   def test_gc1_persistent_count_independent_of_clean_count
     nonclean = [
-      ["github.com/o/dirty1", "dirty"],
-      ["github.com/o/diverged1", "diverged"],
-      ["github.com/o/wrong1", "wrong_branch"],
-      ["github.com/o/detached1", "detached"]
+      ["github.com/o/dirty1", "dirty", :dirty],
+      ["github.com/o/diverged1", "diverged", :diverged],
+      ["github.com/o/wrong1", "wrong_branch", :wrong_branch],
+      ["github.com/o/detached1", "detached", :detached]
     ]
 
     counts = [50, 5].map do |n_clean|
@@ -167,18 +168,23 @@ class InteractiveReporterTest < Minitest::Test
         n_clean.times do |i|
           ref = "github.com/o/clean-#{i}"
           reporter.repo_started(ref)
-          reporter.repo_finished(ref, "clean")
+          reporter.repo_finished(ref, "clean", action: :up_to_date)
         end
-        nonclean.each do |ref, status|
+        nonclean.each do |ref, status, action|
           reporter.repo_started(ref)
-          reporter.repo_finished(ref, status)
+          reporter.repo_finished(ref, status, action: action)
         end
         reporter.run_finished({})
         reporter.detach
       end
 
-      # persistent lines = total \n - 1 (summary)
-      out.string.count("\n") - 1
+      # Persistent lines start with ⚠/✗ immediately (no leading ANSI/status prefix).
+      # They're flushed in render_sweep_tick (not the ensure), so split on \r\e[K
+      # and count across ALL segments — the live status lines don't start with
+      # ⚠/✗, only the persistent newline-terminated lines do.
+      out.string.split("\r\e[K").sum { |seg|
+        seg.split("\n").count { |l| l.match?(/\A[⚠✗]/) }
+      }
     end
 
     assert_equal counts[0], counts[1],
@@ -266,7 +272,7 @@ class InteractiveReporterTest < Minitest::Test
 
   def test_gc2_tallies_match_outcomes
     refs_clean = %w[github.com/o/c1 github.com/o/c2]
-    refs_nonclean = [["github.com/o/d1", "dirty"], ["github.com/o/w1", "wrong_branch"]]
+    refs_nonclean = [["github.com/o/d1", "dirty", :dirty], ["github.com/o/w1", "wrong_branch", :wrong_branch]]
     refs_failed = [["github.com/o/f1", "boom"]]
     all_refs = refs_clean + refs_nonclean.map(&:first) + refs_failed.map(&:first)
 
@@ -277,11 +283,11 @@ class InteractiveReporterTest < Minitest::Test
       reporter.run_started(total: all_refs.size)
       refs_clean.each { |r|
         reporter.repo_started(r)
-        reporter.repo_finished(r, "clean")
+        reporter.repo_finished(r, "clean", action: :up_to_date)
       }
-      refs_nonclean.each { |r, s|
+      refs_nonclean.each { |r, s, a|
         reporter.repo_started(r)
-        reporter.repo_finished(r, s)
+        reporter.repo_finished(r, s, action: a)
       }
       refs_failed.each { |r, e|
         reporter.repo_started(r)
@@ -292,9 +298,9 @@ class InteractiveReporterTest < Minitest::Test
     end
 
     result = out.string
-    # Persistent lines: 2 nonclean + 1 failed = 3, plus 1 summary = 4 newlines
-    assert_equal 4, result.count("\n"),
-      "expected 3 persistent + 1 summary newlines, got #{result.count("\n")}"
+    # Persistent: 2 nonclean + 1 failed = 3, summary = 1, breakdown = 1 → 5 newlines
+    assert_equal 5, result.count("\n"),
+      "expected 3 persistent + 1 summary + 1 breakdown newlines, got #{result.count("\n")}"
     # Check that both nonclean refs appear as ⚠ lines
     assert_match(/⚠.*d1.*dirty/, result)
     assert_match(/⚠.*w1.*wrong_branch/, result)
@@ -322,7 +328,7 @@ class InteractiveReporterTest < Minitest::Test
         task.async do
           sleep 0.02 * (i + 1)
           reporter.repo_started(ref)
-          reporter.repo_finished(ref, "clean")
+          reporter.repo_finished(ref, "clean", action: :up_to_date)
         end
       end
       workers.each(&:wait)
@@ -402,7 +408,7 @@ class InteractiveReporterTest < Minitest::Test
     Sync do |task|
       reporter.attach(task)
       reporter.repo_started(REFS[0])
-      reporter.repo_finished(REFS[0], "clean")
+      reporter.repo_finished(REFS[0], "clean", action: :up_to_date)
       reporter.run_finished("clean" => 1)
       reporter.detach
     end
@@ -418,7 +424,7 @@ class InteractiveReporterTest < Minitest::Test
       reporter.attach(task)
       reporter.repo_started(REFS[0])
       sleep 0.05
-      reporter.repo_finished(REFS[0], "clean")
+      reporter.repo_finished(REFS[0], "clean", action: :up_to_date)
       reporter.run_finished("clean" => 1)
       reporter.detach
     end
@@ -449,7 +455,7 @@ class InteractiveReporterTest < Minitest::Test
       reporter.listing_finished
       reporter.run_started(total: 1)
       reporter.repo_started(REFS[0])
-      reporter.repo_finished(REFS[0], "clean")
+      reporter.repo_finished(REFS[0], "clean", action: :up_to_date)
       reporter.run_finished("clean" => 1)
       reporter.detach
     end
@@ -501,7 +507,7 @@ class InteractiveReporterTest < Minitest::Test
       assert_equal render_task_during_listing, render_task_during_sweep,
         "same render task must be alive across both phases (no re-attach)"
 
-      reporter.repo_finished(REFS[0], "clean")
+      reporter.repo_finished(REFS[0], "clean", action: :up_to_date)
       reporter.run_finished("clean" => 1)
       reporter.detach
     end
@@ -524,15 +530,15 @@ class InteractiveReporterTest < Minitest::Test
       reporter.listing_finished
       reporter.run_started(total: n_clean_repos)
       n_clean_repos.times do |i|
-        reporter.repo_finished("github.com/o/clean#{i}", "clean")
+        reporter.repo_finished("github.com/o/clean#{i}", "clean", action: :up_to_date)
       end
       reporter.run_finished("clean" => n_clean_repos)
       reporter.detach
     end
 
-    # n_orgs persistent listing lines + 1 summary = n_orgs + 1 newlines
-    assert_equal n_orgs + 1, out.string.count("\n"),
-      "output must be O(orgs + non_clean), not O(repos). Expected #{n_orgs + 1} newlines (#{n_orgs} listing + 1 summary)"
+    # n_orgs persistent listing lines + 1 summary + 1 breakdown = n_orgs + 2 newlines
+    assert_equal n_orgs + 2, out.string.count("\n"),
+      "output must be O(orgs + non_clean), not O(repos). Expected #{n_orgs + 2} newlines (#{n_orgs} listing + 1 summary + 1 breakdown)"
   end
 
   # ===========================================================================
@@ -556,7 +562,7 @@ class InteractiveReporterTest < Minitest::Test
       orgs.each_with_index { |org, i| reporter.org_listed(org, count: (i + 1) * 10) }
       reporter.listing_finished
       reporter.run_started(total: 1)
-      reporter.repo_finished(dirty_ref, "dirty")
+      reporter.repo_finished(dirty_ref, "dirty", action: :dirty)
       reporter.run_finished("dirty" => 1)
       reporter.detach
     end
@@ -575,5 +581,140 @@ class InteractiveReporterTest < Minitest::Test
     refute_nil sweep_idx, "dirty sweep line must appear in output; lines=#{lines.inspect}"
     assert last_org_idx < sweep_idx,
       "last org line (idx=#{last_org_idx}) must precede sweep ⚠ line (idx=#{sweep_idx})\nlines:\n#{lines.join("\n")}"
+  end
+
+  # ===========================================================================
+  # G1 (interactive-status) — in-flight repo flashes on status line
+  # ===========================================================================
+
+  def test_g1_in_flight_verb_appears_and_clears_on_status_line
+    reporter, out = make_reporter(color: false, cadence: 0.01)
+    ref = "github.com/owner/repo-a"
+
+    Sync do |task|
+      reporter.attach(task)
+      reporter.run_started(total: 1)
+
+      reporter.repo_started(ref)
+      sleep 0.05  # let render fire while "checking"
+
+      reporter.repo_phase(ref, :cloning)
+      sleep 0.05  # let render fire while "cloning"
+
+      reporter.repo_phase(ref, :fast_forwarding)
+      sleep 0.05  # let render fire while "fast-forwarding"
+
+      reporter.repo_phase(ref, :switching)
+      sleep 0.05  # let render fire while "switching"
+
+      reporter.repo_finished(ref, "clean", action: :cloned)
+      sleep 0.05  # let render fire after cleared
+
+      reporter.run_finished("clean" => 1)
+      reporter.detach
+    end
+
+    # Collect live status-line content (between \r\e[K and next \r or \n)
+    frames = out.string.scan(/\r\e\[K([^\r\n]*)/).map(&:first)
+
+    assert frames.any? { |f| f.include?("checking") && f.include?("owner/repo-a") },
+      "status line must show 'checking owner/repo-a' after repo_started\nframes:\n#{frames.join("\n")}"
+
+    assert frames.any? { |f| f.include?("cloning") && f.include?("owner/repo-a") },
+      "status line must show 'cloning owner/repo-a' after repo_phase(:cloning)\nframes:\n#{frames.join("\n")}"
+
+    assert frames.any? { |f| f.include?("fast-forwarding") && f.include?("owner/repo-a") },
+      "status line must show 'fast-forwarding owner/repo-a' after repo_phase(:fast_forwarding)\nframes:\n#{frames.join("\n")}"
+
+    assert frames.any? { |f| f.include?("switching") && f.include?("owner/repo-a") },
+      "status line must show 'switching owner/repo-a' after repo_phase(:switching)\nframes:\n#{frames.join("\n")}"
+
+    # After repo_finished, the in-flight suffix must be absent from subsequent frames.
+    # The render loop fires at least once after repo_finished (before detach's final tick).
+    # frames.last is the final live tick — owner/repo-a must not appear as in-flight suffix.
+    assert frames.any? { |f| !f.include?("owner/repo-a") },
+      "at least one frame must not show 'owner/repo-a' as in-flight (e.g. after repo_finished)\nframes:\n#{frames.join("\n")}"
+  end
+
+  # ===========================================================================
+  # G2 (interactive-status) — end-of-run breakdown + added-repos list
+  # ===========================================================================
+
+  def test_g2_end_summary_breakdown_and_added_repos_within_threshold
+    reporter, out = make_reporter(color: false, cadence: 0.01)
+
+    cloned_refs = %w[github.com/acme/new-a github.com/acme/new-b]
+    ff_ref = "github.com/acme/ff-repo"
+    utd_ref = "github.com/acme/current"
+    dirty_ref = "github.com/acme/dirty-repo"
+    err_ref = "github.com/acme/boom"
+    all_refs = cloned_refs + [ff_ref, utd_ref, dirty_ref, err_ref]
+
+    Sync do |task|
+      reporter.attach(task)
+      reporter.run_started(total: all_refs.size)
+      cloned_refs.each do |r|
+        reporter.repo_started(r)
+        reporter.repo_phase(r, :cloning)
+        reporter.repo_finished(r, "clean", action: :cloned, commits: 0)
+      end
+      reporter.repo_started(ff_ref)
+      reporter.repo_phase(ff_ref, :fast_forwarding)
+      reporter.repo_finished(ff_ref, "clean", action: :fast_forwarded, commits: 7)
+      reporter.repo_started(utd_ref)
+      reporter.repo_finished(utd_ref, "clean", action: :up_to_date, commits: 0)
+      reporter.repo_started(dirty_ref)
+      reporter.repo_finished(dirty_ref, "dirty", action: :dirty, commits: 0)
+      reporter.repo_started(err_ref)
+      reporter.repo_failed(err_ref, "network timeout")
+      reporter.run_finished({})
+      reporter.detach
+    end
+
+    # Extract terminal block (final output after last \r\e[K overwrite)
+    terminal = out.string.split("\r\e[K").last.to_s
+
+    # Breakdown assertions
+    assert_match(/cloned.*2/, terminal, "breakdown must include 'cloned 2'")
+    assert_match(/fast-forwarded/, terminal, "breakdown must include 'fast-forwarded'")
+    assert_match(/7/, terminal, "breakdown must include commit count 7")
+    assert_match(/commit/, terminal, "breakdown must include word 'commit'")
+    assert_match(/up-to-date/, terminal, "breakdown must include 'up-to-date'")
+    assert_match(/dirty/, terminal, "breakdown must include 'dirty'")
+    assert_match(/error/, terminal, "breakdown must include 'error'")
+
+    # Added-repos block: 2 cloned (≤ ADDED_LIST_THRESHOLD=10), both listed by owner/name
+    assert_match(/added.*2/, terminal, "added-repos block must include count 2")
+    assert_match(/acme\/new-a/, terminal, "added-repos block must list acme/new-a")
+    assert_match(/acme\/new-b/, terminal, "added-repos block must list acme/new-b")
+  end
+
+  # ===========================================================================
+  # G3 (interactive-status) — added-repos collapses above ADDED_LIST_THRESHOLD
+  # ===========================================================================
+
+  def test_g3_added_repos_collapses_above_threshold
+    reporter, out = make_reporter(color: false, cadence: 0.01)
+    n = IR::ADDED_LIST_THRESHOLD + 5  # 15
+
+    Sync do |task|
+      reporter.attach(task)
+      reporter.run_started(total: n)
+      n.times do |i|
+        ref = format("github.com/owner/repo-%02d", i)
+        reporter.repo_started(ref)
+        reporter.repo_phase(ref, :cloning)
+        reporter.repo_finished(ref, "clean", action: :cloned, commits: 0)
+      end
+      reporter.run_finished({})
+      reporter.detach
+    end
+
+    terminal = out.string.split("\r\e[K").last.to_s
+
+    assert_match(/added #{n} repos/, terminal,
+      "should show 'added #{n} repos' one-line summary (above threshold)")
+    refute_match(/owner\/repo-07/, terminal,
+      "individual cloned names must NOT appear in terminal block above threshold")
   end
 end

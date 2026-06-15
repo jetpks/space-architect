@@ -194,7 +194,81 @@ class SCMGitTest < Minitest::Test
       git = Git.new
       result = git.fast_forward(clone, "trunk")
       assert result.success?, "fast_forward failed: #{result.failure.inspect}"
-      assert_equal :fast_forwarded, result.success
+      assert_kind_of Integer, result.success, "fast_forward success must be Integer (commit count)"
+      assert result.success >= 1, "fast_forward must return commit count >= 1 when behind"
+    end
+  end
+
+  # ---- G4 (interactive-status): fast_forward returns Integer commit count ----
+
+  def test_g4_fast_forward_returns_zero_when_up_to_date
+    with_trunk_repo do |_bare, clone|
+      seed_initial_commit(clone)
+      # Clone is already up to date with remote (no commits added elsewhere)
+      git = Git.new
+      result = git.fast_forward(clone, "trunk")
+      assert result.success?, "fast_forward failed: #{result.failure.inspect}"
+      assert_equal 0, result.success, "fast_forward must return 0 (Integer) when up to date"
+    end
+  end
+
+  def test_g4_fast_forward_returns_commit_count_when_behind
+    with_trunk_repo do |bare, clone|
+      seed_initial_commit(clone)
+
+      # Push 2 extra commits from a second clone
+      clone2 = File.join(File.dirname(clone), "clone2")
+      system("git", "-c", "init.defaultBranch=trunk", "init", "-q", clone2, exception: true, out: File::NULL)
+      Shell.run("git", "remote", "add", "origin", bare, chdir: clone2)
+      Shell.run("git", "config", "user.email", "t@t.com", chdir: clone2)
+      Shell.run("git", "config", "user.name", "T", chdir: clone2)
+      Shell.run("git", "pull", "-q", "origin", "trunk", chdir: clone2)
+      2.times do |i|
+        File.write(File.join(clone2, "extra#{i}.md"), "extra#{i}\n")
+        Shell.run("git", "add", ".", chdir: clone2)
+        Shell.run("git", "commit", "-qm", "extra commit #{i}", chdir: clone2)
+      end
+      Shell.run("git", "push", "-q", "origin", "trunk", chdir: clone2)
+
+      # Rewind original clone to be 2 commits behind
+      parent2_sha = Shell.run("git", "rev-parse", "HEAD", chdir: clone).success.strip
+      Shell.run("git", "update-ref", "refs/heads/trunk", parent2_sha, chdir: clone)
+      Shell.run("git", "update-ref", "refs/remotes/origin/trunk", parent2_sha, chdir: clone)
+      Shell.run("git", "fetch", "-q", "origin", chdir: clone)
+
+      git = Git.new
+      result = git.fast_forward(clone, "trunk")
+      assert result.success?, "fast_forward failed: #{result.failure.inspect}"
+      assert_kind_of Integer, result.success, "fast_forward must return Integer"
+      assert result.success >= 1, "fast_forward must return commit count >= 1 when behind"
+    end
+  end
+
+  def test_g4_fast_forward_fails_on_divergence_still
+    with_trunk_repo do |bare, clone|
+      seed_initial_commit(clone)
+
+      clone2 = File.join(File.dirname(clone), "clone2")
+      system("git", "-c", "init.defaultBranch=trunk", "init", "-q", clone2, exception: true, out: File::NULL)
+      Shell.run("git", "remote", "add", "origin", bare, chdir: clone2)
+      Shell.run("git", "config", "user.email", "t@t.com", chdir: clone2)
+      Shell.run("git", "config", "user.name", "T", chdir: clone2)
+      Shell.run("git", "pull", "-q", "origin", "trunk", chdir: clone2)
+      File.write(File.join(clone2, "remote.md"), "remote\n")
+      Shell.run("git", "add", ".", chdir: clone2)
+      Shell.run("git", "commit", "-qm", "remote commit", chdir: clone2)
+      Shell.run("git", "push", "-q", "origin", "trunk", chdir: clone2)
+
+      File.write(File.join(clone, "local.md"), "local\n")
+      Shell.run("git", "add", ".", chdir: clone)
+      Shell.run("git", "commit", "-qm", "local commit", chdir: clone)
+
+      git = Git.new
+      result = git.fast_forward(clone, "trunk")
+      assert result.failure?, "fast_forward must Fail on divergence"
+      assert_includes result.failure[:reason], "diverged"
+      assert result.failure.key?(:local_ahead), "failure must carry :local_ahead"
+      assert result.failure.key?(:remote_ahead), "failure must carry :remote_ahead"
     end
   end
 

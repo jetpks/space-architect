@@ -13,7 +13,7 @@ class PlainReporterTest < Minitest::Test
 
   def test_repo_finished_emits_line_with_ref_and_status
     r = make_reporter
-    r.repo_finished("github.com/foo/bar", "clean")
+    r.repo_finished("github.com/foo/bar", "clean", action: :up_to_date)
     assert_includes @out.string, "github.com/foo/bar"
     assert_includes @out.string, "clean"
   end
@@ -29,7 +29,7 @@ class PlainReporterTest < Minitest::Test
   def test_output_is_ansi_free
     r = make_reporter
     r.run_started(total: 3)
-    r.repo_finished("github.com/foo/bar", "clean")
+    r.repo_finished("github.com/foo/bar", "clean", action: :up_to_date)
     r.repo_failed("github.com/baz/qux", "error")
     r.run_finished({"clean" => 1, "error" => 1})
     refute_includes @out.string, "\e[", "PlainReporter must not emit ANSI escape sequences"
@@ -69,8 +69,8 @@ class PlainReporterTest < Minitest::Test
 
   def test_multiple_repos_each_get_a_line
     r = make_reporter
-    r.repo_finished("github.com/a/b", "clean")
-    r.repo_finished("github.com/c/d", "dirty")
+    r.repo_finished("github.com/a/b", "clean", action: :up_to_date)
+    r.repo_finished("github.com/c/d", "dirty", action: :dirty)
     lines = @out.string.lines
     assert_equal 2, lines.size
     assert lines.any? { |l| l.include?("github.com/a/b") && l.include?("clean") }
