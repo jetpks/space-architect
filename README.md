@@ -155,6 +155,28 @@ config is ready to go.
 Each space also gets a workspace-local `tmp/`. Use it instead of `/tmp` or
 `/var/tmp`; when using `mktemp`, point it at `tmp/`. 🗑️
 
+## Pairs with repo-tender 🤝
+
+Where do those evergreen checkouts come from? [repo-tender](https://github.com/jetpks/repo-tender)
+is the other half of this story. 🛰️ It keeps your local clones under
+`~/src/evergreen/<host>/<owner>/<repo>` **evergreen** — clean, on their default
+branch, and freshly fetched — by running a periodic background sweep. Then
+`space repo add` copy-on-writes from those checkouts instead of hitting the
+network.
+
+The two share a layout by design — repo-tender's `base_dir` and space-cadet's
+`evergreen_dir` both default to `~/src/evergreen`, with the same
+`<host>/<owner>/<repo>` shape — so they line up with zero configuration:
+
+```sh
+repo-tender repo add github.com/example-org/example-app   # tend it: keep it evergreen 🌲
+space repo add example-app                                # cadet copies it, instantly ⚡
+```
+
+Run repo-tender for the repos you reach for often, and every new space provisions
+them at copy-on-write speed. No repo-tender? No problem — space-cadet falls back
+to cloning over the network. 🌐
+
 ## Documentation 📖
 
 - **[Command Reference](docs/reference.md)** — every command, flag, and behavior
