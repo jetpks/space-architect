@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build gem
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: false
+
+      - name: Build gem
+        run: |
+          gem build space-cadet.gemspec
+          mkdir -p pkg/
+          mv *.gem pkg/
+
+      - name: Upload gem
+        uses: actions/upload-artifact@v4
+        with:
+          name: gem
+          path: pkg/
+
+  publish:
+    name: Publish to RubyGems
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    permissions:
+      contents: write
+    steps:
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: gem
+          path: pkg/
+
+      - name: Display structure of downloaded gems
+        run: ls -R pkg/
+
+      - name: Publish gem to RubyGems
+        env:
+          RUBYGEMS_API_KEY: ${{ secrets.RUBYGEM_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p $HOME/.gem
+          touch $HOME/.gem/credentials
+          chmod 0600 $HOME/.gem/credentials
+          printf -- "---\n:rubygems_api_key: ${RUBYGEMS_API_KEY}\n" > $HOME/.gem/credentials
+
+          # Extract version number from tag (v1.0.2 -> 1.0.2)
+          VERSION_NUMBER="${VERSION#v}"
+
+          cd pkg
+          for gem_file in space-cadet-${VERSION_NUMBER}*.gem; do
+            echo "Publishing ${gem_file}..."
+            gem push "${gem_file}"
+          done
+
+      - name: Test installation
+        run: |
+          gem install space-cadet --verbose
+          space help
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pkg/*.gem
+          generate_release_notes: true
