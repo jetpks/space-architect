@@ -8,8 +8,8 @@ Gem::Specification.new do |spec|
   spec.authors = ["Eric Jacobs"]
   spec.email = ["eric@ebj.dev"]
 
-  spec.summary = "Create and manage task-scoped project workspaces."
-  spec.description = "A CLI for creating and managing filesystem-native project workspaces."
+  spec.summary = "Task-scoped project workspaces (repos · notes · artifacts under one self-describing root)"
+  spec.description = "A Thor CLI for spaces: date-prefixed directories with a YAML identity file, $PWD-based current-space resolution, and XDG config/state. Provisions repos at copy-on-write speed from evergreen checkouts (pairs with repo-tender), concurrently on fibers. Ships fish shell integration and completions."
   spec.homepage = "https://github.com/jetpks/space-cadet"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.3.0"
