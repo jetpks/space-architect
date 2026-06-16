@@ -29,6 +29,7 @@ module RepoTender
       attribute :name, Types::String
       attribute :include_archived, Types::Bool.default(false)
       attribute :include_forks, Types::Bool.default(false)
+      attribute :ignored_repos, Types::Array.of(Types::String).default([].freeze)
     end
 
     # Top-level config. The on-disk schema per PRD §3.1:

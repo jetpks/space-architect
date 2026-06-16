@@ -77,11 +77,13 @@ module RepoTender
       # doesn't break us silently).
       def parse_repos(json_text, org_ref)
         rows = JSON.parse(json_text)
+        ignored = org_ref.ignored_repos
         rows.map do |row|
           next if !org_ref.include_archived && row["isArchived"]
           next if !org_ref.include_forks && row["isFork"]
 
           owner, name = row.fetch("nameWithOwner").split("/", 2)
+          next if ignored.include?(name) || ignored.include?(row.fetch("nameWithOwner"))
           # default_branch is state, not config — the SCM layer resolves
           # it on the local clone (see SCM::Git#default_branch).
           Config::RepoRef.new(

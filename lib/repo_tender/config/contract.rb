@@ -34,6 +34,7 @@ module RepoTender
           required(:name).filled(:string)
           optional(:include_archived).filled(:bool)
           optional(:include_forks).filled(:bool)
+          optional(:ignored_repos).array(:string)
         end
       end
 

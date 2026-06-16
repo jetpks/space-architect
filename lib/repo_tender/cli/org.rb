@@ -20,7 +20,7 @@ module RepoTender
         # Parse an org ref string. Accepts "github.com/socketry" or
         # bare "socketry" (defaults host to github.com). Anything
         # with 3+ parts is rejected (org has only host + name).
-        def parse_ref(name, include_archived: false, include_forks: false)
+        def parse_ref(name, include_archived: false, include_forks: false, ignored_repos: [])
           parts = name.to_s.split("/")
           case parts.length
           when 1
@@ -30,7 +30,8 @@ module RepoTender
               host: Config::DEFAULT_HOST,
               name: org,
               include_archived: include_archived,
-              include_forks: include_forks
+              include_forks: include_forks,
+              ignored_repos: ignored_repos
             ))
           when 2
             host, n = parts
@@ -40,7 +41,8 @@ module RepoTender
               host: host,
               name: n,
               include_archived: include_archived,
-              include_forks: include_forks
+              include_forks: include_forks,
+              ignored_repos: ignored_repos
             ))
           else
             Dry::Monads::Failure("invalid org reference: #{name.inspect} (expected \"<name>\" or \"<host>/<name>\")")
@@ -50,6 +52,11 @@ module RepoTender
         def same_org?(a, b) = a.host == b.host && a.name == b.name
         def format_ref(o) = "#{o.host}/#{o.name}"
         def format_failure(f) = f.is_a?(Hash) ? f.inspect : f.to_s
+
+        def format_ignored(o)
+          return "" if o.ignored_repos.empty?
+          " ignored_repos=#{o.ignored_repos.inspect}"
+        end
 
         def fail_with(cmd, msg)
           cmd.send(:err).puts msg
@@ -68,8 +75,10 @@ module RepoTender
           desc: "Include archived repos when expanding the org"
         option :include_forks, type: :boolean, default: false,
           desc: "Include forks when expanding the org"
+        option :ignored_repos, type: :array, default: [],
+          desc: "Repos to exclude from expansion (bare name or owner/name)"
 
-        def call(name:, include_archived: false, include_forks: false, plain: nil, json: nil, no_color: nil, quiet: nil, **)
+        def call(name:, include_archived: false, include_forks: false, ignored_repos: [], plain: nil, json: nil, no_color: nil, quiet: nil, **)
           mode = UI::Mode.resolve(
             flags: {plain: plain, json: json, no_color: no_color, quiet: quiet},
             env: CLI.env,
@@ -79,7 +88,8 @@ module RepoTender
 
           parsed = parse_ref(name,
             include_archived: include_archived,
-            include_forks: include_forks)
+            include_forks: include_forks,
+            ignored_repos: ignored_repos)
           return fail_with(self, parsed.failure) if parsed.failure?
 
           new_ref = parsed.success
@@ -88,7 +98,8 @@ module RepoTender
 
           if config.orgs.any? { |o| same_org?(o, new_ref) }
             out.puts pastel.yellow("already tracked: #{format_ref(new_ref)}" \
-              " (include_archived=#{new_ref.include_archived}, include_forks=#{new_ref.include_forks})")
+              " (include_archived=#{new_ref.include_archived}, include_forks=#{new_ref.include_forks})" \
+              "#{format_ignored(new_ref)}")
             return CLI.record_outcome(Outcome.new(exit_code: 0))
           end
 
@@ -100,7 +111,8 @@ module RepoTender
           end
 
           out.puts pastel.green("added: #{format_ref(new_ref)}" \
-            " (include_archived=#{new_ref.include_archived}, include_forks=#{new_ref.include_forks})")
+            " (include_archived=#{new_ref.include_archived}, include_forks=#{new_ref.include_forks})" \
+            "#{format_ignored(new_ref)}")
           CLI.record_outcome(Outcome.new(exit_code: 0))
         end
       end
@@ -150,6 +162,7 @@ module RepoTender
       end
 
       class List < Dry::CLI::Command
+        include Helpers
         include GlobalOptions
 
         desc "List tracked orgs"
@@ -169,7 +182,8 @@ module RepoTender
           else
             config.orgs.each do |o|
               out.puts pastel.cyan("#{o.host}/#{o.name}" \
-                " (include_archived=#{o.include_archived}, include_forks=#{o.include_forks})")
+                " (include_archived=#{o.include_archived}, include_forks=#{o.include_forks})" \
+                "#{format_ignored(o)}")
             end
           end
           CLI.record_outcome(Outcome.new(exit_code: 0))

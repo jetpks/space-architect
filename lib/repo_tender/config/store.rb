@@ -79,19 +79,41 @@ module RepoTender
         config.new(**changes)
       end
 
-      # Hash → YAML string. Stable key order for diff-ability.
+      # Hash → human-clean YAML string. String keys, defaults omitted.
+      # Stable key order: base_dir, refresh_interval, concurrency, repos, orgs.
+      # repos/orgs omitted when empty.
       def self.emit(hash)
-        # Order: base_dir, refresh_interval, concurrency, repos, orgs.
         ordered = {}
-        ordered[:base_dir] = hash[:base_dir] if hash.key?(:base_dir)
-        ordered[:refresh_interval] = hash[:refresh_interval] if hash.key?(:refresh_interval)
-        ordered[:concurrency] = hash[:concurrency] if hash.key?(:concurrency)
-        ordered[:repos] = hash[:repos] if hash.key?(:repos) && !hash[:repos].nil?
-        ordered[:orgs] = hash[:orgs] if hash.key?(:orgs) && !hash[:orgs].nil?
+        ordered["base_dir"] = hash[:base_dir] if hash.key?(:base_dir)
+        ordered["refresh_interval"] = hash[:refresh_interval] if hash.key?(:refresh_interval)
+        ordered["concurrency"] = hash[:concurrency] if hash.key?(:concurrency)
 
-        # Ruby's Psych has a default flow style and key order that is
-        # good enough — we don't customize it.
+        repos = hash[:repos]
+        ordered["repos"] = repos.map { |r| compact_repo(r) } if repos && !repos.empty?
+
+        orgs = hash[:orgs]
+        ordered["orgs"] = orgs.map { |o| compact_org(o) } if orgs && !orgs.empty?
+
         YAML.dump(ordered, line_width: -1)
+      end
+
+      def self.compact_repo(r)
+        h = {}
+        h["host"] = r[:host] if r[:host] && r[:host] != DEFAULT_HOST
+        h["owner"] = r[:owner]
+        h["name"] = r[:name]
+        h
+      end
+
+      def self.compact_org(o)
+        h = {}
+        h["host"] = o[:host] if o[:host] && o[:host] != DEFAULT_HOST
+        h["name"] = o[:name]
+        h["include_archived"] = true if o[:include_archived]
+        h["include_forks"] = true if o[:include_forks]
+        ignored = o[:ignored_repos]
+        h["ignored_repos"] = ignored if ignored && !ignored.empty?
+        h
       end
 
       def self.read_yaml(path)

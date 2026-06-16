@@ -204,6 +204,59 @@ class ForgeGitHubTest < Minitest::Test
     end
   end
 
+  # GA3: ignored_repos filter is authoritative
+  def test_ignored_repos_excludes_by_bare_name
+    json = File.read(FIXTURE_PATH)
+    shell = StubShell.new(
+      auth_text: "  ✓ Logged in to github.com account test (keyring)\n",
+      repo_listing_json: json
+    )
+    gh = GitHub.new(shell: shell)
+    # "cli" is cli/cli — a non-archived, non-fork repo
+    org = OrgRef.new(name: "cli", include_archived: true, include_forks: true,
+      ignored_repos: ["cli"])
+    result = gh.list_org(org)
+    assert result.success?
+    names = result.success.map(&:name)
+    refute_includes names, "cli", "bare name match should exclude cli/cli"
+    assert_includes names, "browser"
+    assert_includes names, "go-gh"
+    assert_includes names, "octocat"
+  end
+
+  def test_ignored_repos_excludes_by_name_with_owner
+    json = File.read(FIXTURE_PATH)
+    shell = StubShell.new(
+      auth_text: "  ✓ Logged in to github.com account test (keyring)\n",
+      repo_listing_json: json
+    )
+    gh = GitHub.new(shell: shell)
+    # "cli/go-gh" is the nameWithOwner form for the archived repo
+    org = OrgRef.new(name: "cli", include_archived: true, include_forks: true,
+      ignored_repos: ["cli/go-gh"])
+    result = gh.list_org(org)
+    assert result.success?
+    names = result.success.map(&:name)
+    refute_includes names, "go-gh", "nameWithOwner match should exclude cli/go-gh"
+    assert_includes names, "cli"
+    assert_includes names, "browser"
+    assert_includes names, "octocat"
+  end
+
+  def test_empty_ignored_repos_excludes_nothing_new
+    json = File.read(FIXTURE_PATH)
+    shell = StubShell.new(
+      auth_text: "  ✓ Logged in to github.com account test (keyring)\n",
+      repo_listing_json: json
+    )
+    gh = GitHub.new(shell: shell)
+    org = OrgRef.new(name: "cli", include_archived: true, include_forks: true,
+      ignored_repos: [])
+    result = gh.list_org(org)
+    assert result.success?
+    assert_equal 4, result.success.length
+  end
+
   def test_build_argv_emits_no_archived_only_when_excluding_archived
     org_excluding = OrgRef.new(name: "cli", include_archived: false, include_forks: true)
     org_including = OrgRef.new(name: "cli", include_archived: true, include_forks: true)

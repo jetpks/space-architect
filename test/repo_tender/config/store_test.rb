@@ -103,6 +103,66 @@ class ConfigStoreTest < Minitest::Test
     end
   end
 
+  # GA1: emit produces clean human YAML — string keys, defaults omitted.
+  def test_emit_uses_string_keys_no_symbol_prefix
+    cfg = Config.new(
+      base_dir: "~/src/evergreen", refresh_interval: 21600, concurrency: 8,
+      repos: [RepoRef.new(host: "github.com", owner: "ruby", name: "ruby")],
+      orgs: [
+        OrgRef.new(host: "github.com", name: "socketry", ignored_repos: ["async"], include_forks: true),
+        OrgRef.new(host: "github.com", name: "plain")
+      ]
+    )
+    out = Store.emit(cfg.to_h)
+    # No symbol-prefixed keys
+    out.each_line { |l| refute_match(/^\s*:/, l, "symbol-keyed line: #{l.inspect}") }
+    # Default host omitted entirely
+    refute_includes out, "github.com"
+    # Top-level keys present as bare strings
+    %w[base_dir refresh_interval concurrency repos orgs].each { |k| assert_includes out, "#{k}:" }
+    # Repo entry: owner + name, no host
+    assert_includes out, "owner: ruby"
+    assert_includes out, "name: ruby"
+    refute_match(/^- host:/, out)
+    # socketry org: name, include_forks, ignored_repos; no include_archived
+    assert_includes out, "name: socketry"
+    assert_includes out, "include_forks: true"
+    assert_includes out, "ignored_repos:"
+    assert_includes out, "- async"
+    refute_includes out, "include_archived:"
+    # plain org: only name
+    assert_includes out, "name: plain"
+  end
+
+  def test_emit_omits_repos_and_orgs_when_empty
+    cfg = Config.new(base_dir: "/tmp", refresh_interval: 3600, concurrency: 4)
+    out = Store.emit(cfg.to_h)
+    refute_includes out, "repos:"
+    refute_includes out, "orgs:"
+  end
+
+  # GA2: round-trip is lossless when ignored_repos is non-empty and host is default.
+  def test_round_trip_lossless_with_ignored_repos_and_default_host
+    cfg = Config.new(
+      base_dir: "/tmp/eg", refresh_interval: 7200, concurrency: 4,
+      orgs: [
+        OrgRef.new(
+          host: "github.com",
+          name: "bigco",
+          ignored_repos: ["monorepo", "huge"],
+          include_archived: true,
+          include_forks: false
+        )
+      ]
+    )
+    Tempfile.create(["rt-rtrip", ".yaml"]) do |f|
+      Store.write(f.path, cfg)
+      reloaded = Store.load(f.path).success
+      assert_equal cfg.to_h, reloaded.to_h,
+        "round-trip mismatch: #{cfg.to_h.inspect} vs #{reloaded.to_h.inspect}"
+    end
+  end
+
   def test_write_validates_before_writing
     Tempfile.create(["config", ".yaml"]) do |f|
       f.write("")

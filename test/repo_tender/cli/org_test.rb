@@ -104,6 +104,90 @@ class CLIOrgTest < Minitest::Test
     end
   end
 
+  # ---- GA4: --ignored-repos ----
+
+  def test_org_add_ignored_repos_persists_to_config
+    with_cli_env do |env, _home|
+      invoke_command(RepoTenderCLI::Org::Add,
+        name: "bigco",
+        ignored_repos: ["monorepo", "huge"])
+      assert_equal 0, RepoTenderCLI.last_outcome.exit_code
+
+      paths = RepoTender::Paths.new(environment: env)
+      cfg = RepoTender::Config::Store.load(paths.config_file).success
+      assert_equal ["monorepo", "huge"], cfg.orgs.first.ignored_repos
+    end
+  end
+
+  def test_org_add_ignored_repos_shown_in_output
+    with_cli_env do |_env, _home|
+      out, _err = invoke_command(RepoTenderCLI::Org::Add,
+        name: "bigco",
+        ignored_repos: ["monorepo", "huge"])
+      assert_includes out.string, 'ignored_repos=["monorepo", "huge"]'
+    end
+  end
+
+  def test_org_list_shows_ignored_repos_when_non_empty
+    with_cli_env do |env, _home|
+      paths = RepoTender::Paths.new(environment: env)
+      paths.ensure!
+      RepoTender::Config::Store.write(paths.config_file,
+        RepoTender::Config::Store.load(paths.config_file).success.new(
+          orgs: [
+            RepoTender::Config::OrgRef.new(host: "github.com", name: "bigco",
+              ignored_repos: ["monorepo", "huge"])
+          ]
+        ))
+      out, _err = invoke_command(RepoTenderCLI::Org::List)
+      assert_includes out.string, 'ignored_repos=["monorepo", "huge"]'
+    end
+  end
+
+  def test_org_list_omits_ignored_repos_when_empty
+    with_cli_env do |env, _home|
+      paths = RepoTender::Paths.new(environment: env)
+      paths.ensure!
+      RepoTender::Config::Store.write(paths.config_file,
+        RepoTender::Config::Store.load(paths.config_file).success.new(
+          orgs: [RepoTender::Config::OrgRef.new(host: "github.com", name: "plain")]
+        ))
+      out, _err = invoke_command(RepoTenderCLI::Org::List)
+      refute_includes out.string, "ignored_repos"
+    end
+  end
+
+  def test_org_add_ignored_repos_comma_form_via_subprocess
+    with_cli_env do |env, _home|
+      paths = RepoTender::Paths.new(environment: env)
+      _out, err, status = run_cli_subprocess(
+        env: env,
+        args: ["org", "add", "bigco", "--ignored-repos", "monorepo,huge"]
+      )
+      assert status.success?, "subprocess failed: #{err}"
+      cfg = RepoTender::Config::Store.load(paths.config_file).success
+      assert_equal ["monorepo", "huge"], cfg.orgs.first.ignored_repos
+    end
+  end
+
+  # NOTE: dry-cli 1.4.1 does NOT accumulate repeated array flags —
+  # `--ignored-repos a --ignored-repos b` yields ["b"] (last wins).
+  # The gate GA4 repeated-form assertion cannot be proved against the
+  # current dry-cli. Documented as COMPLETE_WITH_CONCERNS in the lane report.
+  # The comma form is the supported user-facing affordance.
+  def test_org_add_ignored_repos_comma_form_is_canonical
+    with_cli_env do |env, _home|
+      paths = RepoTender::Paths.new(environment: env)
+      _out, err, status = run_cli_subprocess(
+        env: env,
+        args: ["org", "add", "bigco", "--ignored-repos", "a,b"]
+      )
+      assert status.success?, "subprocess failed: #{err}"
+      cfg = RepoTender::Config::Store.load(paths.config_file).success
+      assert_equal ["a", "b"], cfg.orgs.first.ignored_repos
+    end
+  end
+
   # ---- G3: invalid input → nonzero exit + Failure-derived stderr ----
 
   def test_org_add_invalid_ref_exits_nonzero_with_stderr_message

@@ -60,4 +60,31 @@ class ConfigContractTest < Minitest::Test
     refute_nil failure[:orgs]
     assert_includes failure[:orgs][0][:name].first, "must be a string"
   end
+
+  # GA5: ignored_repos validation
+  def test_ignored_repos_valid_array_of_strings_passes
+    result = Contract.new.call({orgs: [{name: "bigco", ignored_repos: ["x", "y"]}]})
+    assert result.success?, "expected success, got #{result.failure.inspect}"
+  end
+
+  def test_ignored_repos_empty_array_passes
+    result = Contract.new.call({orgs: [{name: "bigco", ignored_repos: []}]})
+    assert result.success?, "expected success, got #{result.failure.inspect}"
+  end
+
+  def test_ignored_repos_non_array_fails
+    result = Contract.new.call({orgs: [{name: "bigco", ignored_repos: "monorepo"}]})
+    assert result.failure?
+    failure = result.failure
+    refute_nil failure[:orgs], "expected field-level error under :orgs"
+    assert failure[:orgs][0][:ignored_repos], "expected error on ignored_repos"
+  end
+
+  def test_ignored_repos_array_with_non_string_element_fails
+    result = Contract.new.call({orgs: [{name: "bigco", ignored_repos: [42]}]})
+    assert result.failure?
+    failure = result.failure
+    refute_nil failure[:orgs]
+    assert failure[:orgs][0][:ignored_repos], "expected error on ignored_repos element"
+  end
 end
