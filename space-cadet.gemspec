@@ -5,8 +5,8 @@ require_relative "lib/space_cadet/version"
 Gem::Specification.new do |spec|
   spec.name = "space-cadet"
   spec.version = SpaceCadet::VERSION
-  spec.authors = ["Eric"]
-  spec.email = []
+  spec.authors = ["Eric Jacobs"]
+  spec.email = ["eric@ebj.dev"]
 
   spec.summary = "Create and manage task-scoped project workspaces."
   spec.description = "A CLI for creating and managing filesystem-native project workspaces."
