@@ -18,6 +18,7 @@ repo-tender <command> [subcommand] [arguments] [options]
 | [`org`](#org) | Add / remove / list tracked GitHub orgs |
 | [`sync`](#sync) | Run one sync pass |
 | [`status`](#status) | Print the per-repo evergreen status table |
+| [`clone`](#clone) | Copy-on-write copy of mirror(s) into a working dir |
 | [`config`](#config) | Show the config path or effective config |
 | [`daemon`](#daemon) | Manage the launchd scheduled job |
 
@@ -86,8 +87,27 @@ rejected:
 invalid org reference: "a/b/c" (expected "<name>" or "<host>/<name>")
 ```
 
-Per-org `include_archived` and `include_forks` (both default `false`) are set by
-editing the org entry in `config.yaml` — there is no CLI flag for them.
+**`org add` options.**
+
+| Option | Description |
+|--------|-------------|
+| `--include-archived` | Include archived repos when expanding the org (default `false`). |
+| `--include-forks` | Include forks when expanding the org (default `false`). |
+| `--ignored-repos=a,b` | Repos to exclude from expansion — bare `name` or `owner/name`, comma-separated. |
+
+All three persist onto the org entry in `config.yaml` and can equally be set by
+hand-editing it. The `ignored_repos` filter is **authoritative** at expansion
+time: a listed repo is dropped before it ever reaches a sync sweep, matched by
+either its bare `name` or its full `owner/name`.
+
+**Repeated vs. comma form.** Use the comma form (`--ignored-repos a,b`) for
+multiple values. The repeated form (`--ignored-repos a --ignored-repos b`) does
+**not** accumulate — the underlying CLI parser keeps the last value only (a
+`dry-cli` array-option behavior, not specific to this flag).
+
+**Changing an existing org.** `org add` is idempotent on `(host, name)` and does
+not mutate an already-tracked org's options — to change flags or the ignore
+list, `org remove` then `org add` with the new options.
 
 ### `sync`
 
@@ -128,6 +148,38 @@ Otherwise a tab-separated table, rows sorted by repo key:
 | `LAST_SYNCED_AT` | ISO-8601 timestamp of last sync, or empty |
 | `LAST_FETCH_AT` | ISO-8601 timestamp of last fetch, or empty |
 
+### `clone`
+
+Make a copy-on-write copy of one or more evergreen mirrors into a working
+directory, using macOS APFS clonefile (`cp -Rc`) — near-instant, near-zero disk.
+
+```
+repo-tender clone NAME... [--into DIR]
+```
+
+| Argument / Option | Description |
+|-------------------|-------------|
+| `NAME...` | One or more repo names to copy (variadic). |
+| `--into=DIR` | Destination **parent** directory (default `.`). Each repo lands at `<DIR>/<name>`. |
+
+**`NAME` resolution** (against `config.base_dir`, layout `$BASE/host/owner/name`):
+
+- bare `name` → the single `$BASE/*/*/name` match; **ambiguous** (more than one
+  owner) → `Failure` listing the candidates, nothing copied.
+- `owner/name` → `$BASE/*/owner/name`.
+- `host/owner/name` → exact path.
+- no match → `Failure` ("not found under base_dir …"), nothing copied.
+
+**Behaviour notes.**
+
+- **No-clobber (no-data-loss):** if `<into>/<name>` already exists, the copy is
+  refused with a `Failure` and the existing directory is left byte-for-byte
+  untouched. `clone` never overwrites.
+- Each name resolves and copies independently; one bad name is reported on
+  `stderr` and does not abort the others.
+- Exit code is `1` if **any** name failed, else `0`.
+- macOS-only (APFS clonefile); consistent with the project's platform scope.
+
 ### `config`
 
 | Subcommand | Description |
@@ -167,15 +219,21 @@ base_dir: ~/src/evergreen          # default if absent
 refresh_interval: 6h               # see below; default 6h
 concurrency: 8                     # max parallel git/gh ops per run; default 8
 repos:
-  - host: github.com               # defaults to github.com if omitted
-    owner: ruby
+  - owner: ruby                    # host omitted ⇒ github.com
     name: ruby
 orgs:
-  - host: github.com               # defaults to github.com if omitted
-    name: socketry
-    include_archived: false        # default false
-    include_forks: false           # default false
+  - name: socketry                 # host omitted ⇒ github.com
+    include_forks: true            # only non-default flags are written
+    ignored_repos:                 # excluded from expansion (bare name or owner/name)
+      - async
 ```
+
+The writer emits **clean YAML**: string keys (no `:symbol:` prefixes), and it
+**omits anything at its default** — a `host` of `github.com`, an
+`include_archived`/`include_forks` of `false`, and an empty `ignored_repos`.
+Dropping defaults on write is lossless: `load` re-applies them, so the round
+trip reproduces an equal config. You may still write any field explicitly by
+hand.
 
 | Key | Type | Default | Notes |
 |-----|------|---------|-------|
@@ -183,7 +241,7 @@ orgs:
 | `refresh_interval` | duration | `6h` (`21600`) | Freshness window; see [Duration format](#duration-format). |
 | `concurrency` | integer > 0 | `8` | Max concurrent git/gh operations per run. |
 | `repos[]` | list | `[]` | Each: `host` (default `github.com`), `owner`, `name`. |
-| `orgs[]` | list | `[]` | Each: `host` (default `github.com`), `name`, `include_archived` (default `false`), `include_forks` (default `false`). |
+| `orgs[]` | list | `[]` | Each: `host` (default `github.com`), `name`, `include_archived` (default `false`), `include_forks` (default `false`), `ignored_repos` (default `[]`; array of `name` or `owner/name` to exclude from expansion). |
 
 Validation rejects missing required fields, a non-positive/unparseable
 `refresh_interval`, a non-integer `concurrency`, and malformed repo/org entries —

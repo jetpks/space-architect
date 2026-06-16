@@ -120,6 +120,17 @@ repo-tender org add socketry              # host defaults to github.com
 repo-tender org add github.com/socketry   # equivalent, explicit host
 ```
 
+Got a few truly enormous repos in an org you never want cloned? Exclude them
+with `--ignored-repos` (bare `name` or `owner/name`, comma-separated):
+
+```bash
+repo-tender org add bigco --ignored-repos monorepo,huge
+# => added: github.com/bigco (… ignored_repos=["monorepo", "huge"])
+```
+
+The ignore list is authoritative at expansion time — an ignored repo never
+enters a sync sweep. ✋
+
 ### Sync everything now ⚡
 
 ```bash
@@ -144,6 +155,23 @@ github.com/ruby/ruby            dirty   trunk           2026-06-14T20:01:36Z  20
 
 `clean` is the happy path. Anything else is repo-tender telling you a repo needs
 *your* attention — it won't touch it for you. 🔒
+
+### Grab an instant copy ⚡🐄
+
+Need a working copy of an evergreen repo? `clone` makes a near-instant
+copy-on-write clone (macOS APFS `cp -Rc`) from your local mirror — no network,
+barely any disk:
+
+```bash
+repo-tender clone ruby                    # resolves the single ruby/ruby mirror
+repo-tender clone ruby async --into ~/wip # copy several into a parent dir
+```
+
+Name a repo bare (`ruby`), `owner/name`, or `host/owner/name` — bare names that
+match more than one mirror error out and list the candidates so you can qualify.
+`--into` is the destination **parent** (default `.`); each repo lands at
+`<into>/<name>`. And it **never clobbers** — an existing destination is left
+byte-for-byte alone. 🔒
 
 ### Schedule it & forget it 🤖
 
@@ -189,11 +217,13 @@ repo-tender status --json
 
 **Track repos & orgs:**
 - `repo add|remove|list REF` — manage individual repos (`host/owner/name`)
-- `org add|remove|list NAME` — manage whole orgs (`name` or `host/name`)
+- `org add|remove|list NAME` — manage whole orgs (`name` or `host/name`);
+  `org add` takes `--include-archived`, `--include-forks`, `--ignored-repos a,b`
 
 **Run & inspect:**
 - `sync [--repo REF]` — run one sync pass (optionally scoped to one repo)
 - `status` — print the per-repo evergreen status table (reads state, no network)
+- `clone NAME... [--into DIR]` — instant COW copy of mirror(s) into a parent dir
 - `config path|show` — show the config path, or the effective config
 
 **Schedule (launchd):**
