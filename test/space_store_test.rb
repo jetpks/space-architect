@@ -21,6 +21,8 @@ class SpaceStoreTest < SpaceCadetTest
     assert_path_exists space.path.join("notes")
     assert_path_exists space.path.join("artifacts")
     assert_path_exists space.path.join("tmp")
+    assert_path_exists space.path.join(".git")
+    assert_equal "repos/\ntmp/\n", space.path.join(".gitignore").read
     assert_includes space.path.join("README.md").read, "## Organization"
     assert_includes space.path.join("README.md").read, "`repos/` contains cloned Git repositories"
     assert_includes space.path.join("README.md").read, "Use it instead of `/tmp` or"
@@ -32,6 +34,36 @@ class SpaceStoreTest < SpaceCadetTest
     assert_equal [], metadata.fetch("notes")
     assert_equal [], metadata.fetch("tickets")
     assert_equal [], metadata.fetch("tags")
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_create_makes_an_initial_commit_with_a_git_identity
+    setup = temp_env
+    store = build_store(env: setup.fetch(:env))
+
+    space = with_env(
+      "GIT_AUTHOR_NAME" => "Space Cadet",
+      "GIT_AUTHOR_EMAIL" => "cadet@example.com",
+      "GIT_COMMITTER_NAME" => "Space Cadet",
+      "GIT_COMMITTER_EMAIL" => "cadet@example.com"
+    ) { store.create("Committed Space") }
+
+    head = system("git", "-C", space.path.to_s, "rev-parse", "--verify", "HEAD",
+                  out: File::NULL, err: File::NULL)
+    assert head, "expected an initial commit on HEAD"
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_create_with_git_false_skips_repository
+    setup = temp_env
+    store = build_store(env: setup.fetch(:env))
+
+    space = store.create("No Git Space", git: false)
+
+    refute_path_exists space.path.join(".git")
+    refute_path_exists space.path.join(".gitignore")
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end

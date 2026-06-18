@@ -390,6 +390,40 @@ class CLITest < SpaceCadetTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  def test_new_initializes_git_repository_by_default
+    setup = temp_env
+    env = setup.fetch(:env)
+    install_fake_git(setup)
+
+    with_env(env.merge("PATH" => "#{setup.fetch(:git_bin)}:#{ENV.fetch('PATH')}",
+                       "PROJECT_SPACES_GIT_LOG" => setup.fetch(:git_log))) do
+      out, = capture_io { SpaceCadet::CLI.start(["new", "Git Space"]) }
+
+      space_id = out[/Created (\d{8}-git-space)/, 1]
+      space_path = File.join(env["HOME"], "src", "spaces", space_id)
+      assert_path_exists File.join(space_path, ".git")
+      assert_equal "repos/\ntmp/\n", File.read(File.join(space_path, ".gitignore"))
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_new_no_git_skips_repository
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      out, = capture_io { SpaceCadet::CLI.start(["new", "Plain Space", "--no-git"]) }
+
+      space_id = out[/Created (\d{8}-plain-space)/, 1]
+      space_path = File.join(env["HOME"], "src", "spaces", space_id)
+      refute_path_exists File.join(space_path, ".git")
+      refute_path_exists File.join(space_path, ".gitignore")
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   private
 
   def install_fake_git(setup)
@@ -406,6 +440,15 @@ class CLITest < SpaceCadetTest
         printf "%s\\n" "$*" >> "$PROJECT_SPACES_GIT_LOG"
         mkdir -p "$dest/.git"
         exit 0
+      fi
+
+      # Space self-init (git -C <dir> init/add/commit). Succeed without logging
+      # so clone-log assertions stay focused on repo clones.
+      if [ "$1" = "-C" ]; then
+        case "$3" in
+          init) mkdir -p "$2/.git"; exit 0 ;;
+          add|commit) exit 0 ;;
+        esac
       fi
 
       echo "unexpected git command: $*" >&2
