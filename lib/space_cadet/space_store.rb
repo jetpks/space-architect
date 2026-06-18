@@ -22,7 +22,7 @@ module SpaceCadet
       config.spaces_dir
     end
 
-    def create(title)
+    def create(title, git: true, git_client: GitClient.new)
       FileUtils.mkdir_p(spaces_dir)
       timestamp = now.call
       id = unique_id("#{timestamp.strftime('%Y%m%d')}-#{Slugger.slug(title)}")
@@ -36,6 +36,7 @@ module SpaceCadet
       space = Space.new(path, metadata_for(id:, title:, timestamp:))
       space.save
       write_readme(path:, title:, id:, timestamp:)
+      init_git(path:, id:, git_client:) if git
       state.touch_recent(id)
       space
     end
@@ -243,7 +244,26 @@ module SpaceCadet
         - `artifacts/` is for logs, screenshots, generated files, and other ephemera.
         - `tmp/` is the workspace-local scratch directory. Use it instead of `/tmp` or
           `/var/tmp`; when using `mktemp`, use `tmp/` as the base directory.
+        - The space is a Git repository so notes and artifacts are versioned.
+          `repos/` and `tmp/` are gitignored, keeping the cloned repos and scratch
+          out of the space's history (each clone keeps its own Git repo).
       README
+    end
+
+    # Make the space itself a Git repo so its notes/artifacts are versioned.
+    # `repos/` and `tmp/` are ignored: the clones keep their own `.git`, and a
+    # space-level `git add` must never pull them in as embedded-repo gitlinks.
+    def init_git(path:, id:, git_client:)
+      write_gitignore(path)
+      git_client.init(path)
+      git_client.commit_all(path, "Initialize space #{id}")
+    end
+
+    def write_gitignore(path)
+      AtomicWrite.write(path.join(".gitignore"), <<~GITIGNORE)
+        repos/
+        tmp/
+      GITIGNORE
     end
 
     def unique_id(base_id)

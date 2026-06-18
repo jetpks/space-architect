@@ -83,9 +83,13 @@ module SpaceCadet
            repeatable: true,
            banner: "REPO",
            desc: "Clone a repo into the new space; repeatable"
+    option :git,
+           type: :boolean,
+           default: true,
+           desc: "Initialize the space as a Git repository (use --no-git to skip)"
     def new(title)
       handle_errors do
-        space = store.create(title)
+        space = store.create(title, git: options[:git])
         terminal.success "Created #{space.id}"
 
         new_repo_specs.each do |repo_spec|
