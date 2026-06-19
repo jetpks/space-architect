@@ -1,11 +1,18 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "stringio"
 require "tmpdir"
 require "minitest/autorun"
 require_relative "../lib/space_cadet"
 
 class SpaceCadetTest < Minitest::Test
+  def invoke(*argv)
+    out = StringIO.new
+    err = StringIO.new
+    SpaceCadet::CLI.call(argv.flatten, out, err)
+    [out.string, err.string]
+  end
   def with_env(vars)
     original = vars.each_key.to_h { |key| [key, ENV[key]] }
     vars.each { |key, value| ENV[key] = value }

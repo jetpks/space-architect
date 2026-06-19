@@ -1,0 +1,39 @@
+# frozen_string_literal: true
+
+module SpaceCadet
+  module CLI
+    class Status < Dry::CLI::Command
+      include GlobalOptions
+      include Helpers
+
+      desc "Set a space status: active, paused, done, archived"
+      argument :rest, type: :array, required: false, desc: "[SPACE] STATUS"
+
+      def call(rest: [], **opts)
+        setup_terminal(**opts.slice(:color, :colors))
+        handle_errors do
+          identifier, status_value = parse_status_args(Array(rest))
+          space = store.find(identifier)
+          space.update_status(status_value)
+          terminal.success "#{space.id} is #{space.status}"
+          CLI.record_outcome(Outcome.new(exit_code: 0))
+        end
+      end
+
+      private
+
+      def parse_status_args(args)
+        case args.length
+        when 1
+          [nil, args.first]
+        when 2
+          args
+        else
+          raise SpaceCadet::Error, "Usage: space status [SPACE] STATUS"
+        end
+      end
+    end
+  end
+end
+
+SpaceCadet::CLI::Registry.register "status", SpaceCadet::CLI::Status

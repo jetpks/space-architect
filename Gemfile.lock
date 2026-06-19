@@ -4,8 +4,8 @@ PATH
     space-cadet (0.2.0)
       async (~> 2.39)
       async-process (~> 1.4)
+      dry-cli (~> 1.4)
       pastel (~> 0.8)
-      thor (~> 1.3)
 
 GEM
   remote: https://rubygems.org/
@@ -23,6 +23,7 @@ GEM
       fiber-local (~> 1.1)
       json
     drb (2.2.3)
+    dry-cli (1.4.1)
     fiber-annotation (0.2.0)
     fiber-local (1.1.0)
       fiber-storage
@@ -37,7 +38,6 @@ GEM
       tty-color (~> 0.5)
     prism (1.9.0)
     rake (13.4.2)
-    thor (1.5.0)
     traces (0.18.2)
     tty-color (0.6.0)
 
@@ -55,6 +55,7 @@ CHECKSUMS
   async-process (1.4.0) sha256=859c2901b9047b6b8843e9a21ec7f3c626eb04efdcff66185a05ede99257f590
   console (1.35.1) sha256=6d2bfdd0bc7e57830540a6c0ce3bc83fff471844db44be89a38aef9f95df296a
   drb (2.2.3) sha256=0b00d6fdb50995fe4a45dea13663493c841112e4068656854646f418fda13373
+  dry-cli (1.4.1) sha256=b8015bb76c708aa8705a36faf694973e75eeeffca39b89c8e172dc6f66a7d874
   fiber-annotation (0.2.0) sha256=7abfadf1d119f508867d4103bf231c0354d019cc39a5738945dec2edadaf6c03
   fiber-local (1.1.0) sha256=c885f94f210fb9b05737de65d511136ea602e00c5105953748aa0f8793489f06
   fiber-storage (1.0.1) sha256=f48e5b6d8b0be96dac486332b55cee82240057065dc761c1ea692b2e719240e1
@@ -66,7 +67,6 @@ CHECKSUMS
   prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
   rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
   space-cadet (0.2.0)
-  thor (1.5.0) sha256=e3a9e55fe857e44859ce104a84675ab6e8cd59c650a49106a05f55f136425e73
   traces (0.18.2) sha256=80f1649cb4daace1d7174b81f3b3b7427af0b93047759ba349960cb8f315e214
   tty-color (0.6.0) sha256=6f9c37ca3a4e2367fb2e6d09722762647d6f455c111f05b59f35730eeb24332a
 

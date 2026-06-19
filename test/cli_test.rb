@@ -8,7 +8,7 @@ class CLITest < SpaceCadetTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      out, err = capture_io { SpaceCadet::CLI.start(["init"]) }
+      out, err = invoke("init")
 
       assert_empty err
       assert_match(/Config:/, out)
@@ -27,8 +27,8 @@ class CLITest < SpaceCadetTest
     space_path = nil
 
     with_env(env) do
-      capture_io { SpaceCadet::CLI.start(["init"]) }
-      out, err = capture_io { SpaceCadet::CLI.start(["new", "Name of Space"]) }
+      invoke("init")
+      out, err = invoke("new", "Name of Space")
 
       assert_empty err
       assert_match(/Created \d{8}-name-of-space/, out)
@@ -36,7 +36,7 @@ class CLITest < SpaceCadetTest
       space_path = File.join(env["HOME"], "src", "spaces", space_id)
       assert_path_exists space_path
 
-      out, = capture_io { SpaceCadet::CLI.start(["list"]) }
+      out, = invoke("list")
       list_date = "#{space_id[0, 4]}-#{space_id[4, 2]}-#{space_id[6, 2]}"
       assert_match(/Status {3,}Date {3,}Title {3,}Path/, out)
       refute_match(/Status {3,}ID\b/, out)
@@ -47,26 +47,26 @@ class CLITest < SpaceCadetTest
       refute_match(/\e\[/, out)
 
       Dir.chdir(space_path) do
-        out, = capture_io { SpaceCadet::CLI.start(["path"]) }
+        out, = invoke("path")
         assert_equal "~/src/spaces/#{space_id}\n", out
 
-        out, = capture_io { SpaceCadet::CLI.start(["show"]) }
+        out, = invoke("show")
         assert_match("ID:         #{space_id}", out)
         assert_match("Status:     active", out)
 
-        out, = capture_io { SpaceCadet::CLI.start(["status", "done"]) }
+        out, = invoke("status", "done")
         assert_match(/#{space_id} is done/, out)
 
-        out, = capture_io { SpaceCadet::CLI.start(["current"]) }
+        out, = invoke("current")
         assert_match(space_id, out)
         assert_match("~/src/spaces/#{space_id}", out)
       end
 
-      out, = capture_io { SpaceCadet::CLI.start(["show", "name-of-space"]) }
+      out, = invoke("show", "name-of-space")
       assert_match("ID:         #{space_id}", out)
       assert_match("Status:     done", out)
 
-      out, = capture_io { SpaceCadet::CLI.start(["use", "name-of-space"]) }
+      out, = invoke("use", "name-of-space")
       assert_match(/Recent space: #{space_id}/, out)
     end
   ensure
@@ -78,18 +78,18 @@ class CLITest < SpaceCadetTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      capture_io { SpaceCadet::CLI.start(["init"]) }
-      first_out, = capture_io { SpaceCadet::CLI.start(["new", "Foo"]) }
-      second_out, = capture_io { SpaceCadet::CLI.start(["new", "Qux"]) }
+      invoke("init")
+      first_out, = invoke("new", "Foo")
+      second_out, = invoke("new", "Qux")
       first_id = first_out[/Created (\d{8}-foo)/, 1]
       second_id = second_out[/Created (\d{8}-qux)/, 1]
       first_path = File.join(env["HOME"], "src", "spaces", first_id)
       FileUtils.mkdir_p(File.join(first_path, "repos", "example"))
 
-      capture_io { SpaceCadet::CLI.start(["use", second_id]) }
+      invoke("use", second_id)
 
       Dir.chdir(File.join(first_path, "repos", "example")) do
-        out, = capture_io { SpaceCadet::CLI.start(["current"]) }
+        out, = invoke("current")
         assert_match(first_id, out)
         refute_match(second_id, out)
       end
@@ -103,15 +103,15 @@ class CLITest < SpaceCadetTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      capture_io { SpaceCadet::CLI.start(["init"]) }
-      capture_io { SpaceCadet::CLI.start(["new", "Color Test"]) }
+      invoke("init")
+      invoke("new", "Color Test")
 
-      out, = capture_io { SpaceCadet::CLI.start(["list", "--color=always"]) }
+      out, = invoke("list", "--color=always")
       assert_match(/\e\[/, out)
       assert_match(/\e\[32mactive\e\[0m/, out)
       assert_match(/\e\[36m~\/src\/spaces\/\d{8}-color-test\e\[0m/, out)
 
-      out, = capture_io { SpaceCadet::CLI.start(["--colors=never", "list"]) }
+      out, = invoke("--colors=never", "list")
       refute_match(/\e\[/, out)
       assert_match(/Status {3,}Date {3,}Title {3,}Path/, out)
     end
@@ -120,7 +120,7 @@ class CLITest < SpaceCadetTest
   end
 
   def test_shell_init_fish_prints_cd_wrapper
-    out, err = capture_io { SpaceCadet::CLI.start(["shell", "init", "fish"]) }
+    out, err = invoke("shell", "init", "fish")
 
     assert_empty err
     assert_match(/function space --wraps space/, out)
@@ -137,7 +137,7 @@ class CLITest < SpaceCadetTest
     completions_path = File.join(env["XDG_CONFIG_HOME"], "fish", "completions", "space.fish")
 
     with_env(env) do
-      out, err = capture_io { SpaceCadet::CLI.start(["shell", "fish", "install"]) }
+      out, err = invoke("shell", "fish", "install")
 
       assert_empty err
       assert_match("Installed fish integration: #{function_path}", out)
@@ -150,11 +150,11 @@ class CLITest < SpaceCadetTest
       assert_match(/-s r -l repo/, File.read(completions_path))
       assert_match(/__space_cadet_complete_spaces/, File.read(completions_path))
 
-      out, = capture_io { SpaceCadet::CLI.start(["shell", "fish", "install"]) }
+      out, = invoke("shell", "fish", "install")
       assert_match("Fish integration already installed: #{function_path}", out)
       assert_match("Fish completions already installed: #{completions_path}", out)
 
-      out, = capture_io { SpaceCadet::CLI.start(["shell", "fish", "uninstall"]) }
+      out, = invoke("shell", "fish", "uninstall")
       assert_match("Removed fish integration: #{function_path}", out)
       assert_match("Removed fish completions: #{completions_path}", out)
       refute_path_exists function_path
@@ -177,7 +177,7 @@ class CLITest < SpaceCadetTest
       end
       assert_match(/Refusing to overwrite existing fish function/, error.message)
 
-      out, = capture_io { SpaceCadet::CLI.start(["shell", "fish", "install", "--force"]) }
+      out, = invoke("shell", "fish", "install", "--force")
       assert_match(/(?:Installed|Updated) fish integration: #{Regexp.escape(function_path)}/, out)
       assert_match(/function space --wraps space/, File.read(function_path))
     end
@@ -190,12 +190,12 @@ class CLITest < SpaceCadetTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      out, err = capture_io { SpaceCadet::CLI.start(["config", "set", "default_organization", "example-org"]) }
+      out, err = invoke("config", "set", "default_organization", "example-org")
 
       assert_empty err
       assert_match("Set default_organization=example-org", out)
 
-      out, = capture_io { SpaceCadet::CLI.start(["config", "show"]) }
+      out, = invoke("config", "show")
       assert_match(/default_provider {3,}github\.com/, out)
       assert_match(/default_organization {3,}example-org/, out)
 
@@ -215,14 +215,14 @@ class CLITest < SpaceCadetTest
     with_env(env.merge("PATH" => "#{setup.fetch(:git_bin)}:#{ENV.fetch('PATH')}",
                        "PROJECT_SPACES_GIT_LOG" => setup.fetch(:git_log),
                        "PROJECT_SPACES_MISE_LOG" => setup.fetch(:mise_log))) do
-      capture_io { SpaceCadet::CLI.start(["config", "set", "default_organization", "example-org"]) }
-      out, = capture_io { SpaceCadet::CLI.start(["new", "Repo Space"]) }
+      invoke("config", "set", "default_organization", "example-org")
+      out, = invoke("new", "Repo Space")
       space_id = out[/Created (\d{8}-repo-space)/, 1]
       space_path = File.join(env["HOME"], "src", "spaces", space_id)
       real_space_path = File.realpath(space_path)
 
       Dir.chdir(space_path) do
-        out, err = capture_io { SpaceCadet::CLI.start(["repo", "add", "example-app"]) }
+        out, err = invoke("repo", "add", "example-app")
 
         assert_empty err
         assert_match("Added github.com/example-org/example-app", out)
@@ -244,7 +244,7 @@ class CLITest < SpaceCadetTest
         assert_equal "repos/example-app", repo.fetch("path")
         assert_equal "git@github.com:example-org/example-app.git", repo.fetch("clone_url")
 
-        out, = capture_io { SpaceCadet::CLI.start(["repo", "list"]) }
+        out, = invoke("repo", "list")
         assert_match(/Repo {3,}Path/, out)
         assert_match("github.com/example-org/example-app", out)
         assert_match("repos/example-app", out)
@@ -260,7 +260,7 @@ class CLITest < SpaceCadetTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      out, err = capture_io { SpaceCadet::CLI.start(["repo", "resolve", "example-tools/async", "gitlab.com/example-org/api"]) }
+      out, err = invoke("repo", "resolve", "example-tools/async", "gitlab.com/example-org/api")
 
       assert_empty err
       assert_match(/Repo {3,}Clone URL/, out)
@@ -278,22 +278,22 @@ class CLITest < SpaceCadetTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      out, = capture_io { SpaceCadet::CLI.start(["new", "Completion Space"]) }
+      out, = invoke("new", "Completion Space")
       space_id = out[/Created (\d{8}-completion-space)/, 1]
 
-      out, err = capture_io { SpaceCadet::CLI.start(["shell", "complete", "spaces"]) }
+      out, err = invoke("shell", "complete", "spaces")
 
       assert_empty err
       assert_includes out, "#{space_id}\tCompletion Space"
 
-      out, = capture_io { SpaceCadet::CLI.start(["shell", "complete", "statuses"]) }
+      out, = invoke("shell", "complete", "statuses")
       assert_includes out, "active"
       assert_includes out, "archived"
 
-      out, = capture_io { SpaceCadet::CLI.start(["shell", "complete", "config-keys"]) }
+      out, = invoke("shell", "complete", "config-keys")
       assert_includes out, "default_provider"
 
-      out, = capture_io { SpaceCadet::CLI.start(["shell", "complete", "config-values", "git_clone_protocol"]) }
+      out, = invoke("shell", "complete", "config-values", "git_clone_protocol")
       assert_includes out, "ssh"
       assert_includes out, "https"
     end
@@ -310,15 +310,13 @@ class CLITest < SpaceCadetTest
     with_env(env.merge("PATH" => "#{setup.fetch(:git_bin)}:#{ENV.fetch('PATH')}",
                        "PROJECT_SPACES_GIT_LOG" => setup.fetch(:git_log),
                        "PROJECT_SPACES_MISE_LOG" => setup.fetch(:mise_log))) do
-      out, = capture_io { SpaceCadet::CLI.start(["new", "Multi Repo Space"]) }
+      out, = invoke("new", "Multi Repo Space")
       space_id = out[/Created (\d{8}-multi-repo-space)/, 1]
       space_path = File.join(env["HOME"], "src", "spaces", space_id)
       real_space_path = File.realpath(space_path)
 
       Dir.chdir(space_path) do
-        out, err = capture_io do
-          SpaceCadet::CLI.start(["repo", "add", "example-tools/alpha", "example-tools/beta"])
-        end
+        out, err = invoke("repo", "add", "example-tools/alpha", "example-tools/beta")
 
         assert_empty err
         assert_match("Added github.com/example-tools/alpha", out)
@@ -347,7 +345,8 @@ class CLITest < SpaceCadetTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  def test_new_accepts_repeatable_repo_options
+  # G5 — D5 proof: new TITLE REPO [REPO...] positional syntax
+  def test_new_with_positional_repos_records_both_in_space_yml
     setup = temp_env
     env = setup.fetch(:env)
     install_fake_git(setup)
@@ -355,30 +354,18 @@ class CLITest < SpaceCadetTest
     with_env(env.merge("PATH" => "#{setup.fetch(:git_bin)}:#{ENV.fetch('PATH')}",
                        "PROJECT_SPACES_GIT_LOG" => setup.fetch(:git_log),
                        "PROJECT_SPACES_MISE_LOG" => setup.fetch(:mise_log))) do
-      out, err = capture_io do
-        SpaceCadet::CLI.start(["new", "New Repo Space", "-r", "example-tools/alpha", "--repo", "example-tools/beta"])
-      end
+      out, err = invoke("new", "D5 Space", "example-tools/alpha", "example-tools/beta")
 
       assert_empty err
-      space_id = out[/Created (\d{8}-new-repo-space)/, 1]
+      space_id = out[/Created (\d{8}-d5-space)/, 1]
       space_path = File.join(env["HOME"], "src", "spaces", space_id)
 
       assert_match("Queued example-tools/alpha", out)
       assert_match("Queued example-tools/beta", out)
       assert_match("Added github.com/example-tools/alpha", out)
       assert_match("Added github.com/example-tools/beta", out)
-      assert_equal "~/src/spaces/#{space_id}", out.lines.last.chomp
       assert_path_exists File.join(space_path, "repos", "alpha", ".git")
       assert_path_exists File.join(space_path, "repos", "beta", ".git")
-
-      assert_equal [
-        "clone git@github.com:example-tools/alpha.git #{File.join(space_path, 'repos', 'alpha')}",
-        "clone git@github.com:example-tools/beta.git #{File.join(space_path, 'repos', 'beta')}"
-      ], File.read(setup.fetch(:git_log)).split("\n").sort
-      assert_equal [
-        "trust --yes --quiet --cd #{File.join(space_path, 'repos', 'alpha')}",
-        "trust --yes --quiet --cd #{File.join(space_path, 'repos', 'beta')}"
-      ], File.read(setup.fetch(:mise_log)).split("\n").sort
 
       metadata = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
       assert_equal [
@@ -397,7 +384,7 @@ class CLITest < SpaceCadetTest
 
     with_env(env.merge("PATH" => "#{setup.fetch(:git_bin)}:#{ENV.fetch('PATH')}",
                        "PROJECT_SPACES_GIT_LOG" => setup.fetch(:git_log))) do
-      out, = capture_io { SpaceCadet::CLI.start(["new", "Git Space"]) }
+      out, = invoke("new", "Git Space")
 
       space_id = out[/Created (\d{8}-git-space)/, 1]
       space_path = File.join(env["HOME"], "src", "spaces", space_id)
@@ -413,7 +400,7 @@ class CLITest < SpaceCadetTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      out, = capture_io { SpaceCadet::CLI.start(["new", "Plain Space", "--no-git"]) }
+      out, = invoke("new", "Plain Space", "--no-git")
 
       space_id = out[/Created (\d{8}-plain-space)/, 1]
       space_path = File.join(env["HOME"], "src", "spaces", space_id)

@@ -10,4 +10,4 @@ end
 
 require "space_cadet"
 
-SpaceCadet::CLI.start(ARGV)
+SpaceCadet::CLI.run(ARGV, $stdout, $stderr)
