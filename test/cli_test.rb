@@ -411,6 +411,54 @@ class CLITest < SpaceCadetTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  def test_version_forms_print_to_stdout_and_exit_0
+    [["--version"], ["version"]].each do |argv|
+      out = StringIO.new
+      err = StringIO.new
+      exit_code = SpaceCadet::CLI.call(argv, out, err)
+      assert_equal 0, exit_code, "#{argv.inspect} should exit 0"
+      assert_equal "1.0.0", out.string.chomp, "#{argv.inspect} should print VERSION to stdout"
+      assert_empty err.string, "#{argv.inspect} should write nothing to stderr"
+    end
+  end
+
+  def test_help_forms_print_listing_to_stdout_and_exit_0
+    [[], ["--help"], ["-h"], ["help"]].each do |argv|
+      out = StringIO.new
+      err = StringIO.new
+      exit_code = SpaceCadet::CLI.call(argv, out, err)
+      assert_equal 0, exit_code, "#{argv.inspect} should exit 0"
+      assert_match(/\brepo\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should print command listing to stdout")
+      assert_empty err.string, "#{argv.inspect} should write nothing to stderr"
+    end
+  end
+
+  def test_error_output_is_red_when_color_always
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      _out, err = invoke("--color=always", "repo", "add")
+      assert_match(/Usage: space repo add/, err)
+      assert_match(/\e\[31m/, err, "error should be red with --color=always")
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_error_output_is_plain_when_color_never
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      _out, err = invoke("--color=never", "repo", "add")
+      assert_match(/Usage: space repo add/, err)
+      refute_match(/\e\[/, err, "error should have no ANSI with --color=never")
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   private
 
   def install_fake_git(setup)

@@ -110,20 +110,29 @@ module SpaceCadet
 
     def add_repos_to(space, specs, git_client: GitClient.new, mise_client: MiseClient.new, reporter: nil)
       additions = prepare_repo_additions(space, specs)
+      first_error = nil
 
       Warnings.without_experimental do
         Async do |task|
           semaphore = Async::Semaphore.new(MAX_CONCURRENT_CLONES, parent: task)
 
-          tasks = additions.map do |addition|
-            semaphore.async do
+          clone_tasks = additions.map do |addition|
+            semaphore.async(finished: false) do
               clone_addition(addition, git_client:, mise_client:, reporter:)
             end
           end
 
-          wait_for_clone_tasks(tasks)
+          # Collect results without raising inside the reactor so the outer task
+          # succeeds and async does not log "Task may have ended" for our errors.
+          clone_tasks.each do |ct|
+            ct.wait
+          rescue StandardError => e
+            first_error ||= e
+          end
         end.wait
       end
+
+      raise first_error if first_error
 
       additions.map do |addition|
         repo_data = space.add_repo(addition.fetch(:reference), relative_path: addition.fetch(:relative_path), now: now.call)
@@ -200,17 +209,6 @@ module SpaceCadet
       return unless existing
 
       raise RepoExistsError, "Repo '#{reference.full_name}' already exists in #{space.id}"
-    end
-
-    def wait_for_clone_tasks(tasks)
-      errors = []
-      tasks.each do |task|
-        task.wait
-      rescue StandardError => e
-        errors << e
-      end
-
-      raise errors.first unless errors.empty?
     end
 
     def metadata_for(id:, title:, timestamp:)

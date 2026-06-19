@@ -187,6 +187,40 @@ class SpaceStoreTest < SpaceCadetTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  def test_failing_clone_raises_clean_git_error_without_async_noise
+    setup = temp_env
+    store = build_store(env: setup.fetch(:env))
+    space = store.create("Fail Space", git: false)
+
+    old_stderr = $stderr
+    captured = StringIO.new
+    $stderr = captured
+
+    error = assert_raises(SpaceCadet::GitError) do
+      store.add_repos_to(space, ["example-tools/bad"],
+                         git_client: FailingGitClient.new,
+                         mise_client: TrackingMiseClient.new)
+    end
+
+    $stderr = old_stderr
+    assert_match(/clone failed/, error.message)
+    refute_match(/Task may have ended with unhandled exception/, captured.string)
+    refute_match(/"severity":"warn"/, captured.string)
+  ensure
+    $stderr = old_stderr if old_stderr
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  class FailingGitClient
+    def clone(url, _path)
+      raise SpaceCadet::GitError, "git clone failed for #{url}"
+    end
+
+    def copy(_source, _path)
+      raise SpaceCadet::GitError, "copy failed"
+    end
+  end
+
   class TrackingGitClient
     attr_reader :max_active, :clone_count, :cloned_urls, :copied_sources
 
