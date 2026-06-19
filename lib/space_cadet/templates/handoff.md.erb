@@ -1,0 +1,26 @@
+# Mission HANDOFF
+
+**Space:** <%= @_title %>
+
+## Repos in Scope
+
+| Repo | Path |
+|------|------|
+<% @_repos.each do |repo| -%>
+| <%= repo["full_name"] || repo["name"] %> | <%= repo["path"] || "" %> |
+<% end -%>
+<% if @_repos.empty? -%>
+| _(none yet — add repos with `space repo add`)_ | |
+<% end -%>
+
+## Mission Status
+
+_Update this file as the mission progresses. The architect owns this document._
+
+## Slices
+
+<!-- Add slice entries as they are created via `space architect freeze` -->
+
+## Architecture Notes
+
+<!-- Add architecture decisions and context here -->
