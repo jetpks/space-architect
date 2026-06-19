@@ -459,6 +459,75 @@ class CLITest < SpaceCadetTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  def test_color_position_matrix_grouped_subcommand
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      # mid --color=always: color flag between group and subcommand
+      out = StringIO.new; err = StringIO.new
+      code = SpaceCadet::CLI.call(["repo", "--color=always", "resolve", "foo/a", "foo/b"], out, err)
+      assert_equal 0, code, "mid --color=always should exit 0"
+      assert_empty err.string, "mid --color=always should produce no stderr"
+      assert_match(/\e\[/, out.string, "mid --color=always should produce colored output")
+
+      # mid --color=never: output should be plain
+      out = StringIO.new; err = StringIO.new
+      code = SpaceCadet::CLI.call(["repo", "--color=never", "resolve", "foo/a", "foo/b"], out, err)
+      assert_equal 0, code, "mid --color=never should exit 0"
+      refute_match(/\e\[/, out.string, "mid --color=never should produce plain output")
+
+      # mid --colors= alias
+      out = StringIO.new; err = StringIO.new
+      code = SpaceCadet::CLI.call(["repo", "--colors=always", "resolve", "foo/a", "foo/b"], out, err)
+      assert_equal 0, code, "mid --colors=always should exit 0"
+      assert_match(/\e\[/, out.string, "mid --colors=always alias should produce colored output")
+
+      # trailing --color=always
+      out = StringIO.new; err = StringIO.new
+      code = SpaceCadet::CLI.call(["repo", "resolve", "foo/a", "foo/b", "--color=always"], out, err)
+      assert_equal 0, code, "trailing --color=always should exit 0"
+      assert_match(/\e\[/, out.string, "trailing --color=always should produce colored output")
+
+      # leading --color=always (regression: existing behavior must be preserved)
+      out = StringIO.new; err = StringIO.new
+      code = SpaceCadet::CLI.call(["--color=always", "repo", "resolve", "foo/a", "foo/b"], out, err)
+      assert_equal 0, code, "leading --color=always should exit 0"
+      assert_match(/\e\[/, out.string, "leading --color=always should produce colored output")
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_color_position_mid_second_group
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("init")
+      out, err = invoke("config", "--color=always", "show")
+      assert_empty err
+      assert_match(/default_provider/, out)
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_color_position_non_grouped_unregressed
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("init")
+      invoke("new", "Color List Test")
+      out, err = invoke("--color=always", "list")
+      assert_empty err
+      assert_match(/\e\[/, out)
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   private
 
   def install_fake_git(setup)

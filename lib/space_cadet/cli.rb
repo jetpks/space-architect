@@ -35,15 +35,20 @@ module SpaceCadet
       last_outcome&.exit_code || 0
     end
 
-    # Move leading --color/--colors options (those before the first command
-    # token) to the end of the argument list so dry-cli's command routing is
-    # not confused by options before the subcommand name, while still allowing
-    # trailing color options on nested commands (e.g. `repo add X --color=always`)
-    # to stay in place where dry-cli expects them.
+    # Move --color/--colors options to the end of the argument list so dry-cli's
+    # command routing is not confused by options before the subcommand name.
+    #
+    # Two passes:
+    #   1. Leading: extract two-token form (--color VALUE) and =-form from the
+    #      front while args still look like options.
+    #   2. Non-leading: extract =-form (--color=VALUE / --colors=VALUE) from any
+    #      position before the -- separator. The bare two-token form is ambiguous
+    #      with a subcommand name in non-leading position and is left in place.
     def self.normalize_args(argv)
       args = argv.dup
       extracted = []
 
+      # Pass 1: leading two-token and =-form (existing behavior, unchanged)
       while (arg = args.first) && arg != "--" && arg.start_with?("-")
         if %w[--color --colors].include?(arg)
           extracted << args.shift
@@ -54,6 +59,14 @@ module SpaceCadet
           break
         end
       end
+
+      # Pass 2: =-form from any non-leading position, stop at --
+      sep = args.index("--")
+      head = sep ? args[0, sep] : args
+      tail = sep ? args[sep..] : []
+      mid_color, head = head.partition { |a| a.start_with?("--color=", "--colors=") }
+      extracted += mid_color
+      args = head + tail
 
       extracted.empty? ? args : args + extracted
     end
