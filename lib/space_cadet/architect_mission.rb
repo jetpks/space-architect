@@ -134,11 +134,12 @@ module SpaceCadet
     end
 
     def worktree_add(repo, slice, lane, base: nil)
-      slice_entry(slice) # require the slice to be recorded first
+      entry = slice_entry(slice)
       repo_path = space.path.join("repos", repo)
       raise Error, "repos/#{repo} does not exist" unless repo_path.exist?
 
-      wt_path = space.path.join("tmp", "architect", "wt", "#{slice}-#{lane}")
+      id = slice_id(entry)
+      wt_path = space.path.join("tmp", "architect", "wt", "#{id}-#{lane}")
       FileUtils.mkdir_p(wt_path.dirname)
 
       base_ref = base || "HEAD"
@@ -146,7 +147,7 @@ module SpaceCadet
       raise Error, "Could not resolve base ref '#{base_ref}' in #{repo}" unless wt_status.success?
       base_sha = base_sha.strip
 
-      branch = "lane/#{slice}-#{lane}"
+      branch = "lane/#{id}-#{lane}"
       git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
 
       update_architect_block do |b|
@@ -157,7 +158,7 @@ module SpaceCadet
             "name" => lane,
             "repo" => repo,
             "base_sha" => base_sha,
-            "worktree" => "tmp/architect/wt/#{slice}-#{lane}",
+            "worktree" => "tmp/architect/wt/#{id}-#{lane}",
             "integration_branch" => nil
           }
           s["lanes"] = lanes
@@ -175,7 +176,11 @@ module SpaceCadet
 
       repo = lane_entry["repo"]
       repo_path = space.path.join("repos", repo)
-      wt_path = space.path.join("tmp", "architect", "wt", "#{slice}-#{lane}")
+      wt_path = if lane_entry["worktree"]
+        space.path.join(lane_entry["worktree"])
+      else
+        space.path.join("tmp", "architect", "wt", "#{slice_id(entry)}-#{lane}")
+      end
 
       git_run("-C", repo_path.to_s, "worktree", "remove", "--force", wt_path.to_s)
       git_run("-C", repo_path.to_s, "worktree", "prune")
@@ -204,7 +209,7 @@ module SpaceCadet
       lanes.map do |lane|
         lane_name = lane["name"]
         base_sha = lane["base_sha"]
-        wt_path = space.path.join(lane["worktree"] || "tmp/architect/wt/#{slice}-#{lane_name}")
+        wt_path = space.path.join(lane["worktree"] || "tmp/architect/wt/#{slice_id(entry)}-#{lane_name}")
         touch_set = lane["touch_set"] || []
 
         checks = {}
@@ -219,7 +224,7 @@ module SpaceCadet
         checks[:no_builder_commits] = log_out.strip.empty?
 
         # (c) builder's scratch report exists and is non-empty
-        report = space.path.join("tmp", "architect", "#{slice}-#{lane_name}.report.md")
+        report = space.path.join("tmp", "architect", "#{slice_id(entry)}-#{lane_name}.report.md")
         checks[:report_exists] = report.exist? && !report.read.strip.empty?
 
         # (d) in-bounds: changed paths ⊆ touch_set (nil if no touch_set recorded)
@@ -238,6 +243,10 @@ module SpaceCadet
     private
 
     attr_reader :space
+
+    def slice_id(entry)
+      "#{format('%02d', entry['ordinal'])}-#{entry['name']}"
+    end
 
     def slice_entry(slice)
       block = space.data["architect"] || {}

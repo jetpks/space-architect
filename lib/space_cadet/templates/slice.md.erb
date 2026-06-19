@@ -41,13 +41,13 @@ change to Grounds/Contract/Rubric = automatic slice FAIL. -->
 ## Builder Prompt
 
 <!-- The exact lane-prompt(s) dispatched, recorded as provenance. One ###
-subsection per lane. A copy is written to tmp/architect/<%= @_name %>-<lane>.prompt.md
+subsection per lane. A copy is written to tmp/architect/<%= @_ordinal %>-<%= @_name %>-<lane>.prompt.md
 for stdin dispatch. Commit: "slice <%= @_ordinal %>: dispatched". -->
 
 ## Builder Report
 
 <!-- RAW EVIDENCE ONLY — tables, numbers, command output. The builder writes this
-to tmp/architect/<%= @_name %>-<lane>.report.md; the architect transcribes it here
+to tmp/architect/<%= @_ordinal %>-<%= @_name %>-<lane>.report.md; the architect transcribes it here
 VERBATIM (no interpretation). One ### subsection per lane; include the builder's
 PHASE 0 disagreements and its STATUS line. Commit: "slice <%= @_ordinal %>: evidence". -->
 
