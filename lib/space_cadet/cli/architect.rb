@@ -21,6 +21,25 @@ module SpaceCadet
         end
       end
 
+      class New < Dry::CLI::Command
+        include GlobalOptions
+        include Helpers
+
+        desc "Scaffold the next slice file (artifacts/<NN>-<slice>.md)"
+        argument :slice, required: true,  desc: "Slice name (kebab-case)"
+        argument :space, required: false, desc: "Space identifier (default: $PWD)"
+
+        def call(slice:, space: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            mission = ArchitectMission.new(space: store.find(space))
+            path = mission.new_slice!(slice)
+            terminal.say "Slice scaffolded: #{terminal.path(path)}"
+            CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
       class Status < Dry::CLI::Command
         include GlobalOptions
         include Helpers
@@ -43,14 +62,15 @@ module SpaceCadet
               terminal.say "Slices:          (none)"
             else
               rows = slices.map do |s|
+                nn = s["ordinal"] ? format("%02d", s["ordinal"]) : "-"
                 lanes = (s["lanes"] || []).map { |l| "#{l['name']}(#{l['repo']})" }.join(", ")
-                [s["name"], s["freeze_sha"]&.[](0, 8) || "-", lanes, s["verdict"] || "-"]
+                [nn, s["name"], s["freeze_sha"]&.[](0, 8) || "-", lanes, s["verdict"] || "-"]
               end
-              terminal.say terminal.table(%w[Slice FreezeSHA Lanes Verdict], rows)
+              terminal.say terminal.table(%w[NN Slice FreezeSHA Lanes Verdict], rows)
             end
 
-            unless info[:gates].empty?
-              terminal.say "Gates:           #{info[:gates].join(', ')}"
+            unless info[:slice_files].empty?
+              terminal.say "Slice files:     #{info[:slice_files].join(', ')}"
             end
 
             CLI.record_outcome(Outcome.new(exit_code: 0))
@@ -101,10 +121,10 @@ module SpaceCadet
               lane = r[:lane]
               c = r[:checks]
               [
-                [lane, "(a) gates untouched",    pass_fail(c[:gates_untouched])],
-                [lane, "(b) no builder commits",  pass_fail(c[:no_builder_commits])],
-                [lane, "(c) lane report exists",  pass_fail(c[:lane_report_exists])],
-                [lane, "(d) in-bounds",           pass_fail(c[:in_bounds])]
+                [lane, "(a) frozen sections untouched", pass_fail(c[:frozen_untouched])],
+                [lane, "(b) no builder commits",        pass_fail(c[:no_builder_commits])],
+                [lane, "(c) scratch report exists",     pass_fail(c[:report_exists])],
+                [lane, "(d) in-bounds",                 pass_fail(c[:in_bounds])]
               ]
             end
 
@@ -193,6 +213,7 @@ end
 
 SpaceCadet::CLI::Registry.register "architect" do |prefix|
   prefix.register "init",   SpaceCadet::CLI::Architect::Init
+  prefix.register "new",    SpaceCadet::CLI::Architect::New
   prefix.register "status", SpaceCadet::CLI::Architect::Status
   prefix.register "freeze", SpaceCadet::CLI::Architect::Freeze
   prefix.register "verify", SpaceCadet::CLI::Architect::Verify

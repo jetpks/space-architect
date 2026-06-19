@@ -1,8 +1,17 @@
-# Mission HANDOFF
+# HANDOFF — <%= @_title %>
 
-**Space:** <%= @_title %>
+> Cross-slice table of contents for the Architect Loop. Per-slice detail lives in
+> artifacts/<NN>-<slice>.md — this file only indexes the slices and carries
+> mission-wide state. Keep it short (~150 lines): the next session must grok it
+> in under a minute. Not in the committed artifacts = didn't happen.
 
-## Repos in Scope
+## TL;DR (keep current)
+
+- Goal: _[one sentence]_
+- Last slice: _[<NN>-name — CONTINUE / KILL / awaiting verdict]_
+- Next action: _[exact command or decision needed]_
+
+## Repos in scope
 
 | Repo | Path |
 |------|------|
@@ -13,14 +22,27 @@
 | _(none yet — add repos with `space repo add`)_ | |
 <% end -%>
 
-## Mission Status
+## Verification gate (exact commands, per repo)
 
-_Update this file as the mission progresses. The architect owns this document._
+```
+[install / test / lint / typecheck / build commands for each repo in scope]
+```
 
-## Slices
+## Slice index
 
-<!-- Add slice entries as they are created via `space architect freeze` -->
+<!-- Add a row per slice. Create slices with `space architect new <name>`. -->
 
-## Architecture Notes
+| NN | Slice | Status | freeze_sha | Integration branch | Verdict | File |
+|----|-------|--------|-----------|--------------------|---------|------|
 
-<!-- Add architecture decisions and context here -->
+Status values: speccing → frozen → dispatched → in-flight → awaiting-verdict → done.
+
+## Open items for the human / architect
+
+<!-- Blocking items: unresolved disagreements (which slice), scope questions,
+stop-condition checkpoints. Detail lives in the slice file; link it. -->
+
+## Decisions log (architect + human)
+
+| Date | Decision | Why |
+|------|----------|-----|

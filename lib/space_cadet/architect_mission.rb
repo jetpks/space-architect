@@ -7,7 +7,16 @@ require "fileutils"
 require "pathname"
 
 module SpaceCadet
+  # Manages an architect-loop mission inside a space: one self-contained file per
+  # slice at artifacts/<NN>-<slice>.md (Grounds / Contract / Rubric / Builder
+  # Prompt / Builder Report / Verdict), grown one commit per section. The freeze
+  # is the commit that establishes the Rubric; the frozen region (everything
+  # above "## Builder Prompt") is read-only afterward.
   class ArchitectMission
+    # The heading that separates the frozen sections (Grounds/Contract/Rubric)
+    # from the appended-after-freeze sections (Builder Prompt/Report/Verdict).
+    FROZEN_BOUNDARY = /^## Builder Prompt/
+
     def initialize(space:)
       @space = space
     end
@@ -18,12 +27,6 @@ module SpaceCadet
         raise Error, "artifacts/HANDOFF.md already exists — remove it first or edit it directly (idempotent guard)"
       end
 
-      %w[gates lanes prd].each do |dir|
-        target = space.path.join("artifacts", dir)
-        FileUtils.mkdir_p(target)
-        FileUtils.touch(target.join(".gitkeep"))
-      end
-
       FileUtils.mkdir_p(handoff_path.dirname)
       handoff_path.write(render_handoff)
 
@@ -31,79 +34,99 @@ module SpaceCadet
         b.merge("status" => "active", "current_slice" => nil, "slices" => [])
       end
 
-      git_run("-C", space.path.to_s, "add",
-        "artifacts/HANDOFF.md",
-        "artifacts/gates/.gitkeep",
-        "artifacts/lanes/.gitkeep",
-        "artifacts/prd/.gitkeep",
-        ".space.yml")
+      git_run("-C", space.path.to_s, "add", "artifacts/HANDOFF.md", ".space.yml")
       git_run("-C", space.path.to_s, "commit", "-m", "Initialize architect mission")
 
       handoff_path
     end
 
-    def status
+    # Allocate the next ordinal and scaffold artifacts/<NN>-<slice>.md.
+    def new_slice!(slice)
       block = space.data["architect"] || {}
-      gates_dir = space.path.join("artifacts", "gates")
-      lanes_dir = space.path.join("artifacts", "lanes")
-
-      gates = if gates_dir.exist?
-        gates_dir.children.reject { |f| f.basename.to_s == ".gitkeep" }.map { |f| f.basename.to_s }.sort
-      else
-        []
+      slices = block["slices"] || []
+      if slices.any? { |s| s["name"] == slice }
+        raise Error, "slice '#{slice}' already exists in .space.yml"
       end
 
-      lane_reports = if lanes_dir.exist?
-        lanes_dir.children.reject { |f| f.basename.to_s == ".gitkeep" }.map { |f| f.basename.to_s }.sort
-      else
-        []
+      ordinal = (slices.map { |s| s["ordinal"] || 0 }.max || 0) + 1
+      nn = format("%02d", ordinal)
+      rel = "artifacts/#{nn}-#{slice}.md"
+      path = space.path.join(rel)
+      raise Error, "#{rel} already exists" if path.exist?
+
+      FileUtils.mkdir_p(path.dirname)
+      path.write(render_slice(nn, slice))
+
+      update_architect_block do |b|
+        b["current_slice"] = slice
+        list = b["slices"] || []
+        list << {
+          "name" => slice, "ordinal" => ordinal, "file" => rel,
+          "freeze_sha" => nil, "verdict" => "pending", "lanes" => []
+        }
+        b["slices"] = list
+        b
       end
 
-      { block: block, gates: gates, lane_reports: lane_reports }
+      git_run("-C", space.path.to_s, "add", rel, ".space.yml")
+      git_run("-C", space.path.to_s, "commit", "-m", "slice #{nn}: scaffold #{slice}")
+
+      path
     end
 
-    def freeze!(slice)
-      gate_file = space.path.join("artifacts", "gates", "#{slice}.md")
-      unless gate_file.exist?
-        raise Error, "artifacts/gates/#{slice}.md does not exist — create the gate file before freezing"
-      end
-
+    def status
       block = space.data["architect"] || {}
-      slices_list = block["slices"] || []
-      existing = slices_list.find { |s| s["name"] == slice }
+      artifacts_dir = space.path.join("artifacts")
+      slice_files = if artifacts_dir.exist?
+        artifacts_dir.children
+          .select { |f| f.basename.to_s.match?(/\A\d+-.+\.md\z/) }
+          .map { |f| f.basename.to_s }.sort
+      else
+        []
+      end
+      { block: block, slice_files: slice_files }
+    end
 
-      if existing && existing["freeze_sha"]
-        freeze_sha = existing["freeze_sha"]
-        diff_out, = git_capture("-C", space.path.to_s, "diff", freeze_sha, "--",
-          "artifacts/gates/#{slice}.md")
-        unless diff_out.strip.empty?
-          raise Error,
-            "Gate file changed since freeze #{freeze_sha[0, 8]} — " \
-            "refusing to re-freeze. Restore artifacts/gates/#{slice}.md to its frozen state " \
-            "or use a new slice name."
-        end
-        return freeze_sha
+    # Freeze the slice: the slice file must carry a "## Rubric" section. Commits
+    # any pending changes to the slice file and records HEAD as freeze_sha. If
+    # already frozen, refuses when the frozen region has changed since.
+    def freeze!(slice)
+      entry = slice_entry(slice)
+      rel = entry["file"]
+      path = space.path.join(rel)
+      raise Error, "#{rel} does not exist — run `space architect new #{slice}` first" unless path.exist?
+      unless path.read.match?(/^## Rubric/)
+        raise Error, "#{rel} has no '## Rubric' section — write the Rubric before freezing"
       end
 
-      files_to_add = ["artifacts/gates/#{slice}.md"]
-      files_to_add << "artifacts/HANDOFF.md" if space.path.join("artifacts", "HANDOFF.md").exist?
-      git_run("-C", space.path.to_s, "add", *files_to_add)
-      git_run("-C", space.path.to_s, "commit", "-m", "Freeze gates: #{slice}")
+      if entry["freeze_sha"]
+        sha = entry["freeze_sha"]
+        if frozen_region_changed?(sha, rel)
+          raise Error,
+            "Frozen sections of #{rel} changed since freeze #{sha[0, 8]} — " \
+            "refusing to re-freeze. Restore them to their frozen state or use a new slice."
+        end
+        return sha
+      end
+
+      files = [rel]
+      files << "artifacts/HANDOFF.md" if space.path.join("artifacts", "HANDOFF.md").exist?
+      git_run("-C", space.path.to_s, "add", *files)
+      if staged_changes?
+        nn = format("%02d", entry["ordinal"] || 0)
+        git_run("-C", space.path.to_s, "commit", "-m", "slice #{nn}: rubric (freeze)")
+      end
 
       sha, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
       sha = sha.strip
 
       update_architect_block do |b|
         b["current_slice"] = slice
-        list = b["slices"] || []
-        idx = list.index { |s| s["name"] == slice }
-        entry = { "name" => slice, "freeze_sha" => sha, "verdict" => "pending", "lanes" => [] }
-        if idx
-          list[idx] = entry
-        else
-          list << entry
+        (b["slices"] || []).each do |s|
+          next unless s["name"] == slice
+          s["freeze_sha"] = sha
+          s["verdict"] ||= "pending"
         end
-        b["slices"] = list
         b
       end
 
@@ -111,6 +134,7 @@ module SpaceCadet
     end
 
     def worktree_add(repo, slice, lane, base: nil)
+      slice_entry(slice) # require the slice to be recorded first
       repo_path = space.path.join("repos", repo)
       raise Error, "repos/#{repo} does not exist" unless repo_path.exist?
 
@@ -126,24 +150,18 @@ module SpaceCadet
       git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
 
       update_architect_block do |b|
-        list = b["slices"] || []
-        idx = list.index { |s| s["name"] == slice }
-        entry = idx ? list[idx] : { "name" => slice, "freeze_sha" => nil, "verdict" => "pending", "lanes" => [] }
-        lanes = entry["lanes"] || []
-        lanes << {
-          "name" => lane,
-          "repo" => repo,
-          "base_sha" => base_sha,
-          "worktree" => "tmp/architect/wt/#{slice}-#{lane}",
-          "integration_branch" => nil
-        }
-        entry["lanes"] = lanes
-        if idx
-          list[idx] = entry
-        else
-          list << entry
+        (b["slices"] || []).each do |s|
+          next unless s["name"] == slice
+          lanes = s["lanes"] || []
+          lanes << {
+            "name" => lane,
+            "repo" => repo,
+            "base_sha" => base_sha,
+            "worktree" => "tmp/architect/wt/#{slice}-#{lane}",
+            "integration_branch" => nil
+          }
+          s["lanes"] = lanes
         end
-        b["slices"] = list
         b
       end
 
@@ -151,10 +169,8 @@ module SpaceCadet
     end
 
     def worktree_remove(slice, lane)
-      block = space.data["architect"] || {}
-      slices_list = block["slices"] || []
-      slice_entry = slices_list.find { |s| s["name"] == slice }
-      lane_entry = slice_entry&.dig("lanes")&.find { |l| l["name"] == lane }
+      entry = slice_entry(slice)
+      lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Error, "No lane '#{lane}' recorded for slice '#{slice}'" unless lane_entry
 
       repo = lane_entry["repo"]
@@ -165,7 +181,7 @@ module SpaceCadet
       git_run("-C", repo_path.to_s, "worktree", "prune")
 
       update_architect_block do |b|
-        b["slices"]&.each do |s|
+        (b["slices"] || []).each do |s|
           next unless s["name"] == slice
           s["lanes"] = (s["lanes"] || []).reject { |l| l["name"] == lane }
         end
@@ -180,13 +196,10 @@ module SpaceCadet
     end
 
     def verify(slice)
-      block = space.data["architect"] || {}
-      slices_list = block["slices"] || []
-      slice_entry = slices_list.find { |s| s["name"] == slice }
-      raise Error, "Slice '#{slice}' not recorded in .space.yml" unless slice_entry
-
-      freeze_sha = slice_entry["freeze_sha"]
-      lanes = slice_entry["lanes"] || []
+      entry = slice_entry(slice)
+      freeze_sha = entry["freeze_sha"]
+      rel = entry["file"]
+      lanes = entry["lanes"] || []
 
       lanes.map do |lane|
         lane_name = lane["name"]
@@ -196,22 +209,20 @@ module SpaceCadet
 
         checks = {}
 
-        # (a) gates untouched since freeze
-        checks[:gates_untouched] = if freeze_sha
-          diff, = git_capture("-C", space.path.to_s, "diff", freeze_sha, "--",
-            "artifacts/gates/#{slice}.md")
-          diff.strip.empty?
+        # (a) frozen sections of the slice file untouched since freeze
+        checks[:frozen_untouched] = if freeze_sha && rel
+          !frozen_region_changed?(freeze_sha, rel)
         end
 
         # (b) no builder commits in the worktree
         log_out, = git_capture("-C", wt_path.to_s, "log", "#{base_sha}..")
         checks[:no_builder_commits] = log_out.strip.empty?
 
-        # (c) lane report exists and non-empty
-        report = space.path.join("artifacts", "lanes", "#{slice}-#{lane_name}.md")
-        checks[:lane_report_exists] = report.exist? && !report.read.strip.empty?
+        # (c) builder's scratch report exists and is non-empty
+        report = space.path.join("tmp", "architect", "#{slice}-#{lane_name}.report.md")
+        checks[:report_exists] = report.exist? && !report.read.strip.empty?
 
-        # (d) in-bounds: changed paths ⊆ touch_set (best-effort, nil if no touch_set)
+        # (d) in-bounds: changed paths ⊆ touch_set (nil if no touch_set recorded)
         checks[:in_bounds] = if touch_set.empty?
           nil
         else
@@ -228,10 +239,45 @@ module SpaceCadet
 
     attr_reader :space
 
+    def slice_entry(slice)
+      block = space.data["architect"] || {}
+      entry = (block["slices"] || []).find { |s| s["name"] == slice }
+      raise Error, "Slice '#{slice}' not recorded in .space.yml — run `space architect new #{slice}` first" unless entry
+      entry
+    end
+
+    # Everything above the "## Builder Prompt" heading is frozen at freeze time.
+    def frozen_region(text)
+      idx = text =~ FROZEN_BOUNDARY
+      idx ? text[0...idx] : text
+    end
+
+    def frozen_region_changed?(freeze_sha, rel)
+      old, _, st = git_capture("-C", space.path.to_s, "show", "#{freeze_sha}:#{rel}")
+      return true unless st.success?
+      current = space.path.join(rel).read
+      frozen_region(old) != frozen_region(current)
+    end
+
+    def staged_changes?
+      _o, _e, st = git_capture("-C", space.path.to_s, "diff", "--cached", "--quiet")
+      !st.success? # --quiet exits non-zero when there are staged differences
+    end
+
     def render_handoff
       @_title = space.data["title"] || space.id
       @_repos = space.repos
-      template_path = Pathname.new(__dir__).join("templates", "handoff.md.erb")
+      render_template("handoff.md.erb")
+    end
+
+    def render_slice(ordinal_nn, name)
+      @_ordinal = ordinal_nn
+      @_name = name
+      render_template("slice.md.erb")
+    end
+
+    def render_template(filename)
+      template_path = Pathname.new(__dir__).join("templates", filename)
       ERB.new(template_path.read, trim_mode: "-").result(binding)
     end
 

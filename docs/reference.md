@@ -165,6 +165,42 @@ The fish function installs to `~/.config/fish/functions/space.fish` and
 completions to `~/.config/fish/completions/space.fish`. Restart fish (or
 `exec fish`) to pick them up.
 
+### `space architect SUBCOMMAND`
+
+Manage an Architect Loop mission inside the current space. The mission memory is
+one self-contained file per slice at `artifacts/<NN>-<slice>.md` (sections:
+Grounds / Contract / Rubric / Builder Prompt / Builder Report / Verdict), indexed
+by `artifacts/HANDOFF.md`. Mission state (slices, freeze SHAs, lanes, verdicts)
+lives in an `architect:` block in `.space.yml`. Scratch (worktrees, lane-prompts,
+builder reports) lives under `tmp/architect/` (gitignored).
+
+```sh
+space architect init                         # scaffold artifacts/HANDOFF.md + .space.yml block; commits
+space architect new dry-cli-port             # scaffold artifacts/01-dry-cli-port.md (next ordinal)
+space architect status                       # read-only mission state
+space architect freeze dry-cli-port          # commit the slice file; record freeze_sha
+space architect worktree add my-app s1 lane-a --base HEAD
+space architect worktree list
+space architect worktree remove s1 lane-a
+space architect verify dry-cli-port          # per-lane mechanical checks (reports only)
+```
+
+| Command | Description |
+|---------|-------------|
+| `architect init [SPACE]` | Scaffold `artifacts/HANDOFF.md` and add the `architect:` block to `.space.yml`; commits. Idempotent guard: refuses if `HANDOFF.md` exists. |
+| `architect new SLICE [SPACE]` | Allocate the next ordinal and scaffold `artifacts/<NN>-<SLICE>.md` from the slice template; record the slice; commits. |
+| `architect status [SPACE]` | Print mission status, current slice, the slice table (NN, freeze SHA, lanes, verdict), and slice files. Read-only. |
+| `architect freeze SLICE [SPACE]` | Commit the slice file (which must carry a `## Rubric` section) and record its SHA as `freeze_sha`. Refuses to re-freeze once a **frozen section** (anything above `## Builder Prompt`) has changed. |
+| `architect worktree add REPO SLICE LANE [--base REF]` | Create a worktree at `tmp/architect/wt/<SLICE>-<LANE>` off the repo's base commit (default `HEAD`); record the lane in `.space.yml`. |
+| `architect worktree remove SLICE LANE` | Remove the lane worktree and drop it from `.space.yml`. |
+| `architect worktree list` | List active lane worktree directories. |
+| `architect verify SLICE [SPACE]` | Report per lane (PASS/FAIL/N/A, no judgment): (a) frozen sections untouched since freeze, (b) no builder commits in the worktree, (c) the builder's scratch report `tmp/architect/<SLICE>-<LANE>.report.md` exists, (d) in-bounds vs the lane's touch set. |
+
+The `architect:` block survives unrelated `space` commands that rewrite
+`.space.yml`. The builder never writes under `artifacts/` — it writes a scratch
+report which the architect transcribes into the slice's Builder Report section,
+keeping the frozen Rubric out of the builder's editable blast radius.
+
 ## Exit codes 🚦
 
 `space` exits non-zero on failure (unknown space, ambiguous id, refusing to

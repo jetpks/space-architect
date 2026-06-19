@@ -33,7 +33,7 @@ class ArchitectCLITest < SpaceCadetTest
     Pathname.new(space_dir)
   end
 
-  # Create a bare repo in repos/<name> with one commit so worktrees work.
+  # Create a repo in repos/<name> with one commit so worktrees work.
   def create_real_repo(space_path, name)
     repo_dir = File.join(space_path, "repos", name)
     FileUtils.mkdir_p(repo_dir)
@@ -48,9 +48,9 @@ class ArchitectCLITest < SpaceCadetTest
     repo_dir
   end
 
-  # ── GA1 smoke: init and status exit 0 ──────────────────────────────────────
+  # ── init / status smoke ─────────────────────────────────────────────────────
 
-  def test_architect_init_creates_artifacts_and_yml_block
+  def test_architect_init_creates_handoff_and_yml_block
     setup = temp_env
     env = setup.fetch(:env)
 
@@ -64,9 +64,10 @@ class ArchitectCLITest < SpaceCadetTest
         assert_empty err
         assert_match(/Mission ready/, out)
         assert_path_exists File.join(space_path, "artifacts", "HANDOFF.md")
-        assert_path_exists File.join(space_path, "artifacts", "gates", ".gitkeep")
-        assert_path_exists File.join(space_path, "artifacts", "lanes", ".gitkeep")
-        assert_path_exists File.join(space_path, "artifacts", "prd", ".gitkeep")
+        # One-file model: no gates/lanes/prd scaffolding.
+        refute_path_exists File.join(space_path, "artifacts", "gates")
+        refute_path_exists File.join(space_path, "artifacts", "lanes")
+        refute_path_exists File.join(space_path, "artifacts", "prd")
 
         yml = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
         assert_equal "active", yml.dig("architect", "status")
@@ -116,9 +117,9 @@ class ArchitectCLITest < SpaceCadetTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  # ── GA3: freeze records SHA, refuses re-freeze after gate changed ──────────
+  # ── new: scaffolds artifacts/<NN>-<slice>.md and records the slice ──────────
 
-  def test_freeze_records_sha_and_refuses_re_freeze_after_gate_changed # GA3
+  def test_architect_new_scaffolds_ordinal_slice_file
     setup = temp_env
     env = setup.fetch(:env)
 
@@ -129,38 +130,102 @@ class ArchitectCLITest < SpaceCadetTest
       Dir.chdir(space_path) do
         invoke("architect", "init")
 
-        # Create a gate file
-        gate_path = File.join(space_path, "artifacts", "gates", "slice-1.md")
-        File.write(gate_path, "# Gates for slice-1\n\nGA1: tests green\n")
+        out1, err1 = invoke("architect", "new", "first-slice")
+        assert_empty err1
+        assert_match(/Slice scaffolded/, out1)
+        assert_path_exists File.join(space_path, "artifacts", "01-first-slice.md")
 
-        # First freeze — should succeed
-        out, err = invoke("architect", "freeze", "slice-1")
-        assert_empty err
-        assert_match(/[0-9a-f]{7,40}/, out)
+        # second slice gets the next ordinal
+        invoke("architect", "new", "second-slice")
+        assert_path_exists File.join(space_path, "artifacts", "02-second-slice.md")
 
-        # .space.yml should record freeze_sha
+        slice_text = File.read(File.join(space_path, "artifacts", "01-first-slice.md"))
+        assert_match(/^# Slice 01: first-slice/, slice_text)
+        assert_match(/^## Rubric/, slice_text)
+        assert_match(/^## Builder Prompt/, slice_text)
+
         yml = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
-        slice_entry = yml.dig("architect", "slices")&.find { |s| s["name"] == "slice-1" }
-        refute_nil slice_entry, "slice entry should be recorded"
-        freeze_sha = slice_entry["freeze_sha"]
-        refute_nil freeze_sha
-        assert_match(/\A[0-9a-f]{40}\z/, freeze_sha)
-        assert_equal "slice-1", yml.dig("architect", "current_slice")
-
-        # Modify the gate file
-        File.write(gate_path, "# Gates for slice-1 — MODIFIED\n")
-
-        # Re-freeze should be refused (exit via handle_errors → err)
-        _out2, err2 = invoke("architect", "freeze", "slice-1")
-        refute_empty err2
-        assert_match(/refusing to re-freeze/i, err2)
+        entry = yml.dig("architect", "slices").find { |s| s["name"] == "first-slice" }
+        refute_nil entry
+        assert_equal 1, entry["ordinal"]
+        assert_equal "artifacts/01-first-slice.md", entry["file"]
+        # `new` makes the freshly-created slice current.
+        assert_equal "second-slice", yml.dig("architect", "current_slice")
       end
     end
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  def test_architect_block_survives_unrelated_space_command # GA3 round-trip
+  # ── freeze: records SHA, refuses re-freeze after a frozen section changes ───
+
+  def test_freeze_records_sha_and_guards_frozen_region
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("architect", "init")
+        invoke("architect", "new", "slice-1")
+        slice_file = File.join(space_path, "artifacts", "01-slice-1.md")
+
+        # First freeze — the scaffold already carries a "## Rubric" section.
+        out, err = invoke("architect", "freeze", "slice-1")
+        assert_empty err
+        assert_match(/[0-9a-f]{7,40}/, out)
+
+        yml = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
+        entry = yml.dig("architect", "slices").find { |s| s["name"] == "slice-1" }
+        freeze_sha = entry["freeze_sha"]
+        assert_match(/\A[0-9a-f]{40}\z/, freeze_sha)
+        assert_equal "slice-1", yml.dig("architect", "current_slice")
+
+        # Appending BELOW the freeze boundary (Builder Prompt) is allowed —
+        # re-freeze returns the same sha, no error.
+        File.write(slice_file, File.read(slice_file) + "\n### Lane A\nsome dispatched prompt\n")
+        out2, err2 = invoke("architect", "freeze", "slice-1")
+        assert_empty err2
+        assert_match(/#{freeze_sha[0, 7]}/, out2)
+
+        # Changing a FROZEN section (Rubric) is refused.
+        text = File.read(slice_file)
+        text = text.sub("## Rubric", "## Rubric\n\nGA9: tampered threshold")
+        File.write(slice_file, text)
+        _out3, err3 = invoke("architect", "freeze", "slice-1")
+        refute_empty err3
+        assert_match(/refusing to re-freeze/i, err3)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_freeze_refuses_slice_without_rubric
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("architect", "init")
+        invoke("architect", "new", "no-rubric")
+        slice_file = File.join(space_path, "artifacts", "01-no-rubric.md")
+        File.write(slice_file, "# Slice 01: no-rubric\n\n## Contract\n\njust a contract\n")
+
+        _out, err = invoke("architect", "freeze", "no-rubric")
+        assert_match(/no '## Rubric' section/, err)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_architect_block_survives_unrelated_space_command
     setup = temp_env
     env = setup.fetch(:env)
 
@@ -175,7 +240,6 @@ class ArchitectCLITest < SpaceCadetTest
         architect_before = yml_before["architect"]
         refute_nil architect_before
 
-        # Run an unrelated command that modifies .space.yml
         invoke("status", "done")
 
         yml_after = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
@@ -187,9 +251,9 @@ class ArchitectCLITest < SpaceCadetTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  # ── GA4: verify reports FAIL/PASS correctly ───────────────────────────────
+  # ── verify: reports per-lane PASS/FAIL ──────────────────────────────────────
 
-  def test_verify_reports_fail_when_builder_commit_exists # GA4
+  def test_verify_reports_fail_when_builder_commit_exists
     setup = temp_env
     env = setup.fetch(:env)
 
@@ -200,27 +264,19 @@ class ArchitectCLITest < SpaceCadetTest
 
       Dir.chdir(space_path) do
         invoke("architect", "init")
-
-        # Create and freeze a gate
-        File.write(File.join(space_path, "artifacts", "gates", "s1.md"), "# Gates\n")
+        invoke("architect", "new", "s1")
         invoke("architect", "freeze", "s1")
-
-        # Add a worktree for the lane
         invoke("architect", "worktree", "add", "my-repo", "s1", "lane-a")
 
         wt_path = File.join(space_path, "tmp", "architect", "wt", "s1-lane-a")
         assert_path_exists wt_path
 
-        # Builder makes a commit in the worktree
         File.write(File.join(wt_path, "builder_work.md"), "# builder commit\n")
         system("git", "-C", wt_path, "add", "builder_work.md")
         system("git", "-C", wt_path, "commit", "-q", "-m", "builder commit")
 
         out, err = invoke("architect", "verify", "s1")
         assert_empty err
-        # (b) should FAIL because there's a builder commit
-        assert_match(/FAIL/, out)
-        # Specifically check (b) is FAIL
         rows = out.lines.select { |l| l.include?("builder commits") }
         assert rows.any? { |r| r.include?("FAIL") }, "expected (b) no builder commits to be FAIL"
       end
@@ -229,7 +285,7 @@ class ArchitectCLITest < SpaceCadetTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  def test_verify_reports_fail_when_lane_report_missing # GA4
+  def test_verify_reports_fail_when_scratch_report_missing
     setup = temp_env
     env = setup.fetch(:env)
 
@@ -240,23 +296,21 @@ class ArchitectCLITest < SpaceCadetTest
 
       Dir.chdir(space_path) do
         invoke("architect", "init")
-
-        File.write(File.join(space_path, "artifacts", "gates", "s1.md"), "# Gates\n")
+        invoke("architect", "new", "s1")
         invoke("architect", "freeze", "s1")
         invoke("architect", "worktree", "add", "my-repo", "s1", "lane-b")
 
         out, err = invoke("architect", "verify", "s1")
         assert_empty err
-        # (c) lane report missing → FAIL
-        rows = out.lines.select { |l| l.include?("lane report") }
-        assert rows.any? { |r| r.include?("FAIL") }, "expected (c) lane report exists to be FAIL"
+        rows = out.lines.select { |l| l.include?("scratch report") }
+        assert rows.any? { |r| r.include?("FAIL") }, "expected (c) scratch report exists to be FAIL"
       end
     end
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  def test_verify_reports_pass_when_clean # GA4
+  def test_verify_reports_pass_when_clean
     setup = temp_env
     env = setup.fetch(:env)
 
@@ -267,19 +321,17 @@ class ArchitectCLITest < SpaceCadetTest
 
       Dir.chdir(space_path) do
         invoke("architect", "init")
-
-        File.write(File.join(space_path, "artifacts", "gates", "s1.md"), "# Gates\n")
+        invoke("architect", "new", "s1")
         invoke("architect", "freeze", "s1")
         invoke("architect", "worktree", "add", "my-repo", "s1", "lane-c")
 
-        # Write the lane report (non-empty)
-        report_path = File.join(space_path, "artifacts", "lanes", "s1-lane-c.md")
-        File.write(report_path, "# Lane Report\nSTATUS: COMPLETE\n")
+        # The builder's scratch report (non-empty) lives in tmp/architect/.
+        FileUtils.mkdir_p(File.join(space_path, "tmp", "architect"))
+        File.write(File.join(space_path, "tmp", "architect", "s1-lane-c.report.md"),
+          "# Lane Report\nSTATUS: COMPLETE\n")
 
         out, err = invoke("architect", "verify", "s1")
         assert_empty err
-
-        # (a), (b), (c) should all PASS (gates untouched, no builder commits, report present)
         refute_match(/FAIL/, out, "expected all checks to PASS, got:\n#{out}")
       end
     end

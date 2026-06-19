@@ -17,7 +17,7 @@ Gem::Specification.new do |spec|
   spec.metadata["homepage_uri"] = spec.homepage
 
   spec.files = Dir.chdir(__dir__) do
-    Dir["lib/**/*.rb", "exe/*", "README.md", "LICENSE.txt"]
+    Dir["lib/**/*.rb", "lib/**/*.erb", "exe/*", "README.md", "LICENSE.txt"]
   end
   spec.bindir = "exe"
   spec.executables = ["space"]
