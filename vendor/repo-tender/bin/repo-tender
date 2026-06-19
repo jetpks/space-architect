@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby -W:no-experimental
+# frozen_string_literal: true
+
+# repo-tender CLI entrypoint. Loads the gem, hands argv to the
+# Dry::CLI registry, and translates the recorded Outcome to a
+# process exit code. See lib/repo_tender/cli.rb for the seam.
+
+$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+require "repo_tender"
+
+RepoTender::CLI.run(ARGV, $stdout, $stderr)

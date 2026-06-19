@@ -1,0 +1,6 @@
+[
+  {"nameWithOwner": "cli/cli", "defaultBranchRef": {"name": "trunk"}, "isArchived": false, "isFork": false},
+  {"nameWithOwner": "cli/browser", "defaultBranchRef": {"name": "main"}, "isArchived": false, "isFork": true},
+  {"nameWithOwner": "cli/go-gh", "defaultBranchRef": {"name": "trunk"}, "isArchived": true, "isFork": false},
+  {"nameWithOwner": "cli/octocat", "defaultBranchRef": {"name": "main"}, "isArchived": false, "isFork": false}
+]

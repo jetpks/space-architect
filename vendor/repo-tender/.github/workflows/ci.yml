@@ -1,0 +1,35 @@
+---
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS-only: launchd scheduling + ~/Library/LaunchAgents.
+        os:
+          - macos-latest
+        ruby-version:
+          - "4.0"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby-version }}
+          bundler-cache: true
+
+      - name: Run tests
+        run: bundle exec rake test
+
+      - name: Lint (standardrb)
+        run: bundle exec standardrb
