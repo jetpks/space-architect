@@ -48,6 +48,14 @@ module SpaceCadet
       end
     end
 
+    def architect
+      data["architect"]
+    end
+
+    def architect=(val)
+      data["architect"] = val
+    end
+
     def metadata_path
       path.join(METADATA_FILE)
     end
