@@ -2,7 +2,7 @@
 
 require_relative "test_helper"
 
-class SpaceStoreTest < SpaceCadetTest
+class SpaceStoreTest < SpaceArchitectTest
   def test_create_space_with_date_prefixed_unique_id_and_structure
     setup = temp_env
     store = build_store(env: setup.fetch(:env))
@@ -101,7 +101,7 @@ class SpaceStoreTest < SpaceCadetTest
     assert_equal first.id, store.find("name-of-space").id
     assert_equal first.id, store.find("20260531-name").id
 
-    assert_raises(SpaceCadet::AmbiguousSpaceError) { store.find("20260531") }
+    assert_raises(SpaceArchitect::AmbiguousSpaceError) { store.find("20260531") }
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
@@ -119,7 +119,7 @@ class SpaceStoreTest < SpaceCadetTest
     assert_equal first.id, store.find(nil, from: nested).id
     assert_equal first.id, store.current(from: nested).id
     assert_nil store.current_from_pwd(from: setup.fetch(:root))
-    assert_raises(SpaceCadet::CurrentSpaceMissingError) { store.find(nil, from: setup.fetch(:root)) }
+    assert_raises(SpaceArchitect::CurrentSpaceMissingError) { store.find(nil, from: setup.fetch(:root)) }
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
@@ -130,10 +130,10 @@ class SpaceStoreTest < SpaceCadetTest
     space = store.create("Name of Space")
 
     space.update_status("done", now: fixed_time)
-    reloaded = SpaceCadet::Space.load(space.path)
+    reloaded = SpaceArchitect::Space.load(space.path)
 
     assert_equal "done", reloaded.status
-    assert_raises(SpaceCadet::InvalidStatusError) { reloaded.update_status("unknown") }
+    assert_raises(SpaceArchitect::InvalidStatusError) { reloaded.update_status("unknown") }
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
@@ -153,7 +153,7 @@ class SpaceStoreTest < SpaceCadetTest
     )
 
     assert_equal 6, results.length
-    assert_equal SpaceCadet::SpaceStore::MAX_CONCURRENT_CLONES, git_client.max_active
+    assert_equal SpaceArchitect::SpaceStore::MAX_CONCURRENT_CLONES, git_client.max_active
     assert_operator git_client.clone_count, :>, git_client.max_active
     assert_equal 6, mise_client.trust_count
   ensure
@@ -165,12 +165,12 @@ class SpaceStoreTest < SpaceCadetTest
     evergreen = Pathname.new(setup.fetch(:root)).join("evergreen")
     FileUtils.mkdir_p(evergreen.join("github.com", "example-tools", "present", ".git"))
 
-    config = SpaceCadet::Config.new(
+    config = SpaceArchitect::Config.new(
       env: setup.fetch(:env),
       data: { "version" => 1, "spaces_dir" => "~/src/spaces", "evergreen_dir" => evergreen.to_s }
     )
-    state = SpaceCadet::State.new(env: setup.fetch(:env))
-    store = SpaceCadet::SpaceStore.new(config: config, state: state, now: -> { fixed_time })
+    state = SpaceArchitect::State.new(env: setup.fetch(:env))
+    store = SpaceArchitect::SpaceStore.new(config: config, state: state, now: -> { fixed_time })
     space = store.create("Evergreen")
     git_client = TrackingGitClient.new
 
@@ -196,7 +196,7 @@ class SpaceStoreTest < SpaceCadetTest
     captured = StringIO.new
     $stderr = captured
 
-    error = assert_raises(SpaceCadet::GitError) do
+    error = assert_raises(SpaceArchitect::GitError) do
       store.add_repos_to(space, ["example-tools/bad"],
                          git_client: FailingGitClient.new,
                          mise_client: TrackingMiseClient.new)
@@ -213,11 +213,11 @@ class SpaceStoreTest < SpaceCadetTest
 
   class FailingGitClient
     def clone(url, _path)
-      raise SpaceCadet::GitError, "git clone failed for #{url}"
+      raise SpaceArchitect::GitError, "git clone failed for #{url}"
     end
 
     def copy(_source, _path)
-      raise SpaceCadet::GitError, "copy failed"
+      raise SpaceArchitect::GitError, "copy failed"
     end
   end
 

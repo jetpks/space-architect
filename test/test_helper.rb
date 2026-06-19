@@ -4,13 +4,13 @@ require "fileutils"
 require "stringio"
 require "tmpdir"
 require "minitest/autorun"
-require_relative "../lib/space_cadet"
+require_relative "../lib/space_architect"
 
-class SpaceCadetTest < Minitest::Test
+class SpaceArchitectTest < Minitest::Test
   def invoke(*argv)
     out = StringIO.new
     err = StringIO.new
-    SpaceCadet::CLI.call(argv.flatten, out, err)
+    SpaceArchitect::CLI.call(argv.flatten, out, err)
     [out.string, err.string]
   end
   def with_env(vars)
@@ -44,14 +44,14 @@ class SpaceCadetTest < Minitest::Test
   end
 
   def build_store(env:, now: -> { fixed_time })
-    config = SpaceCadet::Config.new(
+    config = SpaceArchitect::Config.new(
       env: env,
       data: {
         "version" => 1,
         "spaces_dir" => "~/src/spaces"
       }
     )
-    state = SpaceCadet::State.new(env: env)
-    SpaceCadet::SpaceStore.new(config: config, state: state, now: now)
+    state = SpaceArchitect::State.new(env: env)
+    SpaceArchitect::SpaceStore.new(config: config, state: state, now: now)
   end
 end

@@ -3,7 +3,7 @@
 require_relative "test_helper"
 require "yaml"
 
-class ArchitectCLITest < SpaceCadetTest
+class ArchitectCLITest < SpaceArchitectTest
   # Build a real git-backed space in a temp dir so architect commands can commit.
   # Does not go through `space new` (which uses Async::Process). Instead writes
   # .space.yml and calls the real git binary directly.
