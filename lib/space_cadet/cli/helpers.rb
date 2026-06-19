@@ -38,7 +38,11 @@ module SpaceCadet
       def handle_errors
         yield
       rescue SpaceCadet::Error => e
-        err.puts e.message
+        if terminal
+          terminal.error(e.message)
+        else
+          err.puts e.message
+        end
         CLI.record_outcome(Outcome.new(exit_code: 1, message: e.message))
       end
     end

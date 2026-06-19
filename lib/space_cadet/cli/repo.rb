@@ -15,7 +15,7 @@ module SpaceCadet
           handle_errors do
             specs = Array(repos).compact
             if specs.empty?
-              err.puts "Usage: space repo add REPO [REPO...]"
+              terminal.error("Usage: space repo add REPO [REPO...]")
               CLI.record_outcome(Outcome.new(exit_code: 1))
               next
             end
@@ -68,7 +68,7 @@ module SpaceCadet
           handle_errors do
             specs = Array(repos).compact
             if specs.empty?
-              err.puts "Usage: space repo resolve REPO [REPO...]"
+              terminal.error("Usage: space repo resolve REPO [REPO...]")
               CLI.record_outcome(Outcome.new(exit_code: 1))
               next
             end

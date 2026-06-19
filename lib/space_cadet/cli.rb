@@ -15,41 +15,47 @@ module SpaceCadet
       extend Dry::CLI::Registry
     end
 
+    TOP_LEVEL_HELP    = [[], ["--help"], ["-h"], ["help"]].freeze
+    VERSION_REQUEST   = [["version"], ["--version"]].freeze
+
     def self.call(argv, out = $stdout, err = $stderr)
       Thread.current[:space_cadet_outcome] = nil
+
+      if TOP_LEVEL_HELP.include?(argv)
+        out.puts Dry::CLI::Usage.call(Registry.get([]))
+        return 0
+      end
+
+      if VERSION_REQUEST.include?(argv)
+        out.puts SpaceCadet::VERSION
+        return 0
+      end
+
       Dry::CLI.new(Registry).call(arguments: normalize_args(argv), out: out, err: err)
       last_outcome&.exit_code || 0
     end
 
-    # Move leading --color/--colors options to after the command token so
-    # dry-cli's command routing isn't confused by options before the subcommand.
+    # Move leading --color/--colors options (those before the first command
+    # token) to the end of the argument list so dry-cli's command routing is
+    # not confused by options before the subcommand name, while still allowing
+    # trailing color options on nested commands (e.g. `repo add X --color=always`)
+    # to stay in place where dry-cli expects them.
     def self.normalize_args(argv)
       args = argv.dup
       extracted = []
-      index = 0
 
-      while index < args.length
-        arg = args[index]
-        break if arg == "--"
-
+      while (arg = args.first) && arg != "--" && arg.start_with?("-")
         if %w[--color --colors].include?(arg)
-          extracted << args.delete_at(index)
-          if args[index] && !args[index].start_with?("-")
-            extracted << args.delete_at(index)
-          end
+          extracted << args.shift
+          extracted << args.shift if args.first && !args.first.start_with?("-")
         elsif arg.start_with?("--color=", "--colors=")
-          extracted << args.delete_at(index)
+          extracted << args.shift
         else
-          index += 1
+          break
         end
       end
 
-      return args if extracted.empty?
-
-      cmd_index = args.index { |a| !a.start_with?("-") }
-      return args + extracted unless cmd_index
-
-      args.insert(cmd_index + 1, *extracted)
+      extracted.empty? ? args : args + extracted
     end
 
     def self.run(argv, out = $stdout, err = $stderr)

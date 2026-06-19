@@ -29,6 +29,10 @@ module SpaceCadet
       stdout.puts(message)
     end
 
+    def error(message)
+      stderr.puts(colors_enabled? ? pastel.red(message) : message)
+    end
+
     def success(message)
       say pastel.green(message)
     end
