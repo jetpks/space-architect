@@ -3,7 +3,7 @@
 require "fileutils"
 require "rake/testtask"
 
-GEMSPEC = Gem::Specification.load("space-cadet.gemspec")
+GEMSPEC = Gem::Specification.load("space-architect.gemspec")
 GEM_FILE = File.join("pkg", "#{GEMSPEC.full_name}.gem")
 
 Rake::TestTask.new(:test) do |task|
@@ -23,7 +23,7 @@ desc "Build #{GEM_FILE}"
 task :build do
   FileUtils.mkdir_p("pkg")
   FileUtils.rm_f(GEM_FILE)
-  sh_unbundled "gem", "build", "space-cadet.gemspec", "--output", GEM_FILE
+  sh_unbundled "gem", "build", "space-architect.gemspec", "--output", GEM_FILE
 end
 
 desc "Install #{GEM_FILE} into the current Ruby user gem home"

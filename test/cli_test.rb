@@ -2,7 +2,7 @@
 
 require_relative "test_helper"
 
-class CLITest < SpaceCadetTest
+class CLITest < SpaceArchitectTest
   def test_init_creates_xdg_files_and_default_spaces_dir
     setup = temp_env
     env = setup.fetch(:env)
@@ -12,8 +12,8 @@ class CLITest < SpaceCadetTest
 
       assert_empty err
       assert_match(/Config:/, out)
-      assert_path_exists File.join(env["XDG_CONFIG_HOME"], "space-cadet", "config.yml")
-      assert_path_exists File.join(env["XDG_STATE_HOME"], "space-cadet", "state.yml")
+      assert_path_exists File.join(env["XDG_CONFIG_HOME"], "space-architect", "config.yml")
+      assert_path_exists File.join(env["XDG_STATE_HOME"], "space-architect", "state.yml")
       assert_path_exists File.join(env["HOME"], "src", "spaces")
     end
   ensure
@@ -148,7 +148,7 @@ class CLITest < SpaceCadetTest
       assert_match(/function space --wraps space/, File.read(function_path))
       assert_match(/complete -c space/, File.read(completions_path))
       assert_match(/-s r -l repo/, File.read(completions_path))
-      assert_match(/__space_cadet_complete_spaces/, File.read(completions_path))
+      assert_match(/__space_architect_complete_spaces/, File.read(completions_path))
 
       out, = invoke("shell", "fish", "install")
       assert_match("Fish integration already installed: #{function_path}", out)
@@ -172,8 +172,8 @@ class CLITest < SpaceCadetTest
     File.write(function_path, "function space\n    echo custom\nend\n")
 
     with_env(env) do
-      error = assert_raises(SpaceCadet::Error) do
-        SpaceCadet::ShellIntegration.install("fish", env: env)
+      error = assert_raises(SpaceArchitect::Error) do
+        SpaceArchitect::ShellIntegration.install("fish", env: env)
       end
       assert_match(/Refusing to overwrite existing fish function/, error.message)
 
@@ -199,7 +199,7 @@ class CLITest < SpaceCadetTest
       assert_match(/default_provider {3,}github\.com/, out)
       assert_match(/default_organization {3,}example-org/, out)
 
-      config = YAML.safe_load(File.read(File.join(env["XDG_CONFIG_HOME"], "space-cadet", "config.yml")), aliases: false)
+      config = YAML.safe_load(File.read(File.join(env["XDG_CONFIG_HOME"], "space-architect", "config.yml")), aliases: false)
       assert_equal "example-org", config.fetch("default_organization")
     end
   ensure
@@ -415,7 +415,7 @@ class CLITest < SpaceCadetTest
     [["--version"], ["version"]].each do |argv|
       out = StringIO.new
       err = StringIO.new
-      exit_code = SpaceCadet::CLI.call(argv, out, err)
+      exit_code = SpaceArchitect::CLI.call(argv, out, err)
       assert_equal 0, exit_code, "#{argv.inspect} should exit 0"
       assert_equal "1.0.0", out.string.chomp, "#{argv.inspect} should print VERSION to stdout"
       assert_empty err.string, "#{argv.inspect} should write nothing to stderr"
@@ -426,7 +426,7 @@ class CLITest < SpaceCadetTest
     [[], ["--help"], ["-h"], ["help"]].each do |argv|
       out = StringIO.new
       err = StringIO.new
-      exit_code = SpaceCadet::CLI.call(argv, out, err)
+      exit_code = SpaceArchitect::CLI.call(argv, out, err)
       assert_equal 0, exit_code, "#{argv.inspect} should exit 0"
       assert_match(/\brepo\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should print command listing to stdout")
       assert_empty err.string, "#{argv.inspect} should write nothing to stderr"
@@ -466,32 +466,32 @@ class CLITest < SpaceCadetTest
     with_env(env) do
       # mid --color=always: color flag between group and subcommand
       out = StringIO.new; err = StringIO.new
-      code = SpaceCadet::CLI.call(["repo", "--color=always", "resolve", "foo/a", "foo/b"], out, err)
+      code = SpaceArchitect::CLI.call(["repo", "--color=always", "resolve", "foo/a", "foo/b"], out, err)
       assert_equal 0, code, "mid --color=always should exit 0"
       assert_empty err.string, "mid --color=always should produce no stderr"
       assert_match(/\e\[/, out.string, "mid --color=always should produce colored output")
 
       # mid --color=never: output should be plain
       out = StringIO.new; err = StringIO.new
-      code = SpaceCadet::CLI.call(["repo", "--color=never", "resolve", "foo/a", "foo/b"], out, err)
+      code = SpaceArchitect::CLI.call(["repo", "--color=never", "resolve", "foo/a", "foo/b"], out, err)
       assert_equal 0, code, "mid --color=never should exit 0"
       refute_match(/\e\[/, out.string, "mid --color=never should produce plain output")
 
       # mid --colors= alias
       out = StringIO.new; err = StringIO.new
-      code = SpaceCadet::CLI.call(["repo", "--colors=always", "resolve", "foo/a", "foo/b"], out, err)
+      code = SpaceArchitect::CLI.call(["repo", "--colors=always", "resolve", "foo/a", "foo/b"], out, err)
       assert_equal 0, code, "mid --colors=always should exit 0"
       assert_match(/\e\[/, out.string, "mid --colors=always alias should produce colored output")
 
       # trailing --color=always
       out = StringIO.new; err = StringIO.new
-      code = SpaceCadet::CLI.call(["repo", "resolve", "foo/a", "foo/b", "--color=always"], out, err)
+      code = SpaceArchitect::CLI.call(["repo", "resolve", "foo/a", "foo/b", "--color=always"], out, err)
       assert_equal 0, code, "trailing --color=always should exit 0"
       assert_match(/\e\[/, out.string, "trailing --color=always should produce colored output")
 
       # leading --color=always (regression: existing behavior must be preserved)
       out = StringIO.new; err = StringIO.new
-      code = SpaceCadet::CLI.call(["--color=always", "repo", "resolve", "foo/a", "foo/b"], out, err)
+      code = SpaceArchitect::CLI.call(["--color=always", "repo", "resolve", "foo/a", "foo/b"], out, err)
       assert_equal 0, code, "leading --color=always should exit 0"
       assert_match(/\e\[/, out.string, "leading --color=always should produce colored output")
     end

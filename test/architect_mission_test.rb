@@ -4,7 +4,7 @@ require_relative "test_helper"
 require "open3"
 require "yaml"
 
-class ArchitectMissionTest < SpaceCadetTest
+class ArchitectMissionTest < SpaceArchitectTest
   def create_real_space(dir)
     FileUtils.mkdir_p(File.join(dir, "artifacts"))
     FileUtils.mkdir_p(File.join(dir, "repos"))
@@ -24,7 +24,7 @@ class ArchitectMissionTest < SpaceCadetTest
     system("git", "-C", dir, "add", ".space.yml")
     system("git", "-C", dir, "commit", "-q", "-m", "init")
 
-    SpaceCadet::Space.load(dir)
+    SpaceArchitect::Space.load(dir)
   end
 
   def create_real_repo(space_dir, name)
@@ -47,7 +47,7 @@ class ArchitectMissionTest < SpaceCadetTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceCadet::ArchitectMission.new(space: space)
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_slice!("my-slice")
     result = mission.worktree_add("my-repo", "my-slice", "lane-a")
@@ -72,7 +72,7 @@ class ArchitectMissionTest < SpaceCadetTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceCadet::ArchitectMission.new(space: space)
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_slice!("my-slice")
     mission.freeze!("my-slice")
@@ -97,7 +97,7 @@ class ArchitectMissionTest < SpaceCadetTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceCadet::ArchitectMission.new(space: space)
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_slice!("my-slice")
     mission.freeze!("my-slice")
