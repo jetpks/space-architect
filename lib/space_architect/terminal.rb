@@ -60,20 +60,18 @@ module SpaceArchitect
     def with_spinner(message)
       return yield unless interactive?
 
-      Warnings.without_experimental do
-        Async do |task|
-          spinner_task = start_spinner(task, message)
-          yield
-        ensure
-          spinner_task&.stop
-          begin
-            spinner_task&.wait
-          rescue StandardError
-            nil
-          end
-          clear_spinner
-        end.wait
-      end
+      Async do |task|
+        spinner_task = start_spinner(task, message)
+        yield
+      ensure
+        spinner_task&.stop
+        begin
+          spinner_task&.wait
+        rescue StandardError
+          nil
+        end
+        clear_spinner
+      end.wait
     end
 
     private

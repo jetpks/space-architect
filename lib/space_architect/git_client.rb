@@ -35,9 +35,7 @@ module SpaceArchitect
     def capture(*command)
       stdout = Tempfile.new("project-spaces-git-stdout")
       stderr = Tempfile.new("project-spaces-git-stderr")
-      status = Warnings.without_experimental do
-        Async::Process.spawn(*command, out: stdout, err: stderr)
-      end
+      status = Async::Process.spawn(*command, out: stdout, err: stderr)
 
       stdout.rewind
       stderr.rewind
