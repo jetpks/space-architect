@@ -37,4 +37,3 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "status", SpaceArchitect::CLI::Status

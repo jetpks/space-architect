@@ -86,16 +86,3 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "repo" do |prefix|
-  prefix.register "add",     SpaceArchitect::CLI::Repo::Add
-  prefix.register "list",    SpaceArchitect::CLI::Repo::RepoList
-  prefix.register "ls",      SpaceArchitect::CLI::Repo::RepoList
-  prefix.register "resolve", SpaceArchitect::CLI::Repo::Resolve
-end
-
-SpaceArchitect::CLI::Registry.register "repos" do |prefix|
-  prefix.register "add",     SpaceArchitect::CLI::Repo::Add
-  prefix.register "list",    SpaceArchitect::CLI::Repo::RepoList
-  prefix.register "ls",      SpaceArchitect::CLI::Repo::RepoList
-  prefix.register "resolve", SpaceArchitect::CLI::Repo::Resolve
-end

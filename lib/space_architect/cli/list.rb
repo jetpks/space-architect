@@ -28,5 +28,3 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "list", SpaceArchitect::CLI::List
-SpaceArchitect::CLI::Registry.register "ls", SpaceArchitect::CLI::List

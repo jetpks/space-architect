@@ -135,8 +135,3 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "shell" do |prefix|
-  prefix.register "init",     SpaceArchitect::CLI::Shell::ShellInit
-  prefix.register "fish",     SpaceArchitect::CLI::Shell::Fish
-  prefix.register "complete", SpaceArchitect::CLI::Shell::Complete
-end

@@ -25,4 +25,3 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "show", SpaceArchitect::CLI::Show

@@ -227,15 +227,13 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "architect" do |prefix|
-  prefix.register "init",   SpaceArchitect::CLI::Architect::Init
-  prefix.register "new",    SpaceArchitect::CLI::Architect::New
-  prefix.register "status", SpaceArchitect::CLI::Architect::Status
-  prefix.register "freeze", SpaceArchitect::CLI::Architect::Freeze
-  prefix.register "verify", SpaceArchitect::CLI::Architect::Verify
-  prefix.register "worktree" do |wt|
-    wt.register "add",    SpaceArchitect::CLI::Architect::Worktree::Add
-    wt.register "remove", SpaceArchitect::CLI::Architect::Worktree::Remove
-    wt.register "list",   SpaceArchitect::CLI::Architect::Worktree::List
-  end
+SpaceArchitect::CLI::Registry.register "init",   SpaceArchitect::CLI::Architect::Init
+SpaceArchitect::CLI::Registry.register "new",    SpaceArchitect::CLI::Architect::New
+SpaceArchitect::CLI::Registry.register "status", SpaceArchitect::CLI::Architect::Status
+SpaceArchitect::CLI::Registry.register "freeze", SpaceArchitect::CLI::Architect::Freeze
+SpaceArchitect::CLI::Registry.register "verify", SpaceArchitect::CLI::Architect::Verify
+SpaceArchitect::CLI::Registry.register "worktree" do |wt|
+  wt.register "add",    SpaceArchitect::CLI::Architect::Worktree::Add
+  wt.register "remove", SpaceArchitect::CLI::Architect::Worktree::Remove
+  wt.register "list",   SpaceArchitect::CLI::Architect::Worktree::List
 end
