@@ -35,7 +35,7 @@ module SpaceArchitect
 
       FileUtils.mkdir_p(path.join("repos"))
       FileUtils.mkdir_p(path.join("notes"))
-      FileUtils.mkdir_p(path.join("artifacts"))
+      FileUtils.mkdir_p(path.join("architecture"))
       FileUtils.mkdir_p(path.join("tmp"))
 
       space = Space.new(path, metadata_for(id:, title:, timestamp:))
@@ -257,16 +257,16 @@ module SpaceArchitect
         - `space.yaml` tracks the space identity, status, and associated metadata.
         - `repos/` contains cloned Git repositories for this work.
         - `notes/` is for task notes, scratch docs, and thinking-in-progress.
-        - `artifacts/` is for logs, screenshots, generated files, and other ephemera.
+        - `architecture/` holds the architect mission memory (ARCHITECT.md and the per-iteration files).
         - `tmp/` is the workspace-local scratch directory. Use it instead of `/tmp` or
           `/var/tmp`; when using `mktemp`, use `tmp/` as the base directory.
-        - The space is a Git repository so notes and artifacts are versioned.
+        - The space is a Git repository so notes and architecture are versioned.
           `repos/` and `tmp/` are gitignored, keeping the cloned repos and scratch
           out of the space's history (each clone keeps its own Git repo).
       README
     end
 
-    # Make the space itself a Git repo so its notes/artifacts are versioned.
+    # Make the space itself a Git repo so its notes/architecture are versioned.
     # `repos/` and `tmp/` are ignored: the clones keep their own `.git`, and a
     # space-level `git add` must never pull them in as embedded-repo gitlinks.
     def init_git(path:, id:, git_client:)

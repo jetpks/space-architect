@@ -27,17 +27,17 @@ module SpaceArchitect
         include GlobalOptions
         include Helpers
 
-        desc "Scaffold the next slice file (artifacts/<NN>-<slice>.md)"
-        argument :slice, required: true,  desc: "Slice name (kebab-case)"
-        argument :space, required: false, desc: "Space identifier (default: $PWD)"
+        desc "Scaffold the next iteration file (architecture/I<NN>-<iteration>.md)"
+        argument :iteration, required: true,  desc: "Iteration name (kebab-case)"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
 
-        def call(slice:, space: nil, **opts)
+        def call(iteration:, space: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               mission = ArchitectMission.new(space: sp)
-              path = mission.new_slice!(slice)
-              terminal.say "Slice scaffolded: #{terminal.path(path)}"
+              path = mission.new_iteration!(iteration)
+              terminal.say "Iteration scaffolded: #{terminal.path(path)}"
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
           end
@@ -59,23 +59,23 @@ module SpaceArchitect
               info = mission.status
               block = info[:block]
 
-              terminal.say "Mission status:  #{block['status'] || '(none)'}"
-              terminal.say "Current slice:   #{block['current_slice'] || '(none)'}"
+              terminal.say "Mission status:     #{block['status'] || '(none)'}"
+              terminal.say "Current iteration:  #{block['current_iteration'] || '(none)'}"
 
-              slices = block["slices"] || []
-              if slices.empty?
-                terminal.say "Slices:          (none)"
+              iterations = block["iterations"] || []
+              if iterations.empty?
+                terminal.say "Iterations:        (none)"
               else
-                rows = slices.map do |s|
+                rows = iterations.map do |s|
                   nn = s["ordinal"] ? format("%02d", s["ordinal"]) : "-"
                   lanes = (s["lanes"] || []).map { |l| "#{l['name']}(#{l['repo']})" }.join(", ")
                   [nn, s["name"], s["freeze_sha"]&.[](0, 8) || "-", lanes, s["verdict"] || "-"]
                 end
-                terminal.say terminal.table(%w[NN Slice FreezeSHA Lanes Verdict], rows)
+                terminal.say terminal.table(%w[II Iteration FreezeSHA Lanes Verdict], rows)
               end
 
-              unless info[:slice_files].empty?
-                terminal.say "Slice files:     #{info[:slice_files].join(', ')}"
+              unless info[:iteration_files].empty?
+                terminal.say "Iteration files:   #{info[:iteration_files].join(', ')}"
               end
 
               CLI.record_outcome(Outcome.new(exit_code: 0))
@@ -88,17 +88,17 @@ module SpaceArchitect
         include GlobalOptions
         include Helpers
 
-        desc "Freeze gates for a slice"
-        argument :slice, required: true, desc: "Slice name"
-        argument :space, required: false, desc: "Space identifier (default: $PWD)"
+        desc "Freeze gates for an iteration"
+        argument :iteration, required: true, desc: "Iteration name"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
 
-        def call(slice:, space: nil, **opts)
+        def call(iteration:, space: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               mission = ArchitectMission.new(space: sp)
-              sha = mission.freeze!(slice)
-              terminal.say "Frozen #{slice} at #{sha}"
+              sha = mission.freeze!(iteration)
+              terminal.say "Frozen #{iteration} at #{sha}"
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
           end
@@ -109,19 +109,19 @@ module SpaceArchitect
         include GlobalOptions
         include Helpers
 
-        desc "Post-flight mechanical checks for a slice (reports only, no judgment)"
-        argument :slice, required: true, desc: "Slice name"
-        argument :space, required: false, desc: "Space identifier (default: $PWD)"
+        desc "Post-flight mechanical checks for an iteration (reports only, no judgment)"
+        argument :iteration, required: true, desc: "Iteration name"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
 
-        def call(slice:, space: nil, **opts)
+        def call(iteration:, space: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               mission = ArchitectMission.new(space: sp)
-              results = mission.verify(slice)
+              results = mission.verify(iteration)
 
               if results.empty?
-                terminal.say "No lanes recorded for slice '#{slice}'"
+                terminal.say "No lanes recorded for iteration '#{iteration}'"
                 CLI.record_outcome(Outcome.new(exit_code: 0))
                 next
               end
@@ -160,17 +160,17 @@ module SpaceArchitect
           include Helpers
 
           desc "Create a worktree for a lane"
-          argument :repo,  required: true, desc: "Repo name (under repos/)"
-          argument :slice, required: true, desc: "Slice name"
-          argument :lane,  required: true, desc: "Lane name"
-          option   :base,  default: nil,   desc: "Base ref (default: HEAD of repo)"
+          argument :repo,      required: true, desc: "Repo name (under repos/)"
+          argument :iteration, required: true, desc: "Iteration name"
+          argument :lane,      required: true, desc: "Lane name"
+          option   :base,      default: nil,   desc: "Base ref (default: HEAD of repo)"
 
-          def call(repo:, slice:, lane:, base: nil, **opts)
+          def call(repo:, iteration:, lane:, base: nil, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find) do |sp|
                 mission = ArchitectMission.new(space: sp)
-                result = mission.worktree_add(repo, slice, lane, base: base)
+                result = mission.worktree_add(repo, iteration, lane, base: base)
                 terminal.say "Worktree: #{terminal.path(result[:worktree])}"
                 terminal.say "Base SHA: #{result[:base_sha]}"
                 CLI.record_outcome(Outcome.new(exit_code: 0))
@@ -184,16 +184,16 @@ module SpaceArchitect
           include Helpers
 
           desc "Remove a lane worktree"
-          argument :slice, required: true, desc: "Slice name"
-          argument :lane,  required: true, desc: "Lane name"
+          argument :iteration, required: true, desc: "Iteration name"
+          argument :lane,      required: true, desc: "Lane name"
 
-          def call(slice:, lane:, **opts)
+          def call(iteration:, lane:, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find) do |sp|
                 mission = ArchitectMission.new(space: sp)
-                mission.worktree_remove(slice, lane)
-                terminal.say "Removed worktree for #{slice}/#{lane}"
+                mission.worktree_remove(iteration, lane)
+                terminal.say "Removed worktree for #{iteration}/#{lane}"
                 CLI.record_outcome(Outcome.new(exit_code: 0))
               end
             end

@@ -8,12 +8,12 @@ require "pathname"
 
 module SpaceArchitect
   # Manages an architect-loop mission inside a space: one self-contained file per
-  # slice at artifacts/<NN>-<slice>.md (Grounds / Contract / Rubric / Builder
+  # iteration at architecture/I<NN>-<iteration>.md (Grounds / Specification / Acceptance Criteria / Builder
   # Prompt / Builder Report / Verdict), grown one commit per section. The freeze
-  # is the commit that establishes the Rubric; the frozen region (everything
+  # is the commit that establishes the Acceptance Criteria; the frozen region (everything
   # above "## Builder Prompt") is read-only afterward.
   class ArchitectMission
-    # The heading that separates the frozen sections (Grounds/Contract/Rubric)
+    # The heading that separates the frozen sections (Grounds/Specification/Acceptance Criteria)
     # from the appended-after-freeze sections (Builder Prompt/Report/Verdict).
     FROZEN_BOUNDARY = /^## Builder Prompt/
 
@@ -22,81 +22,81 @@ module SpaceArchitect
     end
 
     def init!
-      handoff_path = space.path.join("artifacts", "HANDOFF.md")
+      handoff_path = space.path.join("architecture", "ARCHITECT.md")
       if handoff_path.exist?
-        raise Error, "artifacts/HANDOFF.md already exists — remove it first or edit it directly (idempotent guard)"
+        raise Error, "architecture/ARCHITECT.md already exists — remove it first or edit it directly (idempotent guard)"
       end
 
       FileUtils.mkdir_p(handoff_path.dirname)
       handoff_path.write(render_handoff)
 
       update_architect_block do |b|
-        b.merge("status" => "active", "current_slice" => nil, "slices" => [])
+        b.merge("status" => "active", "current_iteration" => nil, "iterations" => [])
       end
 
-      git_run("-C", space.path.to_s, "add", "artifacts/HANDOFF.md", Space::METADATA_FILE)
+      git_run("-C", space.path.to_s, "add", "architecture/ARCHITECT.md", Space::METADATA_FILE)
       git_run("-C", space.path.to_s, "commit", "-m", "Initialize architect mission")
 
       handoff_path
     end
 
-    # Allocate the next ordinal and scaffold artifacts/<NN>-<slice>.md.
-    def new_slice!(slice)
+    # Allocate the next ordinal and scaffold architecture/I<NN>-<iteration>.md.
+    def new_iteration!(name)
       block = space.data["architect"] || {}
-      slices = block["slices"] || []
-      if slices.any? { |s| s["name"] == slice }
-        raise Error, "slice '#{slice}' already exists in space.yaml"
+      iterations = block["iterations"] || []
+      if iterations.any? { |s| s["name"] == name }
+        raise Error, "iteration '#{name}' already exists in space.yaml"
       end
 
-      ordinal = (slices.map { |s| s["ordinal"] || 0 }.max || 0) + 1
+      ordinal = (iterations.map { |s| s["ordinal"] || 0 }.max || 0) + 1
       nn = format("%02d", ordinal)
-      rel = "artifacts/#{nn}-#{slice}.md"
+      rel = "architecture/I#{nn}-#{name}.md"
       path = space.path.join(rel)
       raise Error, "#{rel} already exists" if path.exist?
 
       FileUtils.mkdir_p(path.dirname)
-      path.write(render_slice(nn, slice))
+      path.write(render_iteration(nn, name))
 
       update_architect_block do |b|
-        b["current_slice"] = slice
-        list = b["slices"] || []
+        b["current_iteration"] = name
+        list = b["iterations"] || []
         list << {
-          "name" => slice, "ordinal" => ordinal, "file" => rel,
+          "name" => name, "ordinal" => ordinal, "file" => rel,
           "freeze_sha" => nil, "verdict" => "pending", "lanes" => []
         }
-        b["slices"] = list
+        b["iterations"] = list
         b
       end
 
       git_run("-C", space.path.to_s, "add", rel, Space::METADATA_FILE)
-      git_run("-C", space.path.to_s, "commit", "-m", "slice #{nn}: scaffold #{slice}")
+      git_run("-C", space.path.to_s, "commit", "-m", "I#{nn}: scaffold #{name}")
 
       path
     end
 
     def status
       block = space.data["architect"] || {}
-      artifacts_dir = space.path.join("artifacts")
-      slice_files = if artifacts_dir.exist?
-        artifacts_dir.children
-          .select { |f| f.basename.to_s.match?(/\A\d+-.+\.md\z/) }
+      architecture_dir = space.path.join("architecture")
+      iteration_files = if architecture_dir.exist?
+        architecture_dir.children
+          .select { |f| f.basename.to_s.match?(/\AI\d+-.+\.md\z/) }
           .map { |f| f.basename.to_s }.sort
       else
         []
       end
-      { block: block, slice_files: slice_files }
+      { block: block, iteration_files: iteration_files }
     end
 
-    # Freeze the slice: the slice file must carry a "## Rubric" section. Commits
-    # any pending changes to the slice file and records HEAD as freeze_sha. If
+    # Freeze the iteration: the iteration file must carry a "## Acceptance Criteria" section. Commits
+    # any pending changes to the iteration file and records HEAD as freeze_sha. If
     # already frozen, refuses when the frozen region has changed since.
-    def freeze!(slice)
-      entry = slice_entry(slice)
+    def freeze!(iteration)
+      entry = slice_entry(iteration)
       rel = entry["file"]
       path = space.path.join(rel)
-      raise Error, "#{rel} does not exist — run `space architect new #{slice}` first" unless path.exist?
-      unless path.read.match?(/^## Rubric/)
-        raise Error, "#{rel} has no '## Rubric' section — write the Rubric before freezing"
+      raise Error, "#{rel} does not exist — run `space architect new #{iteration}` first" unless path.exist?
+      unless path.read.match?(/^## Acceptance Criteria/)
+        raise Error, "#{rel} has no '## Acceptance Criteria' section — write the Acceptance Criteria before freezing"
       end
 
       if entry["freeze_sha"]
@@ -104,26 +104,26 @@ module SpaceArchitect
         if frozen_region_changed?(sha, rel)
           raise Error,
             "Frozen sections of #{rel} changed since freeze #{sha[0, 8]} — " \
-            "refusing to re-freeze. Restore them to their frozen state or use a new slice."
+            "refusing to re-freeze. Restore them to their frozen state or use a new iteration."
         end
         return sha
       end
 
       files = [rel]
-      files << "artifacts/HANDOFF.md" if space.path.join("artifacts", "HANDOFF.md").exist?
+      files << "architecture/ARCHITECT.md" if space.path.join("architecture", "ARCHITECT.md").exist?
       git_run("-C", space.path.to_s, "add", *files)
       if staged_changes?
         nn = format("%02d", entry["ordinal"] || 0)
-        git_run("-C", space.path.to_s, "commit", "-m", "slice #{nn}: rubric (freeze)")
+        git_run("-C", space.path.to_s, "commit", "-m", "I#{nn}: acceptance criteria (freeze)")
       end
 
       sha, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
       sha = sha.strip
 
       update_architect_block do |b|
-        b["current_slice"] = slice
-        (b["slices"] || []).each do |s|
-          next unless s["name"] == slice
+        b["current_iteration"] = iteration
+        (b["iterations"] || []).each do |s|
+          next unless s["name"] == iteration
           s["freeze_sha"] = sha
           s["verdict"] ||= "pending"
         end
@@ -133,12 +133,12 @@ module SpaceArchitect
       sha
     end
 
-    def worktree_add(repo, slice, lane, base: nil)
-      entry = slice_entry(slice)
+    def worktree_add(repo, iteration, lane, base: nil)
+      entry = slice_entry(iteration)
       repo_path = space.path.join("repos", repo)
       raise Error, "repos/#{repo} does not exist" unless repo_path.exist?
 
-      id = slice_id(entry)
+      id = iteration_id(entry)
       wt_path = space.path.join("tmp", "architect", "wt", "#{id}-#{lane}")
       FileUtils.mkdir_p(wt_path.dirname)
 
@@ -151,8 +151,8 @@ module SpaceArchitect
       git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
 
       update_architect_block do |b|
-        (b["slices"] || []).each do |s|
-          next unless s["name"] == slice
+        (b["iterations"] || []).each do |s|
+          next unless s["name"] == iteration
           lanes = s["lanes"] || []
           lanes << {
             "name" => lane,
@@ -169,25 +169,25 @@ module SpaceArchitect
       { worktree: wt_path, base_sha: base_sha }
     end
 
-    def worktree_remove(slice, lane)
-      entry = slice_entry(slice)
+    def worktree_remove(iteration, lane)
+      entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
-      raise Error, "No lane '#{lane}' recorded for slice '#{slice}'" unless lane_entry
+      raise Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
 
       repo = lane_entry["repo"]
       repo_path = space.path.join("repos", repo)
       wt_path = if lane_entry["worktree"]
         space.path.join(lane_entry["worktree"])
       else
-        space.path.join("tmp", "architect", "wt", "#{slice_id(entry)}-#{lane}")
+        space.path.join("tmp", "architect", "wt", "#{iteration_id(entry)}-#{lane}")
       end
 
       git_run("-C", repo_path.to_s, "worktree", "remove", "--force", wt_path.to_s)
       git_run("-C", repo_path.to_s, "worktree", "prune")
 
       update_architect_block do |b|
-        (b["slices"] || []).each do |s|
-          next unless s["name"] == slice
+        (b["iterations"] || []).each do |s|
+          next unless s["name"] == iteration
           s["lanes"] = (s["lanes"] || []).reject { |l| l["name"] == lane }
         end
         b
@@ -200,8 +200,8 @@ module SpaceArchitect
       wt_base.children.select(&:directory?).map { |p| p.basename.to_s }.sort
     end
 
-    def verify(slice)
-      entry = slice_entry(slice)
+    def verify(iteration)
+      entry = slice_entry(iteration)
       freeze_sha = entry["freeze_sha"]
       rel = entry["file"]
       lanes = entry["lanes"] || []
@@ -209,12 +209,12 @@ module SpaceArchitect
       lanes.map do |lane|
         lane_name = lane["name"]
         base_sha = lane["base_sha"]
-        wt_path = space.path.join(lane["worktree"] || "tmp/architect/wt/#{slice_id(entry)}-#{lane_name}")
+        wt_path = space.path.join(lane["worktree"] || "tmp/architect/wt/#{iteration_id(entry)}-#{lane_name}")
         touch_set = lane["touch_set"] || []
 
         checks = {}
 
-        # (a) frozen sections of the slice file untouched since freeze
+        # (a) frozen sections of the iteration file untouched since freeze
         checks[:frozen_untouched] = if freeze_sha && rel
           !frozen_region_changed?(freeze_sha, rel)
         end
@@ -224,7 +224,7 @@ module SpaceArchitect
         checks[:no_builder_commits] = log_out.strip.empty?
 
         # (c) builder's scratch report exists and is non-empty
-        report = space.path.join("tmp", "architect", "#{slice_id(entry)}-#{lane_name}.report.md")
+        report = space.path.join("tmp", "architect", "#{iteration_id(entry)}-#{lane_name}.report.md")
         checks[:report_exists] = report.exist? && !report.read.strip.empty?
 
         # (d) in-bounds: changed paths ⊆ touch_set (nil if no touch_set recorded)
@@ -244,14 +244,14 @@ module SpaceArchitect
 
     attr_reader :space
 
-    def slice_id(entry)
-      "#{format('%02d', entry['ordinal'])}-#{entry['name']}"
+    def iteration_id(entry)
+      "I#{format('%02d', entry['ordinal'])}-#{entry['name']}"
     end
 
-    def slice_entry(slice)
+    def slice_entry(iteration)
       block = space.data["architect"] || {}
-      entry = (block["slices"] || []).find { |s| s["name"] == slice }
-      raise Error, "Slice '#{slice}' not recorded in space.yaml — run `space architect new #{slice}` first" unless entry
+      entry = (block["iterations"] || []).find { |s| s["name"] == iteration }
+      raise Error, "Iteration '#{iteration}' not recorded in space.yaml — run `space architect new #{iteration}` first" unless entry
       entry
     end
 
@@ -276,13 +276,13 @@ module SpaceArchitect
     def render_handoff
       @_title = space.data["title"] || space.id
       @_repos = space.repos
-      render_template("handoff.md.erb")
+      render_template("architect.md.erb")
     end
 
-    def render_slice(ordinal_nn, name)
-      @_ordinal = ordinal_nn
+    def render_iteration(ordinal_nn, name)
+      @_ordinal = "I#{ordinal_nn}"
       @_name = name
-      render_template("slice.md.erb")
+      render_template("iteration.md.erb")
     end
 
     def render_template(filename)
@@ -291,7 +291,7 @@ module SpaceArchitect
     end
 
     def update_architect_block
-      block = space.data["architect"] || { "status" => "active", "current_slice" => nil, "slices" => [] }
+      block = space.data["architect"] || { "status" => "active", "current_iteration" => nil, "iterations" => [] }
       space.data["architect"] = yield(block)
       space.save
     end

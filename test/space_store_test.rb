@@ -24,7 +24,7 @@ class SpaceStoreTest < SpaceArchitectTest
     assert_path_exists space.path.join("README.md")
     assert_path_exists space.path.join("repos")
     assert_path_exists space.path.join("notes")
-    assert_path_exists space.path.join("artifacts")
+    assert_path_exists space.path.join("architecture")
     assert_path_exists space.path.join("tmp")
     assert_path_exists space.path.join(".git")
     assert_equal "repos/\ntmp/\n", space.path.join(".gitignore").read
