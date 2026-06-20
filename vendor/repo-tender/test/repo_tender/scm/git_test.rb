@@ -5,7 +5,7 @@ require "test_helper"
 class SCMGitTest < Minitest::Test
   include TestHelpers
 
-  Git = RepoTender::SCM::Git
+  Git = SpaceArchitect::Pristine::SCM::Git
 
   # G5: SCM::Git against a real temp git repo + local bare remote.
   # Status, default_branch (named `trunk`, not `main`), current_branch,

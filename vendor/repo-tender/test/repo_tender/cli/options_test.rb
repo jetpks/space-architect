@@ -7,10 +7,10 @@ class CLIOptionsTest < Minitest::Test
   include TestHelpers
   include CLITestHelpers
 
-  Mode = RepoTender::UI::Mode
-  PlainReporter = RepoTender::UI::PlainReporter
-  JsonReporter = RepoTender::UI::JsonReporter
-  SyncRun = RepoTender::CLI::Sync::Run
+  Mode = SpaceArchitect::Pristine::UI::Mode
+  PlainReporter = SpaceArchitect::Pristine::UI::PlainReporter
+  JsonReporter = SpaceArchitect::Pristine::UI::JsonReporter
+  SyncRun = SpaceArchitect::Pristine::CLI::Sync::Run
 
   TtyIO = Struct.new(:tty_val) { def tty? = tty_val }
 

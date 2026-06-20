@@ -14,7 +14,7 @@ class CLINestedRegistrationTest < Minitest::Test
   include TestHelpers
   include CLITestHelpers
 
-  RepoTenderCLI = RepoTender::CLI
+  PristineCLI = SpaceArchitect::Pristine::CLI
 
   # ---- G7 first: nested subcommand registration works ----
 
@@ -28,12 +28,12 @@ class CLINestedRegistrationTest < Minitest::Test
 
   def test_org_remove_dispatches_to_org_remove_command_subprocess
     with_cli_env do |env, _home|
-      paths = RepoTender::Paths.new(environment: env)
+      paths = SpaceArchitect::Pristine::Paths.new(environment: env)
       paths.ensure!
       # Seed an org first.
-      RepoTender::Config::Store.update(paths.config_file) do |c|
-        RepoTender::Config::Store.with(c,
-          orgs: [RepoTender::Config::OrgRef.new(host: "github.com", name: "socketry")])
+      SpaceArchitect::Pristine::Config::Store.update(paths.config_file) do |c|
+        SpaceArchitect::Pristine::Config::Store.with(c,
+          orgs: [SpaceArchitect::Pristine::Config::OrgRef.new(host: "github.com", name: "socketry")])
       end
       stdout, _stderr, status = run_cli_subprocess(env: env, args: ["org", "remove", "github.com/socketry"])
       assert status.success?, "org remove should exit 0; got #{status.exitstatus}"
@@ -153,7 +153,7 @@ class CLINestedRegistrationTest < Minitest::Test
     with_cli_env do |env, _home|
       stdout, _stderr, status = run_cli_subprocess(env: env, args: ["version"])
       assert status.success?, "version should exit 0; got #{status.exitstatus}"
-      assert_includes stdout, RepoTender::VERSION
+      assert_includes stdout, SpaceArchitect::Pristine::VERSION
     end
   end
 
@@ -161,7 +161,7 @@ class CLINestedRegistrationTest < Minitest::Test
     with_cli_env do |env, _home|
       stdout, _stderr, status = run_cli_subprocess(env: env, args: ["--version"])
       assert status.success?, "--version should exit 0; got #{status.exitstatus}"
-      assert_includes stdout, RepoTender::VERSION
+      assert_includes stdout, SpaceArchitect::Pristine::VERSION
     end
   end
 end

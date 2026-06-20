@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
-require "repo_tender/cloner"
+require "space_architect/pristine/cloner"
 
 class ClonerTest < Minitest::Test
   include TestHelpers
@@ -12,7 +12,7 @@ class ClonerTest < Minitest::Test
     Dir.mktmpdir("cloner-test-") do |base|
       seed_repo(base, "github.com", "owner", "myrepo", files: {"README.md" => "hello"})
       Dir.mktmpdir("cloner-into-") do |into|
-        cloner = RepoTender::Cloner.new(base_dir: base)
+        cloner = SpaceArchitect::Pristine::Cloner.new(base_dir: base)
         result = cloner.call(name: "myrepo", into: into)
         assert result.success?, "expected Success, got #{result.inspect}"
         dest = File.join(into, "myrepo")
@@ -28,7 +28,7 @@ class ClonerTest < Minitest::Test
     Dir.mktmpdir("cloner-test-") do |base|
       seed_repo(base, "github.com", "owner", "myrepo")
       Dir.mktmpdir("cloner-into-") do |into|
-        cloner = RepoTender::Cloner.new(base_dir: base)
+        cloner = SpaceArchitect::Pristine::Cloner.new(base_dir: base)
         result = cloner.call(name: "myrepo", into: into)
         assert result.success?
         assert_equal File.join(into, "myrepo"), result.success
@@ -42,7 +42,7 @@ class ClonerTest < Minitest::Test
     Dir.mktmpdir("cloner-test-") do |base|
       seed_repo(base, "github.com", "acme", "widget")
       Dir.mktmpdir do |into|
-        result = RepoTender::Cloner.new(base_dir: base).call(name: "widget", into: into)
+        result = SpaceArchitect::Pristine::Cloner.new(base_dir: base).call(name: "widget", into: into)
         assert result.success?, result.inspect
       end
     end
@@ -52,7 +52,7 @@ class ClonerTest < Minitest::Test
     Dir.mktmpdir("cloner-test-") do |base|
       seed_repo(base, "github.com", "acme", "widget")
       Dir.mktmpdir do |into|
-        result = RepoTender::Cloner.new(base_dir: base).call(name: "acme/widget", into: into)
+        result = SpaceArchitect::Pristine::Cloner.new(base_dir: base).call(name: "acme/widget", into: into)
         assert result.success?, result.inspect
       end
     end
@@ -62,7 +62,7 @@ class ClonerTest < Minitest::Test
     Dir.mktmpdir("cloner-test-") do |base|
       seed_repo(base, "github.com", "acme", "widget")
       Dir.mktmpdir do |into|
-        result = RepoTender::Cloner.new(base_dir: base).call(name: "github.com/acme/widget", into: into)
+        result = SpaceArchitect::Pristine::Cloner.new(base_dir: base).call(name: "github.com/acme/widget", into: into)
         assert result.success?, result.inspect
       end
     end
@@ -72,7 +72,7 @@ class ClonerTest < Minitest::Test
     Dir.mktmpdir("cloner-test-") do |base|
       seed_repo(base, "github.com", "acme", "widget")
       Dir.mktmpdir do |into|
-        result = RepoTender::Cloner.new(base_dir: base).call(name: "nosuchrepo", into: into)
+        result = SpaceArchitect::Pristine::Cloner.new(base_dir: base).call(name: "nosuchrepo", into: into)
         assert result.failure?, "expected Failure"
         assert_includes result.failure, "not found"
         assert_empty Dir.entries(into).reject { |e| [".", ".."].include?(e) }, "nothing should be copied"
@@ -85,7 +85,7 @@ class ClonerTest < Minitest::Test
       seed_repo(base, "github.com", "org1", "shared")
       seed_repo(base, "github.com", "org2", "shared")
       Dir.mktmpdir do |into|
-        result = RepoTender::Cloner.new(base_dir: base).call(name: "shared", into: into)
+        result = SpaceArchitect::Pristine::Cloner.new(base_dir: base).call(name: "shared", into: into)
         assert result.failure?
         assert_includes result.failure, "ambiguous"
         assert_includes result.failure, "org1/shared"
@@ -100,7 +100,7 @@ class ClonerTest < Minitest::Test
       seed_repo(base, "github.com", "org1", "shared")
       seed_repo(base, "github.com", "org2", "shared")
       Dir.mktmpdir do |into|
-        result = RepoTender::Cloner.new(base_dir: base).call(name: "org1/shared", into: into)
+        result = SpaceArchitect::Pristine::Cloner.new(base_dir: base).call(name: "org1/shared", into: into)
         assert result.success?, result.inspect
         assert File.directory?(File.join(into, "shared"))
       end
@@ -119,7 +119,7 @@ class ClonerTest < Minitest::Test
         sentinel = File.join(dest, "sentinel.txt")
         File.write(sentinel, "do not overwrite")
 
-        result = RepoTender::Cloner.new(base_dir: base).call(name: "myrepo", into: into)
+        result = SpaceArchitect::Pristine::Cloner.new(base_dir: base).call(name: "myrepo", into: into)
         assert result.failure?, "expected Failure when dest exists"
         assert_includes result.failure, "already exists"
 

@@ -5,7 +5,7 @@ require "test_helper"
 class ShellTest < Minitest::Test
   include TestHelpers
 
-  Shell = RepoTender::Shell
+  Shell = SpaceArchitect::Pristine::Shell
 
   # G4: Shell is non-blocking. A zero-exit run returns Success(stdout);
   # a non-zero exit returns Failure carrying argv + stderr + status;

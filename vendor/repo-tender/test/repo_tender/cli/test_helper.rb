@@ -26,9 +26,9 @@ module CLITestHelpers
   # Invoke a command class directly (bypassing Dry::CLI's dispatch)
   # with captured out/err StringIOs and a cleared Outcome stash.
   # Returns [out_io, err_io]; the Outcome is on
-  # RepoTender::CLI.last_outcome.
+  # SpaceArchitect::Pristine::CLI.last_outcome.
   def invoke_command(command_class, **kwargs)
-    RepoTender::CLI.last_outcome # drain
+    SpaceArchitect::Pristine::CLI.last_outcome # drain
     Thread.current[:repo_tender_cli_outcome] = nil
     out = StringIO.new
     err = StringIO.new
