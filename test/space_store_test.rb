@@ -142,19 +142,19 @@ class SpaceStoreTest < SpaceArchitectTest
     setup = temp_env
     store = build_store(env: setup.fetch(:env))
     space = store.create("Concurrent Clones")
-    git_client = TrackingGitClient.new
+    fake_scm = TrackingSCM.new
     mise_client = TrackingMiseClient.new
 
     results = store.add_repos_to(
       space,
       (1..6).map { |index| "example-tools/repo-#{index}" },
-      git_client: git_client,
+      scm: fake_scm,
       mise_client: mise_client
     )
 
     assert_equal 6, results.length
-    assert_equal SpaceArchitect::SpaceStore::MAX_CONCURRENT_CLONES, git_client.max_active
-    assert_operator git_client.clone_count, :>, git_client.max_active
+    assert_equal SpaceArchitect::SpaceStore::MAX_CONCURRENT_CLONES, fake_scm.max_active
+    assert_operator fake_scm.clone_count, :>, fake_scm.max_active
     assert_equal 6, mise_client.trust_count
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
@@ -172,17 +172,20 @@ class SpaceStoreTest < SpaceArchitectTest
     state = SpaceArchitect::State.new(env: setup.fetch(:env))
     store = SpaceArchitect::SpaceStore.new(config: config, state: state, now: -> { fixed_time })
     space = store.create("Evergreen")
-    git_client = TrackingGitClient.new
+    fake_scm = TrackingSCM.new
+    fake_cloner = TrackingCloner.new
 
     store.add_repos_to(
       space,
       ["example-tools/present", "example-tools/absent"],
-      git_client: git_client,
+      scm: fake_scm,
+      cloner: fake_cloner,
       mise_client: TrackingMiseClient.new
     )
 
-    assert_equal [evergreen.join("github.com", "example-tools", "present").to_s], git_client.copied_sources
-    assert_equal ["git@github.com:example-tools/absent.git"], git_client.cloned_urls
+    assert_equal 1, fake_cloner.calls.length
+    assert_equal "github.com/example-tools/present", fake_cloner.calls.first[:name]
+    assert_equal ["git@github.com:example-tools/absent.git"], fake_scm.cloned_urls
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
@@ -198,7 +201,7 @@ class SpaceStoreTest < SpaceArchitectTest
 
     error = assert_raises(SpaceArchitect::GitError) do
       store.add_repos_to(space, ["example-tools/bad"],
-                         git_client: FailingGitClient.new,
+                         scm: FailingSCM.new,
                          mise_client: TrackingMiseClient.new)
     end
 
@@ -211,41 +214,82 @@ class SpaceStoreTest < SpaceArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  class FailingGitClient
-    def clone(url, _path)
-      raise SpaceArchitect::GitError, "git clone failed for #{url}"
-    end
+  def test_add_repos_via_real_engine_copies_evergreen_checkout
+    setup = temp_env
+    evergreen = Pathname.new(setup.fetch(:root)).join("evergreen")
+    repo_src = evergreen.join("github.com", "test-owner", "test-repo")
+    FileUtils.mkdir_p(repo_src)
 
-    def copy(_source, _path)
-      raise SpaceArchitect::GitError, "copy failed"
+    git_env = {
+      "GIT_AUTHOR_NAME" => "Test", "GIT_AUTHOR_EMAIL" => "test@example.com",
+      "GIT_COMMITTER_NAME" => "Test", "GIT_COMMITTER_EMAIL" => "test@example.com"
+    }
+    system("git", "-C", repo_src.to_s, "init", out: File::NULL, err: File::NULL)
+    system(git_env, "git", "-C", repo_src.to_s, "commit", "--allow-empty", "-m", "init",
+           out: File::NULL, err: File::NULL)
+
+    config = SpaceArchitect::Config.new(
+      env: setup.fetch(:env),
+      data: { "version" => 1, "spaces_dir" => "~/src/spaces", "evergreen_dir" => evergreen.to_s }
+    )
+    state = SpaceArchitect::State.new(env: setup.fetch(:env))
+    store = SpaceArchitect::SpaceStore.new(config: config, state: state, now: -> { fixed_time })
+    space = store.create("Real Engine Test", git: false)
+
+    store.add_repos_to(space, ["test-owner/test-repo"], mise_client: TrackingMiseClient.new)
+
+    assert_path_exists space.path.join("repos", "test-repo", ".git")
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  class FailingSCM
+    include Dry::Monads[:result]
+
+    def clone(url, dest)
+      Failure({url: url, dest: dest, stderr: "connection refused"})
     end
   end
 
-  class TrackingGitClient
-    attr_reader :max_active, :clone_count, :cloned_urls, :copied_sources
+  class TrackingSCM
+    include Dry::Monads[:result]
+
+    attr_reader :max_active, :clone_count, :cloned_urls
 
     def initialize
       @active = 0
       @max_active = 0
       @clone_count = 0
       @cloned_urls = []
-      @copied_sources = []
     end
 
-    def clone(url, path)
+    def clone(url, dest)
       @active += 1
       @clone_count += 1
       @cloned_urls << url
-      @max_active = [max_active, @active].max
+      @max_active = [@max_active, @active].max
       sleep 0.01
-      FileUtils.mkdir_p(Pathname.new(path).join(".git"))
+      FileUtils.mkdir_p(File.join(dest, ".git"))
+      Success(dest)
     ensure
       @active -= 1
     end
+  end
 
-    def copy(source, path)
-      @copied_sources << source.to_s
-      FileUtils.mkdir_p(Pathname.new(path).join(".git"))
+  class TrackingCloner
+    include Dry::Monads[:result]
+
+    attr_reader :calls
+
+    def initialize
+      @calls = []
+    end
+
+    def call(name:, into:)
+      @calls << {name: name, into: into}
+      dest = File.join(into, File.basename(name))
+      FileUtils.mkdir_p(File.join(dest, ".git"))
+      Success(dest)
     end
   end
 
