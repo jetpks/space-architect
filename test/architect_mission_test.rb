@@ -6,7 +6,7 @@ require "yaml"
 
 class ArchitectMissionTest < SpaceArchitectTest
   def create_real_space(dir)
-    FileUtils.mkdir_p(File.join(dir, "artifacts"))
+    FileUtils.mkdir_p(File.join(dir, "architecture"))
     FileUtils.mkdir_p(File.join(dir, "repos"))
     FileUtils.mkdir_p(File.join(dir, "tmp"))
 
@@ -40,8 +40,8 @@ class ArchitectMissionTest < SpaceArchitectTest
     repo_dir
   end
 
-  # G3: worktree_add records ordinal-prefixed worktree path and creates
-  #     an ordinal-prefixed branch (e.g. wt/01-my-slice-lane-a, lane/01-my-slice-lane-a)
+  # G3: worktree_add records I-prefixed iteration_id worktree path and creates
+  #     an I-prefixed branch (e.g. wt/I01-my-slice-lane-a, lane/I01-my-slice-lane-a)
   def test_worktree_add_records_ordinal_prefixed_path_and_branch
     dir = Dir.mktmpdir("architect-mission-test")
     space = create_real_space(dir)
@@ -49,24 +49,24 @@ class ArchitectMissionTest < SpaceArchitectTest
 
     mission = SpaceArchitect::ArchitectMission.new(space: space)
     mission.init!
-    mission.new_slice!("my-slice")
+    mission.new_iteration!("my-slice")
     result = mission.worktree_add("my-repo", "my-slice", "lane-a")
 
-    assert_match %r{wt/01-my-slice-lane-a\z}, result[:worktree].to_s
+    assert_match %r{wt/I01-my-slice-lane-a\z}, result[:worktree].to_s
     assert_path_exists result[:worktree].to_s
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    lane = yml.dig("architect", "slices", 0, "lanes", 0)
-    assert_equal "tmp/architect/wt/01-my-slice-lane-a", lane["worktree"]
+    lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+    assert_equal "tmp/architect/wt/I01-my-slice-lane-a", lane["worktree"]
 
-    branch_ref = File.join(dir, "repos", "my-repo", ".git", "refs", "heads", "lane", "01-my-slice-lane-a")
-    assert_path_exists branch_ref, "expected branch lane/01-my-slice-lane-a to exist in git"
+    branch_ref = File.join(dir, "repos", "my-repo", ".git", "refs", "heads", "lane", "I01-my-slice-lane-a")
+    assert_path_exists branch_ref, "expected branch lane/I01-my-slice-lane-a to exist in git"
   ensure
     FileUtils.rm_rf(dir)
   end
 
-  # G4: verify looks for the scratch report at ordinal-prefixed path
-  #     (tmp/architect/01-my-slice-lane-a.report.md) — bare-name path is not found
+  # G4: verify looks for the scratch report at I-prefixed iteration_id path
+  #     (tmp/architect/I01-my-slice-lane-a.report.md) — bare-name path is not found
   def test_verify_finds_ordinal_prefixed_scratch_report
     dir = Dir.mktmpdir("architect-mission-test")
     space = create_real_space(dir)
@@ -74,18 +74,18 @@ class ArchitectMissionTest < SpaceArchitectTest
 
     mission = SpaceArchitect::ArchitectMission.new(space: space)
     mission.init!
-    mission.new_slice!("my-slice")
+    mission.new_iteration!("my-slice")
     mission.freeze!("my-slice")
     mission.worktree_add("my-repo", "my-slice", "lane-a")
 
     FileUtils.mkdir_p(File.join(dir, "tmp", "architect"))
-    File.write(File.join(dir, "tmp", "architect", "01-my-slice-lane-a.report.md"),
+    File.write(File.join(dir, "tmp", "architect", "I01-my-slice-lane-a.report.md"),
       "# Report\nSTATUS: COMPLETE\n")
 
     results = mission.verify("my-slice")
     lane_result = results.find { |r| r[:lane] == "lane-a" }
     assert lane_result[:checks][:report_exists],
-      "expected (c) report_exists to be true with ordinal-prefixed report at 01-my-slice-lane-a.report.md"
+      "expected (c) report_exists to be true with I-prefixed report at I01-my-slice-lane-a.report.md"
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -99,7 +99,7 @@ class ArchitectMissionTest < SpaceArchitectTest
 
     mission = SpaceArchitect::ArchitectMission.new(space: space)
     mission.init!
-    mission.new_slice!("my-slice")
+    mission.new_iteration!("my-slice")
     mission.freeze!("my-slice")
 
     bare_wt_rel = "tmp/architect/wt/my-slice-lane-a"
@@ -110,8 +110,8 @@ class ArchitectMissionTest < SpaceArchitectTest
     assert_path_exists bare_wt_path
 
     sha, = Open3.capture3("git", "-C", repo_path, "rev-parse", "HEAD")
-    slice_entry = space.data.dig("architect", "slices").find { |s| s["name"] == "my-slice" }
-    slice_entry["lanes"] = [{
+    iteration_entry = space.data.dig("architect", "iterations").find { |s| s["name"] == "my-slice" }
+    iteration_entry["lanes"] = [{
       "name" => "lane-a",
       "repo" => "my-repo",
       "base_sha" => sha.strip,

@@ -1,14 +1,14 @@
-# HANDOFF — <%= @_title %>
+# ARCHITECT — <%= @_title %>
 
-> Cross-slice table of contents for the Architect Loop. Per-slice detail lives in
-> artifacts/<NN>-<slice>.md — this file only indexes the slices and carries
+> Cross-iteration table of contents for the Architect Loop. Per-iteration detail lives in
+> architecture/I<NN>-<iteration>.md — this file only indexes the iterations and carries
 > mission-wide state. Keep it short (~150 lines): the next session must grok it
-> in under a minute. Not in the committed artifacts = didn't happen.
+> in under a minute. Not in the committed architecture = didn't happen.
 
 ## TL;DR (keep current)
 
 - Goal: _[one sentence]_
-- Last slice: _[<NN>-name — CONTINUE / KILL / awaiting verdict]_
+- Last iteration: _[I<NN>-name — CONTINUE / KILL / awaiting verdict]_
 - Next action: _[exact command or decision needed]_
 
 ## Repos in scope
@@ -28,19 +28,19 @@
 [install / test / lint / typecheck / build commands for each repo in scope]
 ```
 
-## Slice index
+## Iteration index
 
-<!-- Add a row per slice. Create slices with `space architect new <name>`. -->
+<!-- Add a row per iteration. Create iterations with `space architect new <name>`. -->
 
-| NN | Slice | Status | freeze_sha | Integration branch | Verdict | File |
-|----|-------|--------|-----------|--------------------|---------|------|
+| II | Iteration | Status | freeze_sha | Integration branch | Verdict | File |
+|----|-----------|--------|-----------|--------------------|---------|------|
 
 Status values: speccing → frozen → dispatched → in-flight → awaiting-verdict → done.
 
 ## Open items for the human / architect
 
-<!-- Blocking items: unresolved disagreements (which slice), scope questions,
-stop-condition checkpoints. Detail lives in the slice file; link it. -->
+<!-- Blocking items: unresolved disagreements (which iteration), scope questions,
+stop-condition checkpoints. Detail lives in the iteration file; link it. -->
 
 ## Decisions log (architect + human)
 

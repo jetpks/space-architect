@@ -1,9 +1,9 @@
-# Slice <%= @_ordinal %>: <%= @_name %>
+# <%= @_ordinal %>: <%= @_name %>
 
-> One self-contained slice of the Architect Loop. Grown section by section, one
+> One self-contained iteration of the Architect Loop. Grown section by section, one
 > commit per section. The builder NEVER edits this file — the architect writes
 > every section, and transcribes the Builder Report verbatim from the builder's
-> scratch report in tmp/architect/. Frozen sections (Grounds, Contract, Rubric)
+> scratch report in tmp/architect/. Frozen sections (Grounds, Specification, Acceptance Criteria)
 > are read-only after the freeze commit; only Builder Prompt, Builder Report, and
 > Verdict are appended afterward.
 
@@ -11,12 +11,12 @@
 
 <!-- WHY. Research/PRD distilled: problem, decision + why, requirements,
 non-goals, verified facts WITH citation URLs, open questions. Optional — delete
-this section for slices that needed no research. Commit: "slice <%= @_ordinal %>: grounds". -->
+this section for iterations that needed no research. Commit: "<%= @_ordinal %>: grounds". -->
 
-## Contract
+## Specification
 
 <!-- WHAT / HOW — the full, self-contained delegation contract.
-Commit: "slice <%= @_ordinal %>: contract". -->
+Commit: "<%= @_ordinal %>: specification". -->
 
 - **Objective** — what to build and why (cite Grounds if present).
 - **Output format** — raw tables, numbers, commit SHAs, test output paths.
@@ -28,39 +28,39 @@ Commit: "slice <%= @_ordinal %>: contract". -->
   file-touch set (overlap-checked), objective, output format, boundaries.
 - **Effort** — `think hard` … `ultrathink` per lane, with one line of why.
 
-## Rubric
+## Acceptance Criteria
 
 <!-- PROOF. Exact gate commands + thresholds. `space architect freeze <%= @_name %>`
 commits this file and records its SHA as freeze_sha. Read-only afterward — any
-change to Grounds/Contract/Rubric = automatic slice FAIL. -->
+change to Grounds/Specification/Acceptance Criteria = automatic iteration FAIL. -->
 
-| Gate | Command | Threshold |
-|------|---------|-----------|
-|      |         |           |
+| AC# | Command | Threshold |
+|-----|---------|-----------|
+|     |         |           |
 
 ## Builder Prompt
 
 <!-- The exact lane-prompt(s) dispatched, recorded as provenance. One ###
 subsection per lane. A copy is written to tmp/architect/<%= @_ordinal %>-<%= @_name %>-<lane>.prompt.md
-for stdin dispatch. Commit: "slice <%= @_ordinal %>: dispatched". -->
+for stdin dispatch. Commit: "<%= @_ordinal %>: dispatched". -->
 
 ## Builder Report
 
 <!-- RAW EVIDENCE ONLY — tables, numbers, command output. The builder writes this
 to tmp/architect/<%= @_ordinal %>-<%= @_name %>-<lane>.report.md; the architect transcribes it here
 VERBATIM (no interpretation). One ### subsection per lane; include the builder's
-PHASE 0 disagreements and its STATUS line. Commit: "slice <%= @_ordinal %>: evidence". -->
+PHASE 0 disagreements and its STATUS line. Commit: "<%= @_ordinal %>: evidence". -->
 
 ## Verdict
 
 <!-- ARCHITECT JUDGMENT, written in a LATER session than the dispatch.
-Commit: "slice <%= @_ordinal %>: verdict". -->
+Commit: "<%= @_ordinal %>: verdict". -->
 
 - **Disagreement rulings** — each PHASE 0 disagreement: ACCEPT / REJECT / MODIFY + why.
-- **Rubric integrity** — frozen sections unchanged since freeze (`space architect verify <%= @_name %>`)?
+- **Acceptance Criteria integrity** — frozen sections unchanged since freeze (`space architect verify <%= @_name %>`)?
 
-| Gate | Raw result | Verdict |
-|------|------------|---------|
-|      |            | PASS/FAIL/INVALID |
+| AC# | Raw result | Verdict |
+|-----|------------|---------|
+|     |            | PASS/FAIL/INVALID |
 
-- **Slice** — KILL / CONTINUE + the single decisive reason.
+- **Iteration** — KILL / CONTINUE + the single decisive reason.

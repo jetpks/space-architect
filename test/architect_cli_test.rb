@@ -11,7 +11,7 @@ class ArchitectCLITest < SpaceArchitectTest
     spaces_dir = File.join(base_dir, "src", "spaces")
     FileUtils.mkdir_p(spaces_dir)
     space_dir = File.join(spaces_dir, id)
-    FileUtils.mkdir_p(File.join(space_dir, "artifacts"))
+    FileUtils.mkdir_p(File.join(space_dir, "architecture"))
     FileUtils.mkdir_p(File.join(space_dir, "repos"))
     FileUtils.mkdir_p(File.join(space_dir, "tmp"))
 
@@ -63,15 +63,15 @@ class ArchitectCLITest < SpaceArchitectTest
 
         assert_empty err
         assert_match(/Mission ready/, out)
-        assert_path_exists File.join(space_path, "artifacts", "HANDOFF.md")
+        assert_path_exists File.join(space_path, "architecture", "ARCHITECT.md")
         # One-file model: no gates/lanes/prd scaffolding.
-        refute_path_exists File.join(space_path, "artifacts", "gates")
-        refute_path_exists File.join(space_path, "artifacts", "lanes")
-        refute_path_exists File.join(space_path, "artifacts", "prd")
+        refute_path_exists File.join(space_path, "architecture", "gates")
+        refute_path_exists File.join(space_path, "architecture", "lanes")
+        refute_path_exists File.join(space_path, "architecture", "prd")
 
         yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
         assert_equal "active", yml.dig("architect", "status")
-        assert_equal [], yml.dig("architect", "slices")
+        assert_equal [], yml.dig("architect", "iterations")
       end
     end
   ensure
@@ -117,7 +117,7 @@ class ArchitectCLITest < SpaceArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  # ── new: scaffolds artifacts/<NN>-<slice>.md and records the slice ──────────
+  # ── new: scaffolds architecture/I<NN>-<iteration>.md and records the iteration ──────────
 
   def test_architect_new_scaffolds_ordinal_slice_file
     setup = temp_env
@@ -132,25 +132,25 @@ class ArchitectCLITest < SpaceArchitectTest
 
         out1, err1 = invoke("new", "first-slice")
         assert_empty err1
-        assert_match(/Slice scaffolded/, out1)
-        assert_path_exists File.join(space_path, "artifacts", "01-first-slice.md")
+        assert_match(/Iteration scaffolded/, out1)
+        assert_path_exists File.join(space_path, "architecture", "I01-first-slice.md")
 
-        # second slice gets the next ordinal
+        # second iteration gets the next ordinal
         invoke("new", "second-slice")
-        assert_path_exists File.join(space_path, "artifacts", "02-second-slice.md")
+        assert_path_exists File.join(space_path, "architecture", "I02-second-slice.md")
 
-        slice_text = File.read(File.join(space_path, "artifacts", "01-first-slice.md"))
-        assert_match(/^# Slice 01: first-slice/, slice_text)
-        assert_match(/^## Rubric/, slice_text)
+        slice_text = File.read(File.join(space_path, "architecture", "I01-first-slice.md"))
+        assert_match(/^# I01: first-slice/, slice_text)
+        assert_match(/^## Acceptance Criteria/, slice_text)
         assert_match(/^## Builder Prompt/, slice_text)
 
         yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
-        entry = yml.dig("architect", "slices").find { |s| s["name"] == "first-slice" }
+        entry = yml.dig("architect", "iterations").find { |s| s["name"] == "first-slice" }
         refute_nil entry
         assert_equal 1, entry["ordinal"]
-        assert_equal "artifacts/01-first-slice.md", entry["file"]
-        # `new` makes the freshly-created slice current.
-        assert_equal "second-slice", yml.dig("architect", "current_slice")
+        assert_equal "architecture/I01-first-slice.md", entry["file"]
+        # `new` makes the freshly-created iteration current.
+        assert_equal "second-slice", yml.dig("architect", "current_iteration")
       end
     end
   ensure
@@ -170,18 +170,18 @@ class ArchitectCLITest < SpaceArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "slice-1")
-        slice_file = File.join(space_path, "artifacts", "01-slice-1.md")
+        slice_file = File.join(space_path, "architecture", "I01-slice-1.md")
 
-        # First freeze — the scaffold already carries a "## Rubric" section.
+        # First freeze — the scaffold already carries a "## Acceptance Criteria" section.
         out, err = invoke("freeze", "slice-1")
         assert_empty err
         assert_match(/[0-9a-f]{7,40}/, out)
 
         yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
-        entry = yml.dig("architect", "slices").find { |s| s["name"] == "slice-1" }
+        entry = yml.dig("architect", "iterations").find { |s| s["name"] == "slice-1" }
         freeze_sha = entry["freeze_sha"]
         assert_match(/\A[0-9a-f]{40}\z/, freeze_sha)
-        assert_equal "slice-1", yml.dig("architect", "current_slice")
+        assert_equal "slice-1", yml.dig("architect", "current_iteration")
 
         # Appending BELOW the freeze boundary (Builder Prompt) is allowed —
         # re-freeze returns the same sha, no error.
@@ -190,9 +190,9 @@ class ArchitectCLITest < SpaceArchitectTest
         assert_empty err2
         assert_match(/#{freeze_sha[0, 7]}/, out2)
 
-        # Changing a FROZEN section (Rubric) is refused.
+        # Changing a FROZEN section (Acceptance Criteria) is refused.
         text = File.read(slice_file)
-        text = text.sub("## Rubric", "## Rubric\n\nGA9: tampered threshold")
+        text = text.sub("## Acceptance Criteria", "## Acceptance Criteria\n\nGA9: tampered threshold")
         File.write(slice_file, text)
         _out3, err3 = invoke("freeze", "slice-1")
         refute_empty err3
@@ -214,11 +214,11 @@ class ArchitectCLITest < SpaceArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "no-rubric")
-        slice_file = File.join(space_path, "artifacts", "01-no-rubric.md")
-        File.write(slice_file, "# Slice 01: no-rubric\n\n## Contract\n\njust a contract\n")
+        slice_file = File.join(space_path, "architecture", "I01-no-rubric.md")
+        File.write(slice_file, "# I01: no-rubric\n\n## Specification\n\njust a contract\n")
 
         _out, err = invoke("freeze", "no-rubric")
-        assert_match(/no '## Rubric' section/, err)
+        assert_match(/no '## Acceptance Criteria' section/, err)
       end
     end
   ensure
@@ -268,7 +268,7 @@ class ArchitectCLITest < SpaceArchitectTest
         invoke("freeze", "s1")
         invoke("worktree", "add", "my-repo", "s1", "lane-a")
 
-        wt_path = File.join(space_path, "tmp", "architect", "wt", "01-s1-lane-a")
+        wt_path = File.join(space_path, "tmp", "architect", "wt", "I01-s1-lane-a")
         assert_path_exists wt_path
 
         File.write(File.join(wt_path, "builder_work.md"), "# builder commit\n")
@@ -327,7 +327,7 @@ class ArchitectCLITest < SpaceArchitectTest
 
         # The builder's scratch report (non-empty) lives in tmp/architect/.
         FileUtils.mkdir_p(File.join(space_path, "tmp", "architect"))
-        File.write(File.join(space_path, "tmp", "architect", "01-s1-lane-c.report.md"),
+        File.write(File.join(space_path, "tmp", "architect", "I01-s1-lane-c.report.md"),
           "# Lane Report\nSTATUS: COMPLETE\n")
 
         out, err = invoke("verify", "s1")
