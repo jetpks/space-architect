@@ -78,10 +78,14 @@ module SpaceArchitect
       end
 
       Failure(AmbiguousSpaceError.new("Space '#{value}' is ambiguous: #{matches.map(&:id).join(', ')}"))
+    rescue SpaceArchitect::Error => e
+      Failure(e)
     end
 
     def current(from: Dir.pwd)
       current_from_pwd(from:).to_result(CurrentSpaceMissingError.new("No current space found from #{from}. Run this inside a space or pass a space id."))
+    rescue SpaceArchitect::Error => e
+      Failure(e)
     end
 
     def current_from_pwd(from: Dir.pwd)
@@ -144,6 +148,8 @@ module SpaceArchitect
         repo_data = space.add_repo(addition.fetch(:reference), relative_path: addition.fetch(:relative_path), now: now.call)
         { space: space, repo: repo_data, reference: addition.fetch(:reference), path: addition.fetch(:path) }
       end)
+    rescue SpaceArchitect::Error => e
+      Failure(e)
     end
 
     def repos(from: Dir.pwd)

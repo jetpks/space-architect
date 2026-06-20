@@ -268,6 +268,36 @@ class SpaceStoreTest < SpaceArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  def test_add_repos_to_returns_failure_on_duplicate_destination
+    setup = temp_env
+    store = build_store(env: setup.fetch(:env))
+    space = store.create("Dup Space", git: false).value!
+
+    result = store.add_repos_to(space, ["foo/dup", "foo/dup"],
+                                scm: TrackingSCM.new,
+                                mise_client: TrackingMiseClient.new)
+
+    assert result.failure?
+    assert_kind_of SpaceArchitect::RepoExistsError, result.failure
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_current_returns_failure_on_corrupt_metadata
+    setup = temp_env
+    store = build_store(env: setup.fetch(:env))
+    corrupt_dir = File.join(setup[:root], "corrupt-space")
+    FileUtils.mkdir_p(corrupt_dir)
+    File.write(File.join(corrupt_dir, SpaceArchitect::Space::METADATA_FILE), "just a string\n")
+
+    result = store.current(from: corrupt_dir)
+
+    assert result.failure?
+    assert_kind_of SpaceArchitect::Error, result.failure
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   class FailingSCM
     include Dry::Monads[:result]
 
