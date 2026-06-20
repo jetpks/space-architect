@@ -6,8 +6,8 @@ require "time"
 class SyncRepoPlanTest < Minitest::Test
   include TestHelpers
 
-  RepoPlan = RepoTender::Sync::RepoPlan
-  Status = RepoTender::SCM::Status
+  RepoPlan = SpaceArchitect::Pristine::Sync::RepoPlan
+  Status = SpaceArchitect::Pristine::SCM::Status
 
   # A pure-Ruby stub of SCM::Client that records call counts and
   # returns canned values. This is dependency injection on the plan's
@@ -99,7 +99,7 @@ class SyncRepoPlanTest < Minitest::Test
   end
 
   def repo_ref(name = "ruby")
-    RepoTender::Config::RepoRef.new(host: "github.com", owner: "ruby", name: name)
+    SpaceArchitect::Pristine::Config::RepoRef.new(host: "github.com", owner: "ruby", name: name)
   end
 
   # ---- Decision-table unit tests against the stub SCM. ----
@@ -268,7 +268,7 @@ class SyncRepoPlanTest < Minitest::Test
   def test_real_repo_on_trunk_up_to_date_after_seed
     with_trunk_repo do |_bare, clone|
       seed_initial_commit(clone)
-      scm = RepoTender::SCM::Git.new
+      scm = SpaceArchitect::Pristine::SCM::Git.new
       plan = RepoPlan.call(
         repo_ref: repo_ref, path: clone, scm: scm, refresh_interval: 3600,
         now: Time.now
@@ -288,7 +288,7 @@ class SyncRepoPlanTest < Minitest::Test
     with_trunk_repo do |_bare, clone|
       seed_initial_commit(clone)
       File.write(File.join(clone, "README.md"), "modified\n")
-      scm = RepoTender::SCM::Git.new
+      scm = SpaceArchitect::Pristine::SCM::Git.new
       plan = RepoPlan.call(
         repo_ref: repo_ref, path: clone, scm: scm, refresh_interval: 3600,
         now: Time.now
@@ -303,7 +303,7 @@ class SyncRepoPlanTest < Minitest::Test
       seed_initial_commit(clone)
       Shell.run("git", "switch", "-c", "feature", chdir: clone)
       File.write(File.join(clone, "dirty.txt"), "x")
-      scm = RepoTender::SCM::Git.new
+      scm = SpaceArchitect::Pristine::SCM::Git.new
       plan = RepoPlan.call(
         repo_ref: repo_ref, path: clone, scm: scm, refresh_interval: 3600,
         now: Time.now
@@ -317,7 +317,7 @@ class SyncRepoPlanTest < Minitest::Test
     with_trunk_repo do |_bare, clone|
       seed_initial_commit(clone)
       Shell.run("git", "switch", "-c", "feature", chdir: clone)
-      scm = RepoTender::SCM::Git.new
+      scm = SpaceArchitect::Pristine::SCM::Git.new
       plan = RepoPlan.call(
         repo_ref: repo_ref, path: clone, scm: scm, refresh_interval: 3600,
         now: Time.now
@@ -363,7 +363,7 @@ class SyncRepoPlanTest < Minitest::Test
 
   def test_real_empty_repo_returns_sync_empty
     with_empty_repo do |_bare, clone|
-      scm = RepoTender::SCM::Git.new
+      scm = SpaceArchitect::Pristine::SCM::Git.new
       plan = RepoPlan.call(
         repo_ref: repo_ref, path: clone, scm: scm, refresh_interval: 3600,
         now: Time.now
@@ -378,7 +378,7 @@ class SyncRepoPlanTest < Minitest::Test
   def test_real_empty_repo_with_untracked_file_returns_report_dirty
     with_empty_repo do |_bare, clone|
       File.write(File.join(clone, "local.txt"), "do not touch me\n")
-      scm = RepoTender::SCM::Git.new
+      scm = SpaceArchitect::Pristine::SCM::Git.new
       plan = RepoPlan.call(
         repo_ref: repo_ref, path: clone, scm: scm, refresh_interval: 3600,
         now: Time.now

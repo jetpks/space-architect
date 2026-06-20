@@ -8,7 +8,7 @@ require "time"
 class LogRotatorTest < Minitest::Test
   include TestHelpers
 
-  LogRotator = RepoTender::LogRotator
+  LogRotator = SpaceArchitect::Pristine::LogRotator
 
   # Use a fixed "now" so the archive filename is deterministic.
   FIXED_NOW = Time.utc(2026, 6, 13, 10, 15, 30)

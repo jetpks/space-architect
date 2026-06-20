@@ -6,6 +6,6 @@
 # process exit code. See lib/repo_tender/cli.rb for the seam.
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
-require "repo_tender"
+require "space_architect/pristine"
 
-RepoTender::CLI.run(ARGV, $stdout, $stderr)
+SpaceArchitect::Pristine::CLI.run(ARGV, $stdout, $stderr)

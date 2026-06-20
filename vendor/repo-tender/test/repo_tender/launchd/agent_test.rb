@@ -6,7 +6,7 @@ require "stringio"
 class LaunchdAgentTest < Minitest::Test
   include TestHelpers
 
-  Agent = RepoTender::Launchd::Agent
+  Agent = SpaceArchitect::Pristine::Launchd::Agent
 
   # Recording fake — captures every argv, returns canned output
   # per call. The "fail" response yields a Failure with the

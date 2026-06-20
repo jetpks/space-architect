@@ -4,8 +4,8 @@ require "test_helper"
 require "stringio"
 
 class InteractiveReporterTest < Minitest::Test
-  IR = RepoTender::UI::InteractiveReporter
-  Mode = RepoTender::UI::Mode
+  IR = SpaceArchitect::Pristine::UI::InteractiveReporter
+  Mode = SpaceArchitect::Pristine::UI::Mode
 
   REFS = [
     "github.com/owner/repo-a",
@@ -55,7 +55,7 @@ class InteractiveReporterTest < Minitest::Test
   end
 
   def test_g1_no_thread_new_in_source
-    path = File.expand_path("../../../lib/repo_tender/ui/interactive_reporter.rb", __dir__)
+    path = File.expand_path("../../../lib/space_architect/pristine/ui/interactive_reporter.rb", __dir__)
     code_lines = File.readlines(path).reject { |l| l.strip.start_with?("#") }.join
     refute_match(/Thread\.(new|start|fork)/, code_lines,
       "interactive_reporter.rb must not call Thread.new/start/fork in code (comments excluded)")
@@ -442,8 +442,8 @@ class InteractiveReporterTest < Minitest::Test
   def test_gs6_listing_phase_emits_per_org_persistent_lines
     reporter, out = make_reporter(cadence: 0.01)
     orgs = [
-      RepoTender::Config::OrgRef.new(host: "github.com", name: "org-a"),
-      RepoTender::Config::OrgRef.new(host: "github.com", name: "org-b")
+      SpaceArchitect::Pristine::Config::OrgRef.new(host: "github.com", name: "org-a"),
+      SpaceArchitect::Pristine::Config::OrgRef.new(host: "github.com", name: "org-b")
     ]
 
     Sync do |task|
@@ -472,7 +472,7 @@ class InteractiveReporterTest < Minitest::Test
 
   def test_gs6_listing_phase_failure_org_emits_failed_line
     reporter, out = make_reporter(cadence: 0.01)
-    org = RepoTender::Config::OrgRef.new(host: "github.com", name: "bad-org")
+    org = SpaceArchitect::Pristine::Config::OrgRef.new(host: "github.com", name: "bad-org")
 
     Sync do |task|
       reporter.attach(task)
@@ -491,7 +491,7 @@ class InteractiveReporterTest < Minitest::Test
 
   def test_gs6_render_fiber_alive_across_both_phases
     reporter, = make_reporter(cadence: 0.01)
-    org = RepoTender::Config::OrgRef.new(host: "github.com", name: "myorg")
+    org = SpaceArchitect::Pristine::Config::OrgRef.new(host: "github.com", name: "myorg")
 
     Sync do |task|
       reporter.attach(task)
@@ -518,7 +518,7 @@ class InteractiveReporterTest < Minitest::Test
   def test_gs6_listing_output_bounded_by_org_count_not_repo_count
     # O(orgs) persistent lines in listing phase, O(non_clean) in sweep phase
     n_orgs = 3
-    orgs = n_orgs.times.map { |i| RepoTender::Config::OrgRef.new(host: "github.com", name: "org#{i}") }
+    orgs = n_orgs.times.map { |i| SpaceArchitect::Pristine::Config::OrgRef.new(host: "github.com", name: "org#{i}") }
     n_clean_repos = 20  # many clean repos, zero persistent sweep lines
 
     reporter, out = make_reporter(cadence: 0.01)
@@ -548,8 +548,8 @@ class InteractiveReporterTest < Minitest::Test
   def test_ga1_ga2_last_org_line_precedes_sweep_lines
     reporter, out = make_reporter(cadence: 0.01)
     orgs = [
-      RepoTender::Config::OrgRef.new(host: "github.com", name: "first-org"),
-      RepoTender::Config::OrgRef.new(host: "github.com", name: "last-org")
+      SpaceArchitect::Pristine::Config::OrgRef.new(host: "github.com", name: "first-org"),
+      SpaceArchitect::Pristine::Config::OrgRef.new(host: "github.com", name: "last-org")
     ]
     dirty_ref = "github.com/owner/dirty-repo"
 

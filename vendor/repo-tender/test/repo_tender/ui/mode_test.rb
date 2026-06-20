@@ -4,7 +4,7 @@ require "test_helper"
 require "stringio"
 
 class ModeTest < Minitest::Test
-  Mode = RepoTender::UI::Mode
+  Mode = SpaceArchitect::Pristine::UI::Mode
 
   TtyIO = Struct.new(:tty_value) do
     def tty? = tty_value

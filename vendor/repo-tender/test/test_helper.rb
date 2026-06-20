@@ -6,10 +6,10 @@ require "fileutils"
 require "async"
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
-require "repo_tender"
+require "space_architect/pristine"
 
 module TestHelpers
-  Shell = RepoTender::Shell
+  Shell = SpaceArchitect::Pristine::Shell
 
   # Run the given block in a fresh temp directory that is the
   # effective HOME for XDG resolution. Yields (env_hash, home_dir).
@@ -30,7 +30,7 @@ module TestHelpers
   # XDG-overridden environment hash plus a fresh Paths instance.
   def with_paths(base_dir: nil)
     with_temp_home do |env, _|
-      yield(env, RepoTender::Paths.new(environment: env, base_dir: base_dir))
+      yield(env, SpaceArchitect::Pristine::Paths.new(environment: env, base_dir: base_dir))
     end
   end
 

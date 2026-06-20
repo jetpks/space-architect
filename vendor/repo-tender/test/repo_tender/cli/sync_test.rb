@@ -9,10 +9,10 @@ class CLISyncTest < Minitest::Test
   include TestHelpers
   include CLITestHelpers
 
-  RepoTenderCLI = RepoTender::CLI
-  Engine = RepoTender::Sync::Engine
-  Config = RepoTender::Config::Config
-  RepoRef = RepoTender::Config::RepoRef
+  PristineCLI = SpaceArchitect::Pristine::CLI
+  Engine = SpaceArchitect::Pristine::Sync::Engine
+  Config = SpaceArchitect::Pristine::Config::Config
+  RepoRef = SpaceArchitect::Pristine::Config::RepoRef
 
   # Build 2 real bare remotes + clones, copy the clones into
   # base_dir under `<host>/<owner>/<name>`. Critically, keep the
@@ -29,7 +29,7 @@ class CLISyncTest < Minitest::Test
     Dir.mktmpdir("repo-tender-cli-sync-base-") do |base_dir|
       Dir.mktmpdir("repo-tender-cli-sync-bares-") do |bares_dir|
         with_cli_env do |env, _home|
-          paths = RepoTender::Paths.new(environment: env, base_dir: base_dir)
+          paths = SpaceArchitect::Pristine::Paths.new(environment: env, base_dir: base_dir)
           paths.ensure!
           refs = []
           2.times do |i|
@@ -75,14 +75,14 @@ class CLISyncTest < Minitest::Test
         repos: refs,
         orgs: []
       )
-      RepoTender::Config::Store.write(paths.config_file, config)
+      SpaceArchitect::Pristine::Config::Store.write(paths.config_file, config)
 
-      out, _err = invoke_command(RepoTenderCLI::Sync::Run)
-      assert_equal 0, RepoTenderCLI.last_outcome.exit_code
+      out, _err = invoke_command(PristineCLI::Sync::Run)
+      assert_equal 0, PristineCLI.last_outcome.exit_code
       assert_includes out.string, "synced 2 repo(s)"
 
       # State has rows for both repos.
-      state = RepoTender::State::Store.load(paths.state_file).success
+      state = SpaceArchitect::Pristine::State::Store.load(paths.state_file).success
       refute_nil state.repos["github.com/foo/repo0"], "repo0 missing from state"
       refute_nil state.repos["github.com/bar/repo1"], "repo1 missing from state"
       # Each processed repo got a status (clean — the engine
@@ -104,7 +104,7 @@ class CLISyncTest < Minitest::Test
         repos: refs,
         orgs: []
       )
-      RepoTender::Config::Store.write(paths.config_file, config)
+      SpaceArchitect::Pristine::Config::Store.write(paths.config_file, config)
 
       # Pre-seed state with rows for BOTH repos, using a fixed
       # "old" last_synced_at string (State::Store round-trips
@@ -113,26 +113,26 @@ class CLISyncTest < Minitest::Test
       # after the scoped sync, the non-targeted repo's
       # last_synced_at is unchanged.
       old_time_string = "2000-01-01T00:00:00Z"
-      seeded_state = RepoTender::State::Store::State.new(
+      seeded_state = SpaceArchitect::Pristine::State::Store::State.new(
         repos: {
-          "github.com/foo/repo0" => RepoTender::State::Store::Repo.new(
+          "github.com/foo/repo0" => SpaceArchitect::Pristine::State::Store::Repo.new(
             default_branch: "trunk", last_fetch_at: old_time_string,
             last_synced_at: old_time_string, status: "clean", last_error: nil
           ),
-          "github.com/bar/repo1" => RepoTender::State::Store::Repo.new(
+          "github.com/bar/repo1" => SpaceArchitect::Pristine::State::Store::Repo.new(
             default_branch: "trunk", last_fetch_at: old_time_string,
             last_synced_at: old_time_string, status: "clean", last_error: nil
           )
         },
         orgs: {}
       )
-      RepoTender::State::Store.write(paths.state_file, seeded_state)
+      SpaceArchitect::Pristine::State::Store.write(paths.state_file, seeded_state)
 
-      out, _err = invoke_command(RepoTenderCLI::Sync::Run, repo: "github.com/foo/repo0")
-      assert_equal 0, RepoTenderCLI.last_outcome.exit_code
+      out, _err = invoke_command(PristineCLI::Sync::Run, repo: "github.com/foo/repo0")
+      assert_equal 0, PristineCLI.last_outcome.exit_code
       assert_includes out.string, "scoping sync to: github.com/foo/repo0"
 
-      new_state = RepoTender::State::Store.load(paths.state_file).success
+      new_state = SpaceArchitect::Pristine::State::Store.load(paths.state_file).success
 
       # Targeted repo was processed — its last_synced_at moved
       # forward (the engine's clock is Time.now, not old_time).
@@ -161,10 +161,10 @@ class CLISyncTest < Minitest::Test
         repos: refs,
         orgs: []
       )
-      RepoTender::Config::Store.write(paths.config_file, config)
+      SpaceArchitect::Pristine::Config::Store.write(paths.config_file, config)
 
-      _out, err = invoke_command(RepoTenderCLI::Sync::Run, repo: "github.com/no/such")
-      assert_equal 1, RepoTenderCLI.last_outcome.exit_code
+      _out, err = invoke_command(PristineCLI::Sync::Run, repo: "github.com/no/such")
+      assert_equal 1, PristineCLI.last_outcome.exit_code
       assert_includes err.string, "no such tracked repo"
     end
   end
@@ -178,10 +178,10 @@ class CLISyncTest < Minitest::Test
         repos: refs,
         orgs: []
       )
-      RepoTender::Config::Store.write(paths.config_file, config)
+      SpaceArchitect::Pristine::Config::Store.write(paths.config_file, config)
 
-      _out, err = invoke_command(RepoTenderCLI::Sync::Run, repo: "not-a-ref")
-      assert_equal 1, RepoTenderCLI.last_outcome.exit_code
+      _out, err = invoke_command(PristineCLI::Sync::Run, repo: "not-a-ref")
+      assert_equal 1, PristineCLI.last_outcome.exit_code
       assert_includes err.string, "invalid repo reference"
     end
   end
@@ -195,13 +195,13 @@ class CLISyncTest < Minitest::Test
         repos: refs,
         orgs: []
       )
-      RepoTender::Config::Store.write(paths.config_file, config)
+      SpaceArchitect::Pristine::Config::Store.write(paths.config_file, config)
 
       stdout, _stderr, status = run_cli_subprocess(env: env, args: ["sync"])
       assert status.success?, "sync subprocess should exit 0; got #{status.exitstatus}"
       assert_includes stdout, "synced 2 repo(s)"
 
-      state = RepoTender::State::Store.load(paths.state_file).success
+      state = SpaceArchitect::Pristine::State::Store.load(paths.state_file).success
       refute_nil state.repos["github.com/foo/repo0"]
       refute_nil state.repos["github.com/bar/repo1"]
     end
@@ -218,37 +218,37 @@ class CLISyncTest < Minitest::Test
   #      escapes** for any input.
 
   def log_max_bytes(value)
-    cmd = RepoTenderCLI::Sync::Run.new
+    cmd = PristineCLI::Sync::Run.new
     cmd.send(:log_max_bytes, value)
   end
 
   def test_log_max_bytes_unset_returns_default
-    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes(nil)
+    assert_equal PristineCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes(nil)
   end
 
   def test_log_max_bytes_empty_returns_default
-    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("")
+    assert_equal PristineCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("")
   end
 
   def test_log_max_bytes_whitespace_returns_default
-    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("   ")
+    assert_equal PristineCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("   ")
   end
 
   def test_log_max_bytes_non_numeric_returns_default
     # The CF6 example value — must NOT raise ArgumentError.
-    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("10MB")
-    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("abc")
-    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("1.5")
-    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("10MiB")
+    assert_equal PristineCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("10MB")
+    assert_equal PristineCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("abc")
+    assert_equal PristineCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("1.5")
+    assert_equal PristineCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("10MiB")
   end
 
   def test_log_max_bytes_zero_returns_default
-    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("0")
+    assert_equal PristineCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("0")
   end
 
   def test_log_max_bytes_negative_returns_default
-    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("-5")
-    assert_equal RepoTenderCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("-1048576")
+    assert_equal PristineCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("-5")
+    assert_equal PristineCLI::Sync::Run::DEFAULT_LOG_MAX_BYTES, log_max_bytes("-1048576")
   end
 
   def test_log_max_bytes_valid_positive_returns_value
@@ -286,20 +286,20 @@ class CLISyncTest < Minitest::Test
         repos: refs,
         orgs: []
       )
-      RepoTender::Config::Store.write(paths.config_file, config)
+      SpaceArchitect::Pristine::Config::Store.write(paths.config_file, config)
 
       prev = ENV["REPO_TENDER_LOG_MAX_BYTES"]
       begin
         ENV["REPO_TENDER_LOG_MAX_BYTES"] = "10MB"
-        out, _err = invoke_command(RepoTenderCLI::Sync::Run)
+        out, _err = invoke_command(PristineCLI::Sync::Run)
       ensure
         ENV["REPO_TENDER_LOG_MAX_BYTES"] = prev
       end
-      assert_equal 0, RepoTenderCLI.last_outcome.exit_code,
-        "expected exit 0 with malformed log_max_bytes; got #{RepoTenderCLI.last_outcome.exit_code}"
+      assert_equal 0, PristineCLI.last_outcome.exit_code,
+        "expected exit 0 with malformed log_max_bytes; got #{PristineCLI.last_outcome.exit_code}"
       assert_includes out.string, "synced 2 repo(s)"
 
-      state = RepoTender::State::Store.load(paths.state_file).success
+      state = SpaceArchitect::Pristine::State::Store.load(paths.state_file).success
       refute_nil state.repos["github.com/foo/repo0"], "repo0 missing — sync crashed before writing state"
       refute_nil state.repos["github.com/bar/repo1"], "repo1 missing — sync crashed before writing state"
     end
@@ -317,7 +317,7 @@ class CLISyncTest < Minitest::Test
         repos: refs,
         orgs: []
       )
-      RepoTender::Config::Store.write(paths.config_file, config)
+      SpaceArchitect::Pristine::Config::Store.write(paths.config_file, config)
 
       # Open3.capture3 captures stdout as a string (non-TTY) — the launchd condition
       stdout, _stderr, status = run_cli_subprocess(env: env, args: ["sync"])
@@ -338,11 +338,11 @@ class CLISyncTest < Minitest::Test
         repos: refs,
         orgs: []
       )
-      RepoTender::Config::Store.write(paths.config_file, config)
+      SpaceArchitect::Pristine::Config::Store.write(paths.config_file, config)
 
       _stdout, _stderr, status = run_cli_subprocess(env: env, args: ["sync"])
       assert status.success?
-      state = RepoTender::State::Store.load(paths.state_file).success
+      state = SpaceArchitect::Pristine::State::Store.load(paths.state_file).success
       assert_equal 2, state.repos.size
       assert state.repos["github.com/foo/repo0"]
       assert state.repos["github.com/bar/repo1"]
@@ -358,7 +358,7 @@ class CLISyncTest < Minitest::Test
         repos: refs,
         orgs: []
       )
-      RepoTender::Config::Store.write(paths.config_file, config)
+      SpaceArchitect::Pristine::Config::Store.write(paths.config_file, config)
 
       _stdout, stderr, status = run_cli_subprocess(env: env, args: ["sync", "--repo", "not-a-ref"])
       refute status.success?, "invalid repo ref should exit non-zero"
@@ -371,36 +371,36 @@ class CLISyncTest < Minitest::Test
   # ===========================================================================
 
   def test_g5_json_flag_selects_json_reporter
-    mode = RepoTender::UI::Mode.new(color: false, animate: false, quiet: false, format: :json)
+    mode = SpaceArchitect::Pristine::UI::Mode.new(color: false, animate: false, quiet: false, format: :json)
     reporter = reporter_for_mode(mode)
-    assert_instance_of RepoTender::UI::JsonReporter, reporter
+    assert_instance_of SpaceArchitect::Pristine::UI::JsonReporter, reporter
   end
 
   def test_g5_animate_true_selects_interactive_reporter
-    mode = RepoTender::UI::Mode.new(color: true, animate: true, quiet: false, format: :pretty)
+    mode = SpaceArchitect::Pristine::UI::Mode.new(color: true, animate: true, quiet: false, format: :pretty)
     reporter = reporter_for_mode(mode)
-    assert_instance_of RepoTender::UI::InteractiveReporter, reporter
+    assert_instance_of SpaceArchitect::Pristine::UI::InteractiveReporter, reporter
   end
 
   def test_g5_animate_false_selects_plain_reporter
-    mode = RepoTender::UI::Mode.new(color: false, animate: false, quiet: false, format: :plain)
+    mode = SpaceArchitect::Pristine::UI::Mode.new(color: false, animate: false, quiet: false, format: :plain)
     reporter = reporter_for_mode(mode)
-    assert_instance_of RepoTender::UI::PlainReporter, reporter
+    assert_instance_of SpaceArchitect::Pristine::UI::PlainReporter, reporter
   end
 
   def test_g5_json_format_takes_precedence_over_animate
     # format=:json implies animate=false (Mode.resolve sets animate=false for non-pretty),
     # but assert JsonReporter wins regardless.
-    mode = RepoTender::UI::Mode.new(color: false, animate: false, quiet: false, format: :json)
+    mode = SpaceArchitect::Pristine::UI::Mode.new(color: false, animate: false, quiet: false, format: :json)
     reporter = reporter_for_mode(mode)
-    assert_instance_of RepoTender::UI::JsonReporter, reporter
+    assert_instance_of SpaceArchitect::Pristine::UI::JsonReporter, reporter
   end
 
   def test_g5_no_color_with_animate_still_selects_interactive_reporter
     # --no-color on a TTY: format=:pretty, animate=true, color=false
-    mode = RepoTender::UI::Mode.new(color: false, animate: true, quiet: false, format: :pretty)
+    mode = SpaceArchitect::Pristine::UI::Mode.new(color: false, animate: true, quiet: false, format: :pretty)
     reporter = reporter_for_mode(mode)
-    assert_instance_of RepoTender::UI::InteractiveReporter, reporter
+    assert_instance_of SpaceArchitect::Pristine::UI::InteractiveReporter, reporter
   end
 
   private
@@ -410,11 +410,11 @@ class CLISyncTest < Minitest::Test
   def reporter_for_mode(mode)
     out = StringIO.new
     if mode.format == :json
-      RepoTender::UI::JsonReporter.new(out)
+      SpaceArchitect::Pristine::UI::JsonReporter.new(out)
     elsif mode.animate
-      RepoTender::UI::InteractiveReporter.new(out, mode: mode)
+      SpaceArchitect::Pristine::UI::InteractiveReporter.new(out, mode: mode)
     else
-      RepoTender::UI::PlainReporter.new(out, mode: mode)
+      SpaceArchitect::Pristine::UI::PlainReporter.new(out, mode: mode)
     end
   end
 end

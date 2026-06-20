@@ -8,9 +8,9 @@ class CLIDaemonTest < Minitest::Test
   include TestHelpers
   include CLITestHelpers
 
-  Daemon = RepoTender::CLI::Daemon
-  Agent = RepoTender::Launchd::Agent
-  Plist = RepoTender::Launchd::Plist
+  Daemon = SpaceArchitect::Pristine::CLI::Daemon
+  Agent = SpaceArchitect::Pristine::Launchd::Agent
+  Plist = SpaceArchitect::Pristine::Launchd::Plist
   LABEL = Agent::DEFAULT_LABEL
 
   # Stub the Launchd::Agent class so we never invoke the real
@@ -129,7 +129,7 @@ class CLIDaemonTest < Minitest::Test
     # helper would set the test's local `env` but not the
     # thread-local that the CLI consults.
     with_cli_env do |env, _home|
-      paths = RepoTender::Paths.new(environment: env)
+      paths = SpaceArchitect::Pristine::Paths.new(environment: env)
       paths.ensure!
       yield(env, paths)
     end
@@ -143,17 +143,17 @@ class CLIDaemonTest < Minitest::Test
       fake_agent = stub_agent(install_result: Dry::Monads::Success(""))
       stub_resolve(repo_root: "/Users/eric/src/github.com/jetpks/repo-tender")
       # Seed an empty config so `Install#call` can load.
-      config = RepoTender::Config::Config.new(
+      config = SpaceArchitect::Pristine::Config::Config.new(
         base_dir: paths.base_dir,
         refresh_interval: 3600,
         concurrency: 2,
         repos: [],
         orgs: []
       )
-      RepoTender::Config::Store.write(paths.config_file, config)
+      SpaceArchitect::Pristine::Config::Store.write(paths.config_file, config)
 
       out, _err = invoke_command(Daemon::Install)
-      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 0, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       assert_includes out.string, "installed:"
 
       # Plist was written under the temp HOME.
@@ -189,17 +189,17 @@ class CLIDaemonTest < Minitest::Test
     with_daemon_home do |_env, paths|
       stub_agent(install_result: Dry::Monads::Failure({stderr: "service not loaded", status: 1}))
       stub_resolve(repo_root: "/Users/eric/src/github.com/jetpks/repo-tender")
-      config = RepoTender::Config::Config.new(
+      config = SpaceArchitect::Pristine::Config::Config.new(
         base_dir: paths.base_dir,
         refresh_interval: 3600,
         concurrency: 2,
         repos: [],
         orgs: []
       )
-      RepoTender::Config::Store.write(paths.config_file, config)
+      SpaceArchitect::Pristine::Config::Store.write(paths.config_file, config)
 
       _out, err = invoke_command(Daemon::Install)
-      assert_equal 1, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 1, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       assert_includes err.string, "bootstrap failed"
     end
   end
@@ -214,7 +214,7 @@ class CLIDaemonTest < Minitest::Test
       File.write(pp, "<?xml version=\"1.0\"?><plist/>")
 
       out, _err = invoke_command(Daemon::Uninstall)
-      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 0, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       assert_includes out.string, "removed plist:"
       refute File.exist?(pp)
     end
@@ -226,7 +226,7 @@ class CLIDaemonTest < Minitest::Test
       refute File.exist?(File.join(env["HOME"], "Library", "LaunchAgents", "#{LABEL}.plist"))
 
       out, _err = invoke_command(Daemon::Uninstall)
-      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 0, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       assert_includes out.string, "plist not present"
     end
   end
@@ -237,14 +237,14 @@ class CLIDaemonTest < Minitest::Test
     with_daemon_home do |_env, paths|
       fake = stub_agent(start_result: Dry::Monads::Success(""))
       stub_resolve(repo_root: "/Users/eric/src/github.com/jetpks/repo-tender")
-      config = RepoTender::Config::Config.new(
+      config = SpaceArchitect::Pristine::Config::Config.new(
         base_dir: paths.base_dir, refresh_interval: 3600, concurrency: 2,
         repos: [], orgs: []
       )
-      RepoTender::Config::Store.write(paths.config_file, config)
+      SpaceArchitect::Pristine::Config::Store.write(paths.config_file, config)
 
       out, _err = invoke_command(Daemon::Start)
-      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 0, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       assert_includes out.string, "started:"
       assert_equal 1, fake.calls.size
       assert_equal :start, fake.calls.first.first
@@ -255,7 +255,7 @@ class CLIDaemonTest < Minitest::Test
     with_daemon_home do |_env, _paths|
       fake = stub_agent(stop_result: Dry::Monads::Success(""))
       out, _err = invoke_command(Daemon::Stop)
-      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 0, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       assert_includes out.string, "stopped:"
       assert_equal [[:stop]], fake.calls
     end
@@ -265,7 +265,7 @@ class CLIDaemonTest < Minitest::Test
     with_daemon_home do |_env, _paths|
       fake = stub_agent(restart_result: Dry::Monads::Success(""))
       out, _err = invoke_command(Daemon::Restart)
-      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 0, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       assert_includes out.string, "restarted:"
       assert_equal [[:restart]], fake.calls
     end
@@ -281,7 +281,7 @@ class CLIDaemonTest < Minitest::Test
         )
       )
       out, _err = invoke_command(Daemon::Status)
-      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 0, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       assert_includes out.string, "loaded: true"
       assert_includes out.string, "running: true"
       assert_includes out.string, "pid: 4321"
@@ -295,7 +295,7 @@ class CLIDaemonTest < Minitest::Test
         status_result: Dry::Monads::Failure({stderr: "could not find", status: 1})
       )
       _out, err = invoke_command(Daemon::Status)
-      assert_equal 1, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 1, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       assert_includes err.string, "status failed"
     end
   end
@@ -305,11 +305,11 @@ class CLIDaemonTest < Minitest::Test
   def test_daemon_group_includes_all_six_subcommands
     # The Dry::CLI::Registry doesn't expose `names` directly;
     # walk the top-level children hash.
-    top = RepoTender::CLI::Registry.get([]).children
+    top = SpaceArchitect::Pristine::CLI::Registry.get([]).children
     assert_includes top.keys, "daemon"
 
     # The daemon group has exactly the six expected subcommands.
-    daemon_children = RepoTender::CLI::Registry.get(["daemon"]).children
+    daemon_children = SpaceArchitect::Pristine::CLI::Registry.get(["daemon"]).children
     %w[install uninstall start stop restart status].each do |sub|
       assert_includes daemon_children.keys, sub
     end
@@ -447,7 +447,7 @@ class CLIDaemonTest < Minitest::Test
       stub_make_agent(Daemon::Stop, returning: real_agent)
 
       out, err = invoke_command(Daemon::Stop)
-      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 0, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       assert_includes out.string, "stopped:"
       # No error noise on stderr (gate G1).
       assert_empty err.string,
@@ -469,7 +469,7 @@ class CLIDaemonTest < Minitest::Test
       stub_make_agent(Daemon::Stop, returning: real_agent)
 
       _out, err = invoke_command(Daemon::Stop)
-      assert_equal 1, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 1, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       assert_includes err.string, "stop failed:"
       assert_includes err.string, "Operation not permitted"
       # Only bootout was invoked — disable was NOT attempted
@@ -490,7 +490,7 @@ class CLIDaemonTest < Minitest::Test
       File.write(pp, "<?xml version=\"1.0\"?><plist/>")
 
       out, err = invoke_command(Daemon::Uninstall)
-      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 0, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       # Plist was removed (the CLI's plist-removal step is
       # independent of the bootout result).
       refute File.exist?(pp), "plist should have been removed"
@@ -514,7 +514,7 @@ class CLIDaemonTest < Minitest::Test
       refute File.exist?(pp), "precondition: plist must not exist"
 
       out, err = invoke_command(Daemon::Uninstall)
-      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 0, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       assert_includes out.string, "plist not present"
       refute_includes err.string, "bootout reported:"
     end
@@ -532,7 +532,7 @@ class CLIDaemonTest < Minitest::Test
       out, err = invoke_command(Daemon::Uninstall)
       # Uninstall still exits 0 + removes the plist (Slice-4
       # G3 invariant preserved) — bootout is best-effort.
-      assert_equal 0, RepoTender::CLI.last_outcome.exit_code
+      assert_equal 0, SpaceArchitect::Pristine::CLI.last_outcome.exit_code
       refute File.exist?(pp)
       assert_includes out.string, "removed plist:"
       # The non-benign bootout failure IS surfaced on stderr.

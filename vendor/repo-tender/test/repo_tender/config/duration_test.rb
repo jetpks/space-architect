@@ -6,8 +6,8 @@ require "tempfile"
 class ConfigDurationTest < Minitest::Test
   include TestHelpers
 
-  Duration = RepoTender::Config::Duration
-  Store = RepoTender::Config::Store
+  Duration = SpaceArchitect::Pristine::Config::Duration
+  Store = SpaceArchitect::Pristine::Config::Store
 
   # G8 unit tests: each parsing case from the gate threshold.
   # ("6h" → 21600, "90m" → 5400, "45s" → 45, bare integer 21600 → 21600,

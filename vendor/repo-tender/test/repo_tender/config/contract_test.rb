@@ -5,7 +5,7 @@ require "test_helper"
 class ConfigContractTest < Minitest::Test
   include TestHelpers
 
-  Contract = RepoTender::Config::Contract
+  Contract = SpaceArchitect::Pristine::Config::Contract
 
   # G2: Failure with field-level messages for each rejection case.
 

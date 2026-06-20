@@ -6,7 +6,7 @@ require "tempfile"
 class LaunchdPlistTest < Minitest::Test
   include TestHelpers
 
-  Plist = RepoTender::Launchd::Plist
+  Plist = SpaceArchitect::Pristine::Launchd::Plist
 
   LABEL = "io.github.jetpks.repo-tender.sync"
   MISE_BIN = "/opt/homebrew/opt/mise/bin/mise"

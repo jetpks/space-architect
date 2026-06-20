@@ -4,7 +4,7 @@ require "test_helper"
 require "stringio"
 
 class PlainReporterTest < Minitest::Test
-  PlainReporter = RepoTender::UI::PlainReporter
+  PlainReporter = SpaceArchitect::Pristine::UI::PlainReporter
 
   def make_reporter
     @out = StringIO.new
@@ -94,7 +94,7 @@ class PlainReporterTest < Minitest::Test
 
   def test_org_listed_success_emits_name_and_count
     r = make_reporter
-    org_ref = RepoTender::Config::OrgRef.new(host: "github.com", name: "socketry")
+    org_ref = SpaceArchitect::Pristine::Config::OrgRef.new(host: "github.com", name: "socketry")
     r.org_listed(org_ref, count: 42)
     assert_includes @out.string, "socketry"
     assert_includes @out.string, "42"
@@ -103,7 +103,7 @@ class PlainReporterTest < Minitest::Test
 
   def test_org_listed_failure_emits_failed_marker
     r = make_reporter
-    org_ref = RepoTender::Config::OrgRef.new(host: "github.com", name: "badorg")
+    org_ref = SpaceArchitect::Pristine::Config::OrgRef.new(host: "github.com", name: "badorg")
     r.org_listed(org_ref, count: nil)
     assert_includes @out.string, "badorg"
     assert_includes @out.string, "FAILED"
