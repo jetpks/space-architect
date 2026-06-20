@@ -268,7 +268,7 @@ class ArchitectCLITest < SpaceArchitectTest
         invoke("freeze", "s1")
         invoke("worktree", "add", "my-repo", "s1", "lane-a")
 
-        wt_path = File.join(space_path, "tmp", "architect", "wt", "I01-s1-lane-a")
+        wt_path = File.join(space_path, "build", "I01-s1-lane-a", "wt")
         assert_path_exists wt_path
 
         File.write(File.join(wt_path, "builder_work.md"), "# builder commit\n")
@@ -325,9 +325,9 @@ class ArchitectCLITest < SpaceArchitectTest
         invoke("freeze", "s1")
         invoke("worktree", "add", "my-repo", "s1", "lane-c")
 
-        # The builder's scratch report (non-empty) lives in tmp/architect/.
-        FileUtils.mkdir_p(File.join(space_path, "tmp", "architect"))
-        File.write(File.join(space_path, "tmp", "architect", "I01-s1-lane-c.report.md"),
+        # The builder's scratch report (non-empty) lives in build/.
+        FileUtils.mkdir_p(File.join(space_path, "build", "I01-s1-lane-c"))
+        File.write(File.join(space_path, "build", "I01-s1-lane-c", "report.md"),
           "# Lane Report\nSTATUS: COMPLETE\n")
 
         out, err = invoke("verify", "s1")

@@ -37,6 +37,8 @@ module SpaceArchitect
       FileUtils.mkdir_p(path.join("notes"))
       FileUtils.mkdir_p(path.join("architecture"))
       FileUtils.mkdir_p(path.join("tmp"))
+      FileUtils.mkdir_p(path.join("build"))
+      File.write(path.join("build", ".keep"), "")
 
       space = Space.new(path, metadata_for(id:, title:, timestamp:))
       space.save
@@ -260,8 +262,10 @@ module SpaceArchitect
         - `architecture/` holds the architect mission memory (ARCHITECT.md and the per-iteration files).
         - `tmp/` is the workspace-local scratch directory. Use it instead of `/tmp` or
           `/var/tmp`; when using `mktemp`, use `tmp/` as the base directory.
+        - `build/` holds the architect loop's per-lane worktrees and scratch
+          (gitignored except `.keep`).
         - The space is a Git repository so notes and architecture are versioned.
-          `repos/` and `tmp/` are gitignored, keeping the cloned repos and scratch
+          `repos/`, `tmp/`, and `build/` are gitignored, keeping the cloned repos and scratch
           out of the space's history (each clone keeps its own Git repo).
       README
     end
@@ -279,6 +283,8 @@ module SpaceArchitect
       AtomicWrite.write(path.join(".gitignore"), <<~GITIGNORE)
         repos/
         tmp/
+        build/
+        !build/.keep
       GITIGNORE
     end
 
