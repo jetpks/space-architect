@@ -45,7 +45,7 @@ class PathsTest < Minitest::Test
   def test_falls_back_to_xdg_defaults_when_envs_unset
     Dir.mktmpdir do |home|
       env = {"HOME" => home}
-      paths = RepoTender::Paths.new(environment: env)
+      paths = SpaceArchitect::Pristine::Paths.new(environment: env)
       assert_equal File.join(home, ".config"), paths.config_home
       assert_equal File.join(home, ".local", "state"), paths.state_home
     end

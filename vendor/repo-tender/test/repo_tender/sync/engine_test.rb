@@ -8,14 +8,14 @@ require "time"
 class SyncEngineTest < Minitest::Test
   include TestHelpers
 
-  Engine = RepoTender::Sync::Engine
-  Plan = RepoTender::Sync::RepoPlan
-  Config = RepoTender::Config::Config
-  RepoRef = RepoTender::Config::RepoRef
-  OrgRef = RepoTender::Config::OrgRef
-  SCMGit = RepoTender::SCM::Git
-  StateStore = RepoTender::State::Store
-  Status = RepoTender::SCM::Status
+  Engine = SpaceArchitect::Pristine::Sync::Engine
+  Plan = SpaceArchitect::Pristine::Sync::RepoPlan
+  Config = SpaceArchitect::Pristine::Config::Config
+  RepoRef = SpaceArchitect::Pristine::Config::RepoRef
+  OrgRef = SpaceArchitect::Pristine::Config::OrgRef
+  SCMGit = SpaceArchitect::Pristine::SCM::Git
+  StateStore = SpaceArchitect::Pristine::State::Store
+  Status = SpaceArchitect::Pristine::SCM::Status
 
   # ---- Test doubles (dependency injection on the engine's collaborators) ----
 
@@ -981,7 +981,7 @@ class SyncEngineTest < Minitest::Test
       FileUtils.mkdir_p(File.join(dir, "github.com", "owner", "rep"))
       with_paths(base_dir: dir) do |_, paths|
         scm = StubSCM.new(status_value: good, default_branch_value: "trunk", last_fetch_value: nil)
-        result = Engine.new(scm: scm, clock: clock, reporter: RepoTender::UI::NullReporter.new).call(
+        result = Engine.new(scm: scm, clock: clock, reporter: SpaceArchitect::Pristine::UI::NullReporter.new).call(
           config: make_config(base_dir: dir, repos: [ref]), paths: paths
         )
         assert result.success?, "run failed: #{result.failure.inspect}"
@@ -1658,7 +1658,7 @@ class SyncEngineTest < Minitest::Test
     Dir.mktmpdir("rt-ga2-") do |base_dir|
       with_paths(base_dir: base_dir) do |_, paths|
         state_file = paths.state_file
-        lock_path = RepoTender::State::Lock.path_for(state_file)
+        lock_path = SpaceArchitect::Pristine::State::Lock.path_for(state_file)
 
         # Pre-seed state.yaml with a prior row.
         prior_key = "github.com/prior/repo"
@@ -1731,7 +1731,7 @@ class SyncEngineTest < Minitest::Test
         result = Engine.new(scm: scm).call(config: config, paths: paths)
         assert result.success?
 
-        lock_path = RepoTender::State::Lock.path_for(paths.state_file)
+        lock_path = SpaceArchitect::Pristine::State::Lock.path_for(paths.state_file)
         fd = File.open(lock_path, File::RDWR | File::CREAT)
         assert fd.flock(File::LOCK_EX | File::LOCK_NB),
           "GA3(a): lock must be released after a successful run"
@@ -1762,7 +1762,7 @@ class SyncEngineTest < Minitest::Test
         assert result.failure?,
           "GA3(b): engine must return Failure when Store.write validation fails"
 
-        lock_path = RepoTender::State::Lock.path_for(state_file)
+        lock_path = SpaceArchitect::Pristine::State::Lock.path_for(state_file)
         fd = File.open(lock_path, File::RDWR | File::CREAT)
         assert fd.flock(File::LOCK_EX | File::LOCK_NB),
           "GA3(b): lock must be released even when write returns Failure"
@@ -1784,7 +1784,7 @@ class SyncEngineTest < Minitest::Test
           Engine.new(reporter: reporter).call(config: config, paths: paths)
         end
 
-        lock_path = RepoTender::State::Lock.path_for(paths.state_file)
+        lock_path = SpaceArchitect::Pristine::State::Lock.path_for(paths.state_file)
         fd = File.open(lock_path, File::RDWR | File::CREAT)
         assert fd.flock(File::LOCK_EX | File::LOCK_NB),
           "GA3(c): lock must be released even when an exception escapes Engine#call"

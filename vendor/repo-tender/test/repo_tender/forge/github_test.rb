@@ -5,9 +5,9 @@ require "test_helper"
 class ForgeGitHubTest < Minitest::Test
   include TestHelpers
 
-  GitHub = RepoTender::Forge::GitHub
-  OrgRef = RepoTender::Config::OrgRef
-  RepoRef = RepoTender::Config::RepoRef
+  GitHub = SpaceArchitect::Pristine::Forge::GitHub
+  OrgRef = SpaceArchitect::Pristine::Config::OrgRef
+  RepoRef = SpaceArchitect::Pristine::Config::RepoRef
 
   FIXTURE_PATH = File.expand_path("../../fixtures/gh_repo_list.json", __dir__)
 

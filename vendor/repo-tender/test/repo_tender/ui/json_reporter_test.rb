@@ -5,7 +5,7 @@ require "json"
 require "stringio"
 
 class JsonReporterTest < Minitest::Test
-  JsonReporter = RepoTender::UI::JsonReporter
+  JsonReporter = SpaceArchitect::Pristine::UI::JsonReporter
 
   def make_reporter
     @out = StringIO.new
@@ -115,7 +115,7 @@ class JsonReporterTest < Minitest::Test
 
   def test_org_listed_emits_json_with_org_and_count
     r = make_reporter
-    org_ref = RepoTender::Config::OrgRef.new(host: "github.com", name: "socketry")
+    org_ref = SpaceArchitect::Pristine::Config::OrgRef.new(host: "github.com", name: "socketry")
     r.org_listed(org_ref, count: 42)
     obj = JSON.parse(lines.last)
     assert_equal "org_listed", obj["event"]
@@ -125,7 +125,7 @@ class JsonReporterTest < Minitest::Test
 
   def test_org_listed_failure_emits_null_count
     r = make_reporter
-    org_ref = RepoTender::Config::OrgRef.new(host: "github.com", name: "badorg")
+    org_ref = SpaceArchitect::Pristine::Config::OrgRef.new(host: "github.com", name: "badorg")
     r.org_listed(org_ref, count: nil)
     obj = JSON.parse(lines.last)
     assert_equal "org_listed", obj["event"]

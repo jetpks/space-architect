@@ -41,7 +41,7 @@ class InterruptTest < Minitest::Test
   # exists; see `dry-cli-1.4.1/lib/dry/cli/command_registry.rb`).
   # The command name is prefixed `__` so it does not look like a
   # real CLI command in any `--help` enumeration.
-  RepoTender::CLI::Registry.register "__interrupt_boom__", Boom
+  SpaceArchitect::Pristine::CLI::Registry.register "__interrupt_boom__", Boom
 
   # ---- G2 deterministic automated test ----
 
@@ -55,7 +55,7 @@ class InterruptTest < Minitest::Test
     err = StringIO.new
     status = nil
     begin
-      RepoTender::CLI.run(["__interrupt_boom__"], out, err)
+      SpaceArchitect::Pristine::CLI.run(["__interrupt_boom__"], out, err)
     rescue SystemExit => e
       status = e.status
     end
@@ -118,7 +118,7 @@ class InterruptTest < Minitest::Test
       # in `CLI.run`. A broken Interrupt rescue that swallowed
       # everything would either swallow this failure too or
       # exit 130 instead of 1.
-      RepoTender::CLI.run(["sync", "--repo", "not-a-ref"], out, err)
+      SpaceArchitect::Pristine::CLI.run(["sync", "--repo", "not-a-ref"], out, err)
     rescue SystemExit => e
       status = e.status
     end

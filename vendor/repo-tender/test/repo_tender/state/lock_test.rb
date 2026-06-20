@@ -5,7 +5,7 @@ require "fileutils"
 require "tmpdir"
 
 class StateLockTest < Minitest::Test
-  Lock = RepoTender::State::Lock
+  Lock = SpaceArchitect::Pristine::State::Lock
 
   def test_path_for_appends_dot_lock_suffix
     assert_equal "/tmp/foo/state.yaml.lock", Lock.path_for("/tmp/foo/state.yaml")

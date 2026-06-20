@@ -3,7 +3,7 @@
 require "test_helper"
 
 class SCMStatusTest < Minitest::Test
-  Status = RepoTender::SCM::Status
+  Status = SpaceArchitect::Pristine::SCM::Status
 
   # Unit tests for the SCM::Status value object — a parsed porcelain-v2
   # representation. The end-to-end parsing of git output is exercised

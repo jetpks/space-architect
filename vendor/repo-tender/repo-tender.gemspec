@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-require_relative "lib/repo_tender/version"
+require_relative "lib/space_architect/pristine/version"
 
 Gem::Specification.new do |spec|
   spec.name = "repo-tender"
-  spec.version = RepoTender::VERSION
+  spec.version = SpaceArchitect::Pristine::VERSION
   spec.authors = ["Eric Jacobs"]
   spec.email = ["eric@ebj.dev"]
 

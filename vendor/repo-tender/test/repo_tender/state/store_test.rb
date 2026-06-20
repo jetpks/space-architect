@@ -6,7 +6,7 @@ require "tempfile"
 class StateStoreTest < Minitest::Test
   include TestHelpers
 
-  Store = RepoTender::State::Store
+  Store = SpaceArchitect::Pristine::State::Store
 
   # G7: State store round-trips per-repo + per-org state. Status enum
   # accepts the PRD §3.2 set

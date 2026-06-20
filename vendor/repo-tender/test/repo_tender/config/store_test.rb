@@ -6,10 +6,10 @@ require "tempfile"
 class ConfigStoreTest < Minitest::Test
   include TestHelpers
 
-  Store = RepoTender::Config::Store
-  Config = RepoTender::Config::Config
-  RepoRef = RepoTender::Config::RepoRef
-  OrgRef = RepoTender::Config::OrgRef
+  Store = SpaceArchitect::Pristine::Config::Store
+  Config = SpaceArchitect::Pristine::Config::Config
+  RepoRef = SpaceArchitect::Pristine::Config::RepoRef
+  OrgRef = SpaceArchitect::Pristine::Config::OrgRef
 
   # G1: round-trip. Load → mutate struct → write → reload → managed
   # fields byte-identical to the mutated struct.
@@ -178,7 +178,7 @@ class ConfigStoreTest < Minitest::Test
 
       # Build a contract-bad hash and run the write path's validator.
       bad_hash = cfg.to_h.merge(refresh_interval: -1)
-      contract_result = RepoTender::Config::Contract.new.call(bad_hash)
+      contract_result = SpaceArchitect::Pristine::Config::Contract.new.call(bad_hash)
       assert contract_result.failure?, "contract should reject negative refresh_interval"
       assert_includes contract_result.failure[:refresh_interval].first, "must be greater than 0"
     end
