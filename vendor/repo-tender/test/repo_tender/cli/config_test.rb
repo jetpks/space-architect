@@ -25,10 +25,10 @@ class CLIConfigTest < Minitest::Test
       assert_equal 0, PristineCLI.last_outcome.exit_code
       # For an empty/absent config file, defaults are applied.
       # The store's default is concurrency: 8, refresh_interval:
-      # 21600, base_dir: ~/src/evergreen. These must all appear.
+      # 21600, base_dir: ~/architect/src. These must all appear.
       assert_includes out.string, "concurrency: 8"
       assert_includes out.string, "refresh_interval: 21600"
-      assert_includes out.string, "src/evergreen"
+      assert_includes out.string, "architect/src"
     end
   end
 

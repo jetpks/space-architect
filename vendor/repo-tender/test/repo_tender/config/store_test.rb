@@ -106,7 +106,7 @@ class ConfigStoreTest < Minitest::Test
   # GA1: emit produces clean human YAML — string keys, defaults omitted.
   def test_emit_uses_string_keys_no_symbol_prefix
     cfg = Config.new(
-      base_dir: "~/src/evergreen", refresh_interval: 21600, concurrency: 8,
+      base_dir: "~/architect/src", refresh_interval: 21600, concurrency: 8,
       repos: [RepoRef.new(host: "github.com", owner: "ruby", name: "ruby")],
       orgs: [
         OrgRef.new(host: "github.com", name: "socketry", ignored_repos: ["async"], include_forks: true),

@@ -7,7 +7,7 @@ class PathsTest < Minitest::Test
 
   # G3: Paths resolves config/state/log/base under XDG envs, honoring
   # $XDG_CONFIG_HOME / $XDG_STATE_HOME overrides and the
-  # ~/src/evergreen base default.
+  # ~/architect/src base default.
 
   def test_config_file_under_xdg_config_home_override
     with_paths do |env, paths|
@@ -32,7 +32,7 @@ class PathsTest < Minitest::Test
 
   def test_base_dir_default_is_under_home
     with_paths do |_env, paths|
-      assert_equal File.expand_path("~/src/evergreen"), paths.base_dir
+      assert_equal File.expand_path("~/architect/src"), paths.base_dir
     end
   end
 

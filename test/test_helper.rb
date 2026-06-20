@@ -46,10 +46,7 @@ class SpaceArchitectTest < Minitest::Test
   def build_store(env:, now: -> { fixed_time })
     config = SpaceArchitect::Config.new(
       env: env,
-      data: {
-        "version" => 1,
-        "spaces_dir" => "~/src/spaces"
-      }
+      data: { "version" => 1 }
     )
     state = SpaceArchitect::State.new(env: env)
     SpaceArchitect::SpaceStore.new(config: config, state: state, now: now)

@@ -14,7 +14,7 @@ class CLITest < SpaceArchitectTest
       assert_match(/Config:/, out)
       assert_path_exists File.join(env["XDG_CONFIG_HOME"], "space-architect", "config.yml")
       assert_path_exists File.join(env["XDG_STATE_HOME"], "space-architect", "state.yml")
-      assert_path_exists File.join(env["HOME"], "src", "spaces")
+      assert_path_exists File.join(env["HOME"], "architect", "spaces")
     end
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
@@ -33,7 +33,7 @@ class CLITest < SpaceArchitectTest
       assert_empty err
       assert_match(/Created \d{8}-name-of-space/, out)
       space_id = out[/Created (\d{8}-name-of-space)/, 1]
-      space_path = File.join(env["HOME"], "src", "spaces", space_id)
+      space_path = File.join(env["HOME"], "architect", "spaces", space_id)
       assert_path_exists space_path
 
       out, = invoke("space", "list")
@@ -42,13 +42,13 @@ class CLITest < SpaceArchitectTest
       refute_match(/Status {3,}ID\b/, out)
       assert_match(list_date, out)
       assert_match("Name of Space", out)
-      assert_match("~/src/spaces/#{space_id}", out)
+      assert_match("~/architect/spaces/#{space_id}", out)
       refute_match(env["HOME"], out)
       refute_match(/\e\[/, out)
 
       Dir.chdir(space_path) do
         out, = invoke("space", "path")
-        assert_equal "~/src/spaces/#{space_id}\n", out
+        assert_equal "~/architect/spaces/#{space_id}\n", out
 
         out, = invoke("space", "show")
         assert_match("ID:         #{space_id}", out)
@@ -59,7 +59,7 @@ class CLITest < SpaceArchitectTest
 
         out, = invoke("space", "current")
         assert_match(space_id, out)
-        assert_match("~/src/spaces/#{space_id}", out)
+        assert_match("~/architect/spaces/#{space_id}", out)
       end
 
       out, = invoke("space", "show", "name-of-space")
@@ -83,7 +83,7 @@ class CLITest < SpaceArchitectTest
       second_out, = invoke("space", "new", "Qux")
       first_id = first_out[/Created (\d{8}-foo)/, 1]
       second_id = second_out[/Created (\d{8}-qux)/, 1]
-      first_path = File.join(env["HOME"], "src", "spaces", first_id)
+      first_path = File.join(env["HOME"], "architect", "spaces", first_id)
       FileUtils.mkdir_p(File.join(first_path, "repos", "example"))
 
       invoke("space", "use", second_id)
@@ -109,7 +109,7 @@ class CLITest < SpaceArchitectTest
       out, = invoke("space", "list", "--color=always")
       assert_match(/\e\[/, out)
       assert_match(/\e\[32mactive\e\[0m/, out)
-      assert_match(/\e\[36m~\/src\/spaces\/\d{8}-color-test\e\[0m/, out)
+      assert_match(/\e\[36m~\/architect\/spaces\/\d{8}-color-test\e\[0m/, out)
 
       out, = invoke("--colors=never", "space", "list")
       refute_match(/\e\[/, out)
@@ -218,7 +218,7 @@ class CLITest < SpaceArchitectTest
       invoke("space", "config", "set", "default_organization", "example-org")
       out, = invoke("space", "new", "Repo Space")
       space_id = out[/Created (\d{8}-repo-space)/, 1]
-      space_path = File.join(env["HOME"], "src", "spaces", space_id)
+      space_path = File.join(env["HOME"], "architect", "spaces", space_id)
       real_space_path = File.realpath(space_path)
 
       Dir.chdir(space_path) do
@@ -226,7 +226,7 @@ class CLITest < SpaceArchitectTest
 
         assert_empty err
         assert_match("Added github.com/example-org/example-app", out)
-        assert_match("~/src/spaces/#{space_id}/repos/example-app", out)
+        assert_match("~/architect/spaces/#{space_id}/repos/example-app", out)
         assert_path_exists File.join(space_path, "repos", "example-app", ".git")
 
         assert_equal(
@@ -312,7 +312,7 @@ class CLITest < SpaceArchitectTest
                        "PROJECT_SPACES_MISE_LOG" => setup.fetch(:mise_log))) do
       out, = invoke("space", "new", "Multi Repo Space")
       space_id = out[/Created (\d{8}-multi-repo-space)/, 1]
-      space_path = File.join(env["HOME"], "src", "spaces", space_id)
+      space_path = File.join(env["HOME"], "architect", "spaces", space_id)
       real_space_path = File.realpath(space_path)
 
       Dir.chdir(space_path) do
@@ -358,7 +358,7 @@ class CLITest < SpaceArchitectTest
 
       assert_empty err
       space_id = out[/Created (\d{8}-d5-space)/, 1]
-      space_path = File.join(env["HOME"], "src", "spaces", space_id)
+      space_path = File.join(env["HOME"], "architect", "spaces", space_id)
 
       assert_match("Queued example-tools/alpha", out)
       assert_match("Queued example-tools/beta", out)
@@ -387,7 +387,7 @@ class CLITest < SpaceArchitectTest
       out, = invoke("space", "new", "Git Space")
 
       space_id = out[/Created (\d{8}-git-space)/, 1]
-      space_path = File.join(env["HOME"], "src", "spaces", space_id)
+      space_path = File.join(env["HOME"], "architect", "spaces", space_id)
       assert_path_exists File.join(space_path, ".git")
       assert_equal "repos/\ntmp/\nbuild/\n!build/.keep\n", File.read(File.join(space_path, ".gitignore"))
     end
@@ -403,7 +403,7 @@ class CLITest < SpaceArchitectTest
       out, = invoke("space", "new", "Plain Space", "--no-git")
 
       space_id = out[/Created (\d{8}-plain-space)/, 1]
-      space_path = File.join(env["HOME"], "src", "spaces", space_id)
+      space_path = File.join(env["HOME"], "architect", "spaces", space_id)
       refute_path_exists File.join(space_path, ".git")
       refute_path_exists File.join(space_path, ".gitignore")
     end
