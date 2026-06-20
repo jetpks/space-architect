@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+$LOAD_PATH.unshift File.expand_path("../vendor/repo-tender/lib", __dir__)
+require "space_architect/pristine"
+
 require_relative "space_architect/version"
 require_relative "space_architect/errors"
 require_relative "space_architect/warnings"
