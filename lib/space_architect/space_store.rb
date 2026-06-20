@@ -5,6 +5,8 @@ require "async"
 require "async/semaphore"
 require "pathname"
 require "time"
+require "space_architect/pristine/scm/git"
+require "space_architect/pristine/cloner"
 
 module SpaceArchitect
   class SpaceStore
@@ -100,15 +102,15 @@ module SpaceArchitect
       space
     end
 
-    def add_repo(spec, from: Dir.pwd, git_client: GitClient.new, mise_client: MiseClient.new)
-      add_repos([spec], from:, git_client:, mise_client:).first
+    def add_repo(spec, from: Dir.pwd, scm: Pristine::SCM::Git.new, cloner: nil, mise_client: MiseClient.new)
+      add_repos([spec], from:, scm:, cloner:, mise_client:).first
     end
 
-    def add_repos(specs, from: Dir.pwd, git_client: GitClient.new, mise_client: MiseClient.new, reporter: nil)
-      add_repos_to(current(from:), specs, git_client:, mise_client:, reporter:)
+    def add_repos(specs, from: Dir.pwd, scm: Pristine::SCM::Git.new, cloner: nil, mise_client: MiseClient.new, reporter: nil)
+      add_repos_to(current(from:), specs, scm:, cloner:, mise_client:, reporter:)
     end
 
-    def add_repos_to(space, specs, git_client: GitClient.new, mise_client: MiseClient.new, reporter: nil)
+    def add_repos_to(space, specs, scm: Pristine::SCM::Git.new, cloner: nil, mise_client: MiseClient.new, reporter: nil)
       additions = prepare_repo_additions(space, specs)
       first_error = nil
 
@@ -118,7 +120,7 @@ module SpaceArchitect
 
           clone_tasks = additions.map do |addition|
             semaphore.async(finished: false) do
-              clone_addition(addition, git_client:, mise_client:, reporter:)
+              clone_addition(addition, scm:, cloner:, mise_client:, reporter:)
             end
           end
 
@@ -146,9 +148,9 @@ module SpaceArchitect
 
     private
 
-    def clone_addition(addition, git_client:, mise_client:, reporter: nil)
+    def clone_addition(addition, scm:, cloner:, mise_client:, reporter: nil)
       reporter&.start(addition)
-      fetch_addition(addition, git_client:)
+      fetch_addition(addition, scm:, cloner:)
       reporter&.trust(addition)
       mise_client.trust(addition.fetch(:path))
       reporter&.finish(addition)
@@ -160,12 +162,18 @@ module SpaceArchitect
 
     # Prefer a fast local copy of the evergreen repo; fall back to a network
     # clone only when no evergreen copy is available.
-    def fetch_addition(addition, git_client:)
+    def fetch_addition(addition, scm:, cloner:)
+      reference = addition.fetch(:reference)
+      destination = addition.fetch(:path)
       source = addition.fetch(:evergreen_source)
+
       if source&.directory?
-        git_client.copy(source, addition.fetch(:path))
+        actual_cloner = cloner || Pristine::Cloner.new(base_dir: config.evergreen_dir)
+        result = actual_cloner.call(name: reference.full_name, into: destination.dirname.to_s)
+        raise GitError, "clone failed (copy): #{result.failure}" if result.failure?
       else
-        git_client.clone(addition.fetch(:reference).clone_url, addition.fetch(:path))
+        result = scm.clone(reference.clone_url, destination.to_s)
+        raise GitError, "clone failed: #{result.failure[:stderr]}" if result.failure?
       end
     end
 
