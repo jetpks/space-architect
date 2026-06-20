@@ -41,4 +41,3 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "new", SpaceArchitect::CLI::New

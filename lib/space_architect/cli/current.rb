@@ -20,4 +20,3 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "current", SpaceArchitect::CLI::Current

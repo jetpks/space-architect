@@ -20,4 +20,3 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "path", SpaceArchitect::CLI::Path

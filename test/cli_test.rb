@@ -8,7 +8,7 @@ class CLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      out, err = invoke("init")
+      out, err = invoke("space", "init")
 
       assert_empty err
       assert_match(/Config:/, out)
@@ -27,8 +27,8 @@ class CLITest < SpaceArchitectTest
     space_path = nil
 
     with_env(env) do
-      invoke("init")
-      out, err = invoke("new", "Name of Space")
+      invoke("space", "init")
+      out, err = invoke("space", "new", "Name of Space")
 
       assert_empty err
       assert_match(/Created \d{8}-name-of-space/, out)
@@ -36,7 +36,7 @@ class CLITest < SpaceArchitectTest
       space_path = File.join(env["HOME"], "src", "spaces", space_id)
       assert_path_exists space_path
 
-      out, = invoke("list")
+      out, = invoke("space", "list")
       list_date = "#{space_id[0, 4]}-#{space_id[4, 2]}-#{space_id[6, 2]}"
       assert_match(/Status {3,}Date {3,}Title {3,}Path/, out)
       refute_match(/Status {3,}ID\b/, out)
@@ -47,26 +47,26 @@ class CLITest < SpaceArchitectTest
       refute_match(/\e\[/, out)
 
       Dir.chdir(space_path) do
-        out, = invoke("path")
+        out, = invoke("space", "path")
         assert_equal "~/src/spaces/#{space_id}\n", out
 
-        out, = invoke("show")
+        out, = invoke("space", "show")
         assert_match("ID:         #{space_id}", out)
         assert_match("Status:     active", out)
 
-        out, = invoke("status", "done")
+        out, = invoke("space", "status", "done")
         assert_match(/#{space_id} is done/, out)
 
-        out, = invoke("current")
+        out, = invoke("space", "current")
         assert_match(space_id, out)
         assert_match("~/src/spaces/#{space_id}", out)
       end
 
-      out, = invoke("show", "name-of-space")
+      out, = invoke("space", "show", "name-of-space")
       assert_match("ID:         #{space_id}", out)
       assert_match("Status:     done", out)
 
-      out, = invoke("use", "name-of-space")
+      out, = invoke("space", "use", "name-of-space")
       assert_match(/Recent space: #{space_id}/, out)
     end
   ensure
@@ -78,18 +78,18 @@ class CLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
-      first_out, = invoke("new", "Foo")
-      second_out, = invoke("new", "Qux")
+      invoke("space", "init")
+      first_out, = invoke("space", "new", "Foo")
+      second_out, = invoke("space", "new", "Qux")
       first_id = first_out[/Created (\d{8}-foo)/, 1]
       second_id = second_out[/Created (\d{8}-qux)/, 1]
       first_path = File.join(env["HOME"], "src", "spaces", first_id)
       FileUtils.mkdir_p(File.join(first_path, "repos", "example"))
 
-      invoke("use", second_id)
+      invoke("space", "use", second_id)
 
       Dir.chdir(File.join(first_path, "repos", "example")) do
-        out, = invoke("current")
+        out, = invoke("space", "current")
         assert_match(first_id, out)
         refute_match(second_id, out)
       end
@@ -103,15 +103,15 @@ class CLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
-      invoke("new", "Color Test")
+      invoke("space", "init")
+      invoke("space", "new", "Color Test")
 
-      out, = invoke("list", "--color=always")
+      out, = invoke("space", "list", "--color=always")
       assert_match(/\e\[/, out)
       assert_match(/\e\[32mactive\e\[0m/, out)
       assert_match(/\e\[36m~\/src\/spaces\/\d{8}-color-test\e\[0m/, out)
 
-      out, = invoke("--colors=never", "list")
+      out, = invoke("--colors=never", "space", "list")
       refute_match(/\e\[/, out)
       assert_match(/Status {3,}Date {3,}Title {3,}Path/, out)
     end
@@ -120,7 +120,7 @@ class CLITest < SpaceArchitectTest
   end
 
   def test_shell_init_fish_prints_cd_wrapper
-    out, err = invoke("shell", "init", "fish")
+    out, err = invoke("space", "shell", "init", "fish")
 
     assert_empty err
     assert_match(/function space --wraps space/, out)
@@ -137,7 +137,7 @@ class CLITest < SpaceArchitectTest
     completions_path = File.join(env["XDG_CONFIG_HOME"], "fish", "completions", "space.fish")
 
     with_env(env) do
-      out, err = invoke("shell", "fish", "install")
+      out, err = invoke("space", "shell", "fish", "install")
 
       assert_empty err
       assert_match("Installed fish integration: #{function_path}", out)
@@ -150,11 +150,11 @@ class CLITest < SpaceArchitectTest
       assert_match(/-s r -l repo/, File.read(completions_path))
       assert_match(/__space_architect_complete_spaces/, File.read(completions_path))
 
-      out, = invoke("shell", "fish", "install")
+      out, = invoke("space", "shell", "fish", "install")
       assert_match("Fish integration already installed: #{function_path}", out)
       assert_match("Fish completions already installed: #{completions_path}", out)
 
-      out, = invoke("shell", "fish", "uninstall")
+      out, = invoke("space", "shell", "fish", "uninstall")
       assert_match("Removed fish integration: #{function_path}", out)
       assert_match("Removed fish completions: #{completions_path}", out)
       refute_path_exists function_path
@@ -177,7 +177,7 @@ class CLITest < SpaceArchitectTest
       end
       assert_match(/Refusing to overwrite existing fish function/, error.message)
 
-      out, = invoke("shell", "fish", "install", "--force")
+      out, = invoke("space", "shell", "fish", "install", "--force")
       assert_match(/(?:Installed|Updated) fish integration: #{Regexp.escape(function_path)}/, out)
       assert_match(/function space --wraps space/, File.read(function_path))
     end
@@ -190,12 +190,12 @@ class CLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      out, err = invoke("config", "set", "default_organization", "example-org")
+      out, err = invoke("space", "config", "set", "default_organization", "example-org")
 
       assert_empty err
       assert_match("Set default_organization=example-org", out)
 
-      out, = invoke("config", "show")
+      out, = invoke("space", "config", "show")
       assert_match(/default_provider {3,}github\.com/, out)
       assert_match(/default_organization {3,}example-org/, out)
 
@@ -215,14 +215,14 @@ class CLITest < SpaceArchitectTest
     with_env(env.merge("PATH" => "#{setup.fetch(:git_bin)}:#{ENV.fetch('PATH')}",
                        "PROJECT_SPACES_GIT_LOG" => setup.fetch(:git_log),
                        "PROJECT_SPACES_MISE_LOG" => setup.fetch(:mise_log))) do
-      invoke("config", "set", "default_organization", "example-org")
-      out, = invoke("new", "Repo Space")
+      invoke("space", "config", "set", "default_organization", "example-org")
+      out, = invoke("space", "new", "Repo Space")
       space_id = out[/Created (\d{8}-repo-space)/, 1]
       space_path = File.join(env["HOME"], "src", "spaces", space_id)
       real_space_path = File.realpath(space_path)
 
       Dir.chdir(space_path) do
-        out, err = invoke("repo", "add", "example-app")
+        out, err = invoke("space", "repo", "add", "example-app")
 
         assert_empty err
         assert_match("Added github.com/example-org/example-app", out)
@@ -244,7 +244,7 @@ class CLITest < SpaceArchitectTest
         assert_equal "repos/example-app", repo.fetch("path")
         assert_equal "git@github.com:example-org/example-app.git", repo.fetch("clone_url")
 
-        out, = invoke("repo", "list")
+        out, = invoke("space", "repo", "list")
         assert_match(/Repo {3,}Path/, out)
         assert_match("github.com/example-org/example-app", out)
         assert_match("repos/example-app", out)
@@ -260,7 +260,7 @@ class CLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      out, err = invoke("repo", "resolve", "example-tools/async", "gitlab.com/example-org/api")
+      out, err = invoke("space", "repo", "resolve", "example-tools/async", "gitlab.com/example-org/api")
 
       assert_empty err
       assert_match(/Repo {3,}Clone URL/, out)
@@ -278,22 +278,22 @@ class CLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      out, = invoke("new", "Completion Space")
+      out, = invoke("space", "new", "Completion Space")
       space_id = out[/Created (\d{8}-completion-space)/, 1]
 
-      out, err = invoke("shell", "complete", "spaces")
+      out, err = invoke("space", "shell", "complete", "spaces")
 
       assert_empty err
       assert_includes out, "#{space_id}\tCompletion Space"
 
-      out, = invoke("shell", "complete", "statuses")
+      out, = invoke("space", "shell", "complete", "statuses")
       assert_includes out, "active"
       assert_includes out, "archived"
 
-      out, = invoke("shell", "complete", "config-keys")
+      out, = invoke("space", "shell", "complete", "config-keys")
       assert_includes out, "default_provider"
 
-      out, = invoke("shell", "complete", "config-values", "git_clone_protocol")
+      out, = invoke("space", "shell", "complete", "config-values", "git_clone_protocol")
       assert_includes out, "ssh"
       assert_includes out, "https"
     end
@@ -310,13 +310,13 @@ class CLITest < SpaceArchitectTest
     with_env(env.merge("PATH" => "#{setup.fetch(:git_bin)}:#{ENV.fetch('PATH')}",
                        "PROJECT_SPACES_GIT_LOG" => setup.fetch(:git_log),
                        "PROJECT_SPACES_MISE_LOG" => setup.fetch(:mise_log))) do
-      out, = invoke("new", "Multi Repo Space")
+      out, = invoke("space", "new", "Multi Repo Space")
       space_id = out[/Created (\d{8}-multi-repo-space)/, 1]
       space_path = File.join(env["HOME"], "src", "spaces", space_id)
       real_space_path = File.realpath(space_path)
 
       Dir.chdir(space_path) do
-        out, err = invoke("repo", "add", "example-tools/alpha", "example-tools/beta")
+        out, err = invoke("space", "repo", "add", "example-tools/alpha", "example-tools/beta")
 
         assert_empty err
         assert_match("Added github.com/example-tools/alpha", out)
@@ -354,7 +354,7 @@ class CLITest < SpaceArchitectTest
     with_env(env.merge("PATH" => "#{setup.fetch(:git_bin)}:#{ENV.fetch('PATH')}",
                        "PROJECT_SPACES_GIT_LOG" => setup.fetch(:git_log),
                        "PROJECT_SPACES_MISE_LOG" => setup.fetch(:mise_log))) do
-      out, err = invoke("new", "D5 Space", "example-tools/alpha", "example-tools/beta")
+      out, err = invoke("space", "new", "D5 Space", "example-tools/alpha", "example-tools/beta")
 
       assert_empty err
       space_id = out[/Created (\d{8}-d5-space)/, 1]
@@ -384,7 +384,7 @@ class CLITest < SpaceArchitectTest
 
     with_env(env.merge("PATH" => "#{setup.fetch(:git_bin)}:#{ENV.fetch('PATH')}",
                        "PROJECT_SPACES_GIT_LOG" => setup.fetch(:git_log))) do
-      out, = invoke("new", "Git Space")
+      out, = invoke("space", "new", "Git Space")
 
       space_id = out[/Created (\d{8}-git-space)/, 1]
       space_path = File.join(env["HOME"], "src", "spaces", space_id)
@@ -400,7 +400,7 @@ class CLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      out, = invoke("new", "Plain Space", "--no-git")
+      out, = invoke("space", "new", "Plain Space", "--no-git")
 
       space_id = out[/Created (\d{8}-plain-space)/, 1]
       space_path = File.join(env["HOME"], "src", "spaces", space_id)
@@ -416,10 +416,10 @@ class CLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
+      invoke("space", "init")
       out = StringIO.new
       err = StringIO.new
-      code = SpaceArchitect::CLI.call(["new", "Dup Space", "foo/dup", "foo/dup"], out, err)
+      code = SpaceArchitect::CLI.call(["space", "new", "Dup Space", "foo/dup", "foo/dup"], out, err)
       assert_equal 1, code
       assert_match(/Multiple repos resolve to the same destination/, err.string)
     end
@@ -444,7 +444,8 @@ class CLITest < SpaceArchitectTest
       err = StringIO.new
       exit_code = SpaceArchitect::CLI.call(argv, out, err)
       assert_equal 0, exit_code, "#{argv.inspect} should exit 0"
-      assert_match(/\brepo\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should print command listing to stdout")
+      assert_match(/\bspace\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should list space group at root")
+      assert_match(/\bworktree\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should list worktree loop verb at root")
       assert_empty err.string, "#{argv.inspect} should write nothing to stderr"
     end
   end
@@ -454,7 +455,7 @@ class CLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      _out, err = invoke("--color=always", "repo", "add")
+      _out, err = invoke("--color=always", "space", "repo", "add")
       assert_match(/Usage: space repo add/, err)
       assert_match(/\e\[31m/, err, "error should be red with --color=always")
     end
@@ -467,7 +468,7 @@ class CLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      _out, err = invoke("--color=never", "repo", "add")
+      _out, err = invoke("--color=never", "space", "repo", "add")
       assert_match(/Usage: space repo add/, err)
       refute_match(/\e\[/, err, "error should have no ANSI with --color=never")
     end
@@ -482,32 +483,32 @@ class CLITest < SpaceArchitectTest
     with_env(env) do
       # mid --color=always: color flag between group and subcommand
       out = StringIO.new; err = StringIO.new
-      code = SpaceArchitect::CLI.call(["repo", "--color=always", "resolve", "foo/a", "foo/b"], out, err)
+      code = SpaceArchitect::CLI.call(["space", "repo", "--color=always", "resolve", "foo/a", "foo/b"], out, err)
       assert_equal 0, code, "mid --color=always should exit 0"
       assert_empty err.string, "mid --color=always should produce no stderr"
       assert_match(/\e\[/, out.string, "mid --color=always should produce colored output")
 
       # mid --color=never: output should be plain
       out = StringIO.new; err = StringIO.new
-      code = SpaceArchitect::CLI.call(["repo", "--color=never", "resolve", "foo/a", "foo/b"], out, err)
+      code = SpaceArchitect::CLI.call(["space", "repo", "--color=never", "resolve", "foo/a", "foo/b"], out, err)
       assert_equal 0, code, "mid --color=never should exit 0"
       refute_match(/\e\[/, out.string, "mid --color=never should produce plain output")
 
       # mid --colors= alias
       out = StringIO.new; err = StringIO.new
-      code = SpaceArchitect::CLI.call(["repo", "--colors=always", "resolve", "foo/a", "foo/b"], out, err)
+      code = SpaceArchitect::CLI.call(["space", "repo", "--colors=always", "resolve", "foo/a", "foo/b"], out, err)
       assert_equal 0, code, "mid --colors=always should exit 0"
       assert_match(/\e\[/, out.string, "mid --colors=always alias should produce colored output")
 
       # trailing --color=always
       out = StringIO.new; err = StringIO.new
-      code = SpaceArchitect::CLI.call(["repo", "resolve", "foo/a", "foo/b", "--color=always"], out, err)
+      code = SpaceArchitect::CLI.call(["space", "repo", "resolve", "foo/a", "foo/b", "--color=always"], out, err)
       assert_equal 0, code, "trailing --color=always should exit 0"
       assert_match(/\e\[/, out.string, "trailing --color=always should produce colored output")
 
       # leading --color=always (regression: existing behavior must be preserved)
       out = StringIO.new; err = StringIO.new
-      code = SpaceArchitect::CLI.call(["--color=always", "repo", "resolve", "foo/a", "foo/b"], out, err)
+      code = SpaceArchitect::CLI.call(["--color=always", "space", "repo", "resolve", "foo/a", "foo/b"], out, err)
       assert_equal 0, code, "leading --color=always should exit 0"
       assert_match(/\e\[/, out.string, "leading --color=always should produce colored output")
     end
@@ -520,8 +521,8 @@ class CLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
-      out, err = invoke("config", "--color=always", "show")
+      invoke("space", "init")
+      out, err = invoke("space", "config", "--color=always", "show")
       assert_empty err
       assert_match(/default_provider/, out)
     end
@@ -534,9 +535,9 @@ class CLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
-      invoke("new", "Color List Test")
-      out, err = invoke("--color=always", "list")
+      invoke("space", "init")
+      invoke("space", "new", "Color List Test")
+      out, err = invoke("--color=always", "space", "list")
       assert_empty err
       assert_match(/\e\[/, out)
     end
