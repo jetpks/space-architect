@@ -7,8 +7,13 @@ class SpaceStoreTest < SpaceArchitectTest
     setup = temp_env
     store = build_store(env: setup.fetch(:env))
 
-    space = store.create("Name of Space")
-    duplicate = store.create("Name of Space")
+    result = store.create("Name of Space")
+    duplicate_result = store.create("Name of Space")
+
+    assert result.success?
+    assert duplicate_result.success?
+    space = result.value!
+    duplicate = duplicate_result.value!
 
     assert_equal "20260531-name-of-space", space.id
     assert_equal "20260531-name-of-space-2", duplicate.id
@@ -47,7 +52,7 @@ class SpaceStoreTest < SpaceArchitectTest
       "GIT_AUTHOR_EMAIL" => "cadet@example.com",
       "GIT_COMMITTER_NAME" => "Space Cadet",
       "GIT_COMMITTER_EMAIL" => "cadet@example.com"
-    ) { store.create("Committed Space") }
+    ) { store.create("Committed Space") }.value!
 
     head = system("git", "-C", space.path.to_s, "rev-parse", "--verify", "HEAD",
                   out: File::NULL, err: File::NULL)
@@ -60,7 +65,7 @@ class SpaceStoreTest < SpaceArchitectTest
     setup = temp_env
     store = build_store(env: setup.fetch(:env))
 
-    space = store.create("No Git Space", git: false)
+    space = store.create("No Git Space", git: false).value!
 
     refute_path_exists space.path.join(".git")
     refute_path_exists space.path.join(".gitignore")
@@ -94,14 +99,16 @@ class SpaceStoreTest < SpaceArchitectTest
     setup = temp_env
     store = build_store(env: setup.fetch(:env))
 
-    first = store.create("Name of Space")
+    first = store.create("Name of Space").value!
     store.create("Other Work")
 
-    assert_equal first.id, store.find("20260531-name-of-space").id
-    assert_equal first.id, store.find("name-of-space").id
-    assert_equal first.id, store.find("20260531-name").id
+    assert_equal first.id, store.find("20260531-name-of-space").value!.id
+    assert_equal first.id, store.find("name-of-space").value!.id
+    assert_equal first.id, store.find("20260531-name").value!.id
 
-    assert_raises(SpaceArchitect::AmbiguousSpaceError) { store.find("20260531") }
+    result = store.find("20260531")
+    assert result.failure?
+    assert_kind_of SpaceArchitect::AmbiguousSpaceError, result.failure
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
@@ -110,16 +117,32 @@ class SpaceStoreTest < SpaceArchitectTest
     setup = temp_env
     store = build_store(env: setup.fetch(:env))
 
-    first = store.create("First Space")
-    second = store.create("Second Space")
+    first = store.create("First Space").value!
+    second = store.create("Second Space").value!
     store.state.touch_current(second.id)
     nested = first.path.join("repos", "example")
     FileUtils.mkdir_p(nested)
 
-    assert_equal first.id, store.find(nil, from: nested).id
-    assert_equal first.id, store.current(from: nested).id
-    assert_nil store.current_from_pwd(from: setup.fetch(:root))
-    assert_raises(SpaceArchitect::CurrentSpaceMissingError) { store.find(nil, from: setup.fetch(:root)) }
+    assert_equal first.id, store.find(nil, from: nested).value!.id
+    assert_equal first.id, store.current(from: nested).value!.id
+    assert store.current_from_pwd(from: setup.fetch(:root)).none?
+    result = store.find(nil, from: setup.fetch(:root))
+    assert result.failure?
+    assert_kind_of SpaceArchitect::CurrentSpaceMissingError, result.failure
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_current_from_pwd_returns_maybe
+    setup = temp_env
+    store = build_store(env: setup.fetch(:env))
+
+    assert store.current_from_pwd(from: setup.fetch(:root)).none?
+
+    space = store.create("A Space").value!
+    result = store.current_from_pwd(from: space.path)
+    assert result.some?
+    assert_equal space.id, result.value!.id
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
@@ -127,7 +150,7 @@ class SpaceStoreTest < SpaceArchitectTest
   def test_status_validation_and_update
     setup = temp_env
     store = build_store(env: setup.fetch(:env))
-    space = store.create("Name of Space")
+    space = store.create("Name of Space").value!
 
     space.update_status("done", now: fixed_time)
     reloaded = SpaceArchitect::Space.load(space.path)
@@ -141,17 +164,19 @@ class SpaceStoreTest < SpaceArchitectTest
   def test_add_repos_limits_concurrent_clones
     setup = temp_env
     store = build_store(env: setup.fetch(:env))
-    space = store.create("Concurrent Clones")
+    space = store.create("Concurrent Clones").value!
     fake_scm = TrackingSCM.new
     mise_client = TrackingMiseClient.new
 
-    results = store.add_repos_to(
+    add_result = store.add_repos_to(
       space,
       (1..6).map { |index| "example-tools/repo-#{index}" },
       scm: fake_scm,
       mise_client: mise_client
     )
 
+    assert add_result.success?
+    results = add_result.value!
     assert_equal 6, results.length
     assert_equal SpaceArchitect::SpaceStore::MAX_CONCURRENT_CLONES, fake_scm.max_active
     assert_operator fake_scm.clone_count, :>, fake_scm.max_active
@@ -171,7 +196,7 @@ class SpaceStoreTest < SpaceArchitectTest
     )
     state = SpaceArchitect::State.new(env: setup.fetch(:env))
     store = SpaceArchitect::SpaceStore.new(config: config, state: state, now: -> { fixed_time })
-    space = store.create("Evergreen")
+    space = store.create("Evergreen").value!
     fake_scm = TrackingSCM.new
     fake_cloner = TrackingCloner.new
 
@@ -190,23 +215,23 @@ class SpaceStoreTest < SpaceArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  def test_failing_clone_raises_clean_git_error_without_async_noise
+  def test_failing_clone_returns_failure_with_clean_git_error_without_async_noise
     setup = temp_env
     store = build_store(env: setup.fetch(:env))
-    space = store.create("Fail Space", git: false)
+    space = store.create("Fail Space", git: false).value!
 
     old_stderr = $stderr
     captured = StringIO.new
     $stderr = captured
 
-    error = assert_raises(SpaceArchitect::GitError) do
-      store.add_repos_to(space, ["example-tools/bad"],
-                         scm: FailingSCM.new,
-                         mise_client: TrackingMiseClient.new)
-    end
+    result = store.add_repos_to(space, ["example-tools/bad"],
+                                scm: FailingSCM.new,
+                                mise_client: TrackingMiseClient.new)
 
     $stderr = old_stderr
-    assert_match(/clone failed/, error.message)
+    assert result.failure?
+    assert_kind_of SpaceArchitect::GitError, result.failure
+    assert_match(/clone failed/, result.failure.message)
     refute_match(/Task may have ended with unhandled exception/, captured.string)
     refute_match(/"severity":"warn"/, captured.string)
   ensure
@@ -234,7 +259,7 @@ class SpaceStoreTest < SpaceArchitectTest
     )
     state = SpaceArchitect::State.new(env: setup.fetch(:env))
     store = SpaceArchitect::SpaceStore.new(config: config, state: state, now: -> { fixed_time })
-    space = store.create("Real Engine Test", git: false)
+    space = store.create("Real Engine Test", git: false).value!
 
     store.add_repos_to(space, ["test-owner/test-repo"], mise_client: TrackingMiseClient.new)
 

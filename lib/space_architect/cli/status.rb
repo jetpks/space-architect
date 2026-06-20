@@ -13,10 +13,11 @@ module SpaceArchitect
         setup_terminal(**opts.slice(:color, :colors))
         handle_errors do
           identifier, status_value = parse_status_args(Array(rest))
-          space = store.find(identifier)
-          space.update_status(status_value)
-          terminal.success "#{space.id} is #{space.status}"
-          CLI.record_outcome(Outcome.new(exit_code: 0))
+          render(store.find(identifier)) do |space|
+            space.update_status(status_value)
+            terminal.success "#{space.id} is #{space.status}"
+            CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
         end
       end
 

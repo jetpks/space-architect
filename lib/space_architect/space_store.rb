@@ -5,11 +5,14 @@ require "async"
 require "async/semaphore"
 require "pathname"
 require "time"
+require "dry/monads"
 require "space_architect/pristine/scm/git"
 require "space_architect/pristine/cloner"
 
 module SpaceArchitect
   class SpaceStore
+    include Dry::Monads[:result, :maybe]
+
     MAX_CONCURRENT_CLONES = 5
 
     attr_reader :config, :state, :now
@@ -40,7 +43,9 @@ module SpaceArchitect
       write_readme(path:, title:, id:, timestamp:)
       init_git(path:, id:, git_client:) if git
       state.touch_recent(id)
-      space
+      Success(space)
+    rescue SpaceArchitect::Error => e
+      Failure(e)
     end
 
     def list
@@ -58,24 +63,25 @@ module SpaceArchitect
       return current(from:) if value.empty?
 
       if looks_like_path?(value)
-        return Space.load(File.expand_path(value))
+        begin
+          return Success(Space.load(File.expand_path(value)))
+        rescue SpaceArchitect::Error => e
+          return Failure(e)
+        end
       end
 
       matches = matching_spaces(value)
-      return matches.first if matches.length == 1
+      return Success(matches.first) if matches.length == 1
 
       if matches.empty?
-        raise NotFoundError, "Could not find space matching '#{value}' in #{spaces_dir}"
+        return Failure(NotFoundError.new("Could not find space matching '#{value}' in #{spaces_dir}"))
       end
 
-      raise AmbiguousSpaceError, "Space '#{value}' is ambiguous: #{matches.map(&:id).join(', ')}"
+      Failure(AmbiguousSpaceError.new("Space '#{value}' is ambiguous: #{matches.map(&:id).join(', ')}"))
     end
 
     def current(from: Dir.pwd)
-      space = current_from_pwd(from:)
-      return space if space
-
-      raise CurrentSpaceMissingError, "No current space found from #{from}. Run this inside a space or pass a space id."
+      current_from_pwd(from:).to_result(CurrentSpaceMissingError.new("No current space found from #{from}. Run this inside a space or pass a space id."))
     end
 
     def current_from_pwd(from: Dir.pwd)
@@ -83,31 +89,29 @@ module SpaceArchitect
       path = path.dirname if path.file?
 
       loop do
-        return Space.load(path) if path.join(Space::METADATA_FILE).exist?
+        return Some(Space.load(path)) if path.join(Space::METADATA_FILE).exist?
         break if path.root?
 
         path = path.parent
       end
 
-      nil
+      None()
     end
 
     def path_for(identifier = nil)
-      find(identifier).path
+      find(identifier).fmap(&:path)
     end
 
     def use(identifier)
-      space = find(identifier)
-      state.touch_recent(space.id)
-      space
+      find(identifier).fmap { |space| state.touch_recent(space.id); space }
     end
 
     def add_repo(spec, from: Dir.pwd, scm: Pristine::SCM::Git.new, cloner: nil, mise_client: MiseClient.new)
-      add_repos([spec], from:, scm:, cloner:, mise_client:).first
+      add_repos([spec], from:, scm:, cloner:, mise_client:).fmap(&:first)
     end
 
     def add_repos(specs, from: Dir.pwd, scm: Pristine::SCM::Git.new, cloner: nil, mise_client: MiseClient.new, reporter: nil)
-      add_repos_to(current(from:), specs, scm:, cloner:, mise_client:, reporter:)
+      current(from:).bind { |space| add_repos_to(space, specs, scm:, cloner:, mise_client:, reporter:) }
     end
 
     def add_repos_to(space, specs, scm: Pristine::SCM::Git.new, cloner: nil, mise_client: MiseClient.new, reporter: nil)
@@ -134,16 +138,16 @@ module SpaceArchitect
         end.wait
       end
 
-      raise first_error if first_error
+      return Failure(first_error) if first_error
 
-      additions.map do |addition|
+      Success(additions.map do |addition|
         repo_data = space.add_repo(addition.fetch(:reference), relative_path: addition.fetch(:relative_path), now: now.call)
         { space: space, repo: repo_data, reference: addition.fetch(:reference), path: addition.fetch(:path) }
-      end
+      end)
     end
 
     def repos(from: Dir.pwd)
-      current(from:).repos
+      current(from:).fmap(&:repos)
     end
 
     private

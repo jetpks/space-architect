@@ -11,8 +11,7 @@ module SpaceArchitect
 
       def call(identifier: nil, **opts)
         setup_terminal(**opts.slice(:color, :colors))
-        handle_errors do
-          space = store.find(identifier)
+        render(store.find(identifier)) do |space|
           terminal.say "ID:         #{space.id}"
           terminal.say "Title:      #{space.title}"
           terminal.say "Status:     #{space.status}"
