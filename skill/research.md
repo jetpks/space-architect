@@ -1,10 +1,10 @@
 # Research fan-out reference
 
-Read this only when a research trigger fires (see SKILL.md step 3). The fan-out
-uses `claude -p` (Sonnet 4.6) as parallel web-research subagents — read-only
-(no `Edit`/`Write`/`Bash`), built-in `WebSearch`/`WebFetch` — and the architect
-keeps all judgment: it verifies the load-bearing claims and writes the slice's
-**Grounds** section itself.
+Read this only when a research trigger fires (see SKILL.md step 3). The
+fan-out uses `claude -p` (Sonnet 4.6) as parallel web-research subagents —
+read-only (no `Edit`/`Write`/`Bash`), built-in `WebSearch`/`WebFetch` — and
+the architect keeps all judgment: it verifies the load-bearing claims and writes
+the iteration's **Grounds** section itself.
 
 ## Fan out
 
@@ -17,36 +17,36 @@ One fresh `claude -p` per question, each launched as its own **background Bash
 tool call** (`run_in_background`) — one call per researcher, not a shell `&`
 loop (a `&` launcher orphans the researchers and the harness reaps them all at
 once; same trap as builder dispatch). The researcher toolset is read-only
-(`Read,Grep,Glob`) plus the
-web tools (`WebSearch,WebFetch`) — no `Edit`/`Write`/`Bash`, so it cannot touch
-the repo. Capture the final report by redirecting stdout (the report *is* the
-text result in the default `text` output format):
+(`Read,Grep,Glob`) plus the web tools (`WebSearch,WebFetch`) — no
+`Edit`/`Write`/`Bash`, so it cannot touch the repo. Capture the final report
+by redirecting stdout (the report *is* the text result in the default `text`
+output format):
 
 ```bash
 claude -p --model claude-sonnet-4-6 \
   --allowedTools 'Read,Grep,Glob,WebSearch,WebFetch' \
   --max-turns 40 \
-  < tmp/architect/research/<NN>-<topic>.prompt.md \
-  > tmp/architect/research/<NN>-<topic>.md
+  < build/research/<NN>-<topic>.prompt.md \
+  > build/research/<NN>-<topic>.md
 ```
 
-Write each research-prompt to a `.prompt.md` file and feed it on stdin, never as
-a shell argument — a quote-mangling shell will corrupt a big prompt; the stdin
-redirect injects it verbatim.
+Write each research-prompt to a `.prompt.md` file and feed it on stdin, never
+as a shell argument — a quote-mangling shell will corrupt a big prompt; the
+stdin redirect injects it verbatim.
 
 - Read-only by toolset: with only `Read,Grep,Glob,WebSearch,WebFetch` on the
   allow list and nothing else granted, any write/bash call is denied — the
   researcher can't touch the repo. Its report is the redirected stdout.
-- Web comes from the built-in `WebSearch` and `WebFetch` tools — no extension or
-  key. Launch ONE canary researcher and confirm it actually fetches live URLs
+- Web comes from the built-in `WebSearch` and `WebFetch` tools — no extension
+  or key. Launch ONE canary researcher and confirm it actually fetches live URLs
   before fanning out. Restrict domains with `WebFetch(domain:…)` allow rules in
   prompt-injection-sensitive repos.
 - Thinking budget: keep research at a modest level (a plain block, or "think
   hard") — research is coverage work; deep thinking buys nothing here. Synthesis
   happens on the architect's side.
 - Scope each researcher to ≤5 subjects and put hard context rules in the
-  research-prompt (snippet over page; quote ≤2 sentences; stop the moment you can
-  answer) — a researcher that fills its context window dies without emitting
+  research-prompt (snippet over page; quote ≤2 sentences; stop the moment you
+  can answer) — a researcher that fills its context window dies without emitting
   its report. Bisect and re-dispatch dead lanes; don't re-run as-is.
 
 ## Research-prompt template
@@ -72,18 +72,18 @@ OUTPUT FORMAT — a markdown report:
 
 ## Gather (architect — this is your work, not another agent's)
 
-1. Read every findings file in `tmp/architect/research/`.
+1. Read every findings file in `build/research/`.
 2. Identify the **load-bearing claims** — facts the spec will depend on
    (an API shape, a version constraint, a limit, a deprecation). Adversarially
    verify each: cross-check against a second independent source or the live
    dependency itself. Discard single-source low-confidence claims or mark them
    as open questions.
-3. Write the slice's **Grounds** section (`artifacts/<NN>-<slice>.md`): problem,
-   decision + why, requirements, non-goals, verified facts **with citations**,
-   open questions for the human. You write it — researchers gather, the architect
-   judges and decides.
-4. Commit Grounds (`slice <NN>: grounds`). Raw findings stay in
-   `tmp/architect/research/` (gitignored) — only the distilled, cited Grounds
-   section is repo memory.
-5. The slice's Contract cites Grounds instead of restating it; the builder's
-   PHASE 0 is expected to challenge Grounds' claims like anything else.
+3. Write the iteration's **Grounds** section
+   (`architecture/I<NN>-<name>.md`): problem, decision + why, requirements,
+   non-goals, verified facts **with citations**, open questions for the human.
+   You write it — researchers gather, the architect judges and decides.
+4. Commit Grounds (`I<NN>: grounds`). Raw findings stay in `build/research/`
+   (gitignored) — only the distilled, cited Grounds section is repo memory.
+5. The iteration's Specification cites Grounds instead of restating it; the
+   builder's PHASE 0 is expected to challenge Grounds' claims like anything
+   else.
