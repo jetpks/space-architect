@@ -411,6 +411,22 @@ class CLITest < SpaceArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  def test_new_with_duplicate_repos_reports_error_and_exits_one
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("init")
+      out = StringIO.new
+      err = StringIO.new
+      code = SpaceArchitect::CLI.call(["new", "Dup Space", "foo/dup", "foo/dup"], out, err)
+      assert_equal 1, code
+      assert_match(/Multiple repos resolve to the same destination/, err.string)
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   def test_version_forms_print_to_stdout_and_exit_0
     [["--version"], ["version"]].each do |argv|
       out = StringIO.new

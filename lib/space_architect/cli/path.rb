@@ -11,8 +11,8 @@ module SpaceArchitect
 
       def call(identifier: nil, **opts)
         setup_terminal(**opts.slice(:color, :colors))
-        handle_errors do
-          terminal.say terminal.path(store.path_for(identifier))
+        render(store.path_for(identifier)) do |path|
+          terminal.say terminal.path(path)
           CLI.record_outcome(Outcome.new(exit_code: 0))
         end
       end

@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
+require "dry/monads"
+
 module SpaceArchitect
   module CLI
     module Helpers
+      include Dry::Monads[:result]
       def project_config
         @project_config ||= SpaceArchitect::Config.load
       end
@@ -44,6 +47,18 @@ module SpaceArchitect
           err.puts e.message
         end
         CLI.record_outcome(Outcome.new(exit_code: 1, message: e.message))
+      end
+
+      def render(result)
+        case result
+        when Dry::Monads::Result::Success
+          yield result.value! if block_given?
+        when Dry::Monads::Result::Failure
+          error = result.failure
+          message = error.respond_to?(:message) ? error.message : error.to_s
+          terminal ? terminal.error(message) : err.puts(message)
+          CLI.record_outcome(Outcome.new(exit_code: 1, message: message))
+        end
       end
     end
 
