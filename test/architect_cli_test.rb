@@ -310,6 +310,47 @@ class ArchitectCLITest < SpaceArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  def test_dispatch_cli_runs_fake_claude_and_writes_run_jsonl
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake = File.join(setup[:root], "fake_claude")
+    File.write(fake, <<~RUBY)
+      #!/usr/bin/env ruby
+      a = ARGV; c = Dir.pwd; s = $stdin.gets
+      $stdout.puts "argv=" + a.inspect
+      $stdout.puts "cwd=" + c.inspect
+      $stdout.puts "stdin=" + (s || "").chomp
+      $stdout.flush
+      exit 0
+    RUBY
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out, err = invoke("dispatch", "demo", "A")
+
+        assert_empty err
+        assert_match(/Builder exited with status 0/, out)
+        assert File.exist?(File.join(build_dir, "run.jsonl")), "run.jsonl must be created"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   def test_verify_reports_pass_when_clean
     setup = temp_env
     env = setup.fetch(:env)
