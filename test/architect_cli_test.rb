@@ -6,7 +6,7 @@ require "yaml"
 class ArchitectCLITest < SpaceArchitectTest
   # Build a real git-backed space in a temp dir so architect commands can commit.
   # Does not go through `space new` (which uses Async::Process). Instead writes
-  # .space.yml and calls the real git binary directly.
+  # space.yaml and calls the real git binary directly.
   def create_real_space(base_dir, id: "20260619-test-space", title: "Test Space", repos: [])
     spaces_dir = File.join(base_dir, "src", "spaces")
     FileUtils.mkdir_p(spaces_dir)
@@ -20,14 +20,14 @@ class ArchitectCLITest < SpaceArchitectTest
       "created_at" => "2026-06-19T00:00:00Z", "updated_at" => "2026-06-19T00:00:00Z",
       "repos" => repos, "notes" => [], "tickets" => [], "tags" => []
     }
-    File.write(File.join(space_dir, ".space.yml"), YAML.dump(data))
+    File.write(File.join(space_dir, "space.yaml"), YAML.dump(data))
 
     system("git", "-C", space_dir, "init", "-q", "-b", "main",
       exception: false) ||
       system("git", "-C", space_dir, "init", "-q")
     system("git", "-C", space_dir, "config", "user.name", "Test Builder")
     system("git", "-C", space_dir, "config", "user.email", "test@example.com")
-    system("git", "-C", space_dir, "add", ".space.yml")
+    system("git", "-C", space_dir, "add", "space.yaml")
     system("git", "-C", space_dir, "commit", "-q", "-m", "init")
 
     Pathname.new(space_dir)
@@ -69,7 +69,7 @@ class ArchitectCLITest < SpaceArchitectTest
         refute_path_exists File.join(space_path, "artifacts", "lanes")
         refute_path_exists File.join(space_path, "artifacts", "prd")
 
-        yml = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
+        yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
         assert_equal "active", yml.dig("architect", "status")
         assert_equal [], yml.dig("architect", "slices")
       end
@@ -144,7 +144,7 @@ class ArchitectCLITest < SpaceArchitectTest
         assert_match(/^## Rubric/, slice_text)
         assert_match(/^## Builder Prompt/, slice_text)
 
-        yml = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
+        yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
         entry = yml.dig("architect", "slices").find { |s| s["name"] == "first-slice" }
         refute_nil entry
         assert_equal 1, entry["ordinal"]
@@ -177,7 +177,7 @@ class ArchitectCLITest < SpaceArchitectTest
         assert_empty err
         assert_match(/[0-9a-f]{7,40}/, out)
 
-        yml = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
+        yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
         entry = yml.dig("architect", "slices").find { |s| s["name"] == "slice-1" }
         freeze_sha = entry["freeze_sha"]
         assert_match(/\A[0-9a-f]{40}\z/, freeze_sha)
@@ -236,13 +236,13 @@ class ArchitectCLITest < SpaceArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
 
-        yml_before = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
+        yml_before = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
         architect_before = yml_before["architect"]
         refute_nil architect_before
 
         invoke("space", "status", "done")
 
-        yml_after = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
+        yml_after = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
         assert_equal "done", yml_after["status"], "status should be updated"
         assert_equal architect_before, yml_after["architect"], "architect: block must survive round-trip"
       end

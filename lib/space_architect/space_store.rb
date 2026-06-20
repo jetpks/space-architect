@@ -254,7 +254,7 @@ module SpaceArchitect
 
         ## Organization
 
-        - `.space.yml` tracks the space identity, status, and associated metadata.
+        - `space.yaml` tracks the space identity, status, and associated metadata.
         - `repos/` contains cloned Git repositories for this work.
         - `notes/` is for task notes, scratch docs, and thinking-in-progress.
         - `artifacts/` is for logs, screenshots, generated files, and other ephemera.

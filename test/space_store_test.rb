@@ -20,7 +20,7 @@ class SpaceStoreTest < SpaceArchitectTest
     assert_nil store.state.current_space
     assert_equal ["20260531-name-of-space-2", "20260531-name-of-space"], store.state.recent
 
-    assert_path_exists space.path.join(".space.yml")
+    assert_path_exists space.path.join("space.yaml")
     assert_path_exists space.path.join("README.md")
     assert_path_exists space.path.join("repos")
     assert_path_exists space.path.join("notes")
@@ -32,7 +32,7 @@ class SpaceStoreTest < SpaceArchitectTest
     assert_includes space.path.join("README.md").read, "`repos/` contains cloned Git repositories"
     assert_includes space.path.join("README.md").read, "Use it instead of `/tmp` or"
 
-    metadata = YAML.safe_load(space.path.join(".space.yml").read, aliases: false)
+    metadata = YAML.safe_load(space.path.join("space.yaml").read, aliases: false)
     assert_equal "Name of Space", metadata.fetch("title")
     assert_equal "active", metadata.fetch("status")
     assert_equal [], metadata.fetch("repos")

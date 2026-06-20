@@ -6,7 +6,7 @@ require "time"
 
 module SpaceArchitect
   class Space
-    METADATA_FILE = ".space.yml"
+    METADATA_FILE = "space.yaml"
     VALID_STATUSES = %w[active paused done archived].freeze
 
     attr_reader :path, :data

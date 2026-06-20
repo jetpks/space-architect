@@ -34,7 +34,7 @@ module SpaceArchitect
         b.merge("status" => "active", "current_slice" => nil, "slices" => [])
       end
 
-      git_run("-C", space.path.to_s, "add", "artifacts/HANDOFF.md", ".space.yml")
+      git_run("-C", space.path.to_s, "add", "artifacts/HANDOFF.md", Space::METADATA_FILE)
       git_run("-C", space.path.to_s, "commit", "-m", "Initialize architect mission")
 
       handoff_path
@@ -45,7 +45,7 @@ module SpaceArchitect
       block = space.data["architect"] || {}
       slices = block["slices"] || []
       if slices.any? { |s| s["name"] == slice }
-        raise Error, "slice '#{slice}' already exists in .space.yml"
+        raise Error, "slice '#{slice}' already exists in space.yaml"
       end
 
       ordinal = (slices.map { |s| s["ordinal"] || 0 }.max || 0) + 1
@@ -68,7 +68,7 @@ module SpaceArchitect
         b
       end
 
-      git_run("-C", space.path.to_s, "add", rel, ".space.yml")
+      git_run("-C", space.path.to_s, "add", rel, Space::METADATA_FILE)
       git_run("-C", space.path.to_s, "commit", "-m", "slice #{nn}: scaffold #{slice}")
 
       path
@@ -251,7 +251,7 @@ module SpaceArchitect
     def slice_entry(slice)
       block = space.data["architect"] || {}
       entry = (block["slices"] || []).find { |s| s["name"] == slice }
-      raise Error, "Slice '#{slice}' not recorded in .space.yml — run `space architect new #{slice}` first" unless entry
+      raise Error, "Slice '#{slice}' not recorded in space.yaml — run `space architect new #{slice}` first" unless entry
       entry
     end
 
