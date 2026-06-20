@@ -21,4 +21,3 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "use", SpaceArchitect::CLI::Use

@@ -59,8 +59,3 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "config" do |prefix|
-  prefix.register "show", SpaceArchitect::CLI::Config::Show
-  prefix.register "path", SpaceArchitect::CLI::Config::ConfigPath
-  prefix.register "set",  SpaceArchitect::CLI::Config::Set
-end

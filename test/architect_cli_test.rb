@@ -55,11 +55,11 @@ class ArchitectCLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
+      invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
-        out, err = invoke("architect", "init")
+        out, err = invoke("init")
 
         assert_empty err
         assert_match(/Mission ready/, out)
@@ -83,12 +83,12 @@ class ArchitectCLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
+      invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
-        invoke("architect", "init")
-        out, err = invoke("architect", "status")
+        invoke("init")
+        out, err = invoke("status")
 
         assert_empty err
         assert_match(/Mission status/, out)
@@ -104,12 +104,12 @@ class ArchitectCLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
+      invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
-        invoke("architect", "init")
-        _out, err = invoke("architect", "init")
+        invoke("init")
+        _out, err = invoke("init")
         assert_match(/already exists/, err)
       end
     end
@@ -124,19 +124,19 @@ class ArchitectCLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
+      invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
-        invoke("architect", "init")
+        invoke("init")
 
-        out1, err1 = invoke("architect", "new", "first-slice")
+        out1, err1 = invoke("new", "first-slice")
         assert_empty err1
         assert_match(/Slice scaffolded/, out1)
         assert_path_exists File.join(space_path, "artifacts", "01-first-slice.md")
 
         # second slice gets the next ordinal
-        invoke("architect", "new", "second-slice")
+        invoke("new", "second-slice")
         assert_path_exists File.join(space_path, "artifacts", "02-second-slice.md")
 
         slice_text = File.read(File.join(space_path, "artifacts", "01-first-slice.md"))
@@ -164,16 +164,16 @@ class ArchitectCLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
+      invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
-        invoke("architect", "init")
-        invoke("architect", "new", "slice-1")
+        invoke("init")
+        invoke("new", "slice-1")
         slice_file = File.join(space_path, "artifacts", "01-slice-1.md")
 
         # First freeze — the scaffold already carries a "## Rubric" section.
-        out, err = invoke("architect", "freeze", "slice-1")
+        out, err = invoke("freeze", "slice-1")
         assert_empty err
         assert_match(/[0-9a-f]{7,40}/, out)
 
@@ -186,7 +186,7 @@ class ArchitectCLITest < SpaceArchitectTest
         # Appending BELOW the freeze boundary (Builder Prompt) is allowed —
         # re-freeze returns the same sha, no error.
         File.write(slice_file, File.read(slice_file) + "\n### Lane A\nsome dispatched prompt\n")
-        out2, err2 = invoke("architect", "freeze", "slice-1")
+        out2, err2 = invoke("freeze", "slice-1")
         assert_empty err2
         assert_match(/#{freeze_sha[0, 7]}/, out2)
 
@@ -194,7 +194,7 @@ class ArchitectCLITest < SpaceArchitectTest
         text = File.read(slice_file)
         text = text.sub("## Rubric", "## Rubric\n\nGA9: tampered threshold")
         File.write(slice_file, text)
-        _out3, err3 = invoke("architect", "freeze", "slice-1")
+        _out3, err3 = invoke("freeze", "slice-1")
         refute_empty err3
         assert_match(/refusing to re-freeze/i, err3)
       end
@@ -208,16 +208,16 @@ class ArchitectCLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
+      invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
-        invoke("architect", "init")
-        invoke("architect", "new", "no-rubric")
+        invoke("init")
+        invoke("new", "no-rubric")
         slice_file = File.join(space_path, "artifacts", "01-no-rubric.md")
         File.write(slice_file, "# Slice 01: no-rubric\n\n## Contract\n\njust a contract\n")
 
-        _out, err = invoke("architect", "freeze", "no-rubric")
+        _out, err = invoke("freeze", "no-rubric")
         assert_match(/no '## Rubric' section/, err)
       end
     end
@@ -230,17 +230,17 @@ class ArchitectCLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
+      invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
-        invoke("architect", "init")
+        invoke("init")
 
         yml_before = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
         architect_before = yml_before["architect"]
         refute_nil architect_before
 
-        invoke("status", "done")
+        invoke("space", "status", "done")
 
         yml_after = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
         assert_equal "done", yml_after["status"], "status should be updated"
@@ -258,15 +258,15 @@ class ArchitectCLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
+      invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
       Dir.chdir(space_path) do
-        invoke("architect", "init")
-        invoke("architect", "new", "s1")
-        invoke("architect", "freeze", "s1")
-        invoke("architect", "worktree", "add", "my-repo", "s1", "lane-a")
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
 
         wt_path = File.join(space_path, "tmp", "architect", "wt", "01-s1-lane-a")
         assert_path_exists wt_path
@@ -275,7 +275,7 @@ class ArchitectCLITest < SpaceArchitectTest
         system("git", "-C", wt_path, "add", "builder_work.md")
         system("git", "-C", wt_path, "commit", "-q", "-m", "builder commit")
 
-        out, err = invoke("architect", "verify", "s1")
+        out, err = invoke("verify", "s1")
         assert_empty err
         rows = out.lines.select { |l| l.include?("builder commits") }
         assert rows.any? { |r| r.include?("FAIL") }, "expected (b) no builder commits to be FAIL"
@@ -290,17 +290,17 @@ class ArchitectCLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
+      invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
       Dir.chdir(space_path) do
-        invoke("architect", "init")
-        invoke("architect", "new", "s1")
-        invoke("architect", "freeze", "s1")
-        invoke("architect", "worktree", "add", "my-repo", "s1", "lane-b")
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-b")
 
-        out, err = invoke("architect", "verify", "s1")
+        out, err = invoke("verify", "s1")
         assert_empty err
         rows = out.lines.select { |l| l.include?("scratch report") }
         assert rows.any? { |r| r.include?("FAIL") }, "expected (c) scratch report exists to be FAIL"
@@ -315,22 +315,22 @@ class ArchitectCLITest < SpaceArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("init")
+      invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
       Dir.chdir(space_path) do
-        invoke("architect", "init")
-        invoke("architect", "new", "s1")
-        invoke("architect", "freeze", "s1")
-        invoke("architect", "worktree", "add", "my-repo", "s1", "lane-c")
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-c")
 
         # The builder's scratch report (non-empty) lives in tmp/architect/.
         FileUtils.mkdir_p(File.join(space_path, "tmp", "architect"))
         File.write(File.join(space_path, "tmp", "architect", "01-s1-lane-c.report.md"),
           "# Lane Report\nSTATUS: COMPLETE\n")
 
-        out, err = invoke("architect", "verify", "s1")
+        out, err = invoke("verify", "s1")
         assert_empty err
         refute_match(/FAIL/, out, "expected all checks to PASS, got:\n#{out}")
       end

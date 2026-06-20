@@ -33,4 +33,3 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "init", SpaceArchitect::CLI::Init
