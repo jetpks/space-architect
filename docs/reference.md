@@ -1,6 +1,6 @@
 # Command Reference 📖
 
-Every `space-cadet` command, flag, and behavior. The executable is `space`. 🚀
+Every Space Architect (`space-architect`) command, flag, and behavior. The primary executable is `architect`; `space` is a forwarding shim — `space foo` routes to `architect space foo`. 🚀
 
 ## Global options 🎨
 
@@ -10,117 +10,190 @@ These work on any command:
 |--------|--------|---------|-------------|
 | `--color` | `auto` `always` `never` | `auto` | Color output. `--colors` is accepted too. |
 
-Color defaults to auto-detection: colorized when stdout is a TTY, plain
-otherwise. Paths under your home directory are displayed as `~/...` in
-human-oriented output.
+Color defaults to auto-detection: colorized when stdout is a TTY, plain otherwise. Paths under your home directory are displayed as `~/...` in human-oriented output.
 
 ## Space resolution 🧭
 
 Commands that take an optional `[SPACE]` resolve it in this order:
 
-1. An explicit id passed on the command line (`space show 20260531-name-of-space`).
-2. Otherwise, the nearest parent directory of `$PWD` containing a `.space.yml`.
+1. An explicit id or slug passed on the command line.
+2. Otherwise, the nearest parent directory of `$PWD` containing a `space.yaml`.
 
-Being *inside* a space is what makes it current — `space use` records recent
-state and prints a path, but it never overrides `$PWD`-based resolution.
+Being *inside* a space is what makes it current — `architect space use` records recent state and prints a path, but it never overrides `$PWD`-based resolution.
 
-## Commands 🛰️
+## Architect Loop commands 🔄
 
-### `space init`
+These root-level commands manage the Architect Loop within a space.
+
+### `architect init [SPACE]`
+
+Scaffold architect mission memory in the current space: creates `architecture/ARCHITECT.md` and adds the `architect:` block to `space.yaml`. Idempotent guard: refuses if `ARCHITECT.md` already exists.
+
+```sh
+architect init
+architect init 20260531-name-of-space
+```
+
+### `architect new ITERATION [SPACE]`
+
+Scaffold the next iteration file at `architecture/I<NN>-<ITERATION>.md` from the iteration template. Allocates the next ordinal and records the iteration in `space.yaml`.
+
+```sh
+architect new dry-cli-port
+architect new dispatch-engine 20260531-name-of-space
+```
+
+### `architect status [SPACE]`
+
+Show the Architect Loop mission state: current iteration, the iteration index table (ordinal, freeze SHA, lanes, verdict), and iteration files. Read-only.
+
+```sh
+architect status
+architect status 20260531-name-of-space
+```
+
+### `architect freeze ITERATION [SPACE]`
+
+Commit the iteration file (Grounds + Specification + Acceptance Criteria must be present) and record its SHA as `freeze_sha` in `space.yaml`. Refuses to re-freeze once the frozen sections have changed.
+
+```sh
+architect freeze dry-cli-port
+architect freeze dry-cli-port 20260531-name-of-space
+```
+
+### `architect verify ITERATION [SPACE]`
+
+Post-flight mechanical checks for an iteration — reports only, no judgment. Per lane: (a) frozen sections untouched since freeze, (b) builder made no commits in the worktree, (c) the builder's scratch report `build/<id>-<lane>/report.md` exists, (d) builder stayed in-bounds per the lane's declared touch set.
+
+```sh
+architect verify dry-cli-port
+architect verify dry-cli-port 20260531-name-of-space
+```
+
+### `architect dispatch ITERATION LANE [SPACE]`
+
+Dispatch a builder for a lane: runs `claude -p` headless and streams the full conversation to `build/<id>-<lane>/run.jsonl`.
+
+```sh
+architect dispatch dry-cli-port lane-a
+architect dispatch dispatch-engine lane-b 20260531-name-of-space --model claude-opus-4-8
+architect dispatch dry-cli-port lane-a --max-turns 100
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--model=VALUE` | `claude-sonnet-4-6` | Model for the builder. |
+| `--max-turns=VALUE` | `200` | Max conversation turns. |
+
+### `architect worktree [SUBCOMMAND]`
+
+Manage per-lane git worktrees under `build/`.
+
+```sh
+architect worktree add my-app dry-cli-port lane-a
+architect worktree add my-app dry-cli-port lane-a --base main
+architect worktree list
+architect worktree remove dry-cli-port lane-a
+```
+
+| Command | Description |
+|---------|-------------|
+| `worktree add REPO ITERATION LANE [--base REF]` | Create a worktree at `build/<id>-<lane>/wt` off the repo's base commit (default: `HEAD`). |
+| `worktree list` | List active architect worktree directories. |
+| `worktree remove ITERATION LANE` | Remove the lane worktree. |
+
+## Space management: `architect space …` 🗂️
+
+Manage project spaces. These commands are also accessible via the `space` shim (e.g., `space new "Title"` → `architect space new "Title"`).
+
+### `architect space init`
 
 Create the default XDG config and state files.
 
 ```sh
-space init
-space init --force      # overwrite existing config and state files
+architect space init
 ```
 
-### `space new TITLE`
+### `architect space new TITLE [REPOS]`
 
-Create a new space. The id is date-prefixed and slugged from the title
-(`"Name of Space"` → `20260531-name-of-space`); duplicate names on the same day
-get a counter (`...-name-of-space-2`).
+Create a new space. The id is date-prefixed and slugged from the title (`"Name of Space"` → `20260531-name-of-space`); duplicate names on the same day get a counter (`...-name-of-space-2`). Optionally clone repos into the new space immediately.
 
 ```sh
-space new "Name of Space"
-space new "Name of Space" -r example-tools/alpha -r example-tools/beta
+architect space new "Name of Space"
+architect space new "Name of Space" example-tools/alpha example-tools/beta
+architect space new "Name of Space" --no-git   # skip git init
 ```
 
 | Option | Description |
 |--------|-------------|
-| `-r`, `--repo` | Clone a repo into the new space. Repeatable. |
+| `--[no-]git` | Initialize the space as a Git repository (default: `--git`). |
 
-With fish integration installed, `space new` also `cd`s you into the new space.
-
-### `space list` (alias `space ls`)
+### `architect space list` (alias `architect space ls`)
 
 List all spaces, compact and human-readable.
 
 ```sh
-space list
-space ls --color=always
+architect space list
+architect space ls --color=always
 ```
 
-### `space show [SPACE]`
+### `architect space show [IDENTIFIER]`
 
 Show metadata for a space, or the current space when no id is given.
 
 ```sh
-space show
-space show 20260531-name-of-space
+architect space show
+architect space show 20260531-name-of-space
 ```
 
-### `space path [SPACE]`
+### `architect space path [IDENTIFIER]`
 
-Print *only* the path for a space (handy for scripting and `cd`).
+Print *only* the path for a space (handy for scripting).
 
 ```sh
-space path
-space path 20260531-name-of-space
-cd (space path 20260531-name-of-space)   # fish
+architect space path
+architect space path 20260531-name-of-space
 ```
 
-### `space use SPACE`
+### `architect space use IDENTIFIER`
 
-Record a space in recent state and print its path. With fish integration, also
-`cd`s into it.
+Record a space in recent state and print its path.
 
 ```sh
-space use 20260531-name-of-space
+architect space use 20260531-name-of-space
 ```
 
-### `space current`
+### `architect space current`
 
 Show the current space, resolved from `$PWD`.
 
 ```sh
-space current
+architect space current
 ```
 
-### `space status [SPACE] STATUS`
+### `architect space status [SPACE] STATUS`
 
-Set a space's status. Supported statuses: `active`, `paused`, `done`,
-`archived`.
+Set a space's status. Supported statuses: `active`, `paused`, `done`, `archived`.
 
 ```sh
-space status done                            # current space
-space status 20260531-name-of-space archived
+architect space status done                              # current space
+architect space status 20260531-name-of-space archived
 ```
 
-### `space config [SUBCOMMAND]`
+### `architect space config [SUBCOMMAND]`
 
 Show or update configuration.
 
 ```sh
-space config show
-space config path
-space config set default_provider github.com
-space config set default_organization example-org
-space config set git_clone_protocol https
-space config set evergreen_dir ""            # disable evergreen copies
+architect space config show
+architect space config path
+architect space config set default_provider github.com
+architect space config set default_organization example-org
+architect space config set git_clone_protocol https
+architect space config set evergreen_dir ""              # disable evergreen copies
 ```
 
-Config lives at `~/.config/space-cadet/config.yml` (XDG-aware):
+Config lives at `~/.config/space-architect/config.yml` (XDG-aware):
 
 ```yaml
 version: 1
@@ -131,78 +204,117 @@ default_organization:
 git_clone_protocol: ssh
 ```
 
-### `space repo SUBCOMMAND` (alias `space repos`)
+### `architect space repo [SUBCOMMAND]` (alias `architect space repos`)
 
 Manage repos in the current space.
 
 ```sh
-space repo add example-app                       # github.com/<default_org>/example-app
-space repo add example-tools/alpha example-tools/beta
-space repo add gitlab.com/example-org/api
-space repo list                                  # alias: ls
-space repo resolve example-app example-tools/async
+architect space repo add example-app
+architect space repo add example-tools/alpha example-tools/beta
+architect space repo add gitlab.com/example-org/api
+architect space repo list            # alias: ls
+architect space repo resolve example-app example-tools/async
 ```
 
-- **add** — clone (or copy-on-write from `evergreen_dir`) repos into `repos/`,
-  concurrently, up to five at a time, then run `mise trust`.
+- **add** — clone (or copy-on-write from `evergreen_dir`) repos into `repos/`, concurrently up to five at a time.
 - **list** / **ls** — list repos tracked in the current space.
 - **resolve** — print the resolved full name and clone URL without cloning.
 
-### `space shell SUBCOMMAND`
+### `architect space shell [SUBCOMMAND]`
 
 Manage shell integration. Only `fish` is supported today.
 
 ```sh
-space shell init fish              # print the fish function to stdout
-space shell fish install           # install function + completions
-space shell fish install --force   # overwrite existing files
-space shell fish uninstall
-space shell fish path              # print install paths
-space shell complete spaces        # print completion candidates
+architect space shell init fish              # print the fish function to stdout
+architect space shell fish install           # install function + completions
+architect space shell fish install --force   # overwrite existing files
+architect space shell fish uninstall
+architect space shell fish path              # print install paths
+architect space shell complete spaces        # print completion candidates
 ```
 
-The fish function installs to `~/.config/fish/functions/space.fish` and
-completions to `~/.config/fish/completions/space.fish`. Restart fish (or
-`exec fish`) to pick them up.
+## Evergreen engine: `architect src …` 🌲
 
-### `space architect SUBCOMMAND`
+The vendored evergreen engine (`repo-tender`) keeps canonical copies of tracked repos in sync so spaces can clone via fast APFS copy-on-write. Run `architect src --help` to list available subcommands.
 
-Manage an Architect Loop mission inside the current space. The mission memory is
-one self-contained file per slice at `artifacts/<NN>-<slice>.md` (sections:
-Grounds / Contract / Rubric / Builder Prompt / Builder Report / Verdict), indexed
-by `artifacts/HANDOFF.md`. Mission state (slices, freeze SHAs, lanes, verdicts)
-lives in an `architect:` block in `.space.yml`. Scratch (worktrees, lane-prompts,
-builder reports) lives under `tmp/architect/` (gitignored).
+> **Note:** these commands appear under `architect src <verb>` but are not listed in root `architect --help`. Discover them via `architect src --help`.
+
+### `architect src clone NAMES`
+
+Clone evergreen repo(s) into a working directory via APFS COW copy.
 
 ```sh
-space architect init                         # scaffold artifacts/HANDOFF.md + .space.yml block; commits
-space architect new dry-cli-port             # scaffold artifacts/01-dry-cli-port.md (next ordinal)
-space architect status                       # read-only mission state
-space architect freeze dry-cli-port          # commit the slice file; record freeze_sha
-space architect worktree add my-app s1 lane-a --base HEAD
-space architect worktree list
-space architect worktree remove s1 lane-a
-space architect verify dry-cli-port          # per-lane mechanical checks (reports only)
+architect src clone example-app
+architect src clone example-tools/alpha example-tools/beta
+architect src clone github.com/example-org/api --into ~/work
 ```
 
-| Command | Description |
-|---------|-------------|
-| `architect init [SPACE]` | Scaffold `artifacts/HANDOFF.md` and add the `architect:` block to `.space.yml`; commits. Idempotent guard: refuses if `HANDOFF.md` exists. |
-| `architect new SLICE [SPACE]` | Allocate the next ordinal and scaffold `artifacts/<NN>-<SLICE>.md` from the slice template; record the slice; commits. |
-| `architect status [SPACE]` | Print mission status, current slice, the slice table (NN, freeze SHA, lanes, verdict), and slice files. Read-only. |
-| `architect freeze SLICE [SPACE]` | Commit the slice file (which must carry a `## Rubric` section) and record its SHA as `freeze_sha`. Refuses to re-freeze once a **frozen section** (anything above `## Builder Prompt`) has changed. |
-| `architect worktree add REPO SLICE LANE [--base REF]` | Create a worktree at `tmp/architect/wt/<SLICE>-<LANE>` off the repo's base commit (default `HEAD`); record the lane in `.space.yml`. |
-| `architect worktree remove SLICE LANE` | Remove the lane worktree and drop it from `.space.yml`. |
-| `architect worktree list` | List active lane worktree directories. |
-| `architect verify SLICE [SPACE]` | Report per lane (PASS/FAIL/N/A, no judgment): (a) frozen sections untouched since freeze, (b) no builder commits in the worktree, (c) the builder's scratch report `tmp/architect/<SLICE>-<LANE>.report.md` exists, (d) in-bounds vs the lane's touch set. |
+| Option | Description |
+|--------|-------------|
+| `--into=DIR` | Destination parent directory (default: `$PWD`). |
+| `--json` | JSON output (one object per event line). |
+| `--plain` | Plain text output, no color. |
+| `--quiet, -q` | Suppress non-essential output. |
 
-The `architect:` block survives unrelated `space` commands that rewrite
-`.space.yml`. The builder never writes under `artifacts/` — it writes a scratch
-report which the architect transcribes into the slice's Builder Report section,
-keeping the frozen Rubric out of the builder's editable blast radius.
+### `architect src sync`
+
+Run one sync pass — fetch + fast-forward all tracked repos.
+
+```sh
+architect src sync
+architect src sync --repo github.com/example-org/api   # scope to one repo
+```
+
+### `architect src status`
+
+Show the per-repo evergreen status table (source: `$XDG_STATE_HOME/repo-tender/state.yaml`).
+
+```sh
+architect src status
+```
+
+### `architect src repo [SUBCOMMAND]`
+
+Manage tracked repos in the evergreen store.
+
+```sh
+architect src repo add example-org/api
+architect src repo list
+architect src repo remove example-org/api
+```
+
+### `architect src org [SUBCOMMAND]`
+
+Manage tracked orgs (all repos under an org are synced automatically).
+
+```sh
+architect src org add github.com/example-org
+architect src org list
+architect src org remove github.com/example-org
+```
+
+### `architect src config [SUBCOMMAND]`
+
+Show or locate the evergreen engine config (separate from space config).
+
+```sh
+architect src config show
+architect src config path
+```
+
+### `architect src daemon [SUBCOMMAND]`
+
+Manage the per-user launchd sync agent (macOS).
+
+```sh
+architect src daemon install
+architect src daemon start
+architect src daemon stop
+architect src daemon restart
+architect src daemon status
+architect src daemon uninstall
+```
 
 ## Exit codes 🚦
 
-`space` exits non-zero on failure (unknown space, ambiguous id, refusing to
-overwrite an existing file without `--force`, and so on) with a clear message on
-stderr.
+`architect` exits non-zero on failure — unknown space, ambiguous id, refusing to overwrite an existing file without `--force`, and so on — with a clear message on stderr.
