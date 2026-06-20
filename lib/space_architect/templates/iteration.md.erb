@@ -3,7 +3,7 @@
 > One self-contained iteration of the Architect Loop. Grown section by section, one
 > commit per section. The builder NEVER edits this file — the architect writes
 > every section, and transcribes the Builder Report verbatim from the builder's
-> scratch report in tmp/architect/. Frozen sections (Grounds, Specification, Acceptance Criteria)
+> scratch report in build/. Frozen sections (Grounds, Specification, Acceptance Criteria)
 > are read-only after the freeze commit; only Builder Prompt, Builder Report, and
 > Verdict are appended afterward.
 
@@ -41,13 +41,13 @@ change to Grounds/Specification/Acceptance Criteria = automatic iteration FAIL. 
 ## Builder Prompt
 
 <!-- The exact lane-prompt(s) dispatched, recorded as provenance. One ###
-subsection per lane. A copy is written to tmp/architect/<%= @_ordinal %>-<%= @_name %>-<lane>.prompt.md
+subsection per lane. A copy is written to build/<%= @_ordinal %>-<%= @_name %>-<lane>/prompt.md
 for stdin dispatch. Commit: "<%= @_ordinal %>: dispatched". -->
 
 ## Builder Report
 
 <!-- RAW EVIDENCE ONLY — tables, numbers, command output. The builder writes this
-to tmp/architect/<%= @_ordinal %>-<%= @_name %>-<lane>.report.md; the architect transcribes it here
+to build/<%= @_ordinal %>-<%= @_name %>-<lane>/report.md; the architect transcribes it here
 VERBATIM (no interpretation). One ### subsection per lane; include the builder's
 PHASE 0 disagreements and its STATUS line. Commit: "<%= @_ordinal %>: evidence". -->
 

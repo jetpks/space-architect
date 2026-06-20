@@ -389,7 +389,7 @@ class CLITest < SpaceArchitectTest
       space_id = out[/Created (\d{8}-git-space)/, 1]
       space_path = File.join(env["HOME"], "src", "spaces", space_id)
       assert_path_exists File.join(space_path, ".git")
-      assert_equal "repos/\ntmp/\n", File.read(File.join(space_path, ".gitignore"))
+      assert_equal "repos/\ntmp/\nbuild/\n!build/.keep\n", File.read(File.join(space_path, ".gitignore"))
     end
   ensure
     FileUtils.rm_rf(setup[:root]) if setup

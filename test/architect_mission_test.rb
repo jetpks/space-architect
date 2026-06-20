@@ -52,12 +52,12 @@ class ArchitectMissionTest < SpaceArchitectTest
     mission.new_iteration!("my-slice")
     result = mission.worktree_add("my-repo", "my-slice", "lane-a")
 
-    assert_match %r{wt/I01-my-slice-lane-a\z}, result[:worktree].to_s
+    assert_match %r{build/I01-my-slice-lane-a/wt\z}, result[:worktree].to_s
     assert_path_exists result[:worktree].to_s
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     lane = yml.dig("architect", "iterations", 0, "lanes", 0)
-    assert_equal "tmp/architect/wt/I01-my-slice-lane-a", lane["worktree"]
+    assert_equal "build/I01-my-slice-lane-a/wt", lane["worktree"]
 
     branch_ref = File.join(dir, "repos", "my-repo", ".git", "refs", "heads", "lane", "I01-my-slice-lane-a")
     assert_path_exists branch_ref, "expected branch lane/I01-my-slice-lane-a to exist in git"
@@ -66,7 +66,7 @@ class ArchitectMissionTest < SpaceArchitectTest
   end
 
   # G4: verify looks for the scratch report at I-prefixed iteration_id path
-  #     (tmp/architect/I01-my-slice-lane-a.report.md) — bare-name path is not found
+  #     (build/I01-my-slice-lane-a/report.md) — bare-name path is not found
   def test_verify_finds_ordinal_prefixed_scratch_report
     dir = Dir.mktmpdir("architect-mission-test")
     space = create_real_space(dir)
@@ -78,8 +78,8 @@ class ArchitectMissionTest < SpaceArchitectTest
     mission.freeze!("my-slice")
     mission.worktree_add("my-repo", "my-slice", "lane-a")
 
-    FileUtils.mkdir_p(File.join(dir, "tmp", "architect"))
-    File.write(File.join(dir, "tmp", "architect", "I01-my-slice-lane-a.report.md"),
+    FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-a"))
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "report.md"),
       "# Report\nSTATUS: COMPLETE\n")
 
     results = mission.verify("my-slice")
