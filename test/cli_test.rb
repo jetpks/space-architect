@@ -238,7 +238,7 @@ class CLITest < SpaceArchitectTest
           File.read(setup.fetch(:mise_log)).strip
         )
 
-        metadata = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
+        metadata = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
         repo = metadata.fetch("repos").first
         assert_equal "github.com/example-org/example-app", repo.fetch("full_name")
         assert_equal "repos/example-app", repo.fetch("path")
@@ -333,7 +333,7 @@ class CLITest < SpaceArchitectTest
           "trust --yes --quiet --cd #{File.join(real_space_path, 'repos', 'beta')}"
         ], File.read(setup.fetch(:mise_log)).split("\n").sort
 
-        metadata = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
+        metadata = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
         assert_equal [
           "github.com/example-tools/alpha",
           "github.com/example-tools/beta"
@@ -346,7 +346,7 @@ class CLITest < SpaceArchitectTest
   end
 
   # G5 — D5 proof: new TITLE REPO [REPO...] positional syntax
-  def test_new_with_positional_repos_records_both_in_space_yml
+  def test_new_with_positional_repos_records_both_in_space_yaml
     setup = temp_env
     env = setup.fetch(:env)
     install_fake_git(setup)
@@ -367,7 +367,7 @@ class CLITest < SpaceArchitectTest
       assert_path_exists File.join(space_path, "repos", "alpha", ".git")
       assert_path_exists File.join(space_path, "repos", "beta", ".git")
 
-      metadata = YAML.safe_load(File.read(File.join(space_path, ".space.yml")), aliases: false)
+      metadata = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
       assert_equal [
         "github.com/example-tools/alpha",
         "github.com/example-tools/beta"

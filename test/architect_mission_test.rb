@@ -15,13 +15,13 @@ class ArchitectMissionTest < SpaceArchitectTest
       "created_at" => "2026-06-19T00:00:00Z", "updated_at" => "2026-06-19T00:00:00Z",
       "repos" => [], "notes" => [], "tickets" => [], "tags" => []
     }
-    File.write(File.join(dir, ".space.yml"), YAML.dump(data))
+    File.write(File.join(dir, "space.yaml"), YAML.dump(data))
 
     system("git", "-C", dir, "init", "-q", "-b", "main", exception: false) ||
       system("git", "-C", dir, "init", "-q")
     system("git", "-C", dir, "config", "user.name", "Test Builder")
     system("git", "-C", dir, "config", "user.email", "test@example.com")
-    system("git", "-C", dir, "add", ".space.yml")
+    system("git", "-C", dir, "add", "space.yaml")
     system("git", "-C", dir, "commit", "-q", "-m", "init")
 
     SpaceArchitect::Space.load(dir)
@@ -55,7 +55,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     assert_match %r{wt/01-my-slice-lane-a\z}, result[:worktree].to_s
     assert_path_exists result[:worktree].to_s
 
-    yml = YAML.safe_load(File.read(File.join(dir, ".space.yml")), aliases: false)
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     lane = yml.dig("architect", "slices", 0, "lanes", 0)
     assert_equal "tmp/architect/wt/01-my-slice-lane-a", lane["worktree"]
 
