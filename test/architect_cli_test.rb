@@ -8,7 +8,7 @@ class ArchitectCLITest < SpaceArchitectTest
   # Does not go through `space new` (which uses Async::Process). Instead writes
   # space.yaml and calls the real git binary directly.
   def create_real_space(base_dir, id: "20260619-test-space", title: "Test Space", repos: [])
-    spaces_dir = File.join(base_dir, "src", "spaces")
+    spaces_dir = File.join(base_dir, "architect", "spaces")
     FileUtils.mkdir_p(spaces_dir)
     space_dir = File.join(spaces_dir, id)
     FileUtils.mkdir_p(File.join(space_dir, "architecture"))
