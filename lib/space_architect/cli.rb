@@ -31,6 +31,10 @@ module SpaceArchitect
         return 0
       end
 
+      if argv.first == "src"
+        return dispatch_src(argv[1..], out, err)
+      end
+
       Dry::CLI.new(Registry).call(arguments: normalize_args(argv), out: out, err: err)
       last_outcome&.exit_code || 0
     end
@@ -95,3 +99,4 @@ require_relative "cli/repo"
 require_relative "cli/shell"
 require_relative "cli/architect"
 require_relative "cli/space"
+require_relative "cli/src"
