@@ -139,7 +139,7 @@ module SpaceArchitect
       raise Error, "repos/#{repo} does not exist" unless repo_path.exist?
 
       id = iteration_id(entry)
-      wt_path = space.path.join("tmp", "architect", "wt", "#{id}-#{lane}")
+      wt_path = space.path.join("build", "#{id}-#{lane}", "wt")
       FileUtils.mkdir_p(wt_path.dirname)
 
       base_ref = base || "HEAD"
@@ -158,7 +158,7 @@ module SpaceArchitect
             "name" => lane,
             "repo" => repo,
             "base_sha" => base_sha,
-            "worktree" => "tmp/architect/wt/#{id}-#{lane}",
+            "worktree" => "build/#{id}-#{lane}/wt",
             "integration_branch" => nil
           }
           s["lanes"] = lanes
@@ -179,7 +179,7 @@ module SpaceArchitect
       wt_path = if lane_entry["worktree"]
         space.path.join(lane_entry["worktree"])
       else
-        space.path.join("tmp", "architect", "wt", "#{iteration_id(entry)}-#{lane}")
+        space.path.join("build", "#{iteration_id(entry)}-#{lane}", "wt")
       end
 
       git_run("-C", repo_path.to_s, "worktree", "remove", "--force", wt_path.to_s)
@@ -195,7 +195,7 @@ module SpaceArchitect
     end
 
     def worktree_list
-      wt_base = space.path.join("tmp", "architect", "wt")
+      wt_base = space.path.join("build")
       return [] unless wt_base.exist?
       wt_base.children.select(&:directory?).map { |p| p.basename.to_s }.sort
     end
@@ -209,7 +209,7 @@ module SpaceArchitect
       lanes.map do |lane|
         lane_name = lane["name"]
         base_sha = lane["base_sha"]
-        wt_path = space.path.join(lane["worktree"] || "tmp/architect/wt/#{iteration_id(entry)}-#{lane_name}")
+        wt_path = space.path.join(lane["worktree"] || "build/#{iteration_id(entry)}-#{lane_name}/wt")
         touch_set = lane["touch_set"] || []
 
         checks = {}
@@ -224,7 +224,7 @@ module SpaceArchitect
         checks[:no_builder_commits] = log_out.strip.empty?
 
         # (c) builder's scratch report exists and is non-empty
-        report = space.path.join("tmp", "architect", "#{iteration_id(entry)}-#{lane_name}.report.md")
+        report = space.path.join("build", "#{iteration_id(entry)}-#{lane_name}", "report.md")
         checks[:report_exists] = report.exist? && !report.read.strip.empty?
 
         # (d) in-bounds: changed paths ⊆ touch_set (nil if no touch_set recorded)

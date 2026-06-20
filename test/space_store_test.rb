@@ -26,9 +26,12 @@ class SpaceStoreTest < SpaceArchitectTest
     assert_path_exists space.path.join("notes")
     assert_path_exists space.path.join("architecture")
     assert_path_exists space.path.join("tmp")
+    assert_path_exists space.path.join("build")
+    assert_path_exists space.path.join("build", ".keep")
     assert_path_exists space.path.join(".git")
-    assert_equal "repos/\ntmp/\n", space.path.join(".gitignore").read
+    assert_equal "repos/\ntmp/\nbuild/\n!build/.keep\n", space.path.join(".gitignore").read
     assert_includes space.path.join("README.md").read, "## Organization"
+    assert_includes space.path.join("README.md").read, "build/"
     assert_includes space.path.join("README.md").read, "`repos/` contains cloned Git repositories"
     assert_includes space.path.join("README.md").read, "Use it instead of `/tmp` or"
 
