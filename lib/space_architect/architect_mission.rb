@@ -94,7 +94,7 @@ module SpaceArchitect
       entry = slice_entry(iteration)
       rel = entry["file"]
       path = space.path.join(rel)
-      raise Error, "#{rel} does not exist — run `space architect new #{iteration}` first" unless path.exist?
+      raise Error, "#{rel} does not exist — run `architect new #{iteration}` first" unless path.exist?
       unless path.read.match?(/^## Acceptance Criteria/)
         raise Error, "#{rel} has no '## Acceptance Criteria' section — write the Acceptance Criteria before freezing"
       end
@@ -274,7 +274,7 @@ module SpaceArchitect
     def slice_entry(iteration)
       block = space.data["architect"] || {}
       entry = (block["iterations"] || []).find { |s| s["name"] == iteration }
-      raise Error, "Iteration '#{iteration}' not recorded in space.yaml — run `space architect new #{iteration}` first" unless entry
+      raise Error, "Iteration '#{iteration}' not recorded in space.yaml — run `architect new #{iteration}` first" unless entry
       entry
     end
 
