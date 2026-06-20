@@ -219,15 +219,15 @@ planning around them.
 PHASE 1 — Treat the shared contracts (schemas/interfaces) named in the spec,
 and the repo's existing public interfaces, as FROZEN: do not change them —
 other lanes depend on them. You have no access to the space's architecture/
-directory; the architect owns it. The ACCEPTANCE RUBRIC below is frozen —
-verify your work against it; never weaken or work around it.
+directory; the architect owns it. The ACCEPTANCE CRITERIA below are frozen —
+verify your work against them; never weaken or work around them.
 
 PHASE 2 — Build YOUR LANE ONLY: exactly the files listed in BOUNDARIES. You
 are one of several parallel lane agents working in isolated worktrees; files
 outside your lane belong to other agents — touching them fails your lane.
 No placeholder implementations — search the codebase before implementing;
-full implementations only. Verify your work by running the rubric's gate
-commands and record the verbatim output. Do NOT commit and do NOT run any
+full implementations only. Verify your work by running the acceptance
+criteria's gate commands and record the verbatim output. Do NOT commit and do NOT run any
 git write command (commit/add/branch/reset/checkout) — the architect commits
 and merges after verification, and verifies you made no commits. Do NOT delete
 lock files or escalate privileges if a command fails; record the exact error
@@ -259,7 +259,7 @@ at analysis or partial fixes.
 === DISAGREEMENT RULINGS (from last session) ===
 ...
 
-=== ACCEPTANCE RUBRIC (frozen — the architect re-runs these to judge; verify
+=== ACCEPTANCE CRITERIA (frozen — the architect re-runs these to judge; verify
 against them, do not edit or work around) ===
 ...
 ```
