@@ -8,14 +8,14 @@ module SpaceArchitect::Pristine
   # overrides (and a caller-supplied environment hash for testability);
   # otherwise falls back to the XDG defaults (~/.config, ~/.local/state).
   #
-  # `base_dir` is the on-disk home for the evergreen clones
-  # ($BASE/:host/:owner/:repo). It defaults to ~/src/evergreen/ and is
+  # `base_dir` is the on-disk home for the src clones
+  # ($BASE/:host/:owner/:repo). It defaults to ~/architect/src and is
   # resolved from the config at call time (passed in as an argument here
   # so this module owns nothing about config storage).
   class Paths
     APP_NAME = "repo-tender"
 
-    DEFAULT_BASE_DIR = File.expand_path("~/src/evergreen")
+    DEFAULT_BASE_DIR = File.expand_path("~/architect/src")
 
     def initialize(environment: ENV, base_dir: nil)
       @environment = environment
@@ -47,8 +47,8 @@ module SpaceArchitect::Pristine
       File.join(home, "Library", "LaunchAgents")
     end
 
-    # Default `base_dir` is ~/src/evergreen (per PRD §3.1). Callers may
-    # override by passing one to the constructor (e.g. from loaded config).
+    # Default `base_dir` is ~/architect/src. Callers may override by passing
+    # one to the constructor (e.g. from loaded config).
     def base_dir
       @base_dir || DEFAULT_BASE_DIR
     end

@@ -172,15 +172,15 @@ module SpaceArchitect
       raise
     end
 
-    # Prefer a fast local copy of the evergreen repo; fall back to a network
-    # clone only when no evergreen copy is available.
+    # Prefer a fast local src copy; fall back to a network clone only when no
+    # src copy is available.
     def fetch_addition(addition, scm:, cloner:)
       reference = addition.fetch(:reference)
       destination = addition.fetch(:path)
-      source = addition.fetch(:evergreen_source)
+      source = addition.fetch(:src_source)
 
       if source&.directory?
-        actual_cloner = cloner || Pristine::Cloner.new(base_dir: config.evergreen_dir)
+        actual_cloner = cloner || Pristine::Cloner.new(base_dir: config.src_dir)
         result = actual_cloner.call(name: reference.full_name, into: destination.dirname.to_s)
         raise GitError, "clone failed (copy): #{result.failure}" if result.failure?
       else
@@ -190,7 +190,7 @@ module SpaceArchitect
     end
 
     def prepare_repo_additions(space, specs)
-      evergreen_dir = config.evergreen_dir
+      src_dir = config.src_dir
       additions = specs.map do |spec|
         reference = RepoResolver.new(config).resolve(spec)
         relative_path = Pathname.new("repos").join(reference.directory_name)
@@ -202,7 +202,7 @@ module SpaceArchitect
           reference: reference,
           relative_path: relative_path,
           path: destination,
-          evergreen_source: evergreen_dir && reference.evergreen_path(evergreen_dir)
+          src_source: src_dir && reference.src_path(src_dir)
         }
       end
 

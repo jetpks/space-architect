@@ -7,15 +7,15 @@ module SpaceArchitect
   class Config
     DEFAULT_DATA = {
       "version" => 1,
-      "spaces_dir" => "~/src/spaces",
-      "evergreen_dir" => "~/src/evergreen",
+      "base_dir" => "~/architect",
       "default_provider" => "github.com",
       "default_organization" => nil,
       "git_clone_protocol" => "ssh"
     }.freeze
     EDITABLE_KEYS = %w[
+      base_dir
       spaces_dir
-      evergreen_dir
+      src_dir
       default_provider
       default_organization
       git_clone_protocol
@@ -62,12 +62,21 @@ module SpaceArchitect
       self
     end
 
-    def spaces_dir
-      Pathname.new(XDG.expand_user(data.fetch("spaces_dir"), env: env))
+    def base_dir
+      Pathname.new(XDG.expand_user(data.fetch("base_dir"), env: env))
     end
 
-    def evergreen_dir
-      value = normalized_value(data["evergreen_dir"])
+    def spaces_dir
+      value = normalized_value(data["spaces_dir"])
+      return base_dir.join("spaces") unless value
+
+      Pathname.new(XDG.expand_user(value, env: env))
+    end
+
+    def src_dir
+      return base_dir.join("src") unless data.key?("src_dir")
+
+      value = normalized_value(data["src_dir"])
       return nil unless value
 
       Pathname.new(XDG.expand_user(value, env: env))

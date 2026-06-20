@@ -69,7 +69,7 @@ module SpaceArchitect
       end
 
       def start(addition)
-        source = addition[:evergreen_source]
+        source = addition[:src_source]
         @statuses[addition.fetch(:reference).full_name] = source&.directory? ? :copying : :cloning
       end
 

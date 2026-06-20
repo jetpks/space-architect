@@ -12,7 +12,7 @@ module SpaceArchitect
       name
     end
 
-    def evergreen_path(root)
+    def src_path(root)
       Pathname.new(root).join(provider, owner, name)
     end
   end

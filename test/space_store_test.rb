@@ -195,7 +195,7 @@ class SpaceStoreTest < SpaceArchitectTest
 
     config = SpaceArchitect::Config.new(
       env: setup.fetch(:env),
-      data: { "version" => 1, "spaces_dir" => "~/src/spaces", "evergreen_dir" => evergreen.to_s }
+      data: { "version" => 1, "src_dir" => evergreen.to_s }
     )
     state = SpaceArchitect::State.new(env: setup.fetch(:env))
     store = SpaceArchitect::SpaceStore.new(config: config, state: state, now: -> { fixed_time })
@@ -258,7 +258,7 @@ class SpaceStoreTest < SpaceArchitectTest
 
     config = SpaceArchitect::Config.new(
       env: setup.fetch(:env),
-      data: { "version" => 1, "spaces_dir" => "~/src/spaces", "evergreen_dir" => evergreen.to_s }
+      data: { "version" => 1, "src_dir" => evergreen.to_s }
     )
     state = SpaceArchitect::State.new(env: setup.fetch(:env))
     store = SpaceArchitect::SpaceStore.new(config: config, state: state, now: -> { fixed_time })
