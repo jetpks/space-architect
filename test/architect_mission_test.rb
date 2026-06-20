@@ -126,4 +126,24 @@ class ArchitectMissionTest < SpaceArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  def test_rendered_scaffolds_name_real_commands_not_space_architect
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+
+    architect_md = File.read(File.join(dir, "architecture", "ARCHITECT.md"))
+    iteration_md = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+
+    refute_match(/space architect/, architect_md)
+    refute_match(/space architect/, iteration_md)
+    assert_match(/architect new/, architect_md)
+    assert_match(/architect freeze/, iteration_md)
+    assert_match(/architect verify/, iteration_md)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end
