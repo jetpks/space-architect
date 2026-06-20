@@ -24,10 +24,8 @@ module SpaceArchitect
 
       File.open(prompt_path, "r") do |prompt_io|
         File.open(run_log_path, "w") do |log|
-          status = Warnings.without_experimental do
-            Sync do
-              Async::Process.spawn(*argv, chdir: chdir.to_s, in: prompt_io, out: log, err: log)
-            end
+          status = Sync do
+            Async::Process.spawn(*argv, chdir: chdir.to_s, in: prompt_io, out: log, err: log)
           end
           status.exitstatus
         end

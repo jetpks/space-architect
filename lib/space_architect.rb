@@ -6,6 +6,7 @@ require "space_architect/pristine"
 require_relative "space_architect/version"
 require_relative "space_architect/errors"
 require_relative "space_architect/warnings"
+SpaceArchitect::Warnings.disable_experimental!
 require_relative "space_architect/atomic_write"
 require_relative "space_architect/xdg"
 require_relative "space_architect/config"

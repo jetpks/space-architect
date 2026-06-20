@@ -124,25 +124,23 @@ module SpaceArchitect
       additions = prepare_repo_additions(space, specs)
       first_error = nil
 
-      Warnings.without_experimental do
-        Async do |task|
-          semaphore = Async::Semaphore.new(MAX_CONCURRENT_CLONES, parent: task)
+      Async do |task|
+        semaphore = Async::Semaphore.new(MAX_CONCURRENT_CLONES, parent: task)
 
-          clone_tasks = additions.map do |addition|
-            semaphore.async(finished: false) do
-              clone_addition(addition, scm:, cloner:, mise_client:, reporter:)
-            end
+        clone_tasks = additions.map do |addition|
+          semaphore.async(finished: false) do
+            clone_addition(addition, scm:, cloner:, mise_client:, reporter:)
           end
+        end
 
-          # Collect results without raising inside the reactor so the outer task
-          # succeeds and async does not log "Task may have ended" for our errors.
-          clone_tasks.each do |ct|
-            ct.wait
-          rescue StandardError => e
-            first_error ||= e
-          end
-        end.wait
-      end
+        # Collect results without raising inside the reactor so the outer task
+        # succeeds and async does not log "Task may have ended" for our errors.
+        clone_tasks.each do |ct|
+          ct.wait
+        rescue StandardError => e
+          first_error ||= e
+        end
+      end.wait
 
       return Failure(first_error) if first_error
 
