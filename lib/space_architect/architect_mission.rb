@@ -240,6 +240,29 @@ module SpaceArchitect
       end
     end
 
+    def dispatch(iteration, lane, model: "claude-sonnet-4-6", max_turns: 200, claude_bin: nil)
+      entry = slice_entry(iteration)
+      lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
+      raise Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
+
+      id = iteration_id(entry)
+      wt_path = space.path.join(lane_entry["worktree"] || "build/#{id}-#{lane}/wt")
+      raise Error, "Worktree directory does not exist: #{wt_path}" unless wt_path.exist?
+
+      prompt_path  = space.path.join("build", "#{id}-#{lane}", "prompt.md")
+      run_log_path = space.path.join("build", "#{id}-#{lane}", "run.jsonl")
+      report_path  = space.path.join("build", "#{id}-#{lane}", "report.md")
+      raise Error, "prompt.md not found: #{prompt_path}" unless prompt_path.exist?
+
+      exit_code = Dispatcher.new(model: model, max_turns: max_turns, claude_bin: claude_bin).run(
+        prompt_path:  prompt_path,
+        run_log_path: run_log_path,
+        chdir:        wt_path
+      )
+
+      { exit_code: exit_code, run_log: run_log_path, report: report_path, worktree: wt_path }
+    end
+
     private
 
     attr_reader :space
