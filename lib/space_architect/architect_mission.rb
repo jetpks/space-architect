@@ -210,9 +210,10 @@ module SpaceArchitect
       entry = slice_entry(iteration)
       variant_lanes = (entry["lanes"] || []).select { |l| l["variant"] }
       raise Error, "Iteration '#{iteration}' has no variant set — nothing to promote" if variant_lanes.empty?
-      raise Error, "Cannot promote '#{winner}' — not a variant lane of iteration '#{iteration}'" unless variant_lanes.any? { |l| l["name"] == winner }
 
-      discarded_names = variant_lanes.reject { |l| l["name"] == winner }.map { |l| l["name"] }
+      names = variant_lanes.map { |l| l["name"] }
+      raise Error, "Cannot promote '#{winner}' — not a variant lane of iteration '#{iteration}'" unless names.include?(winner)
+      discarded_names = names - [winner]
 
       update_architect_block do |b|
         (b["iterations"] || []).each do |s|
