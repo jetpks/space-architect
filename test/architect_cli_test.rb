@@ -519,6 +519,72 @@ class ArchitectCLITest < SpaceArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # ── I05: effort status render and CLI options ──────────────────────────────
+
+  # AC6: lane with effort renders ·<effort> suffix; lane without renders byte-identical to pre-I05
+  def test_status_shows_effort_suffix_for_effort_lane
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "lane-e",
+               "--harness", "opencode",
+               "--model", "fireworks-ai/accounts/fireworks/models/glm-5p2",
+               "--effort", "high")
+        invoke("worktree", "add", "my-repo", "demo", "lane-f",
+               "--harness", "opencode",
+               "--model", "fireworks-ai/accounts/fireworks/models/glm-5p2")
+
+        out, err = invoke("status")
+        assert_empty err
+
+        # lane-e cell has ·high inside the per-lane paren, after the model
+        assert_includes out, "lane-e(my-repo·opencode·fireworks-ai/accounts/fireworks/models/glm-5p2·high)",
+          "expected lane-e cell with ·high inside the paren"
+        # lane-f cell does NOT carry effort (closes right after the model)
+        assert_includes out, "lane-f(my-repo·opencode·fireworks-ai/accounts/fireworks/models/glm-5p2)",
+          "expected lane-f cell without effort"
+        refute_includes out, "lane-f(my-repo·opencode·fireworks-ai/accounts/fireworks/models/glm-5p2·high)",
+          "lane-f cell must not carry ·high"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC6 control: worktree add without effort → CLI passes effort: nil → no effort key in yaml
+  def test_worktree_add_cli_without_effort_produces_no_effort_key
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "lane-a",
+               "--harness", "opencode",
+               "--model", "fireworks-ai/accounts/fireworks/models/glm-5p2")
+
+        yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
+        lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+        refute lane.key?("effort"), "no effort key expected when --effort not passed"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   def test_variant_promote_cli_surfaces_error_for_bad_winner
     setup = temp_env
     env = setup.fetch(:env)

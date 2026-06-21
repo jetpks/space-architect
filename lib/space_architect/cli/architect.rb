@@ -72,7 +72,8 @@ module SpaceArchitect
                   lanes_str = lane_list.map do |l|
                     h = l["harness"] || "claude-code"
                     m = l["model"]   || Harness::CLAUDE_DEFAULT_MODEL
-                    "#{l['name']}(#{l['repo']}·#{h}·#{m})"
+                    eff = l["effort"] ? "·#{l['effort']}" : ""
+                    "#{l['name']}(#{l['repo']}·#{h}·#{m}#{eff})"
                   end.join(", ")
                   lanes = lane_list.any? { |l| l["variant"] } ? "variant: #{lanes_str}" : lanes_str
                   lanes = "#{lanes} → winner: #{s['winner']}" if s["winner"]
@@ -172,9 +173,10 @@ module SpaceArchitect
         option   :model,     default: nil,   desc: "Model to use (default: lane entry or claude-sonnet-4-6)"
         option   :max_turns, default: "200", desc: "Max turns for the builder"
         option   :harness,   default: nil,   desc: "Harness override (claude-code, opencode)"
+        option   :effort,    default: nil,   desc: "Reasoning effort override (opencode only, maps to --variant)"
 
         def call(iteration:, lane:, space: nil, model: nil,
-                 max_turns: "200", harness: nil, **opts)
+                 max_turns: "200", harness: nil, effort: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
@@ -182,6 +184,7 @@ module SpaceArchitect
               kwargs = { max_turns: max_turns.to_i }
               kwargs[:model]   = model   if model
               kwargs[:harness] = harness if harness
+              kwargs[:effort]  = effort  if effort
               res = mission.dispatch(iteration, lane, **kwargs)
               terminal.say "Run log: #{terminal.path(res[:run_log])}"
               terminal.say "Report:  #{terminal.path(res[:report])}"
@@ -204,14 +207,15 @@ module SpaceArchitect
           option   :base,      default: nil,          desc: "Base ref (default: HEAD of repo)"
           option   :harness,   default: "claude-code", desc: "Harness (claude-code, opencode)"
           option   :model,     default: nil,           desc: "Model (required for opencode)"
+          option   :effort,    default: nil,           desc: "Reasoning effort (opencode only, maps to --variant)"
 
-          def call(repo:, iteration:, lane:, base: nil, harness: "claude-code", model: nil, **opts)
+          def call(repo:, iteration:, lane:, base: nil, harness: "claude-code", model: nil, effort: nil, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find) do |sp|
                 mission = ArchitectMission.new(space: sp)
                 result = mission.worktree_add(repo, iteration, lane, base: base,
-                                             harness: harness, model: model)
+                                             harness: harness, model: model, effort: effort)
                 terminal.say "Worktree: #{terminal.path(result[:worktree])}"
                 terminal.say "Base SHA: #{result[:base_sha]}"
                 CLI.record_outcome(Outcome.new(exit_code: 0))

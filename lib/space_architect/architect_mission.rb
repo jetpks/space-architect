@@ -133,12 +133,17 @@ module SpaceArchitect
       sha
     end
 
-    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false)
+    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false, effort: nil)
       if harness.to_s == "opencode" && (model.nil? || model == Harness::CLAUDE_DEFAULT_MODEL)
         raise Error,
           "Pass --model when using --harness opencode " \
           "(#{Harness::CLAUDE_DEFAULT_MODEL} is a Claude model ID, not valid for opencode — " \
           "try e.g. fireworks-ai/accounts/fireworks/models/glm-5p2)"
+      end
+      if effort && harness.to_s != "opencode"
+        raise Error,
+          "effort is opencode-only (maps to --variant #{effort}) — " \
+          "set effort only on opencode lanes (harness: opencode)"
       end
 
       entry = slice_entry(iteration)
@@ -161,7 +166,7 @@ module SpaceArchitect
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
           lanes = s["lanes"] || []
-          lanes << {
+          lane_entry = {
             "name" => lane,
             "repo" => repo,
             "base_sha" => base_sha,
@@ -171,6 +176,8 @@ module SpaceArchitect
             "model" => model,
             "variant" => variant
           }
+          lane_entry["effort"] = effort if effort
+          lanes << lane_entry
           s["lanes"] = lanes
         end
         b
@@ -302,13 +309,14 @@ module SpaceArchitect
     end
 
     def dispatch(iteration, lane, model: nil, max_turns: 200,
-                 claude_bin: nil, harness: nil, opencode_bin: nil)
+                 claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
 
       resolved_harness = harness || lane_entry["harness"] || "claude-code"
       resolved_model   = model   || lane_entry["model"]   || Harness::CLAUDE_DEFAULT_MODEL
+      resolved_effort  = effort  || lane_entry["effort"]
 
       id = iteration_id(entry)
       wt_path = space.path.join(lane_entry["worktree"] || "build/#{id}-#{lane}/wt")
@@ -322,7 +330,7 @@ module SpaceArchitect
 
       bin = resolved_harness == "claude-code" ? claude_bin : opencode_bin
       harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
-                                                  bin: bin, config_dir: build_dir)
+                                                  bin: bin, config_dir: build_dir, effort: resolved_effort)
 
       exit_code = harness_obj.run(
         prompt_path:  prompt_path,
