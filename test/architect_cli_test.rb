@@ -608,4 +608,49 @@ class ArchitectCLITest < SpaceArchitectTest
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
+
+  # AC3: variant compare CLI renders a side-by-side table with winner/discarded
+  #      statuses, (default) for nil-model, - for nil-effort, and exit code 0
+  def test_variant_compare_cli_renders_table_with_statuses
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("variant", "add", "my-repo", "demo",
+               "--pairs", "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2")
+        invoke("variant", "promote", "demo", "v02")
+
+        out, err = invoke("variant", "compare", "demo")
+        assert_empty err
+        assert_match(/Variant comparison: demo/, out)
+        assert_match(/Winner: v02/, out)
+
+        # winner row Status cell reads WINNER
+        v02_line = out.lines.find { |l| l.include?("v02") && l.include?("WINNER") }
+        refute_nil v02_line, "expected a table row for v02 with WINNER status"
+
+        # non-winner variant row Status cell reads discarded
+        v01_line = out.lines.find { |l| l.include?("v01") && l.include?("discarded") }
+        refute_nil v01_line, "expected a table row for v01 with discarded status"
+
+        # nil-model lane's Model cell reads (default)
+        assert_includes v01_line, "(default)"
+
+        # lane with no effort renders - in the Effort cell (between Model and Status)
+        assert_match(/\(default\)\s+-\s+discarded/, v01_line)
+
+        # exit code 0
+        assert_equal 0, SpaceArchitect::CLI.last_outcome&.exit_code
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
 end
