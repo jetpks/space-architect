@@ -68,7 +68,11 @@ module SpaceArchitect
               else
                 rows = iterations.map do |s|
                   nn = s["ordinal"] ? format("%02d", s["ordinal"]) : "-"
-                  lanes = (s["lanes"] || []).map { |l| "#{l['name']}(#{l['repo']})" }.join(", ")
+                  lanes = (s["lanes"] || []).map do |l|
+          h = l["harness"] || "claude-code"
+          m = l["model"]   || Harness::CLAUDE_DEFAULT_MODEL
+          "#{l['name']}(#{l['repo']}·#{h}·#{m})"
+        end.join(", ")
                   [nn, s["name"], s["freeze_sha"]&.[](0, 8) || "-", lanes, s["verdict"] || "-"]
                 end
                 terminal.say terminal.table(%w[II Iteration FreezeSHA Lanes Verdict], rows)
@@ -162,18 +166,20 @@ module SpaceArchitect
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-        option   :model,     default: "claude-sonnet-4-6", desc: "Model to use"
-        option   :max_turns, default: "200",               desc: "Max turns for the builder"
-        option   :harness,   default: "claude-code",       desc: "Harness to use (claude-code, opencode)"
+        option   :model,     default: nil,   desc: "Model to use (default: lane entry or claude-sonnet-4-6)"
+        option   :max_turns, default: "200", desc: "Max turns for the builder"
+        option   :harness,   default: nil,   desc: "Harness override (claude-code, opencode)"
 
-        def call(iteration:, lane:, space: nil, model: "claude-sonnet-4-6",
-                 max_turns: "200", harness: "claude-code", **opts)
+        def call(iteration:, lane:, space: nil, model: nil,
+                 max_turns: "200", harness: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               mission = ArchitectMission.new(space: sp)
-              res = mission.dispatch(iteration, lane, model: model, max_turns: max_turns.to_i,
-                                                     harness: harness)
+              kwargs = { max_turns: max_turns.to_i }
+              kwargs[:model]   = model   if model
+              kwargs[:harness] = harness if harness
+              res = mission.dispatch(iteration, lane, **kwargs)
               terminal.say "Run log: #{terminal.path(res[:run_log])}"
               terminal.say "Report:  #{terminal.path(res[:report])}"
               terminal.say "Builder exited with status #{res[:exit_code]}"
@@ -192,14 +198,17 @@ module SpaceArchitect
           argument :repo,      required: true, desc: "Repo name (under repos/)"
           argument :iteration, required: true, desc: "Iteration name"
           argument :lane,      required: true, desc: "Lane name"
-          option   :base,      default: nil,   desc: "Base ref (default: HEAD of repo)"
+          option   :base,      default: nil,          desc: "Base ref (default: HEAD of repo)"
+          option   :harness,   default: "claude-code", desc: "Harness (claude-code, opencode)"
+          option   :model,     default: nil,           desc: "Model (required for opencode)"
 
-          def call(repo:, iteration:, lane:, base: nil, **opts)
+          def call(repo:, iteration:, lane:, base: nil, harness: "claude-code", model: nil, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find) do |sp|
                 mission = ArchitectMission.new(space: sp)
-                result = mission.worktree_add(repo, iteration, lane, base: base)
+                result = mission.worktree_add(repo, iteration, lane, base: base,
+                                             harness: harness, model: model)
                 terminal.say "Worktree: #{terminal.path(result[:worktree])}"
                 terminal.say "Base SHA: #{result[:base_sha]}"
                 CLI.record_outcome(Outcome.new(exit_code: 0))

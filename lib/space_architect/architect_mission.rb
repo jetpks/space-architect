@@ -133,7 +133,14 @@ module SpaceArchitect
       sha
     end
 
-    def worktree_add(repo, iteration, lane, base: nil)
+    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil)
+      if harness.to_s == "opencode" && (model.nil? || model == Harness::CLAUDE_DEFAULT_MODEL)
+        raise Error,
+          "Pass --model when using --harness opencode " \
+          "(#{Harness::CLAUDE_DEFAULT_MODEL} is a Claude model ID, not valid for opencode — " \
+          "try e.g. fireworks-ai/accounts/fireworks/models/glm-5p2)"
+      end
+
       entry = slice_entry(iteration)
       repo_path = space.path.join("repos", repo)
       raise Error, "repos/#{repo} does not exist" unless repo_path.exist?
@@ -159,7 +166,9 @@ module SpaceArchitect
             "repo" => repo,
             "base_sha" => base_sha,
             "worktree" => "build/#{id}-#{lane}/wt",
-            "integration_branch" => nil
+            "integration_branch" => nil,
+            "harness" => harness.to_s,
+            "model" => model
           }
           s["lanes"] = lanes
         end
@@ -240,11 +249,14 @@ module SpaceArchitect
       end
     end
 
-    def dispatch(iteration, lane, model: "claude-sonnet-4-6", max_turns: 200,
-                 claude_bin: nil, harness: "claude-code", opencode_bin: nil)
+    def dispatch(iteration, lane, model: nil, max_turns: 200,
+                 claude_bin: nil, harness: nil, opencode_bin: nil)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
+
+      resolved_harness = harness || lane_entry["harness"] || "claude-code"
+      resolved_model   = model   || lane_entry["model"]   || Harness::CLAUDE_DEFAULT_MODEL
 
       id = iteration_id(entry)
       wt_path = space.path.join(lane_entry["worktree"] || "build/#{id}-#{lane}/wt")
@@ -256,9 +268,9 @@ module SpaceArchitect
       report_path  = build_dir.join("report.md")
       raise Error, "prompt.md not found: #{prompt_path}" unless prompt_path.exist?
 
-      bin = harness.to_s == "claude-code" ? claude_bin : opencode_bin
-      harness_obj = Harness.for(harness.to_s, model: model, max_turns: max_turns,
-                                              bin: bin, config_dir: build_dir)
+      bin = resolved_harness == "claude-code" ? claude_bin : opencode_bin
+      harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
+                                                  bin: bin, config_dir: build_dir)
 
       exit_code = harness_obj.run(
         prompt_path:  prompt_path,
