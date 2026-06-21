@@ -336,6 +336,48 @@ class ArchitectCLITest < SpaceArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # AC6: architect status marks variant set with "variant:" prefix;
+  #      non-variant lane renders without prefix (control assertion)
+  def test_status_marks_variant_set_and_leaves_non_variant_unchanged
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+
+        # Iteration with a variant set
+        invoke("new", "variant-iter")
+        invoke("variant", "add", "my-repo", "variant-iter",
+               "--pairs", "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2")
+
+        # Iteration with a plain non-variant lane (control)
+        invoke("new", "plain-iter")
+        invoke("worktree", "add", "my-repo", "plain-iter", "lane-a",
+               "--harness", "claude-code")
+
+        out, err = invoke("status")
+        assert_empty err
+
+        variant_row = out.lines.find { |l| l.include?("variant-iter") }
+        refute_nil variant_row, "expected a row for variant-iter"
+        assert_includes variant_row, "variant:", "variant-iter row must include 'variant:' prefix"
+        assert_includes variant_row, "claude-code"
+        assert_includes variant_row, "glm-5p2"
+
+        plain_row = out.lines.find { |l| l.include?("plain-iter") }
+        refute_nil plain_row, "expected a row for plain-iter"
+        refute_includes plain_row, "variant:", "plain-iter row must NOT include 'variant:' prefix"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   def test_dispatch_cli_runs_fake_claude_and_writes_run_jsonl
     setup = temp_env
     env = setup.fetch(:env)

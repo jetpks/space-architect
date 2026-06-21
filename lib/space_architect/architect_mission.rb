@@ -133,7 +133,7 @@ module SpaceArchitect
       sha
     end
 
-    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil)
+    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false)
       if harness.to_s == "opencode" && (model.nil? || model == Harness::CLAUDE_DEFAULT_MODEL)
         raise Error,
           "Pass --model when using --harness opencode " \
@@ -168,7 +168,8 @@ module SpaceArchitect
             "worktree" => "build/#{id}-#{lane}/wt",
             "integration_branch" => nil,
             "harness" => harness.to_s,
-            "model" => model
+            "model" => model,
+            "variant" => variant
           }
           s["lanes"] = lanes
         end
@@ -176,6 +177,29 @@ module SpaceArchitect
       end
 
       { worktree: wt_path, base_sha: base_sha }
+    end
+
+    # Declare a variant set for an iteration: one competing lane per (harness, model) pair,
+    # all sharing a byte-identical prompt. Returns descriptors for each created variant.
+    def variant_add(repo, iteration, pairs, base: nil, prompt: nil)
+      prompt_bytes = prompt ? File.binread(prompt) : nil
+      entry = slice_entry(iteration)
+      id = iteration_id(entry)
+      existing_count = (entry["lanes"] || []).count { |l| l["name"].match?(/\Av\d+\z/) }
+
+      pairs.each_with_index.map do |(harness, model), i|
+        v_name = "v#{format('%02d', existing_count + i + 1)}"
+        result = worktree_add(repo, iteration, v_name, base: base,
+                              harness: harness, model: model, variant: true)
+
+        if prompt_bytes
+          build_dir = space.path.join("build", "#{id}-#{v_name}")
+          File.open(build_dir.join("prompt.md"), "wb") { |f| f.write(prompt_bytes) }
+        end
+
+        { name: v_name, repo: repo, harness: harness, model: model,
+          worktree: result[:worktree], base_sha: result[:base_sha] }
+      end
     end
 
     def worktree_remove(iteration, lane)

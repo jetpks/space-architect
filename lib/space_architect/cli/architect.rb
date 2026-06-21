@@ -68,11 +68,13 @@ module SpaceArchitect
               else
                 rows = iterations.map do |s|
                   nn = s["ordinal"] ? format("%02d", s["ordinal"]) : "-"
-                  lanes = (s["lanes"] || []).map do |l|
-          h = l["harness"] || "claude-code"
-          m = l["model"]   || Harness::CLAUDE_DEFAULT_MODEL
-          "#{l['name']}(#{l['repo']}·#{h}·#{m})"
-        end.join(", ")
+                  lane_list = s["lanes"] || []
+                  lanes_str = lane_list.map do |l|
+                    h = l["harness"] || "claude-code"
+                    m = l["model"]   || Harness::CLAUDE_DEFAULT_MODEL
+                    "#{l['name']}(#{l['repo']}·#{h}·#{m})"
+                  end.join(", ")
+                  lanes = lane_list.any? { |l| l["variant"] } ? "variant: #{lanes_str}" : lanes_str
                   [nn, s["name"], s["freeze_sha"]&.[](0, 8) || "-", lanes, s["verdict"] || "-"]
                 end
                 terminal.say terminal.table(%w[II Iteration FreezeSHA Lanes Verdict], rows)
@@ -261,6 +263,41 @@ module SpaceArchitect
           end
         end
       end
+
+      module Variant
+        class Add < Dry::CLI::Command
+          include GlobalOptions
+          include Helpers
+
+          desc "Create a variant set (competing lanes over one frozen spec)"
+          argument :repo,      required: true,  desc: "Repo name (under repos/)"
+          argument :iteration, required: true,  desc: "Iteration name"
+          argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+          option   :pairs,     required: true,  desc: "Comma-separated harness[:model] pairs (e.g. claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2)"
+          option   :base,      default: nil,    desc: "Base ref (default: HEAD of repo)"
+          option   :prompt,    default: nil,    desc: "Prompt file to fan-out byte-identical to each variant"
+
+          def call(repo:, iteration:, space: nil, pairs:, base: nil, prompt: nil, **opts)
+            setup_terminal(**opts.slice(:color, :colors))
+            handle_errors do
+              render(store.find(space)) do |sp|
+                parsed_pairs = pairs.to_s.split(",").map do |spec|
+                  harness, model = spec.split(":", 2)
+                  model = nil if model.nil? || model.empty?
+                  [harness, model]
+                end
+
+                mission = ArchitectMission.new(space: sp)
+                variants = mission.variant_add(repo, iteration, parsed_pairs, base: base, prompt: prompt)
+                variants.each do |v|
+                  terminal.say "#{v[:name]} · #{v[:harness]} · #{v[:model] || "(default)"} · #{terminal.path(v[:worktree])}"
+                end
+                CLI.record_outcome(Outcome.new(exit_code: 0))
+              end
+            end
+          end
+        end
+      end
     end
   end
 end
@@ -275,4 +312,7 @@ SpaceArchitect::CLI::Registry.register "worktree" do |wt|
   wt.register "add",    SpaceArchitect::CLI::Architect::Worktree::Add
   wt.register "remove", SpaceArchitect::CLI::Architect::Worktree::Remove
   wt.register "list",   SpaceArchitect::CLI::Architect::Worktree::List
+end
+SpaceArchitect::CLI::Registry.register "variant" do |v|
+  v.register "add", SpaceArchitect::CLI::Architect::Variant::Add
 end
