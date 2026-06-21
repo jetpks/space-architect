@@ -237,6 +237,31 @@ module SpaceArchitect
       { winner: winner, discarded: discarded_names }
     end
 
+    # Read-only side-by-side view of an iteration's variant set, reading ONLY the
+    # durable records in space.yaml. Returns a structured hash; the CLI renders it.
+    def variant_compare(iteration)
+      entry = slice_entry(iteration)
+      variant_lanes = (entry["lanes"] || []).select { |l| l["variant"] }
+      raise Error, "Iteration '#{iteration}' has no variant set — nothing to compare" if variant_lanes.empty?
+
+      winner = entry["winner"]
+      {
+        winner:     winner,
+        freeze_sha: entry["freeze_sha"],
+        variants: variant_lanes.map do |l|
+          {
+            name:               l["name"],
+            harness:            l["harness"] || "claude-code",
+            model:              l["model"],
+            effort:             l["effort"],
+            base_sha:           l["base_sha"],
+            integration_branch: l["integration_branch"],
+            status:             winner.nil? ? "pending" : (l["name"] == winner ? "winner" : "discarded")
+          }
+        end
+      }
+    end
+
     def worktree_remove(iteration, lane)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
@@ -256,7 +281,7 @@ module SpaceArchitect
       update_architect_block do |b|
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
-          s["lanes"] = (s["lanes"] || []).reject { |l| l["name"] == lane }
+          (s["lanes"] || []).each { |l| l["worktree"] = nil if l["name"] == lane }
         end
         b
       end
