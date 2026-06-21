@@ -191,6 +191,66 @@ class HarnessTest < SpaceArchitectTest
     FileUtils.rm_rf(root)
   end
 
+  # ── Dispatch resolution from lane entry (AC3 / AC4) ──────────────────────
+
+  # AC3: dispatch with no harness/model kwargs reads both from the persisted lane entry
+  def test_dispatch_reads_harness_and_model_from_lane
+    root = Dir.mktmpdir("harness-test")
+    space_dir, mission, _fake_claude, fake_oc, _build_dir = setup_space(root)
+
+    mission.worktree_add("my-repo", "demo", "B",
+                         harness: "opencode",
+                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2")
+    b_build_dir = File.join(space_dir, "build", "I01-demo-B")
+    FileUtils.mkdir_p(b_build_dir)
+    File.write(File.join(b_build_dir, "prompt.md"), "PROMPT-B\n")
+
+    res = mission.dispatch("demo", "B", opencode_bin: fake_oc)
+    log = File.read(File.join(b_build_dir, "run.jsonl"))
+
+    assert_equal 0, res[:exit_code]
+    # Opencode path taken — not claude path
+    assert_includes log, '"run"'
+    assert_includes log, '"--agent"'
+    assert_includes log, '"builder"'
+    # Correct model from lane
+    assert_includes log, "fireworks-ai/accounts/fireworks/models/glm-5p2"
+    # Claude path NOT taken
+    refute_includes log, "stream-json"
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  # AC4: explicit dispatch-time model overrides without mutating the persisted lane entry
+  def test_dispatch_override_does_not_mutate_lane_entry
+    root = Dir.mktmpdir("harness-test")
+    space_dir, mission, _fake_claude, fake_oc, _build_dir = setup_space(root)
+
+    mission.worktree_add("my-repo", "demo", "C",
+                         harness: "opencode",
+                         model: "original-model")
+    c_build_dir = File.join(space_dir, "build", "I01-demo-C")
+    FileUtils.mkdir_p(c_build_dir)
+    File.write(File.join(c_build_dir, "prompt.md"), "PROMPT-C\n")
+
+    res = mission.dispatch("demo", "C", model: "override-model", opencode_bin: fake_oc)
+    log = File.read(File.join(c_build_dir, "run.jsonl"))
+
+    assert_equal 0, res[:exit_code]
+    # Captured argv carries the override model
+    assert_includes log, "override-model"
+    refute_includes log, "original-model"
+
+    # Lane entry on disk is unchanged — original model survives
+    yml = YAML.safe_load(File.read(File.join(space_dir, "space.yaml")), aliases: false)
+    iterations = yml.dig("architect", "iterations") || []
+    demo = iterations.find { |i| i["name"] == "demo" }
+    lane_c = (demo["lanes"] || []).find { |l| l["name"] == "C" }
+    assert_equal "original-model", lane_c["model"]
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
   # ── Footgun guard ─────────────────────────────────────────────────────────
 
   def test_footgun_guard_raises_when_opencode_with_default_model

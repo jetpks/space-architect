@@ -127,6 +127,60 @@ class ArchitectMissionTest < SpaceArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # AC2: worktree_add persists harness and model on the lane entry
+  def test_worktree_add_persists_harness_and_model
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.worktree_add("my-repo", "my-slice", "lane-a",
+                         harness: "opencode",
+                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2")
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+
+    assert_equal "opencode", lane["harness"]
+    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", lane["model"]
+    # Pre-existing keys must still be present
+    assert_equal "lane-a",   lane["name"]
+    assert_equal "my-repo",  lane["repo"]
+    assert        lane["base_sha"]
+    assert_match %r{build/I01-my-slice-lane-a/wt}, lane["worktree"]
+    assert_nil    lane["integration_branch"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5: worktree_add raises footgun error for opencode without a valid model
+  def test_worktree_add_footgun_raises_for_opencode_without_model
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+
+    # nil model raises, and error names --model
+    err = assert_raises(SpaceArchitect::Error) do
+      mission.worktree_add("my-repo", "my-slice", "lane-bad", harness: "opencode")
+    end
+    assert_match(/--model/, err.message)
+
+    # claude default model also raises
+    assert_raises(SpaceArchitect::Error) do
+      mission.worktree_add("my-repo", "my-slice", "lane-bad",
+                           harness: "opencode",
+                           model: SpaceArchitect::Harness::CLAUDE_DEFAULT_MODEL)
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   def test_rendered_scaffolds_name_real_commands_not_space_architect
     dir = Dir.mktmpdir("architect-mission-test")
     space = create_real_space(dir)
