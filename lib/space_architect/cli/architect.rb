@@ -158,19 +158,22 @@ module SpaceArchitect
         include GlobalOptions
         include Helpers
 
-        desc "Dispatch a builder for a lane (runs claude -p, streams to build/<id>-<lane>/run.jsonl)"
+        desc "Dispatch a builder for a lane (streams to build/<id>-<lane>/run.jsonl)"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :model,     default: "claude-sonnet-4-6", desc: "Model to use"
         option   :max_turns, default: "200",               desc: "Max turns for the builder"
+        option   :harness,   default: "claude-code",       desc: "Harness to use (claude-code, opencode)"
 
-        def call(iteration:, lane:, space: nil, model: "claude-sonnet-4-6", max_turns: "200", **opts)
+        def call(iteration:, lane:, space: nil, model: "claude-sonnet-4-6",
+                 max_turns: "200", harness: "claude-code", **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               mission = ArchitectMission.new(space: sp)
-              res = mission.dispatch(iteration, lane, model: model, max_turns: max_turns.to_i)
+              res = mission.dispatch(iteration, lane, model: model, max_turns: max_turns.to_i,
+                                                     harness: harness)
               terminal.say "Run log: #{terminal.path(res[:run_log])}"
               terminal.say "Report:  #{terminal.path(res[:report])}"
               terminal.say "Builder exited with status #{res[:exit_code]}"

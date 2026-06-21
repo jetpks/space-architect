@@ -240,7 +240,8 @@ module SpaceArchitect
       end
     end
 
-    def dispatch(iteration, lane, model: "claude-sonnet-4-6", max_turns: 200, claude_bin: nil)
+    def dispatch(iteration, lane, model: "claude-sonnet-4-6", max_turns: 200,
+                 claude_bin: nil, harness: "claude-code", opencode_bin: nil)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
@@ -249,12 +250,17 @@ module SpaceArchitect
       wt_path = space.path.join(lane_entry["worktree"] || "build/#{id}-#{lane}/wt")
       raise Error, "Worktree directory does not exist: #{wt_path}" unless wt_path.exist?
 
-      prompt_path  = space.path.join("build", "#{id}-#{lane}", "prompt.md")
-      run_log_path = space.path.join("build", "#{id}-#{lane}", "run.jsonl")
-      report_path  = space.path.join("build", "#{id}-#{lane}", "report.md")
+      build_dir    = space.path.join("build", "#{id}-#{lane}")
+      prompt_path  = build_dir.join("prompt.md")
+      run_log_path = build_dir.join("run.jsonl")
+      report_path  = build_dir.join("report.md")
       raise Error, "prompt.md not found: #{prompt_path}" unless prompt_path.exist?
 
-      exit_code = Dispatcher.new(model: model, max_turns: max_turns, claude_bin: claude_bin).run(
+      bin = harness.to_s == "claude-code" ? claude_bin : opencode_bin
+      harness_obj = Harness.for(harness.to_s, model: model, max_turns: max_turns,
+                                              bin: bin, config_dir: build_dir)
+
+      exit_code = harness_obj.run(
         prompt_path:  prompt_path,
         run_log_path: run_log_path,
         chdir:        wt_path
