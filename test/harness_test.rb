@@ -284,4 +284,168 @@ class HarnessTest < SpaceArchitectTest
                                   model: "x", max_turns: 1, config_dir: Dir.mktmpdir)
     end
   end
+
+  # ── I05: effort / --variant ───────────────────────────────────────────────
+
+  # Fake binary that records argv to ARGV_RECORD_FILE (null-delimited).
+  FAKE_ARGV_RECORDER = <<~RUBY
+    #!/usr/bin/env ruby
+    File.write(ENV.fetch("ARGV_RECORD_FILE"), ARGV.join("\x00"))
+    exit 0
+  RUBY
+
+  # AC2(a): effort "high" → argv contains adjacent pair --variant high
+  def test_opencode_argv_includes_variant_when_effort_set
+    root = Dir.mktmpdir("harness-test")
+    _space_dir, mission, _fake_claude, _fake_oc, build_dir = setup_space(root)
+
+    recorder = File.join(root, "recorder")
+    argv_file = File.join(root, "recorded_argv")
+    File.write(recorder, FAKE_ARGV_RECORDER)
+    File.chmod(0o755, recorder)
+
+    ENV["ARGV_RECORD_FILE"] = argv_file
+    mission.dispatch("demo", "A",
+                     harness: "opencode",
+                     model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
+                     effort: "high",
+                     opencode_bin: recorder)
+    recorded = File.read(argv_file).split("\x00")
+
+    idx = recorded.index("--variant")
+    refute_nil idx, "expected --variant in argv: #{recorded.inspect}"
+    assert_equal "high", recorded[idx + 1], "expected --variant high: #{recorded.inspect}"
+  ensure
+    ENV.delete("ARGV_RECORD_FILE")
+    FileUtils.rm_rf(root)
+  end
+
+  # AC2(b): no effort → argv has no --variant and is otherwise identical to pre-I05
+  def test_opencode_argv_excludes_variant_when_no_effort
+    root = Dir.mktmpdir("harness-test")
+    _space_dir, mission, _fake_claude, _fake_oc, build_dir = setup_space(root)
+
+    recorder = File.join(root, "recorder")
+    argv_file = File.join(root, "recorded_argv")
+    File.write(recorder, FAKE_ARGV_RECORDER)
+    File.chmod(0o755, recorder)
+
+    ENV["ARGV_RECORD_FILE"] = argv_file
+    mission.dispatch("demo", "A",
+                     harness: "opencode",
+                     model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
+                     opencode_bin: recorder)
+    recorded = File.read(argv_file).split("\x00")
+
+    refute_includes recorded, "--variant", "no --variant token expected: #{recorded.inspect}"
+    # pre-I05 shape: run --format json --model <m> --dangerously-skip-permissions --agent builder --dir <wt>
+    # ARGV[0] is "run" (binary name excluded from ARGV)
+    assert_equal "run", recorded[0]
+    assert_includes recorded, "--format"
+    assert_includes recorded, "json"
+    assert_includes recorded, "--dangerously-skip-permissions"
+    assert_includes recorded, "--agent"
+    assert_includes recorded, "builder"
+    assert_includes recorded, "--dir"
+  ensure
+    ENV.delete("ARGV_RECORD_FILE")
+    FileUtils.rm_rf(root)
+  end
+
+  # AC3(a): lane effort "high" → argv has --variant high when dispatch passes no effort
+  def test_dispatch_reads_effort_from_lane
+    root = Dir.mktmpdir("harness-test")
+    space_dir, mission, _fake_claude, _fake_oc, _build_dir = setup_space(root)
+
+    recorder = File.join(root, "recorder")
+    argv_file = File.join(root, "recorded_argv")
+    File.write(recorder, FAKE_ARGV_RECORDER)
+    File.chmod(0o755, recorder)
+
+    mission.worktree_add("my-repo", "demo", "E",
+                         harness: "opencode",
+                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
+                         effort: "high")
+    e_build_dir = File.join(space_dir, "build", "I01-demo-E")
+    FileUtils.mkdir_p(e_build_dir)
+    File.write(File.join(e_build_dir, "prompt.md"), "PROMPT-E\n")
+
+    ENV["ARGV_RECORD_FILE"] = argv_file
+    mission.dispatch("demo", "E", opencode_bin: recorder)
+    recorded = File.read(argv_file).split("\x00")
+
+    idx = recorded.index("--variant")
+    refute_nil idx, "lane effort should produce --variant: #{recorded.inspect}"
+    assert_equal "high", recorded[idx + 1]
+  ensure
+    ENV.delete("ARGV_RECORD_FILE")
+    FileUtils.rm_rf(root)
+  end
+
+  # AC3(b): explicit effort "low" overrides lane effort "high"
+  def test_dispatch_explicit_effort_overrides_lane_effort
+    root = Dir.mktmpdir("harness-test")
+    space_dir, mission, _fake_claude, _fake_oc, _build_dir = setup_space(root)
+
+    recorder = File.join(root, "recorder")
+    argv_file = File.join(root, "recorded_argv")
+    File.write(recorder, FAKE_ARGV_RECORDER)
+    File.chmod(0o755, recorder)
+
+    mission.worktree_add("my-repo", "demo", "F",
+                         harness: "opencode",
+                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
+                         effort: "high")
+    f_build_dir = File.join(space_dir, "build", "I01-demo-F")
+    FileUtils.mkdir_p(f_build_dir)
+    File.write(File.join(f_build_dir, "prompt.md"), "PROMPT-F\n")
+
+    ENV["ARGV_RECORD_FILE"] = argv_file
+    mission.dispatch("demo", "F", effort: "low", opencode_bin: recorder)
+    recorded = File.read(argv_file).split("\x00")
+
+    idx = recorded.index("--variant")
+    refute_nil idx, "explicit effort should produce --variant: #{recorded.inspect}"
+    assert_equal "low", recorded[idx + 1]
+
+    # Lane entry on disk still has "high" — no mutation
+    yml = YAML.safe_load(File.read(File.join(space_dir, "space.yaml")), aliases: false)
+    demo = yml.dig("architect", "iterations").find { |i| i["name"] == "demo" }
+    lane_f = (demo["lanes"] || []).find { |l| l["name"] == "F" }
+    assert_equal "high", lane_f["effort"]
+  ensure
+    ENV.delete("ARGV_RECORD_FILE")
+    FileUtils.rm_rf(root)
+  end
+
+  # AC4(b): Harness.for with claude-code + effort raises with opencode-only message
+  def test_harness_for_raises_for_claude_code_with_effort
+    err = assert_raises(SpaceArchitect::Error) do
+      SpaceArchitect::Harness.for("claude-code",
+                                  model: "claude-sonnet-4-6", max_turns: 10,
+                                  bin: "/fake", effort: "high")
+    end
+    assert_match(/opencode-only/, err.message)
+    assert_match(/--variant/, err.message)
+  end
+
+  # AC6 control: dispatching claude-code via fake produces no --variant in argv
+  def test_claude_code_dispatch_argv_unchanged_by_effort_feature
+    root = Dir.mktmpdir("harness-test")
+    _space_dir, mission, _fake_claude, _fake_oc, build_dir = setup_space(root)
+
+    recorder = File.join(root, "recorder")
+    argv_file = File.join(root, "recorded_argv")
+    File.write(recorder, FAKE_ARGV_RECORDER)
+    File.chmod(0o755, recorder)
+
+    ENV["ARGV_RECORD_FILE"] = argv_file
+    mission.dispatch("demo", "A", claude_bin: recorder)
+    recorded = File.read(argv_file).split("\x00")
+
+    refute_includes recorded, "--variant", "claude-code argv must not contain --variant"
+  ensure
+    ENV.delete("ARGV_RECORD_FILE")
+    FileUtils.rm_rf(root)
+  end
 end

@@ -473,6 +473,85 @@ class ArchitectMissionTest < SpaceArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # ── I05: effort persistence and footgun ──────────────────────────────────
+
+  # AC5(a): effort "high" persisted on lane entry; all pre-existing keys preserved
+  def test_worktree_add_persists_effort_when_set
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.worktree_add("my-repo", "my-slice", "lane-e",
+                         harness: "opencode",
+                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
+                         effort: "high")
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+
+    assert_equal "high", lane["effort"]
+    # pre-existing keys preserved
+    assert_equal "lane-e",   lane["name"]
+    assert_equal "my-repo",  lane["repo"]
+    assert        lane["base_sha"]
+    assert_match %r{build/I01-my-slice-lane-e/wt}, lane["worktree"]
+    assert_nil    lane["integration_branch"]
+    assert_equal "opencode", lane["harness"]
+    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", lane["model"]
+    assert_equal false, lane["variant"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5(b): no effort kwarg → NO "effort" key in lane entry at all
+  def test_worktree_add_no_effort_key_when_not_set
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.worktree_add("my-repo", "my-slice", "lane-f",
+                         harness: "opencode",
+                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2")
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+
+    refute lane.key?("effort"), "effort key must be absent when not set"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4(a): effort on a claude-code lane raises and writes nothing
+  def test_worktree_add_footgun_raises_for_effort_on_claude_code
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+
+    err = assert_raises(SpaceArchitect::Error) do
+      mission.worktree_add("my-repo", "my-slice", "lane-bad",
+                           harness: "claude-code", effort: "high")
+    end
+    assert_match(/opencode-only/, err.message)
+    assert_match(/--variant/, err.message)
+
+    # Nothing persisted after the raise
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lanes = yml.dig("architect", "iterations", 0, "lanes") || []
+    assert_empty lanes, "no lane should be written after footgun raise"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # AC6: promote raises on a no-variant iteration and writes nothing
   def test_variant_promote_raises_on_no_variant_iteration
     dir = Dir.mktmpdir("architect-mission-test")

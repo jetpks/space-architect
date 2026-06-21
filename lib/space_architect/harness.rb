@@ -10,9 +10,14 @@ module SpaceArchitect
 
     # Factory keyed by harness name.
     # For opencode: config_dir is required (build/<id>-<lane> dir outside the worktree).
-    def self.for(name, model:, max_turns:, bin: nil, config_dir: nil)
+    def self.for(name, model:, max_turns:, bin: nil, config_dir: nil, effort: nil)
       case name.to_s
       when "claude-code"
+        if effort
+          raise Error,
+            "effort is opencode-only (maps to --variant #{effort}) — " \
+            "claude-code effort is set via the prompt"
+        end
         ClaudeCodeHarness.new(model: model, max_turns: max_turns, bin: bin)
       when "opencode"
         if model == CLAUDE_DEFAULT_MODEL
@@ -22,7 +27,7 @@ module SpaceArchitect
             "try e.g. fireworks-ai/accounts/fireworks/models/glm-5p2)"
         end
         raise Error, "config_dir is required for opencode harness" unless config_dir
-        OpenCodeHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir)
+        OpenCodeHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir, effort: effort)
       else
         raise Error, "Unknown harness '#{name}' — valid values: claude-code, opencode"
       end
@@ -73,11 +78,12 @@ module SpaceArchitect
     end
 
     class OpenCodeHarness
-      def initialize(model:, max_turns:, bin: nil, config_dir:)
+      def initialize(model:, max_turns:, bin: nil, config_dir:, effort: nil)
         @model      = model
         @max_turns  = max_turns
         @bin        = bin || ENV.fetch("ARCHITECT_OPENCODE_BIN", "opencode")
         @config_dir = Pathname.new(config_dir)
+        @effort     = effort
       end
 
       # Returns the agent config hash (deterministic, unit-testable).
@@ -132,7 +138,7 @@ module SpaceArchitect
 
       # --dir sets the working directory for opencode's tooling layer.
       def argv(chdir)
-        [
+        args = [
           @bin, "run",
           "--format", "json",
           "--model", @model,
@@ -140,6 +146,8 @@ module SpaceArchitect
           "--agent", "builder",
           "--dir", chdir.to_s
         ]
+        args += ["--variant", @effort] if @effort
+        args
       end
     end
   end
