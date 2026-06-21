@@ -208,20 +208,18 @@ module SpaceArchitect
     # and recomputes every variant lane's "discarded" flag.
     def variant_promote(iteration, winner)
       entry = slice_entry(iteration)
-      variant_lanes = (entry["lanes"] || []).select { |l| l["variant"] == true }
+      variant_lanes = (entry["lanes"] || []).select { |l| l["variant"] }
       raise Error, "Iteration '#{iteration}' has no variant set — nothing to promote" if variant_lanes.empty?
-      unless variant_lanes.any? { |l| l["name"] == winner }
-        raise Error, "Cannot promote '#{winner}' — not a variant lane of iteration '#{iteration}'"
-      end
+      raise Error, "Cannot promote '#{winner}' — not a variant lane of iteration '#{iteration}'" unless variant_lanes.any? { |l| l["name"] == winner }
 
-      discarded_names = variant_lanes.select { |l| l["name"] != winner }.map { |l| l["name"] }
+      discarded_names = variant_lanes.reject { |l| l["name"] == winner }.map { |l| l["name"] }
 
       update_architect_block do |b|
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
           s["winner"] = winner
           (s["lanes"] || []).each do |l|
-            next unless l["variant"] == true
+            next unless l["variant"]
             l["discarded"] = (l["name"] != winner)
           end
         end
