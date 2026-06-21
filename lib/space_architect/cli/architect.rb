@@ -328,6 +328,43 @@ module SpaceArchitect
             end
           end
         end
+
+        class Compare < Dry::CLI::Command
+          include GlobalOptions
+          include Helpers
+
+          desc "Compare variants of an iteration's variant set (read-only)"
+          argument :iteration, required: true,  desc: "Iteration name"
+          argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+
+          def call(iteration:, space: nil, **opts)
+            setup_terminal(**opts.slice(:color, :colors))
+            handle_errors do
+              render(store.find(space)) do |sp|
+                mission = ArchitectMission.new(space: sp)
+                info = mission.variant_compare(iteration)
+
+                terminal.say "Variant comparison: #{iteration} (freeze #{info[:freeze_sha]&.[](0, 8) || "-"})"
+                terminal.say "Winner: #{info[:winner] || "(none)"}"
+                terminal.say
+                rows = info[:variants].map do |v|
+                  [
+                    v[:name],
+                    v[:harness],
+                    v[:model] || "(default)",
+                    v[:effort] || "-",
+                    v[:status] == "winner" ? "WINNER" : v[:status],
+                    v[:integration_branch] || "-",
+                    v[:base_sha]&.[](0, 8) || "-"
+                  ]
+                end
+                terminal.say terminal.table(%w[Variant Harness Model Effort Status Integration Base], rows)
+
+                CLI.record_outcome(Outcome.new(exit_code: 0))
+              end
+            end
+          end
+        end
       end
     end
   end
@@ -347,4 +384,5 @@ end
 SpaceArchitect::CLI::Registry.register "variant" do |v|
   v.register "add",     SpaceArchitect::CLI::Architect::Variant::Add
   v.register "promote", SpaceArchitect::CLI::Architect::Variant::Promote
+  v.register "compare", SpaceArchitect::CLI::Architect::Variant::Compare
 end

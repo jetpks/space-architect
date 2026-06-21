@@ -577,4 +577,160 @@ class ArchitectMissionTest < SpaceArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  # ── I06: variant compare + worktree_remove preservation ───────────────────
+
+  # AC1: variant_compare returns a structured hash with one descriptor per
+  #      variant lane (non-variant lanes excluded), status derived from winner
+  def test_variant_compare_returns_structured_descriptor_with_status
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.freeze!("my-slice")
+    mission.variant_add("my-repo", "my-slice",
+                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+    # non-variant lane must be EXCLUDED from the compare result
+    mission.worktree_add("my-repo", "my-slice", "lane-a")
+    mission.variant_promote("my-slice", "v02")
+
+    result = mission.variant_compare("my-slice")
+
+    assert_equal "v02", result[:winner]
+    assert_match(/\A[0-9a-f]{40}\z/, result[:freeze_sha])
+    assert_equal 2, result[:variants].length, "non-variant lanes must be excluded"
+
+    v01 = result[:variants].find { |v| v[:name] == "v01" }
+    v02 = result[:variants].find { |v| v[:name] == "v02" }
+
+    assert_equal "v01",               v01[:name]
+    assert_equal "claude-code",       v01[:harness]
+    assert_nil                       v01[:model]
+    assert_nil                       v01[:effort]
+    assert v01[:base_sha]
+    assert_nil                       v01[:integration_branch]
+    assert_equal "discarded",         v01[:status]
+
+    assert_equal "v02",               v02[:name]
+    assert_equal "opencode",          v02[:harness]
+    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", v02[:model]
+    assert_nil                       v02[:effort]
+    assert v02[:base_sha]
+    assert_nil                       v02[:integration_branch]
+    assert_equal "winner",            v02[:status]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1: status is "pending" for every variant lane when winner is nil
+  def test_variant_compare_returns_pending_when_no_winner
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.variant_add("my-repo", "my-slice",
+                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+
+    result = mission.variant_compare("my-slice")
+
+    assert_nil result[:winner]
+    assert_equal 2, result[:variants].length
+    assert_equal ["pending", "pending"], result[:variants].map { |v| v[:status] }
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1: harness defaults to "claude-code" when the record's value is nil
+  def test_variant_compare_defaults_nil_harness_to_claude_code
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.variant_add("my-repo", "my-slice", [["claude-code", nil]])
+
+    # Simulate a record with nil harness (e.g. from older code)
+    space.data.dig("architect", "iterations").find { |s| s["name"] == "my-slice" }["lanes"][0]["harness"] = nil
+
+    result = mission.variant_compare("my-slice")
+    assert_equal "claude-code", result[:variants].first[:harness]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2: variant_compare on an iteration with no variant lanes raises and writes nothing
+  def test_variant_compare_raises_on_no_variant_iteration
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.worktree_add("my-repo", "my-slice", "lane-a")
+
+    err = assert_raises(SpaceArchitect::Error) do
+      mission.variant_compare("my-slice")
+    end
+    assert_match(/no variant set — nothing to compare/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: worktree_remove preserves the lane record (worktree → nil) and
+  #      leaves winner / discarded flags and all other fields byte-identical
+  def test_worktree_remove_preserves_lane_record_after_promote
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.variant_add("my-repo", "my-slice",
+                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+    mission.variant_promote("my-slice", "v02")
+
+    # Snapshot the lane record before removal
+    yml_before = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    iter_before = yml_before.dig("architect", "iterations", 0)
+    lane_before = iter_before["lanes"].find { |l| l["name"] == "v01" }
+    wt_path_before = lane_before["worktree"]
+    refute_nil wt_path_before
+
+    mission.worktree_remove("my-slice", "v01")
+
+    yml_after = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    iter_after = yml_after.dig("architect", "iterations", 0)
+    lane_after = iter_after["lanes"].find { |l| l["name"] == "v01" }
+
+    # (a) winner unchanged
+    assert_equal "v02", iter_after["winner"]
+
+    # (b) every variant lane's discarded flag unchanged
+    iter_after["lanes"].select { |l| l["variant"] }.each do |l|
+      expected = (l["name"] != "v02")
+      assert_equal expected, l["discarded"], "discarded flag for #{l['name']} must be unchanged"
+    end
+
+    # (c) removed lane is STILL PRESENT with worktree == nil, all other fields byte-identical
+    refute_nil lane_after, "removed lane must still be present in the record"
+    assert_nil lane_after["worktree"], "worktree must be nil after removal"
+    expected = lane_before.reject { |k, _| k == "worktree" }
+    actual = lane_after.reject { |k, _| k == "worktree" }
+    assert_equal expected, actual, "all fields except worktree must be byte-identical after removal"
+
+    # (d) the physical worktree directory no longer exists
+    refute_path_exists File.join(dir, wt_path_before)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end
