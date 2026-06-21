@@ -350,4 +350,152 @@ class ArchitectMissionTest < SpaceArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  # AC2: variant_promote records the winner on the iteration and discarded flags
+  #      on each variant lane, preserving all pre-existing keys
+  def test_variant_promote_records_winner_and_discarded_flags
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.variant_add("my-repo", "my-slice",
+                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+
+    result = mission.variant_promote("my-slice", "v02")
+
+    assert_equal "v02", result[:winner]
+    assert_equal ["v01"], result[:discarded]
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    iter = yml.dig("architect", "iterations", 0)
+
+    assert_equal "v02", iter["winner"]
+    # pre-existing iteration keys preserved
+    assert_equal "my-slice", iter["name"]
+    assert_equal 1, iter["ordinal"]
+    assert_equal "architecture/I01-my-slice.md", iter["file"]
+    assert_nil iter["freeze_sha"]
+    assert_equal "pending", iter["verdict"]
+    assert iter["lanes"].is_a?(Array)
+
+    v01 = iter["lanes"].find { |l| l["name"] == "v01" }
+    v02 = iter["lanes"].find { |l| l["name"] == "v02" }
+
+    assert_equal true,  v01["discarded"]
+    assert_equal false, v02["discarded"]
+    # pre-existing lane keys preserved on both
+    [v01, v02].each do |l|
+      assert l["name"]
+      assert_equal "my-repo", l["repo"]
+      assert l["base_sha"]
+      assert l["worktree"]
+      assert_nil l["integration_branch"]
+      assert l["harness"]
+      assert l.key?("model")
+      assert_equal true, l["variant"]
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: validate-before-mutate — bad winner raises and writes nothing
+  def test_variant_promote_validates_before_mutate
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.variant_add("my-repo", "my-slice",
+                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+    # also add a non-variant lane to test (b)
+    mission.worktree_add("my-repo", "my-slice", "lane-a")
+
+    # (a) non-existent lane name
+    err = assert_raises(SpaceArchitect::Error) do
+      mission.variant_promote("my-slice", "v99")
+    end
+    assert_match(/v99/, err.message)
+
+    # (b) name of a non-variant lane
+    err = assert_raises(SpaceArchitect::Error) do
+      mission.variant_promote("my-slice", "lane-a")
+    end
+    assert_match(/lane-a/, err.message)
+
+    # After both raises: no winner key, no discarded keys on variant lanes
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    iter = yml.dig("architect", "iterations", 0)
+
+    refute iter.key?("winner"), "no winner key should be written after a raise"
+
+    variant_lanes = (iter["lanes"] || []).select { |l| l["variant"] == true }
+    variant_lanes.each do |l|
+      refute l.key?("discarded"), "no discarded key should be written on variant lane after a raise"
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: idempotent re-promote — second call reassigns winner and recomputes flags
+  def test_variant_promote_is_idempotent_repromote
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.variant_add("my-repo", "my-slice",
+                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+
+    mission.variant_promote("my-slice", "v02")
+    mission.variant_promote("my-slice", "v01")
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    iter = yml.dig("architect", "iterations", 0)
+
+    assert_equal "v01", iter["winner"]
+
+    v01 = iter["lanes"].find { |l| l["name"] == "v01" }
+    v02 = iter["lanes"].find { |l| l["name"] == "v02" }
+
+    assert_equal false, v01["discarded"]
+    assert_equal true,  v02["discarded"]
+    # no duplicate keys — YAML round-trip would not duplicate, but verify count
+    assert_equal 1, iter["lanes"].count { |l| l["name"] == "v01" }
+    assert_equal 1, iter["lanes"].count { |l| l["name"] == "v02" }
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC6: promote raises on a no-variant iteration and writes nothing
+  def test_variant_promote_raises_on_no_variant_iteration
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.worktree_add("my-repo", "my-slice", "lane-a")
+
+    err = assert_raises(SpaceArchitect::Error) do
+      mission.variant_promote("my-slice", "lane-a")
+    end
+    assert_match(/no variant/, err.message)
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    iter = yml.dig("architect", "iterations", 0)
+
+    refute iter.key?("winner"), "no winner key should be written on a no-variant iteration"
+    lane = iter["lanes"].find { |l| l["name"] == "lane-a" }
+    refute lane.key?("discarded"), "no discarded key should be written on a non-variant lane"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end

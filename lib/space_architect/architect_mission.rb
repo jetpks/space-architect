@@ -202,6 +202,35 @@ module SpaceArchitect
       end
     end
 
+    # Promote one variant of an iteration's variant set as the winner: records
+    # the decision durably onto the iteration entry (additive — no existing keys
+    # are removed or renamed). Re-promotable: a second call reassigns "winner"
+    # and recomputes every variant lane's "discarded" flag.
+    def variant_promote(iteration, winner)
+      entry = slice_entry(iteration)
+      variant_lanes = (entry["lanes"] || []).select { |l| l["variant"] == true }
+      raise Error, "Iteration '#{iteration}' has no variant set — nothing to promote" if variant_lanes.empty?
+      unless variant_lanes.any? { |l| l["name"] == winner }
+        raise Error, "Cannot promote '#{winner}' — not a variant lane of iteration '#{iteration}'"
+      end
+
+      discarded_names = variant_lanes.select { |l| l["name"] != winner }.map { |l| l["name"] }
+
+      update_architect_block do |b|
+        (b["iterations"] || []).each do |s|
+          next unless s["name"] == iteration
+          s["winner"] = winner
+          (s["lanes"] || []).each do |l|
+            next unless l["variant"] == true
+            l["discarded"] = (l["name"] != winner)
+          end
+        end
+        b
+      end
+
+      { winner: winner, discarded: discarded_names }
+    end
+
     def worktree_remove(iteration, lane)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }

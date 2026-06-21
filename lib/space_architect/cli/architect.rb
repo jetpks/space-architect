@@ -75,6 +75,7 @@ module SpaceArchitect
                     "#{l['name']}(#{l['repo']}·#{h}·#{m})"
                   end.join(", ")
                   lanes = lane_list.any? { |l| l["variant"] } ? "variant: #{lanes_str}" : lanes_str
+                  lanes = "#{lanes} → winner: #{s['winner']}" if s["winner"]
                   [nn, s["name"], s["freeze_sha"]&.[](0, 8) || "-", lanes, s["verdict"] || "-"]
                 end
                 terminal.say terminal.table(%w[II Iteration FreezeSHA Lanes Verdict], rows)
@@ -297,6 +298,32 @@ module SpaceArchitect
             end
           end
         end
+
+        class Promote < Dry::CLI::Command
+          include GlobalOptions
+          include Helpers
+
+          desc "Promote one variant of a variant set as the winner"
+          argument :iteration, required: true,  desc: "Iteration name"
+          argument :winner,    required: true,  desc: "Variant lane name to promote (e.g. v02)"
+          argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+
+          def call(iteration:, winner:, space: nil, **opts)
+            setup_terminal(**opts.slice(:color, :colors))
+            handle_errors do
+              render(store.find(space)) do |sp|
+                mission = ArchitectMission.new(space: sp)
+                result = mission.variant_promote(iteration, winner)
+                if result[:discarded].any?
+                  terminal.say "Promoted #{result[:winner]} (discarded: #{result[:discarded].join(', ')})"
+                else
+                  terminal.say "Promoted #{result[:winner]}"
+                end
+                CLI.record_outcome(Outcome.new(exit_code: 0))
+              end
+            end
+          end
+        end
       end
     end
   end
@@ -314,5 +341,6 @@ SpaceArchitect::CLI::Registry.register "worktree" do |wt|
   wt.register "list",   SpaceArchitect::CLI::Architect::Worktree::List
 end
 SpaceArchitect::CLI::Registry.register "variant" do |v|
-  v.register "add", SpaceArchitect::CLI::Architect::Variant::Add
+  v.register "add",     SpaceArchitect::CLI::Architect::Variant::Add
+  v.register "promote", SpaceArchitect::CLI::Architect::Variant::Promote
 end
