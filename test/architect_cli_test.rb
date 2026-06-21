@@ -447,4 +447,99 @@ class ArchitectCLITest < SpaceArchitectTest
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
+
+  # AC5: architect status shows the winner marker for a promoted variant iteration,
+  #      and a non-promoted variant iteration renders without the marker (control)
+  def test_status_shows_winner_marker_for_promoted_variant
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+
+        # Promoted variant iteration
+        invoke("new", "winner-iter")
+        invoke("variant", "add", "my-repo", "winner-iter",
+               "--pairs", "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2")
+        invoke("variant", "promote", "winner-iter", "v02")
+
+        # Non-promoted variant iteration (control)
+        invoke("new", "control-iter")
+        invoke("variant", "add", "my-repo", "control-iter",
+               "--pairs", "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2")
+
+        out, err = invoke("status")
+        assert_empty err
+
+        promoted_row = out.lines.find { |l| l.include?("winner-iter") && l.include?("my-repo") }
+        refute_nil promoted_row, "expected a table row for winner-iter"
+        assert_includes promoted_row, "variant:", "winner-iter row must include 'variant:' prefix"
+        assert_includes promoted_row, " → winner: v02", "winner-iter row must include winner marker"
+        assert_includes promoted_row, "claude-code"
+        assert_includes promoted_row, "glm-5p2"
+
+        unpromoted_row = out.lines.find { |l| l.include?("control-iter") && l.include?("my-repo") }
+        refute_nil unpromoted_row, "expected a table row for control-iter"
+        assert_includes unpromoted_row, "variant:", "control-iter row must include 'variant:' prefix"
+        refute_includes unpromoted_row, " → winner:", "control-iter row must NOT include winner marker"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # variant promote CLI: prints confirmation, surfaces errors via handle_errors
+  def test_variant_promote_cli_prints_confirmation
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("variant", "add", "my-repo", "demo",
+               "--pairs", "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2")
+
+        out, err = invoke("variant", "promote", "demo", "v02")
+        assert_empty err
+        assert_match(/Promoted v02/, out)
+        assert_match(/discarded: v01/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_variant_promote_cli_surfaces_error_for_bad_winner
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("variant", "add", "my-repo", "demo",
+               "--pairs", "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2")
+
+        _out, err = invoke("variant", "promote", "demo", "v99")
+        refute_empty err
+        assert_match(/v99/, err)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
 end
