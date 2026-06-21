@@ -1,50 +1,21 @@
 # frozen_string_literal: true
 
-require "async/process"
-require "pathname"
+require_relative "harness"
 
 module SpaceArchitect
+  # Thin backward-compat wrapper around Harness::ClaudeCodeHarness.
+  # Existing callers that construct Dispatcher.new(...).run(...) continue to work byte-for-byte.
   class Dispatcher
-    ALLOWED_TOOLS = "Read,Edit,Write,Grep,Glob,Bash,WebSearch,WebFetch"
-    DISALLOWED_TOOLS = [
-      "Bash(git commit:*)", "Bash(git push:*)", "Bash(git reset:*)",
-      "Bash(git merge:*)", "Bash(git rebase:*)", "Bash(git checkout:*)",
-      "Bash(git branch:*)"
-    ].join(",")
+    # Keep constants here so any code referencing Dispatcher::ALLOWED_TOOLS still works.
+    ALLOWED_TOOLS    = Harness::ClaudeCodeHarness::ALLOWED_TOOLS
+    DISALLOWED_TOOLS = Harness::ClaudeCodeHarness::DISALLOWED_TOOLS
 
     def initialize(model: "claude-sonnet-4-6", max_turns: 200, claude_bin: nil)
-      @model      = model
-      @max_turns  = max_turns
-      @claude_bin = claude_bin || ENV.fetch("ARCHITECT_CLAUDE_BIN", "claude")
+      @harness = Harness::ClaudeCodeHarness.new(model: model, max_turns: max_turns, bin: claude_bin)
     end
 
     def run(prompt_path:, run_log_path:, chdir:)
-      prompt_path  = Pathname.new(prompt_path)
-      run_log_path = Pathname.new(run_log_path)
-
-      File.open(prompt_path, "r") do |prompt_io|
-        File.open(run_log_path, "w") do |log|
-          status = Sync do
-            Async::Process.spawn(*argv, chdir: chdir.to_s, in: prompt_io, out: log, err: log)
-          end
-          status.exitstatus
-        end
-      end
-    end
-
-    private
-
-    def argv
-      [
-        @claude_bin, "-p",
-        "--model", @model,
-        "--permission-mode", "acceptEdits",
-        "--allowedTools", ALLOWED_TOOLS,
-        "--disallowedTools", DISALLOWED_TOOLS,
-        "--output-format", "stream-json",
-        "--verbose",
-        "--max-turns", @max_turns.to_s
-      ]
+      @harness.run(prompt_path: prompt_path, run_log_path: run_log_path, chdir: chdir)
     end
   end
 end
