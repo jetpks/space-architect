@@ -173,7 +173,7 @@ module SpaceArchitect
         option   :model,     default: nil,   desc: "Model to use (default: lane entry or claude-sonnet-4-6)"
         option   :max_turns, default: "200", desc: "Max turns for the builder"
         option   :harness,   default: nil,   desc: "Harness override (claude-code, opencode)"
-        option   :effort,    default: nil,   desc: "Reasoning effort override (opencode only, maps to --variant)"
+        option   :effort,    default: nil,   desc: "Reasoning effort override (opencode only; sets reasoningEffort in the model config)"
 
         def call(iteration:, lane:, space: nil, model: nil,
                  max_turns: "200", harness: nil, effort: nil, **opts)
@@ -207,7 +207,7 @@ module SpaceArchitect
           option   :base,      default: nil,          desc: "Base ref (default: HEAD of repo)"
           option   :harness,   default: "claude-code", desc: "Harness (claude-code, opencode)"
           option   :model,     default: nil,           desc: "Model (required for opencode)"
-          option   :effort,    default: nil,           desc: "Reasoning effort (opencode only, maps to --variant)"
+          option   :effort,    default: nil,           desc: "Reasoning effort (opencode only; sets reasoningEffort in the model config)"
 
           def call(repo:, iteration:, lane:, base: nil, harness: "claude-code", model: nil, effort: nil, **opts)
             setup_terminal(**opts.slice(:color, :colors))

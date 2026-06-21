@@ -142,7 +142,7 @@ module SpaceArchitect
       end
       if effort && harness.to_s != "opencode"
         raise Error,
-          "effort is opencode-only (maps to --variant #{effort}) — " \
+          "effort is opencode-only (sets opencode reasoningEffort) — " \
           "set effort only on opencode lanes (harness: opencode)"
       end
 
