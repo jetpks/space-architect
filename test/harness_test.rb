@@ -18,9 +18,10 @@ class HarnessTest < SpaceArchitectTest
 
   FAKE_OPENCODE_SCRIPT = <<~RUBY
     #!/usr/bin/env ruby
-    a = ARGV; c = Dir.pwd
+    a = ARGV; c = Dir.pwd; s = $stdin.gets
     $stdout.puts "argv=" + a.inspect
     $stdout.puts "cwd=" + c.inspect
+    $stdout.puts "stdin=" + (s || "").chomp
     $stdout.puts "OPENCODE_CONFIG=" + (ENV["OPENCODE_CONFIG"] || "").inspect
     $stdout.puts "OPENCODE_DISABLE_PROJECT_CONFIG=" + (ENV["OPENCODE_DISABLE_PROJECT_CONFIG"] || "").inspect
     $stdout.flush
@@ -143,6 +144,10 @@ class HarnessTest < SpaceArchitectTest
     # AC4: OPENCODE_CONFIG is set
     assert_includes log, "OPENCODE_CONFIG="
     refute_includes log, 'OPENCODE_CONFIG=""'
+    # AC-fix-2: prompt arrives on stdin, not argv
+    assert_includes log, "stdin=PROMPT-MARKER-99"
+    argv_line = log.lines.find { |l| l.start_with?("argv=") }
+    refute_includes argv_line, "PROMPT-MARKER-99"
   ensure
     FileUtils.rm_rf(root)
   end

@@ -106,18 +106,19 @@ module SpaceArchitect
         run_log_path = Pathname.new(run_log_path)
         config_path  = write_config
 
-        prompt = prompt_path.read
-        env    = {
+        env = {
           "OPENCODE_CONFIG"                 => config_path.to_s,
           "OPENCODE_DISABLE_PROJECT_CONFIG" => "1"
         }
 
-        File.open(run_log_path, "w") do |log|
-          status = Sync do
-            Async::Process.spawn(env, *argv(chdir), prompt,
-                                 chdir: chdir.to_s, in: :close, out: log, err: log)
+        File.open(prompt_path, "r") do |prompt_io|
+          File.open(run_log_path, "w") do |log|
+            status = Sync do
+              Async::Process.spawn(env, *argv(chdir),
+                                   chdir: chdir.to_s, in: prompt_io, out: log, err: log)
+            end
+            status.exitstatus
           end
-          status.exitstatus
         end
       end
 
@@ -129,7 +130,6 @@ module SpaceArchitect
         path
       end
 
-      # opencode reads the prompt from positional [message..] args (not stdin).
       # --dir sets the working directory for opencode's tooling layer.
       def argv(chdir)
         [
