@@ -226,8 +226,16 @@ PHASE 2 — Build YOUR LANE ONLY: exactly the files listed in BOUNDARIES. You
 are one of several parallel lane agents working in isolated worktrees; files
 outside your lane belong to other agents — touching them fails your lane.
 No placeholder implementations — search the codebase before implementing;
-full implementations only. Verify your work by running the acceptance
-criteria's gate commands and record the verbatim output. Do NOT commit and do NOT run any
+full implementations only. Write IDIOMATIC, house-consistent code: read the
+neighbouring code and match its conventions (naming, guards, predicates,
+error/persistence idioms, the language's expressive collection/enumerable
+forms); well-factored and DRY-ish; terse but clear; pragmatic, not clever — the
+smallest change that does the job, no abstraction it doesn't need. Consistency
+with the surrounding code is part of correctness here: a change that works but
+fights the house style (or introduces an inconsistency a careful reader of this
+repo would never write) is not done. Tests stay simple and terse, exercising
+public behavior, no mock/stub of the class under test. Verify your work by
+running the acceptance criteria's gate commands and record the verbatim output. Do NOT commit and do NOT run any
 git write command (commit/add/branch/reset/checkout) — the architect commits
 and merges after verification, and verifies you made no commits. Do NOT delete
 lock files or escalate privileges if a command fails; record the exact error

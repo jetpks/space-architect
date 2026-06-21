@@ -126,7 +126,17 @@ measured the way the gate specifies). Check
 Grounds/Specification/Acceptance Criteria lines is an automatic FAIL.
 Gate-pass is necessary, not sufficient: read the diff against the
 Specification's intent before the verdict — test-passing changes are frequently
-unmergeable, and iterating against visible tests is a known gaming vector. Then
+unmergeable, and iterating against visible tests is a known gaming vector. Read
+for **idiomaticity and style**, not just correctness: does the code match the
+target repo's house conventions (naming, guards, predicates, error/persistence
+idioms, the language's expressive forms), stay well-factored and DRY-ish, avoid
+needless repetition or abstraction it doesn't need, and read like the
+surrounding code? A gate-green diff that fights the house style — or introduces
+an inconsistency a careful reader of that repo would never write — is a defect:
+flag it in the Verdict with file:line, and weight it in a head-to-head. (Models
+are strong on *local* idiom and restraint but weak on *structural*
+re-derivation — the simplification that re-sees the shape is often the
+architect's or human's to name.) Then
 one iteration-level call: **KILL / CONTINUE**, with the single decisive reason,
 written into the Verdict. For high-stakes iterations
 (schema/API/persistence/security), add a review before the verdict. You
@@ -136,6 +146,17 @@ over the Sonnet builder's work — a cross-tier read, though not cross-vendor
 read-only `claude -p` reviewer (command in `dispatch.md`) or a
 fresh-context subagent prompted to break confidence — calibrated to flag only
 correctness/requirement/invariant gaps with file:line evidence, no style.
+
+**Variant sets — human in the loop.** When the iteration was built as a variant
+set (multiple `(harness, model)` lanes over one frozen spec), judge every
+variant against the same frozen AC, then **do not pick the winner unilaterally**
+— assume the human wants to be involved in selection. Present the head-to-head:
+per-variant gate results plus the deltas that decide it (correctness/invariants,
+idiomaticity + house-style, tests, user-facing behavior), with your
+recommendation and its reasoning. Let the human choose (`AskUserQuestion` or a
+checkpoint); you then execute the promote/merge they pick. Surface a
+recommendation — the call is theirs. (A standing handoff that pre-delegates the
+pick still gets the comparison surfaced before you act on it.)
 
 ### 3. Research fan-out (optional — most iterations skip this)
 
