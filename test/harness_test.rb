@@ -285,7 +285,7 @@ class HarnessTest < SpaceArchitectTest
     end
   end
 
-  # ── I05: effort / --variant ───────────────────────────────────────────────
+  # ── I07: effort → reasoningEffort config injection ───────────────────────
 
   # Fake binary that records argv to ARGV_RECORD_FILE (null-delimited).
   FAKE_ARGV_RECORDER = <<~RUBY
@@ -294,10 +294,41 @@ class HarnessTest < SpaceArchitectTest
     exit 0
   RUBY
 
-  # AC2(a): effort "high" → argv contains adjacent pair --variant high
-  def test_opencode_argv_includes_variant_when_effort_set
+  # AC1: effort "high" + GLM model → builder_config injects reasoningEffort at correct path;
+  #      agent.builder block (steps, bash permission deny map) is unchanged.
+  def test_builder_config_injects_reasoning_effort_for_glm
+    harness = SpaceArchitect::Harness::OpenCodeHarness.new(
+      model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
+      max_turns: 10, bin: "opencode", config_dir: Dir.mktmpdir,
+      effort: "high"
+    )
+    cfg = harness.builder_config
+
+    assert_equal "high",
+      cfg.dig("provider", "fireworks-ai", "models",
+              "accounts/fireworks/models/glm-5p2", "options", "reasoningEffort")
+    assert_equal 10,     cfg.dig("agent", "builder", "steps")
+    bash = cfg.dig("agent", "builder", "permission", "bash")
+    assert_equal "deny",  bash["git commit *"]
+    assert_equal "deny",  bash["git push *"]
+    assert_equal "allow", bash["*"]
+  end
+
+  # AC2: effort nil → builder_config returns exactly the pre-I07 hash (no "provider" key).
+  def test_builder_config_no_provider_key_when_effort_nil
+    harness = SpaceArchitect::Harness::OpenCodeHarness.new(
+      model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
+      max_turns: 10, bin: "opencode", config_dir: Dir.mktmpdir
+    )
+    cfg = harness.builder_config
+    refute cfg.key?("provider"), "builder_config must not have provider key when effort is nil: #{cfg.keys.inspect}"
+    assert cfg.key?("agent")
+  end
+
+  # AC3: argv has NO --variant token whether effort is set or nil.
+  def test_opencode_argv_excludes_variant_when_effort_set
     root = Dir.mktmpdir("harness-test")
-    _space_dir, mission, _fake_claude, _fake_oc, build_dir = setup_space(root)
+    _space_dir, mission, _fake_claude, _fake_oc, _build_dir = setup_space(root)
 
     recorder = File.join(root, "recorder")
     argv_file = File.join(root, "recorded_argv")
@@ -312,18 +343,15 @@ class HarnessTest < SpaceArchitectTest
                      opencode_bin: recorder)
     recorded = File.read(argv_file).split("\x00")
 
-    idx = recorded.index("--variant")
-    refute_nil idx, "expected --variant in argv: #{recorded.inspect}"
-    assert_equal "high", recorded[idx + 1], "expected --variant high: #{recorded.inspect}"
+    refute_includes recorded, "--variant", "no --variant token expected even with effort set: #{recorded.inspect}"
   ensure
     ENV.delete("ARGV_RECORD_FILE")
     FileUtils.rm_rf(root)
   end
 
-  # AC2(b): no effort → argv has no --variant and is otherwise identical to pre-I05
   def test_opencode_argv_excludes_variant_when_no_effort
     root = Dir.mktmpdir("harness-test")
-    _space_dir, mission, _fake_claude, _fake_oc, build_dir = setup_space(root)
+    _space_dir, mission, _fake_claude, _fake_oc, _build_dir = setup_space(root)
 
     recorder = File.join(root, "recorder")
     argv_file = File.join(root, "recorded_argv")
@@ -338,8 +366,6 @@ class HarnessTest < SpaceArchitectTest
     recorded = File.read(argv_file).split("\x00")
 
     refute_includes recorded, "--variant", "no --variant token expected: #{recorded.inspect}"
-    # pre-I05 shape: run --format json --model <m> --dangerously-skip-permissions --agent builder --dir <wt>
-    # ARGV[0] is "run" (binary name excluded from ARGV)
     assert_equal "run", recorded[0]
     assert_includes recorded, "--format"
     assert_includes recorded, "json"
@@ -352,7 +378,21 @@ class HarnessTest < SpaceArchitectTest
     FileUtils.rm_rf(root)
   end
 
-  # AC3(a): lane effort "high" → argv has --variant high when dispatch passes no effort
+  # AC4: effort "high" + Kimi model → reasoningEffort injected under Kimi's config path.
+  def test_builder_config_injects_reasoning_effort_for_kimi
+    harness = SpaceArchitect::Harness::OpenCodeHarness.new(
+      model: "fireworks-ai/accounts/fireworks/models/kimi-k2p7-code",
+      max_turns: 5, bin: "opencode", config_dir: Dir.mktmpdir,
+      effort: "high"
+    )
+    cfg = harness.builder_config
+
+    assert_equal "high",
+      cfg.dig("provider", "fireworks-ai", "models",
+              "accounts/fireworks/models/kimi-k2p7-code", "options", "reasoningEffort")
+  end
+
+  # Resolution: lane effort → injected into builder_config (no --variant in argv).
   def test_dispatch_reads_effort_from_lane
     root = Dir.mktmpdir("harness-test")
     space_dir, mission, _fake_claude, _fake_oc, _build_dir = setup_space(root)
@@ -374,15 +414,17 @@ class HarnessTest < SpaceArchitectTest
     mission.dispatch("demo", "E", opencode_bin: recorder)
     recorded = File.read(argv_file).split("\x00")
 
-    idx = recorded.index("--variant")
-    refute_nil idx, "lane effort should produce --variant: #{recorded.inspect}"
-    assert_equal "high", recorded[idx + 1]
+    refute_includes recorded, "--variant", "lane effort must not produce --variant: #{recorded.inspect}"
+    cfg = JSON.parse(File.read(File.join(e_build_dir, "opencode.json")))
+    assert_equal "high",
+      cfg.dig("provider", "fireworks-ai", "models",
+              "accounts/fireworks/models/glm-5p2", "options", "reasoningEffort")
   ensure
     ENV.delete("ARGV_RECORD_FILE")
     FileUtils.rm_rf(root)
   end
 
-  # AC3(b): explicit effort "low" overrides lane effort "high"
+  # Resolution: explicit effort "low" overrides lane effort "high" in generated config.
   def test_dispatch_explicit_effort_overrides_lane_effort
     root = Dir.mktmpdir("harness-test")
     space_dir, mission, _fake_claude, _fake_oc, _build_dir = setup_space(root)
@@ -404,9 +446,11 @@ class HarnessTest < SpaceArchitectTest
     mission.dispatch("demo", "F", effort: "low", opencode_bin: recorder)
     recorded = File.read(argv_file).split("\x00")
 
-    idx = recorded.index("--variant")
-    refute_nil idx, "explicit effort should produce --variant: #{recorded.inspect}"
-    assert_equal "low", recorded[idx + 1]
+    refute_includes recorded, "--variant", "no --variant expected with effort override: #{recorded.inspect}"
+    cfg = JSON.parse(File.read(File.join(f_build_dir, "opencode.json")))
+    assert_equal "low",
+      cfg.dig("provider", "fireworks-ai", "models",
+              "accounts/fireworks/models/glm-5p2", "options", "reasoningEffort")
 
     # Lane entry on disk still has "high" — no mutation
     yml = YAML.safe_load(File.read(File.join(space_dir, "space.yaml")), aliases: false)
@@ -418,7 +462,7 @@ class HarnessTest < SpaceArchitectTest
     FileUtils.rm_rf(root)
   end
 
-  # AC4(b): Harness.for with claude-code + effort raises with opencode-only message
+  # Footgun: claude-code + effort raises with opencode-only / reasoningEffort message.
   def test_harness_for_raises_for_claude_code_with_effort
     err = assert_raises(SpaceArchitect::Error) do
       SpaceArchitect::Harness.for("claude-code",
@@ -426,13 +470,13 @@ class HarnessTest < SpaceArchitectTest
                                   bin: "/fake", effort: "high")
     end
     assert_match(/opencode-only/, err.message)
-    assert_match(/--variant/, err.message)
+    assert_match(/reasoningEffort/, err.message)
   end
 
-  # AC6 control: dispatching claude-code via fake produces no --variant in argv
+  # Claude-code dispatch: no --variant in argv (unchanged by effort feature).
   def test_claude_code_dispatch_argv_unchanged_by_effort_feature
     root = Dir.mktmpdir("harness-test")
-    _space_dir, mission, _fake_claude, _fake_oc, build_dir = setup_space(root)
+    _space_dir, mission, _fake_claude, _fake_oc, _build_dir = setup_space(root)
 
     recorder = File.join(root, "recorder")
     argv_file = File.join(root, "recorded_argv")
