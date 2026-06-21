@@ -542,7 +542,7 @@ class ArchitectMissionTest < SpaceArchitectTest
                            harness: "claude-code", effort: "high")
     end
     assert_match(/opencode-only/, err.message)
-    assert_match(/--variant/, err.message)
+    assert_match(/reasoningEffort/, err.message)
 
     # Nothing persisted after the raise
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)

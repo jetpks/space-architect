@@ -15,7 +15,7 @@ module SpaceArchitect
       when "claude-code"
         if effort
           raise Error,
-            "effort is opencode-only (maps to --variant #{effort}) — " \
+            "effort is opencode-only (sets opencode reasoningEffort) — " \
             "claude-code effort is set via the prompt"
         end
         ClaudeCodeHarness.new(model: model, max_turns: max_turns, bin: bin)
@@ -88,7 +88,7 @@ module SpaceArchitect
 
       # Returns the agent config hash (deterministic, unit-testable).
       def builder_config
-        {
+        cfg = {
           "agent" => {
             "builder" => {
               "steps" => @max_turns,
@@ -105,6 +105,8 @@ module SpaceArchitect
             }
           }
         }
+        cfg.merge!(reasoning_provider_config) if @effort
+        cfg
       end
 
       def run(prompt_path:, run_log_path:, chdir:)
@@ -130,6 +132,19 @@ module SpaceArchitect
 
       private
 
+      def reasoning_provider_config
+        provider, model_id = @model.split("/", 2)
+        {
+          "provider" => {
+            provider => {
+              "models" => {
+                model_id => { "options" => { "reasoningEffort" => @effort } }
+              }
+            }
+          }
+        }
+      end
+
       def write_config
         path = @config_dir.join("opencode.json")
         path.write(JSON.generate(builder_config))
@@ -146,7 +161,6 @@ module SpaceArchitect
           "--agent", "builder",
           "--dir", chdir.to_s
         ]
-        args += ["--variant", @effort] if @effort
         args
       end
     end
