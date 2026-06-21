@@ -181,6 +181,156 @@ class ArchitectMissionTest < SpaceArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # AC7: plain worktree_add persists variant: false (backward-compat)
+  def test_worktree_add_records_variant_false_by_default
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.worktree_add("my-repo", "my-slice", "lane-a")
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+
+    assert_equal false, lane["variant"]
+    assert_equal "lane-a", lane["name"]
+    assert_equal "my-repo", lane["repo"]
+    assert lane["base_sha"]
+    assert lane["worktree"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2: variant_add creates v01/v02 with variant: true and correct harness/model
+  def test_variant_add_creates_named_lanes_with_variant_true
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.variant_add("my-repo", "my-slice",
+                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lanes = yml.dig("architect", "iterations", 0, "lanes")
+
+    assert_equal 2, lanes.length
+
+    v01 = lanes.find { |l| l["name"] == "v01" }
+    v02 = lanes.find { |l| l["name"] == "v02" }
+
+    refute_nil v01, "expected v01 lane"
+    refute_nil v02, "expected v02 lane"
+
+    assert_equal true, v01["variant"]
+    assert_equal "claude-code", v01["harness"]
+    assert_nil   v01["model"]
+    assert_equal "my-repo", v01["repo"]
+    assert v01["base_sha"]
+    assert v01["worktree"]
+    assert_nil v01["integration_branch"]
+
+    assert_equal true, v02["variant"]
+    assert_equal "opencode", v02["harness"]
+    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", v02["model"]
+    assert_equal "my-repo", v02["repo"]
+    assert v02["base_sha"]
+    assert v02["worktree"]
+    assert_nil v02["integration_branch"]
+
+    repo_path = File.join(dir, "repos", "my-repo")
+    assert_path_exists File.join(repo_path, ".git", "refs", "heads", "lane", "I01-my-slice-v01")
+    assert_path_exists File.join(repo_path, ".git", "refs", "heads", "lane", "I01-my-slice-v02")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: variant_add fans out a byte-identical prompt to each variant's build dir
+  def test_variant_add_fans_out_byte_identical_prompt
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    prompt_src = File.join(dir, "prompt_src.md")
+    File.binwrite(prompt_src, "# Frozen Prompt\nWith special bytes: \xC3\xA9\n")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.variant_add("my-repo", "my-slice",
+                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]],
+                        prompt: prompt_src)
+
+    src_bytes = File.binread(prompt_src)
+    v01_bytes = File.binread(File.join(dir, "build", "I01-my-slice-v01", "prompt.md"))
+    v02_bytes = File.binread(File.join(dir, "build", "I01-my-slice-v02", "prompt.md"))
+
+    assert_equal src_bytes, v01_bytes, "v01 prompt.md must be byte-identical to source"
+    assert_equal src_bytes, v02_bytes, "v02 prompt.md must be byte-identical to source"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: a second variant_add call appends with continued ordinals (v03)
+  def test_variant_add_appends_ordinals_across_calls
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.variant_add("my-repo", "my-slice",
+                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+    mission.variant_add("my-repo", "my-slice", [["claude-code", nil]])
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lanes = yml.dig("architect", "iterations", 0, "lanes")
+
+    assert_equal 3, lanes.length
+    names = lanes.map { |l| l["name"] }
+    assert_includes names, "v01"
+    assert_includes names, "v02"
+    assert_includes names, "v03"
+    lanes.each { |l| assert_equal true, l["variant"] }
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5: footgun fires for opencode+nil model; no lane or worktree left behind
+  def test_variant_add_inherits_footgun_guard
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+
+    err = assert_raises(SpaceArchitect::Error) do
+      mission.variant_add("my-repo", "my-slice", [["opencode", nil]])
+    end
+    assert_match(/--model/, err.message)
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lanes = yml.dig("architect", "iterations", 0, "lanes") || []
+    assert_empty lanes, "no lane entry should be persisted after footgun raise"
+
+    repo_path = File.join(dir, "repos", "my-repo")
+    v01_branch = File.join(repo_path, ".git", "refs", "heads", "lane", "I01-my-slice-v01")
+    refute_path_exists v01_branch, "no branch should be created after footgun raise"
+
+    v01_wt = File.join(dir, "build", "I01-my-slice-v01", "wt")
+    refute_path_exists v01_wt, "no worktree should be created after footgun raise"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   def test_rendered_scaffolds_name_real_commands_not_space_architect
     dir = Dir.mktmpdir("architect-mission-test")
     space = create_real_space(dir)
