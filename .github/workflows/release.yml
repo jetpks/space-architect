@@ -46,7 +46,7 @@ jobs:
 
       - name: Publish gem to RubyGems
         env:
-          RUBYGEMS_API_KEY: ${{ secrets.RUBYGEM_TOKEN }}
+          RUBYGEMS_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
           VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p $HOME/.gem
