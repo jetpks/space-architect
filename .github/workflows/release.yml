@@ -6,11 +6,16 @@ on:
       - "v*"
 
 jobs:
-  build:
-    name: Build gem
+  release:
+    name: Build and publish gem
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # OIDC token for RubyGems trusted publishing
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: jdx/mise-action@v4
 
       - name: Build gem
@@ -19,53 +24,23 @@ jobs:
           mkdir -p pkg/
           mv *.gem pkg/
 
-      - name: Upload gem
-        uses: actions/upload-artifact@v4
-        with:
-          name: gem
-          path: pkg/
+      # Trusted publishing: no API token. Auth is a short-lived OIDC
+      # credential minted at run time, scoped to this repo + workflow.
+      # Requires a (pending) trusted publisher configured on rubygems.org.
+      - name: Configure RubyGems credentials
+        uses: rubygems/configure-rubygems-credentials@v2.1.0
 
-  publish:
-    name: Publish to RubyGems
-    runs-on: ubuntu-latest
-    needs:
-      - build
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v5
-      - uses: jdx/mise-action@v4
+      - name: Publish to RubyGems
+        run: gem push pkg/space-architect-*.gem
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: gem
-          path: pkg/
-
-      - name: Display structure of downloaded gems
-        run: ls -R pkg/
-
-      - name: Publish gem to RubyGems
-        env:
-          RUBYGEMS_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
-          VERSION: ${{ github.ref_name }}
+      - name: Smoke-test the published gem
         run: |
-          mkdir -p $HOME/.gem
-          touch $HOME/.gem/credentials
-          chmod 0600 $HOME/.gem/credentials
-          printf -- "---\n:rubygems_api_key: ${RUBYGEMS_API_KEY}\n" > $HOME/.gem/credentials
-
-          # Extract version number from tag (v1.0.2 -> 1.0.2)
-          VERSION_NUMBER="${VERSION#v}"
-
-          cd pkg
-          for gem_file in space-architect-${VERSION_NUMBER}*.gem; do
-            echo "Publishing ${gem_file}..."
-            gem push "${gem_file}"
+          version="${GITHUB_REF_NAME#v}"
+          for attempt in 1 2 3 4 5; do
+            gem install space-architect --version "$version" && break
+            echo "not indexed yet (attempt $attempt) — retrying in 15s"
+            sleep 15
           done
-
-      - name: Test installation
-        run: |
-          gem install space-architect --verbose
           architect version
 
       - name: Create GitHub Release
