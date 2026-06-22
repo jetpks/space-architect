@@ -10,16 +10,12 @@ jobs:
     name: Build gem
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "4.0"
-          bundler-cache: false
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v4
 
       - name: Build gem
         run: |
-          gem build space-cadet.gemspec
+          gem build space-architect.gemspec
           mkdir -p pkg/
           mv *.gem pkg/
 
@@ -37,9 +33,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "4.0"
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v4
 
       - uses: actions/download-artifact@v4
         with:
@@ -63,15 +58,15 @@ jobs:
           VERSION_NUMBER="${VERSION#v}"
 
           cd pkg
-          for gem_file in space-cadet-${VERSION_NUMBER}*.gem; do
+          for gem_file in space-architect-${VERSION_NUMBER}*.gem; do
             echo "Publishing ${gem_file}..."
             gem push "${gem_file}"
           done
 
       - name: Test installation
         run: |
-          gem install space-cadet --verbose
-          space help
+          gem install space-architect --verbose
+          architect version
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
