@@ -345,8 +345,8 @@ module SpaceArchitect
                 info = mission.variant_compare(iteration)
 
                 terminal.say "Variant comparison: #{iteration} (freeze #{info[:freeze_sha]&.[](0, 8) || "-"})"
-                terminal.say "Winner: #{info[:winner] || "(none)"}"
-                terminal.say
+                terminal.say "Winner: #{info[:winner] || '(none)'}"
+                terminal.say ""
                 rows = info[:variants].map do |v|
                   [
                     v[:name],
