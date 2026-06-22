@@ -575,4 +575,32 @@ class HarnessTest < SpaceArchitectTest
     chunks = reader.value
     assert_equal ["a", "b"], chunks
   end
+
+  # I07: tee_pipe continues writing to the log even when the push body is closed.
+  # Simulates push-side close (e.g. connection drop) before tee_pipe has finished.
+  def test_tee_pipe_continues_log_after_push_body_closes
+    harness = SpaceArchitect::Harness::ClaudeCodeHarness.new(
+      model: "x", max_turns: 1
+    )
+
+    root = Dir.mktmpdir("tee-pipe-fail")
+    log_path = File.join(root, "run.jsonl")
+
+    r, w = IO.pipe
+    body = Protocol::HTTP::Body::Writable.new(queue: Thread::SizedQueue.new(4))
+    body.close_write  # push side closed early — body.write raises Closed
+
+    w.write("line1\n")
+    w.write("line2\n")
+    w.close
+
+    File.open(log_path, "w") do |log|
+      Sync { harness.send(:tee_pipe, r, log, body) }
+    end
+
+    assert_equal "line1\nline2\n", File.read(log_path),
+      "log must contain all lines even after push body closes"
+  ensure
+    FileUtils.rm_rf(root)
+  end
 end

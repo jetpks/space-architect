@@ -113,7 +113,7 @@ module SpaceArchitect
         while (chunk = r.gets)
           log.write(chunk)
           log.flush
-          body.write(chunk)
+          body.write(chunk) rescue Protocol::HTTP::Body::Writable::Closed
         end
       ensure
         body.close_write
