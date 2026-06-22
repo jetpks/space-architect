@@ -35,6 +35,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency "dry-types", "~> 1.9"
   spec.add_dependency "dry-validation", "~> 1.11"
   spec.add_dependency "xdg", "~> 10.2"
+  spec.add_dependency "async-http", "~> 0.95"
   spec.add_dependency "tty-cursor", "~> 0.7"
 
   spec.add_development_dependency "minitest", "~> 6.0"

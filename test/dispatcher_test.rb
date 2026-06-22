@@ -66,6 +66,7 @@ class DispatcherTest < SpaceArchitectTest
     refute log.strip.empty?, "run.jsonl must be non-empty"
     assert_includes log, "claude-sonnet-4-6"
     assert_includes log, "stream-json"
+    assert_includes log, "--include-partial-messages"
     assert_includes log, "acceptEdits"
     assert_includes log, "Bash(git commit"
     assert_includes log, "--max-turns"

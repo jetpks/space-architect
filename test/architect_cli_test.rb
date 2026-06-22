@@ -784,4 +784,83 @@ class ArchitectCLITest < SpaceArchitectTest
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
+
+  # I06: --push-url and --push-token CLI options are accepted and the push
+  # endpoint receives the builder's stdout.
+  def test_dispatch_cli_push_url_and_push_token_options
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    require "socket"
+
+    received_chunks = []
+    tcp_server = TCPServer.new("127.0.0.1", 0)
+    port = tcp_server.addr[1]
+
+    server_thread = Thread.new do
+      client = tcp_server.accept
+      # Drain request line + headers
+      while (line = client.gets) && !line.chomp.empty?; end
+      # Read chunked body
+      loop do
+        size_line = client.gets&.strip || ""
+        size = size_line.to_i(16)
+        break if size == 0
+        chunk = client.read(size)
+        received_chunks << chunk
+        client.read(2)  # trailing CRLF after chunk data
+      end
+      client.write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+    rescue
+      # ignore connection errors
+    ensure
+      client&.close
+      tcp_server.close
+    end
+
+    fake = File.join(setup[:root], "fake_claude_push")
+    File.write(fake, <<~RUBY)
+      #!/usr/bin/env ruby
+      a = ARGV; c = Dir.pwd; s = $stdin.gets
+      $stdout.puts "argv=" + a.inspect
+      $stdout.puts "cwd=" + c.inspect
+      $stdout.puts "stdin=" + (s || "").chomp
+      $stdout.flush
+      exit 0
+    RUBY
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "push test prompt\n")
+
+        out, err = invoke("dispatch", "demo", "A",
+                          "--push-url", "http://127.0.0.1:#{port}/runs/r1/ingest",
+                          "--push-token", "test-bearer-token")
+
+        assert_empty err
+        assert_match(/Builder exited with status 0/, out)
+
+        log = File.read(File.join(build_dir, "run.jsonl"))
+        assert_includes log, "--include-partial-messages", "partial-messages flag must be in log"
+      end
+    end
+
+    server_thread.join(5)
+    assert received_chunks.any? { |c| c.include?("argv=") },
+      "HTTP server must receive builder output, got: #{received_chunks.inspect}"
+  ensure
+    tcp_server.close rescue nil
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
 end

@@ -158,21 +158,26 @@ module SpaceArchitect
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-        option   :model,     default: nil,   desc: "Model to use (default: lane entry or claude-sonnet-4-6)"
-        option   :max_turns, default: "200", desc: "Max turns for the builder"
-        option   :harness,   default: nil,   desc: "Harness override (claude-code, opencode)"
-        option   :effort,    default: nil,   desc: "Reasoning effort override (opencode only; sets reasoningEffort in the model config)"
+        option   :model,      default: nil,   desc: "Model to use (default: lane entry or claude-sonnet-4-6)"
+        option   :max_turns,  default: "200", desc: "Max turns for the builder"
+        option   :harness,    default: nil,   desc: "Harness override (claude-code, opencode)"
+        option   :effort,     default: nil,   desc: "Reasoning effort override (opencode only; sets reasoningEffort in the model config)"
+        option   :push_url,   default: nil,   desc: "HTTP endpoint for streaming push (POST body to this URL)"
+        option   :push_token, default: nil,   desc: "Bearer token for push endpoint authorization"
 
         def call(iteration:, lane:, space: nil, model: nil,
-                 max_turns: "200", harness: nil, effort: nil, **opts)
+                 max_turns: "200", harness: nil, effort: nil,
+                 push_url: nil, push_token: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               mission = ArchitectMission.new(space: sp)
               kwargs = { max_turns: max_turns.to_i }
-              kwargs[:model]   = model   if model
-              kwargs[:harness] = harness if harness
-              kwargs[:effort]  = effort  if effort
+              kwargs[:model]      = model      if model
+              kwargs[:harness]    = harness    if harness
+              kwargs[:effort]     = effort     if effort
+              kwargs[:push_url]   = push_url   if push_url
+              kwargs[:push_token] = push_token if push_token
               res = mission.dispatch(iteration, lane, **kwargs)
               terminal.say "Run log: #{terminal.path(res[:run_log])}"
               terminal.say "Report:  #{terminal.path(res[:report])}"
