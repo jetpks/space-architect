@@ -164,10 +164,11 @@ module SpaceArchitect
         option   :effort,     default: nil,   desc: "Reasoning effort override (opencode only; sets reasoningEffort in the model config)"
         option   :push_url,   default: nil,   desc: "HTTP endpoint for streaming push (POST body to this URL)"
         option   :push_token, default: nil,   desc: "Bearer token for push endpoint authorization"
+        option   :push_host,  default: nil,   desc: "Base URL of the ingest server; the CLI creates a run via POST <host>/runs and streams to /runs/<id>/ingest (requires --push-token)"
 
         def call(iteration:, lane:, space: nil, model: nil,
                  max_turns: "200", harness: nil, effort: nil,
-                 push_url: nil, push_token: nil, **opts)
+                 push_url: nil, push_token: nil, push_host: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
@@ -178,7 +179,12 @@ module SpaceArchitect
               kwargs[:effort]     = effort     if effort
               kwargs[:push_url]   = push_url   if push_url
               kwargs[:push_token] = push_token if push_token
+              kwargs[:push_host]  = push_host  if push_host
               res = mission.dispatch(iteration, lane, **kwargs)
+              if res[:created_run_id]
+                terminal.say "Created run: #{res[:created_run_id]}"
+                terminal.say "Ingest URL:  #{res[:push_url]}"
+              end
               terminal.say "Run log: #{terminal.path(res[:run_log])}"
               terminal.say "Report:  #{terminal.path(res[:report])}"
               terminal.say "Builder exited with status #{res[:exit_code]}"

@@ -964,4 +964,114 @@ class ArchitectMissionTest < SpaceArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  # ── dispatch: push_host guards and URL derivation ──────────────────────────
+
+  def setup_dispatch_space(dir)
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("demo")
+    mission.worktree_add("my-repo", "demo", "A")
+    build_dir = File.join(dir, "build", "I01-demo-A")
+    FileUtils.mkdir_p(build_dir)
+    File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+    [space, mission, build_dir]
+  end
+
+  def fake_claude_bin(dir)
+    bin = File.join(dir, "fake_claude_dispatch")
+    File.write(bin, <<~RUBY)
+      #!/usr/bin/env ruby
+      $stdout.puts "ok"
+      $stdout.flush
+      exit 0
+    RUBY
+    File.chmod(0o755, bin)
+    bin
+  end
+
+  # AC4(a): push_host + push_token creates a run via the injected creator and
+  # derives push_url = "<host>/runs/<id>/ingest".
+  def test_dispatch_push_host_derives_push_url_from_created_run_id
+    dir = Dir.mktmpdir("architect-mission-dispatch")
+    _space, mission, _build = setup_dispatch_space(dir)
+    bin = fake_claude_bin(dir)
+
+    fake_creator = Object.new
+    def fake_creator.create = 99
+
+    mock_endpoint = Async::HTTP::Mock::Endpoint.new
+
+    Sync do
+      server_task = Async do
+        mock_endpoint.run do |request|
+          request.body&.read
+          Protocol::HTTP::Response[200, [], nil]
+        end
+      end
+
+      push_client = Async::HTTP::Client.new(mock_endpoint)
+
+      result = mission.dispatch("demo", "A",
+                                push_host:    "https://architect.example.com",
+                                push_token:   "my-ingest-token",
+                                run_creator:  fake_creator,
+                                push_client:  push_client,
+                                claude_bin:   bin)
+
+      assert_equal 99, result[:created_run_id]
+      assert_equal "https://architect.example.com/runs/99/ingest", result[:push_url]
+
+      push_client.close
+      server_task.stop
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4(b): push_host without push_token raises before the builder is spawned.
+  def test_dispatch_push_host_without_token_raises_before_builder
+    dir = Dir.mktmpdir("architect-mission-dispatch")
+    _space, mission, _build = setup_dispatch_space(dir)
+
+    assert_raises(SpaceArchitect::Error) do
+      mission.dispatch("demo", "A", push_host: "http://example.com")
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4(c): push_host together with push_url raises.
+  def test_dispatch_push_host_and_push_url_together_raises
+    dir = Dir.mktmpdir("architect-mission-dispatch")
+    _space, mission, _build = setup_dispatch_space(dir)
+
+    assert_raises(SpaceArchitect::Error) do
+      mission.dispatch("demo", "A",
+                       push_host:  "http://example.com",
+                       push_url:   "http://example.com/runs/1/ingest",
+                       push_token: "tok")
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4(d): neither push_host nor push_url — no run created, dispatch unchanged.
+  def test_dispatch_without_push_options_does_not_invoke_creator
+    dir = Dir.mktmpdir("architect-mission-dispatch")
+    _space, mission, _build = setup_dispatch_space(dir)
+    bin = fake_claude_bin(dir)
+
+    sentinel = Object.new
+    def sentinel.create = raise("run_creator must not be called when no push_host is set")
+
+    result = mission.dispatch("demo", "A", run_creator: sentinel, claude_bin: bin)
+
+    refute result[:created_run_id], "no run should be created without push_host"
+    refute result[:push_url],       "no push_url should be set without push options"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end

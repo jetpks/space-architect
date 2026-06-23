@@ -170,6 +170,27 @@ architect status                                 # review mission state
 # … architect reads evidence and writes Verdict …
 ```
 
+**Streaming builder output to a server:**
+
+`architect dispatch` can push the builder's stream-json to an ingest server for live viewing.
+
+```sh
+# Push to an already-created run (you supply the full ingest URL):
+architect dispatch my-feature lane-A \
+  --push-url  $HOST/runs/<id>/ingest \
+  --push-token $INGEST_TOKEN
+
+# Create a run and push in one step (requires --push-token = server's INGEST_TOKEN):
+architect dispatch my-feature lane-A \
+  --push-host $HOST \
+  --push-token $INGEST_TOKEN
+```
+
+`--push-host` POSTs to `<HOST>/runs`, parses the new run id from the `201` response,
+derives `<HOST>/runs/<id>/ingest`, and streams there. The created run id and ingest URL
+are printed after dispatch starts. `--push-url` and `--push-host` are mutually exclusive;
+both require `--push-token`.
+
 ## Fish shell integration 🐟
 
 Shells can't let a child process change *their* working directory, so `architect`

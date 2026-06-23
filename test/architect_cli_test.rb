@@ -863,4 +863,37 @@ class ArchitectCLITest < SpaceArchitectTest
     tcp_server.close rescue nil
     FileUtils.rm_rf(setup[:root]) if setup
   end
+
+  # I09: --push-host and --push-url are mutually exclusive; the CLI forwards
+  # --push-host to mission.dispatch and the error surfaces via handle_errors.
+  def test_dispatch_cli_push_host_and_push_url_mutual_exclusion
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test\n")
+
+        _out, err = invoke("dispatch", "demo", "A",
+                           "--push-host",  "http://example.com",
+                           "--push-url",   "http://example.com/runs/1/ingest",
+                           "--push-token", "tok")
+
+        assert_match(/push-host|push-url/i, err,
+                     "expected mutual-exclusion error to mention push-host or push-url")
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
 end
