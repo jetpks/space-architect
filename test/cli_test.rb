@@ -433,7 +433,7 @@ class CLITest < SpaceArchitectTest
       err = StringIO.new
       exit_code = SpaceArchitect::CLI.call(argv, out, err)
       assert_equal 0, exit_code, "#{argv.inspect} should exit 0"
-      assert_equal "1.0.0", out.string.chomp, "#{argv.inspect} should print VERSION to stdout"
+      assert_equal SpaceArchitect::VERSION, out.string.chomp, "#{argv.inspect} should print VERSION to stdout"
       assert_empty err.string, "#{argv.inspect} should write nothing to stderr"
     end
   end

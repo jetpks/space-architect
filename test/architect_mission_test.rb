@@ -733,4 +733,235 @@ class ArchitectMissionTest < SpaceArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  # ── section / evidence / brief / gate / integrate (CLI-absorbs-persistence) ──
+
+  # write_section! lands the body below the frozen boundary, preserves every other
+  # section, and commits with the canonical per-section message.
+  def test_write_section_replaces_body_and_commits_canonical_message
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+
+    res = mission.write_section!("my-slice", "specification", body: "- Objective — wire the seam (BRIEF §3.1)")
+    assert res[:committed]
+    assert_match(/\A[0-9a-f]{40}\z/, res[:sha])
+
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    assert_match(/wire the seam \(BRIEF §3\.1\)/, text)
+    # other sections survive
+    assert_match(/^## Acceptance Criteria/, text)
+    assert_match(/^## Builder Prompt/, text)
+    assert_match(/^## Verdict/, text)
+
+    msg, = Open3.capture3("git", "-C", dir, "log", "-1", "--format=%s")
+    assert_equal "I01: specification", msg.strip
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # write_section! refuses a frozen section once the iteration is frozen.
+  def test_write_section_refuses_frozen_section_after_freeze
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.freeze!("my-slice")
+
+    err = assert_raises(SpaceArchitect::Error) do
+      mission.write_section!("my-slice", "specification", body: "tampered")
+    end
+    assert_match(/frozen/i, err.message)
+
+    # but a below-the-boundary section (verdict) is still writable after freeze
+    res = mission.write_section!("my-slice", "verdict", body: "CONTINUE — diff vs BRIEF §1 faithful")
+    assert res[:committed]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # write_section! --append stacks per-lane ### subsections under Builder Prompt.
+  def test_write_section_append_stacks_lane_subsections
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+
+    mission.write_section!("my-slice", "prompt", body: "prompt for A", append: true, lane: "lane-a")
+    mission.write_section!("my-slice", "prompt", body: "prompt for B", append: true, lane: "lane-b")
+
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    bp = text[/## Builder Prompt.*?(?=## Builder Report)/m]
+    assert_match(/### lane-a\n\nprompt for A/, bp)
+    assert_match(/### lane-b\n\nprompt for B/, bp)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # transcribe_evidence! copies the scratch report VERBATIM — even when it contains
+  # its own "## " headings and markdown tables — and surfaces the STATUS line.
+  def test_transcribe_evidence_is_verbatim_even_with_hashes_and_tables
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+
+    report = "## Results\n\n| AC | result |\n|----|--------|\n| G0 | 222/0/0 |\n\nSTATUS: COMPLETE\n"
+    FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-a"))
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "report.md"), report)
+
+    res = mission.transcribe_evidence!("my-slice", lane: "lane-a")
+    assert_equal "STATUS: COMPLETE", res[:status_line]
+
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    # the verbatim block (including its own ## heading + table) is present under Builder Report
+    assert_includes text, "## Results"
+    assert_includes text, "| G0 | 222/0/0 |"
+    # and the Verdict section that follows is intact (parser wasn't fooled by the report's ## )
+    assert_match(/^## Verdict/, text)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # brief_new! scaffolds architecture/BRIEF.md with numbered §sections and commits it;
+  # a second call without --force is refused.
+  def test_brief_new_scaffolds_numbered_sections_and_guards
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    path = mission.brief_new!
+
+    assert_path_exists path.to_s
+    brief = File.read(path)
+    assert_match(/^## 1\. Goal & non-goals/, brief)
+    assert_match(/^## 7\. Definition of done/, brief)
+    assert_match(/BRIEF §N/, brief)
+
+    err = assert_raises(SpaceArchitect::Error) { mission.brief_new! }
+    assert_match(/already exists/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # worktree_add --touch records touch_set, which makes verify's (d) in-bounds check
+  # meaningful: an out-of-bounds write reports in_bounds == false.
+  def test_worktree_add_touch_set_drives_in_bounds_check
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.freeze!("my-slice")
+    mission.worktree_add("my-repo", "my-slice", "lane-a", touch: ["allowed/**"])
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    assert_equal ["allowed/**"], yml.dig("architect", "iterations", 0, "lanes", 0, "touch_set")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "out-of-bounds.rb"), "x = 1\n")
+
+    checks = mission.verify("my-slice").first[:checks]
+    assert_equal false, checks[:in_bounds], "an out-of-bounds write must report in_bounds == false"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # merge_lane! refuses a lane whose worktree carries builder commits (tamper).
+  def test_merge_lane_refuses_builder_commits
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.freeze!("my-slice")
+    mission.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "work.rb"), "x = 1\n")
+    system("git", "-C", wt, "add", "work.rb")
+    system("git", "-C", wt, "commit", "-q", "-m", "builder commit")
+
+    err = assert_raises(SpaceArchitect::Error) { mission.merge_lane!("my-slice", "lane-a") }
+    assert_match(/builder commits/i, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # merge_lane! integrates a clean lane: commits the working tree on the lane branch
+  # and merges --no-ff into lane/<id>, recording the integration branch.
+  def test_merge_lane_integrates_clean_lane
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+    mission.freeze!("my-slice")
+    mission.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "feature.rb"), "def feature; end\n")
+
+    r = mission.merge_lane!("my-slice", "lane-a")
+    assert_equal "lane/I01-my-slice", r[:integration_branch]
+    assert_equal false, r[:gates_run]
+
+    repo = File.join(dir, "repos", "my-repo")
+    assert_path_exists File.join(repo, ".git", "refs", "heads", "lane", "I01-my-slice")
+    log, = Open3.capture3("git", "-C", repo, "log", "lane/I01-my-slice", "--format=%s")
+    assert_match(/Merge lane\/I01-my-slice-lane-a/, log)
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    assert_equal "lane/I01-my-slice", yml.dig("architect", "iterations", 0, "lanes", 0, "integration_branch")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # run_gates reads the frozen AC table's Command column and returns RAW output with
+  # no PASS/FAIL/INVALID verdict tokens (it is a runner, not a judge).
+  def test_run_gates_returns_raw_output_without_verdict_tokens
+    dir = Dir.mktmpdir("architect-mission-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission.init!
+    mission.new_iteration!("my-slice")
+
+    # add a real gate row to the scaffold's AC table, then freeze
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    text = text.sub(/(\|-----\|---------\|-----------\|---------\|\n)/,
+      "\\1| G0 | `echo hello-gate` | prints hello-gate | §1 |\n")
+    File.write(slice, text)
+    mission.freeze!("my-slice")
+    mission.worktree_add("my-repo", "my-slice", "lane-a")
+
+    results = mission.run_gates("my-slice", lane: "lane-a")
+    assert_equal 1, results.length
+    assert_equal "echo hello-gate", results[0][:command]
+    assert_match(/hello-gate/, results[0][:stdout])
+    assert_equal 0, results[0][:exit_code]
+
+    blob = results.map { |r| "#{r[:command]} #{r[:stdout]} #{r[:stderr]}" }.join(" ")
+    refute_match(/\b(PASS|FAIL|INVALID)\b/, blob, "gate runner output must carry no verdict tokens")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end

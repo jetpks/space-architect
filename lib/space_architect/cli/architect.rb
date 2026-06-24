@@ -107,6 +107,12 @@ module SpaceArchitect
               mission = ArchitectMission.new(space: sp)
               sha = mission.freeze!(iteration)
               terminal.say "Frozen #{iteration} at #{sha}"
+              ac = mission.acceptance_criteria(iteration)
+              unless ac.to_s.strip.empty?
+                terminal.say ""
+                terminal.say "Frozen Acceptance Criteria (quote these verbatim when judging):"
+                terminal.say ac
+              end
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
           end
@@ -195,6 +201,176 @@ module SpaceArchitect
         end
       end
 
+      class Section < Dry::CLI::Command
+        include GlobalOptions
+        include Helpers
+
+        desc "Write a section of the iteration file and commit it (one call)"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :section,   required: true,  desc: "Section: grounds, specification, prompt, verdict"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option   :from,   default: nil, desc: "Read the section body from this file"
+        option   :body,   default: nil, desc: "Inline section body (one-liners)"
+        option   :stdin,  type: :boolean, default: false, desc: "Read the section body from stdin"
+        option   :append, type: :boolean, default: false, desc: "Append a ### <lane> subsection instead of replacing"
+        option   :lane,   default: nil, desc: "Lane name for an appended ### subsection"
+
+        def call(iteration:, section:, space: nil, from: nil, body: nil, stdin: false, append: false, lane: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            content = read_section_body(from: from, body: body, stdin: stdin)
+            render(store.find(space)) do |sp|
+              mission = ArchitectMission.new(space: sp)
+              res = mission.write_section!(iteration, section, body: content, append: append, lane: lane)
+              if res[:committed]
+                terminal.say "Committed #{res[:heading]} → #{res[:sha][0, 8]}"
+                terminal.say res[:diffstat] unless res[:diffstat].empty?
+              else
+                terminal.say "#{res[:heading]} written — no change to commit"
+              end
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+
+        private
+
+        def read_section_body(from:, body:, stdin:)
+          return File.read(from) if from
+          return body if body
+          return $stdin.read if stdin
+          raise SpaceArchitect::Error, "provide the section body via --from <file>, --body <text>, or --stdin"
+        end
+      end
+
+      class Evidence < Dry::CLI::Command
+        include GlobalOptions
+        include Helpers
+
+        desc "Transcribe a lane's scratch report VERBATIM into Builder Report and commit"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option   :lane,      default: nil,    desc: "Lane name (per-lane subsection; omit for a single-lane iteration)"
+
+        def call(iteration:, space: nil, lane: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            render(store.find(space)) do |sp|
+              mission = ArchitectMission.new(space: sp)
+              res = mission.transcribe_evidence!(iteration, lane: lane)
+              terminal.say "Transcribed #{res[:lines]} lines → #{res[:sha][0, 8]}"
+              terminal.say "Builder STATUS: #{res[:status_line]}" if res[:status_line]
+              terminal.say "Now rule on the builder's PHASE 0 disagreements in the Verdict (a later session)."
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+      end
+
+      class Merge < Dry::CLI::Command
+        include GlobalOptions
+        include Helpers
+
+        desc "Integrate ONE judged-passing lane (merges --no-ff; runs no gates, makes no verdict)"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :lane,      required: true,  desc: "Lane name (architect-judged passing)"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option   :message,   default: nil,    desc: "Commit message for the lane's working-tree changes"
+
+        def call(iteration:, lane:, space: nil, message: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            render(store.find(space)) do |sp|
+              mission = ArchitectMission.new(space: sp)
+              r = mission.merge_lane!(iteration, lane, message: message)
+              terminal.say "Merged #{lane} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
+              terminal.say r[:diffstat] unless r[:diffstat].empty?
+              terminal.say "Gates NOT run — run `architect gate #{iteration}` against the integration branch."
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+      end
+
+      class Integrate < Dry::CLI::Command
+        include GlobalOptions
+        include Helpers
+
+        desc "Integrate the architect-supplied set of passing lanes, in order (stops on conflict)"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option   :lanes,     required: true,  desc: "Comma-separated passing lane names (you decide the set)"
+        option   :teardown,  type: :boolean, default: false, desc: "Remove worktrees + delete lane branches after merge"
+
+        def call(iteration:, space: nil, lanes:, teardown: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            render(store.find(space)) do |sp|
+              mission = ArchitectMission.new(space: sp)
+              lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
+              results = mission.integrate!(iteration, lanes: lane_names, teardown: teardown)
+              results.each do |r|
+                terminal.say "Merged #{r[:lane]} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
+              end
+              terminal.say "Gates NOT run — run `architect gate #{iteration}`; the verdict is the next session's."
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+      end
+
+      class Gate < Dry::CLI::Command
+        include GlobalOptions
+        include Helpers
+
+        desc "Run the frozen Acceptance Criteria gate commands and stream raw output (no PASS/FAIL)"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :lane,      required: false, desc: "Run in a lane worktree (default: the integration repo)"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+
+        def call(iteration:, lane: nil, space: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            render(store.find(space)) do |sp|
+              mission = ArchitectMission.new(space: sp)
+              results = mission.run_gates(iteration, lane: lane)
+              results.each do |r|
+                terminal.say ""
+                terminal.say "── #{r[:ac].empty? ? "(gate)" : r[:ac]}: #{r[:command]}  (exit #{r[:exit_code]})"
+                terminal.say r[:stdout].rstrip unless r[:stdout].strip.empty?
+                terminal.say r[:stderr].rstrip unless r[:stderr].strip.empty?
+              end
+              terminal.say ""
+              terminal.say "Raw gate output above — the PASS/FAIL/INVALID verdict is yours, read against the frozen thresholds."
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+      end
+
+      module Brief
+        class New < Dry::CLI::Command
+          include GlobalOptions
+          include Helpers
+
+          desc "Scaffold the durable mission brief (architecture/BRIEF.md)"
+          argument :space, required: false, desc: "Space identifier (default: $PWD)"
+          option   :force, type: :boolean, default: false, desc: "Overwrite an existing BRIEF.md"
+
+          def call(space: nil, force: false, **opts)
+            setup_terminal(**opts.slice(:color, :colors))
+            handle_errors do
+              render(store.find(space)) do |sp|
+                mission = ArchitectMission.new(space: sp)
+                path = mission.brief_new!(force: force)
+                terminal.say "Brief ready: #{terminal.path(path)}"
+                CLI.record_outcome(Outcome.new(exit_code: 0))
+              end
+            end
+          end
+        end
+      end
+
       module Worktree
         class Add < Dry::CLI::Command
           include GlobalOptions
@@ -208,14 +384,16 @@ module SpaceArchitect
           option   :harness,   default: "claude-code", desc: "Harness (claude-code, opencode)"
           option   :model,     default: nil,           desc: "Model (required for opencode)"
           option   :effort,    default: nil,           desc: "Reasoning effort (opencode only; sets reasoningEffort in the model config)"
+          option   :touch,     default: nil,           desc: "Comma-separated file globs the lane may touch (records its touch_set for in-bounds + merge checks)"
 
-          def call(repo:, iteration:, lane:, base: nil, harness: "claude-code", model: nil, effort: nil, **opts)
+          def call(repo:, iteration:, lane:, base: nil, harness: "claude-code", model: nil, effort: nil, touch: nil, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find) do |sp|
                 mission = ArchitectMission.new(space: sp)
+                touch_set = touch ? touch.split(",").map(&:strip).reject(&:empty?) : nil
                 result = mission.worktree_add(repo, iteration, lane, base: base,
-                                             harness: harness, model: model, effort: effort)
+                                             harness: harness, model: model, effort: effort, touch: touch_set)
                 terminal.say "Worktree: #{terminal.path(result[:worktree])}"
                 terminal.say "Base SHA: #{result[:base_sha]}"
                 CLI.record_outcome(Outcome.new(exit_code: 0))
@@ -376,6 +554,14 @@ SpaceArchitect::CLI::Registry.register "status", SpaceArchitect::CLI::Architect:
 SpaceArchitect::CLI::Registry.register "freeze", SpaceArchitect::CLI::Architect::Freeze
 SpaceArchitect::CLI::Registry.register "verify", SpaceArchitect::CLI::Architect::Verify
 SpaceArchitect::CLI::Registry.register "dispatch", SpaceArchitect::CLI::Architect::Dispatch
+SpaceArchitect::CLI::Registry.register "section",   SpaceArchitect::CLI::Architect::Section
+SpaceArchitect::CLI::Registry.register "evidence",  SpaceArchitect::CLI::Architect::Evidence
+SpaceArchitect::CLI::Registry.register "merge",     SpaceArchitect::CLI::Architect::Merge
+SpaceArchitect::CLI::Registry.register "integrate", SpaceArchitect::CLI::Architect::Integrate
+SpaceArchitect::CLI::Registry.register "gate",      SpaceArchitect::CLI::Architect::Gate
+SpaceArchitect::CLI::Registry.register "brief" do |b|
+  b.register "new", SpaceArchitect::CLI::Architect::Brief::New
+end
 SpaceArchitect::CLI::Registry.register "worktree" do |wt|
   wt.register "add",    SpaceArchitect::CLI::Architect::Worktree::Add
   wt.register "remove", SpaceArchitect::CLI::Architect::Worktree::Remove
