@@ -9,21 +9,23 @@
 
 ## Grounds
 
-<!-- WHY. Research/PRD distilled: problem, decision + why, requirements,
-non-goals, verified facts WITH citation URLs, open questions. Optional — delete
-this section for iterations that needed no research. Commit: "<%= @_ordinal %>: grounds". -->
+<!-- WHY. Research/spec distilled: problem, decision + why, requirements,
+non-goals, verified facts WITH citation URLs, open questions. If
+architecture/BRIEF.md exists, cite **BRIEF §N** instead of restating — shrink this
+to deltas + citations. Optional — delete this section for iterations that needed
+no research. Write + commit: `architect section <%= @_name %> grounds --from <file>`. -->
 
 ## Specification
 
 <!-- WHAT / HOW — the full, self-contained delegation contract.
-Commit: "<%= @_ordinal %>: specification". -->
+Write + commit: `architect section <%= @_name %> specification --from <file>`. -->
 
-- **Objective** — what to build and why (cite Grounds if present).
+- **Objective** — what to build and why; cite **BRIEF §N** for durable context (e.g. `(BRIEF §3.1)`).
 - **Output format** — raw tables, numbers, commit SHAs, test output paths.
 - **Tool guidance** — exact verification commands for the target repo; the
   APIs/formats/versions to verify against live dependencies before writing code.
 - **Boundaries** — may-touch / must-not-touch / out-of-scope; no placeholders;
-  no refactors beyond the task.
+  no refactors beyond the task. (Frozen stack: cite `BRIEF §2`.)
 - **Lane plan** — 1–4 lanes, each declaring: target repo `repos/<repo>`,
   file-touch set (overlap-checked), objective, output format, boundaries.
 - **Effort** — `think hard` … `ultrathink` per lane, with one line of why.
@@ -34,33 +36,39 @@ Commit: "<%= @_ordinal %>: specification". -->
 commits this file and records its SHA as freeze_sha. Read-only afterward — any
 change to Grounds/Specification/Acceptance Criteria = automatic iteration FAIL. -->
 
-| AC# | Command | Threshold |
-|-----|---------|-----------|
-|     |         |           |
+> Gate-pass is necessary, not sufficient: the architect also reads the diff against the
+> cited **BRIEF §sections** intent and the §1 cardinal invariant before the verdict.
+
+| AC# | Command | Threshold | Brief § |
+|-----|---------|-----------|---------|
+|     |         |           |         |
 
 ## Builder Prompt
 
 <!-- The exact lane-prompt(s) dispatched, recorded as provenance. One ###
 subsection per lane. A copy is written to build/<%= @_ordinal %>-<%= @_name %>-<lane>/prompt.md
-for stdin dispatch. Commit: "<%= @_ordinal %>: dispatched". -->
+for stdin dispatch. Record + commit:
+`architect section <%= @_name %> prompt --append --lane <lane> --from build/<%= @_ordinal %>-<%= @_name %>-<lane>/prompt.md`. -->
 
 ## Builder Report
 
 <!-- RAW EVIDENCE ONLY — tables, numbers, command output. The builder writes this
 to build/<%= @_ordinal %>-<%= @_name %>-<lane>/report.md; the architect transcribes it here
-VERBATIM (no interpretation). One ### subsection per lane; include the builder's
-PHASE 0 disagreements and its STATUS line. Commit: "<%= @_ordinal %>: evidence". -->
+VERBATIM with `architect evidence <%= @_name %> --lane <lane>` (byte-for-byte, no
+interpretation). One ### subsection per lane; includes the builder's PHASE 0
+disagreements and its STATUS line. -->
 
 ## Verdict
 
 <!-- ARCHITECT JUDGMENT, written in a LATER session than the dispatch.
-Commit: "<%= @_ordinal %>: verdict". -->
+Write + commit: `architect section <%= @_name %> verdict --from <file>`. -->
 
-- **Disagreement rulings** — each PHASE 0 disagreement: ACCEPT / REJECT / MODIFY + why.
+- **Disagreement rulings** — each PHASE 0 disagreement: ACCEPT / REJECT / MODIFY + why; cite the
+  BRIEF §section in tension beside file:line.
 - **Acceptance Criteria integrity** — frozen sections unchanged since freeze (`architect verify <%= @_name %>`)?
 
-| AC# | Raw result | Verdict |
-|-----|------------|---------|
-|     |            | PASS/FAIL/INVALID |
+| AC# | Raw result | Brief § | Verdict |
+|-----|------------|---------|---------|
+|     |            |         | PASS/FAIL/INVALID |
 
-- **Iteration** — KILL / CONTINUE + the single decisive reason.
+- **Iteration** — KILL / CONTINUE + the single decisive reason (e.g. "diff vs BRIEF §1/§3.3 faithful — CONTINUE").
