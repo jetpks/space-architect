@@ -66,7 +66,10 @@ that are still finding their shape defer the brief, cite per-iteration Grounds,
 and promote the consolidated picture into BRIEF.md once it stabilizes.
 
 Full rationale and citations: `DESIGN.md` in this skill's repo. Exact dispatch
-commands and the lane-prompt template: `dispatch.md` next to this file.
+commands and the lane-prompt template: `dispatch.md` next to this file. To load
+this system's vocabulary without running the loop (e.g. when working *on* the
+skill), invoke the `/architect-vocabulary` skill — it is the glossary, not the
+loop.
 
 ## Hard rules
 

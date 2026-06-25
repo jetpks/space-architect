@@ -80,6 +80,7 @@ class SkillInstallerTest < SpaceArchitectTest
     names = SpaceArchitect::SkillInstaller.source_skills.map { |s| s.basename.to_s }
     assert_includes names, "architect"
     assert_includes names, "architect-research"
+    assert_includes names, "architect-vocabulary"
   end
 
   # install — copies skills to dest
@@ -90,6 +91,7 @@ class SkillInstallerTest < SpaceArchitectTest
     names = skills.map { |s| s[:name] }
     assert_includes names, "architect"
     assert_includes names, "architect-research"
+    assert_includes names, "architect-vocabulary"
 
     architect_dest = result[:dest_root].join("architect")
     assert architect_dest.join("SKILL.md").exist?
@@ -99,6 +101,9 @@ class SkillInstallerTest < SpaceArchitectTest
     research_dest = result[:dest_root].join("architect-research")
     assert research_dest.join("SKILL.md").exist?
     assert research_dest.join("lanes.md").exist?
+
+    vocabulary_dest = result[:dest_root].join("architect-vocabulary")
+    assert vocabulary_dest.join("SKILL.md").exist?
   end
 
   def test_install_reports_installed_for_new_skills

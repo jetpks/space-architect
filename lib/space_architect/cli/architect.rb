@@ -352,7 +352,7 @@ module SpaceArchitect
         include GlobalOptions
         include Helpers
 
-        desc "Install bundled skills (architect, architect-research) for a harness"
+        desc "Install bundled skills (architect, architect-research, architect-vocabulary) for a harness"
         option :provider, default: "claude", desc: "Harness: claude, codex, opencode, pi"
         option :project, type: :boolean, default: false, desc: "Install to CWD instead of global"
         option :force,   type: :boolean, default: false, desc: "Overwrite existing skills that differ"

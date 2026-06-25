@@ -36,7 +36,7 @@ architect init 20260531-name-of-space
 
 ### `architect install-skills [--provider=PROVIDER] [--project] [--force]`
 
-Install the bundled skills (`architect` and `architect-research`) for a harness. Run this once per machine after installing the gem, or after upgrading to pick up skill changes.
+Install the bundled skills (`architect`, `architect-research`, and `architect-vocabulary`) for a harness. Run this once per machine after installing the gem, or after upgrading to pick up skill changes.
 
 ```sh
 architect install-skills                              # claude (default) → ~/.claude/skills/
