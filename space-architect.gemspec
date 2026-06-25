@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.email = ["eric@ebj.dev"]
 
   spec.summary = "Task-scoped project workspaces (repos · notes · artifacts under one self-describing root)"
-  spec.description = "A dry-cli CLI for spaces: date-prefixed directories with a YAML identity file, $PWD-based current-space resolution, and XDG config/state. Provisions repos at copy-on-write speed from evergreen checkouts (pairs with repo-tender), concurrently on fibers. Ships fish shell integration and completions."
+  spec.description = "A dry-cli CLI for spaces: date-prefixed directories with a YAML identity file, $PWD-based current-space resolution, and XDG config/state. Provisions repos at copy-on-write speed from evergreen checkouts, concurrently on fibers. Ships fish shell integration and completions."
   spec.homepage = "https://github.com/jetpks/space-architect"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 4.0.5"
@@ -17,11 +17,10 @@ Gem::Specification.new do |spec|
   spec.metadata["homepage_uri"] = spec.homepage
 
   spec.files = Dir.chdir(__dir__) do
-    Dir["lib/**/*.rb", "lib/**/*.erb", "exe/*", "README.md", "LICENSE.txt"] +
-      Dir["vendor/repo-tender/lib/**/*.rb"]
+    Dir["lib/**/*.rb", "lib/**/*.erb", "exe/*", "README.md", "LICENSE.txt"]
   end
   spec.bindir = "exe"
-  spec.executables = ["architect", "space"]
+  spec.executables = ["architect", "space", "src"]
   spec.require_paths = ["lib"]
 
   spec.add_dependency "async", "~> 2.39"
