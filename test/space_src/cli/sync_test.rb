@@ -207,7 +207,7 @@ class CLISyncTest < Minitest::Test
     end
   end
 
-  # ---- Slice 5 / CF6: `REPO_TENDER_LOG_MAX_BYTES` parse
+  # ---- Slice 5 / CF6: `SPACE_SRC_LOG_MAX_BYTES` parse
   #      hardening. A malformed value (e.g. `"10MB"`) must
   #      fall back to the 10 MiB default instead of raising
   #      `ArgumentError` and crashing the entire `sync` run.
@@ -275,7 +275,7 @@ class CLISyncTest < Minitest::Test
 
   def test_sync_with_malformed_log_max_bytes_does_not_crash
     # Integration: a real `sync` run with
-    # `REPO_TENDER_LOG_MAX_BYTES="10MB"` set in the env must
+    # `SPACE_SRC_LOG_MAX_BYTES="10MB"` set in the env must
     # exit 0 and write state for both repos. The pre-step's
     # parse must NOT crash the run.
     with_engine_home_2_repos do |_env, paths, base_dir, refs|
@@ -288,12 +288,12 @@ class CLISyncTest < Minitest::Test
       )
       Space::Src::Config::Store.write(paths.config_file, config)
 
-      prev = ENV["REPO_TENDER_LOG_MAX_BYTES"]
+      prev = ENV["SPACE_SRC_LOG_MAX_BYTES"]
       begin
-        ENV["REPO_TENDER_LOG_MAX_BYTES"] = "10MB"
+        ENV["SPACE_SRC_LOG_MAX_BYTES"] = "10MB"
         out, _err = invoke_command(PristineCLI::Sync::Run)
       ensure
-        ENV["REPO_TENDER_LOG_MAX_BYTES"] = prev
+        ENV["SPACE_SRC_LOG_MAX_BYTES"] = prev
       end
       assert_equal 0, PristineCLI.last_outcome.exit_code,
         "expected exit 0 with malformed log_max_bytes; got #{PristineCLI.last_outcome.exit_code}"

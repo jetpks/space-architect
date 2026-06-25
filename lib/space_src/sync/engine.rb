@@ -160,7 +160,7 @@ module Space::Src
           end
 
           if lock_result == State::Lock::NOT_ACQUIRED
-            warn "repo-tender: skipped — another sync in progress"
+            warn "src: skipped — another sync in progress"
             Dry::Monads::Success(State::Store.load(paths.state_file).success)
           else
             lock_result
