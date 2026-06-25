@@ -78,7 +78,7 @@ class DispatcherTest < SpaceArchitectTest
 
   def test_dispatch_reflects_nonzero_exit_code
     root = Dir.mktmpdir("dispatcher-test")
-    _space_dir, mission, fake, build_dir = setup_space_with_worktree(root)
+    _space_dir, mission, fake, _build_dir = setup_space_with_worktree(root)
 
     with_env("FAKE_EXIT" => "7") do
       res = mission.dispatch("demo", "A", claude_bin: fake)

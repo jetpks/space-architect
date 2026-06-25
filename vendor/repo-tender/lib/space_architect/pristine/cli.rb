@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "dry/cli"
-require "space_architect/pristine"
 
 module SpaceArchitect::Pristine
   # CLI surface — thin translation layer between argv and the
@@ -126,12 +125,4 @@ module SpaceArchitect::Pristine
   end
 end
 
-# Subcommand files — each defines its command classes and
-# registers them under their group prefix.
-require "space_architect/pristine/cli/repo"
-require "space_architect/pristine/cli/org"
-require "space_architect/pristine/cli/sync"
-require "space_architect/pristine/cli/status"
-require "space_architect/pristine/cli/config"
-require "space_architect/pristine/cli/daemon"
-require "space_architect/pristine/cli/clone"
+
