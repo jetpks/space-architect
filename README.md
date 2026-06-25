@@ -69,6 +69,7 @@ architect space status done                      # mark the current mission comp
 **Architect Loop (run from inside a space):**
 
 ```sh
+architect install-skills                          # install skills for your harness (once per machine)
 architect init                                   # scaffold ARCHITECT.md + architecture/
 architect new <iteration>                        # scaffold next iteration file
 architect dispatch <iteration> <lane>            # dispatch a builder for a lane
@@ -76,6 +77,11 @@ architect status                                 # show mission state (read-only
 architect freeze <iteration>                     # freeze Acceptance Criteria
 architect verify <iteration>                     # post-flight mechanical checks
 ```
+
+`architect install-skills` installs the bundled `architect` and `architect-research`
+skills for a harness. Default is `claude` (`~/.claude/skills/`); use `--provider
+opencode|codex|pi` for other harnesses, and `--project` to install into the current
+directory instead of globally. See the [command reference](docs/reference.md) for details.
 
 ## Usage 🛰️
 

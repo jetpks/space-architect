@@ -74,6 +74,21 @@ module SpaceArchitect
       end.wait
     end
 
+    def style_skill_action(action)
+      case action.to_s
+      when "installed", "updated"
+        pastel.green(action)
+      when "would_install", "would_update"
+        pastel.cyan(action)
+      when "unchanged"
+        pastel.bright_black(action)
+      when "conflict"
+        pastel.yellow(action)
+      else
+        action.to_s
+      end
+    end
+
     private
 
     def color_mode

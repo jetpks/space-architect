@@ -34,6 +34,36 @@ architect init
 architect init 20260531-name-of-space
 ```
 
+### `architect install-skills [--provider=PROVIDER] [--project] [--force]`
+
+Install the bundled skills (`architect` and `architect-research`) for a harness. Run this once per machine after installing the gem, or after upgrading to pick up skill changes.
+
+```sh
+architect install-skills                              # claude (default) → ~/.claude/skills/
+architect install-skills --provider opencode           # → ~/.config/opencode/skills/
+architect install-skills --provider codex              # → ~/.agents/skills/
+architect install-skills --provider pi                 # → ~/.pi/agent/skills/
+architect install-skills --project                     # install to ./.claude/skills/ instead of global
+architect install-skills --force                       # overwrite existing skills that differ
+architect install-skills --dry-run                      # print what would happen without writing
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--provider=VALUE` | `claude` | Harness: `claude`, `codex`, `opencode`, `pi`. |
+| `--project` | `false` | Install to the current working directory instead of global. |
+| `--force` | `false` | Overwrite existing skills that differ from the bundled source. |
+| `--dry-run` | `false` | Print what would happen without writing any files. |
+
+Provider destination paths:
+
+| Provider | Global | `--project` |
+|----------|--------|-------------|
+| `claude` | `~/.claude/skills/` | `./.claude/skills/` |
+| `codex` | `~/.agents/skills/` | `./.agents/skills/` |
+| `opencode` | `~/.config/opencode/skills/` | `./.opencode/skills/` |
+| `pi` | `~/.pi/agent/skills/` (or `$PI_CODING_AGENT_DIR/skills/`) | `./.pi/skills/` |
+
 ### `architect new ITERATION [SPACE]`
 
 Scaffold the next iteration file at `architecture/I<NN>-<ITERATION>.md` from the iteration template. Allocates the next ordinal and records the iteration in `space.yaml`.
