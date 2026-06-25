@@ -26,7 +26,7 @@ class CLISrcTest < SpaceArchitectTest
     err = StringIO.new
     code = SpaceArchitect::CLI.call(["src", "version"], out, err)
     assert_equal 0, code
-    assert_equal SpaceArchitect::Pristine::VERSION, out.string.chomp
+    assert_equal Space::Src::VERSION, out.string.chomp
   end
 
   def test_src_version_flag_prints_pristine_version_and_exits_0
@@ -34,7 +34,7 @@ class CLISrcTest < SpaceArchitectTest
     err = StringIO.new
     code = SpaceArchitect::CLI.call(["src", "--version"], out, err)
     assert_equal 0, code
-    assert_equal SpaceArchitect::Pristine::VERSION, out.string.chomp
+    assert_equal Space::Src::VERSION, out.string.chomp
   end
 
   def test_src_status_dispatches_to_pristine_and_returns_0

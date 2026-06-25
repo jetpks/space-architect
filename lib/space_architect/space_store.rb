@@ -6,8 +6,8 @@ require "async/semaphore"
 require "pathname"
 require "time"
 require "dry/monads"
-require "space_architect/pristine/scm/git"
-require "space_architect/pristine/cloner"
+require "space_src/scm/git"
+require "space_src/cloner"
 
 module SpaceArchitect
   class SpaceStore
@@ -112,15 +112,15 @@ module SpaceArchitect
       find(identifier).fmap { |space| state.touch_recent(space.id); space }
     end
 
-    def add_repo(spec, from: Dir.pwd, scm: Pristine::SCM::Git.new, cloner: nil, mise_client: MiseClient.new)
+    def add_repo(spec, from: Dir.pwd, scm: ::Space::Src::SCM::Git.new, cloner: nil, mise_client: MiseClient.new)
       add_repos([spec], from:, scm:, cloner:, mise_client:).fmap(&:first)
     end
 
-    def add_repos(specs, from: Dir.pwd, scm: Pristine::SCM::Git.new, cloner: nil, mise_client: MiseClient.new, reporter: nil)
+    def add_repos(specs, from: Dir.pwd, scm: ::Space::Src::SCM::Git.new, cloner: nil, mise_client: MiseClient.new, reporter: nil)
       current(from:).bind { |space| add_repos_to(space, specs, scm:, cloner:, mise_client:, reporter:) }
     end
 
-    def add_repos_to(space, specs, scm: Pristine::SCM::Git.new, cloner: nil, mise_client: MiseClient.new, reporter: nil)
+    def add_repos_to(space, specs, scm: ::Space::Src::SCM::Git.new, cloner: nil, mise_client: MiseClient.new, reporter: nil)
       additions = prepare_repo_additions(space, specs)
       first_error = nil
 
@@ -178,7 +178,7 @@ module SpaceArchitect
       source = addition.fetch(:src_source)
 
       if source&.directory?
-        actual_cloner = cloner || Pristine::Cloner.new(base_dir: config.src_dir)
+        actual_cloner = cloner || ::Space::Src::Cloner.new(base_dir: config.src_dir)
         result = actual_cloner.call(name: reference.full_name, into: destination.dirname.to_s)
         raise GitError, "clone failed (copy): #{result.failure}" if result.failure?
       else
