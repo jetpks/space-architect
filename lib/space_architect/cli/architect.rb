@@ -348,6 +348,31 @@ module SpaceArchitect
         end
       end
 
+      class InstallSkills < Dry::CLI::Command
+        include GlobalOptions
+        include Helpers
+
+        desc "Install bundled skills (architect, architect-research) for a harness"
+        option :provider, default: "claude", desc: "Harness: claude, codex, opencode, pi"
+        option :project, type: :boolean, default: false, desc: "Install to CWD instead of global"
+        option :force,   type: :boolean, default: false, desc: "Overwrite existing skills that differ"
+        option :dry_run, type: :boolean, default: false, desc: "Print what would happen without writing files"
+
+        def call(provider: "claude", project: false, force: false, dry_run: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            result = SkillInstaller.install(provider, project: project, force: force,
+                                             env: project_config.env, dry_run: dry_run)
+            verb = dry_run ? "Would install" : "Installed"
+            terminal.say "#{verb} skills for #{provider} → #{terminal.path(result[:dest_root])}"
+            result[:skills].each do |s|
+              terminal.say "  #{s[:name]}: #{terminal.style_skill_action(s[:action])} (#{terminal.path(s[:path])})"
+            end
+            CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
       module Brief
         class New < Dry::CLI::Command
           include GlobalOptions
@@ -559,6 +584,7 @@ SpaceArchitect::CLI::Registry.register "evidence",  SpaceArchitect::CLI::Archite
 SpaceArchitect::CLI::Registry.register "merge",     SpaceArchitect::CLI::Architect::Merge
 SpaceArchitect::CLI::Registry.register "integrate", SpaceArchitect::CLI::Architect::Integrate
 SpaceArchitect::CLI::Registry.register "gate",      SpaceArchitect::CLI::Architect::Gate
+SpaceArchitect::CLI::Registry.register "install-skills", SpaceArchitect::CLI::Architect::InstallSkills
 SpaceArchitect::CLI::Registry.register "brief" do |b|
   b.register "new", SpaceArchitect::CLI::Architect::Brief::New
 end
