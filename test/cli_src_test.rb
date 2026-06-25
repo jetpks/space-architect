@@ -41,7 +41,7 @@ class CLISrcTest < SpaceArchitectTest
     out = StringIO.new
     err = StringIO.new
     Dir.mktmpdir do |d|
-      Thread.current[:repo_tender_cli_env] = {
+      Thread.current[:space_src_cli_env] = {
         "HOME" => "#{d}/h",
         "XDG_CONFIG_HOME" => "#{d}/c",
         "XDG_STATE_HOME" => "#{d}/s"
@@ -50,7 +50,7 @@ class CLISrcTest < SpaceArchitectTest
       assert_equal 0, code
       assert_match(/no repos in state/, out.string)
     ensure
-      Thread.current[:repo_tender_cli_env] = nil
+      Thread.current[:space_src_cli_env] = nil
     end
   end
 

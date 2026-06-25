@@ -4,10 +4,10 @@ require "space_src/cli"
 
 module SpaceArchitect
   module CLI
-    # Exit-code bridge to the migrated Space::Src (repo-tender) CLI engine.
+    # Exit-code bridge to the Space::Src CLI engine.
     # `architect src <args>` hands the raw remainder to Space::Src's own dry-cli
     # registry and translates Space::Src's recorded Outcome into the host exit code.
-    # Space::Src has its own Registry, Outcome, and :repo_tender_cli_* thread-locals;
+    # Space::Src has its own Registry, Outcome, and :space_src_cli_* thread-locals;
     # this is the seam between the two registries (NOT a re-registration). Space::Src's
     # top-level help/version interceptors call Kernel.exit, so we reproduce that
     # interception here against the injected IO instead of delegating to them.
@@ -24,7 +24,7 @@ module SpaceArchitect
         return 0
       end
 
-      Thread.current[:repo_tender_cli_outcome] = nil
+      Thread.current[:space_src_cli_outcome] = nil
       Dry::CLI.new(::Space::Src::CLI::Registry).call(arguments: rest, out: out, err: err)
       ::Space::Src::CLI.last_outcome&.exit_code || 0
     end

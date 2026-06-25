@@ -82,7 +82,7 @@ class CLIDaemonTest < Minitest::Test
       mise_toml: "#{repo_root}/mise.toml",
       mise_bin: "/opt/homebrew/opt/mise/bin/mise",
       ruby_bin: "/Users/eric/.local/share/mise/installs/ruby/latest/bin/ruby",
-      bin_path: "#{repo_root}/bin/repo-tender"
+      bin_path: "#{repo_root}/exe/src"
     )
     @resolve_detect_orig = Daemon::Helpers::Resolve.method(:detect)
     Daemon::Helpers::Resolve.define_singleton_method(:detect) { |**| fake }
@@ -173,7 +173,7 @@ class CLIDaemonTest < Minitest::Test
         mise_toml: "/Users/eric/src/github.com/jetpks/repo-tender/mise.toml",
         mise_bin: "/opt/homebrew/opt/mise/bin/mise",
         ruby_bin: "/Users/eric/.local/share/mise/installs/ruby/latest/bin/ruby",
-        bin_path: "/Users/eric/src/github.com/jetpks/repo-tender/bin/repo-tender"
+        bin_path: "/Users/eric/src/github.com/jetpks/repo-tender/exe/src"
       )
       assert_equal expected, File.read(written)
 
@@ -322,21 +322,21 @@ class CLIDaemonTest < Minitest::Test
 
   def test_detect_bin_path_prefers_on_disk_dev_bin
     Dir.mktmpdir do |root|
-      FileUtils.mkdir_p(File.join(root, "bin"))
-      dev = File.join(root, "bin", "repo-tender")
+      FileUtils.mkdir_p(File.join(root, "exe"))
+      dev = File.join(root, "exe", "src")
       File.write(dev, "#!/usr/bin/env ruby\n")
       assert_equal dev, Daemon::Helpers::Resolve.detect_bin_path(root)
     end
   end
 
   def test_detect_bin_path_honors_env_override
-    prev = ENV["REPO_TENDER_BIN_PATH"]
-    ENV["REPO_TENDER_BIN_PATH"] = "/custom/repo-tender"
+    prev = ENV["SPACE_SRC_BIN_PATH"]
+    ENV["SPACE_SRC_BIN_PATH"] = "/custom/src"
     Dir.mktmpdir do |root|
-      assert_equal "/custom/repo-tender", Daemon::Helpers::Resolve.detect_bin_path(root)
+      assert_equal "/custom/src", Daemon::Helpers::Resolve.detect_bin_path(root)
     end
   ensure
-    ENV["REPO_TENDER_BIN_PATH"] = prev
+    ENV["SPACE_SRC_BIN_PATH"] = prev
   end
 
   # ---- RC1/RC3: color in pretty mode, no color otherwise ----
@@ -538,6 +538,79 @@ class CLIDaemonTest < Minitest::Test
       # The non-benign bootout failure IS surfaced on stderr.
       assert_includes err.string, "bootout reported:"
       assert_includes err.string, "Operation not permitted"
+    end
+  end
+
+  # ---- AC#5: daemon install relabels old-identity agent ----
+  # Proves (injected RecordingRunner + temp HOME, no real launchctl/
+  # ~/Library/LaunchAgents) that `daemon install` with an old-label
+  # plist present boots out the old label, removes the old plist,
+  # and bootstraps the new-label plist.
+
+  def test_install_boots_out_old_label_and_bootstraps_new
+    old_label = Space::Src::Migration::OLD_LABEL
+    new_label = LABEL
+    uid = 525
+
+    with_daemon_home do |env, paths|
+      old_pp = File.join(env["HOME"], "Library", "LaunchAgents", "#{old_label}.plist")
+      new_pp = File.join(env["HOME"], "Library", "LaunchAgents", "#{new_label}.plist")
+      FileUtils.mkdir_p(File.dirname(old_pp))
+      File.write(old_pp, "<?xml version=\"1.0\"?><plist/>")
+
+      recorder = Class.new do
+        attr_reader :calls
+        def initialize
+          @calls = []
+        end
+        def run(*argv)
+          @calls << argv
+          Dry::Monads::Success("")
+        end
+      end.new
+
+      @make_agent_stub_class = Daemon::Install
+      Daemon::Install.define_method(:make_agent) do |**kwargs|
+        Agent.new(runner: recorder, uid: uid, label: kwargs.fetch(:label, Agent::DEFAULT_LABEL))
+      end
+
+      stub_resolve(repo_root: "/fake/repo")
+      config = Space::Src::Config::Config.new(
+        base_dir: paths.base_dir, refresh_interval: 3600, concurrency: 2,
+        repos: [], orgs: []
+      )
+      Space::Src::Config::Store.write(paths.config_file, config)
+
+      out, _err = invoke_command(Daemon::Install)
+      assert_equal 0, Space::Src::CLI.last_outcome.exit_code, out.string
+
+      refute File.exist?(old_pp), "old plist should have been removed"
+      assert File.exist?(new_pp), "new plist should have been written"
+
+      assert_equal [
+        ["launchctl", "bootout", "gui/#{uid}/#{old_label}"],
+        ["launchctl", "bootstrap", "gui/#{uid}", new_pp]
+      ], recorder.calls
+    end
+  end
+
+  # ---- AC#5: daemon status warns on stale old-label plist ----
+
+  def test_daemon_status_warns_on_stale_old_label_plist
+    old_label = Space::Src::Migration::OLD_LABEL
+
+    with_daemon_home do |env, _paths|
+      old_pp = File.join(env["HOME"], "Library", "LaunchAgents", "#{old_label}.plist")
+      FileUtils.mkdir_p(File.dirname(old_pp))
+      File.write(old_pp, "<?xml version=\"1.0\"?><plist/>")
+
+      stub_agent(status_result: Dry::Monads::Success(loaded: false, running: false, pid: nil, last_exit: nil))
+
+      _out, err = invoke_command(Daemon::Status)
+      assert_equal 0, Space::Src::CLI.last_outcome.exit_code
+      assert_includes err.string, "stale"
+      assert_includes err.string, old_label
+      assert_includes err.string, "src daemon install"
     end
   end
 end

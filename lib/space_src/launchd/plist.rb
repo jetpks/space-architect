@@ -8,7 +8,7 @@ module Space::Src
     #
     # The plist produced here is a fixed-shape StartInterval-driven
     # agent that:
-    #   * runs `repo-tender sync` non-interactively under the
+    #   * runs `src sync` non-interactively under the
     #     repo's mise-managed Ruby (so the right toolchain is in
     #     effect without `mise activate`, which is broken
     #     non-interactively);
@@ -44,7 +44,7 @@ module Space::Src
         # @param mise_toml [String]          Absolute path to mise.toml (pinned via EnvironmentVariables.MISE_CONFIG_FILE).
         # @param mise_bin [String]           Absolute path to the mise binary (ProgramArguments[0]).
         # @param ruby_bin [String]           Absolute path to the ruby to run the script under.
-        # @param bin_path [String]           Absolute path to the repo-tender bin script.
+        # @param bin_path [String]           Absolute path to the src bin script.
         # @return [String]                   The full plist XML, ready to be written to disk and `plutil -lint`-validated.
         def call(label:, refresh_interval:, log_dir:, repo_root:, mise_toml:, mise_bin:, ruby_bin:, bin_path:)
           raise ArgumentError, "label is required" if label.to_s.empty?

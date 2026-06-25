@@ -2,6 +2,7 @@
 
 require "dry/cli"
 require "space_src"
+require "space_src/migration"
 
 module Space::Src
   # CLI surface — thin translation layer between argv and the
@@ -17,7 +18,7 @@ module Space::Src
   #
   # Exit-code seam: each command records an `Outcome(exit_code:,
   # message:)` (the thread-local stash) and writes the user-facing
-  # message to `out`/`err` via the injected IOs. The `bin/repo-tender`
+  # message to `out`/`err` via the injected IOs. The `exe/src`
   # entrypoint reads the recorded Outcome and calls Kernel.exit with
   # the code — see CLI.run below. Tests can inspect last_outcome
   # in-process (no subprocess needed for unit tests); a subprocess
@@ -34,21 +35,21 @@ module Space::Src
     end
 
     # Thread-local env hash. Defaults to ENV. Tests inject a temp
-    # HOME / XDG_* hash via Thread.current[:repo_tender_cli_env] =
+    # HOME / XDG_* hash via Thread.current[:space_src_cli_env] =
     # env_hash. The CLI's `make_paths` reads this to resolve the
     # config/state file locations under the test's temp home.
     def self.env
-      Thread.current[:repo_tender_cli_env] || ENV
+      Thread.current[:space_src_cli_env] || ENV
     end
 
     # Thread-local Outcome stash. The most recent command's Outcome
     # is read by CLI.run to set the process exit code.
     def self.record_outcome(outcome)
-      Thread.current[:repo_tender_cli_outcome] = outcome
+      Thread.current[:space_src_cli_outcome] = outcome
     end
 
     def self.last_outcome
-      Thread.current[:repo_tender_cli_outcome]
+      Thread.current[:space_src_cli_outcome]
     end
 
     # Program-name-level invocations that must succeed (exit 0) with
@@ -62,7 +63,7 @@ module Space::Src
     TOP_LEVEL_HELP = [[], ["--help"], ["-h"], ["help"]].freeze
     VERSION_REQUEST = [["version"], ["--version"]].freeze
 
-    # Entrypoint. Called by bin/repo-tender. Intercepts the top-level
+    # Entrypoint. Called by exe/src. Intercepts the top-level
     # help/version forms (stdout, exit 0), otherwise hands argv to
     # Dry::CLI for command dispatch and translates the last Outcome to
     # a process exit code. A `Interrupt` raised from inside command
@@ -72,10 +73,12 @@ module Space::Src
     # with a single human line on stderr — the G2 ^C-hygiene fix
     # (Slice 6). The reader-thread `IOError` noise that Open3 emits
     # in the same scenario is suppressed at the `Shell.run` seam
-    # (see `lib/repo_tender/shell.rb`).
+    # (see `lib/space_src/shell.rb`).
     def self.run(argv, stdout, stderr)
       return print_usage(stdout) if TOP_LEVEL_HELP.include?(argv)
       return print_version(stdout) if VERSION_REQUEST.include?(argv)
+
+      Migration.run(paths: make_paths, err: stderr)
 
       begin
         Dry::CLI.new(Registry).call(arguments: argv, out: stdout, err: stderr)
@@ -110,7 +113,7 @@ module Space::Src
     end
 
     # Internal: build a Paths instance scoped to the active env
-    # (Thread.current[:repo_tender_cli_env] || ENV). Every command
+    # (Thread.current[:space_src_cli_env] || ENV). Every command
     # uses this so tests can inject a temp home without mutating
     # the real ENV.
     def self.make_paths

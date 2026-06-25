@@ -8,7 +8,7 @@ class LaunchdPlistTest < Minitest::Test
 
   Plist = Space::Src::Launchd::Plist
 
-  LABEL = "io.github.jetpks.repo-tender.sync"
+  LABEL = Space::Src::Launchd::Agent::DEFAULT_LABEL
   MISE_BIN = "/opt/homebrew/opt/mise/bin/mise"
   RUBY_BIN = "/Users/eric/.local/share/mise/installs/ruby/latest/bin/ruby"
   REPO_ROOT = "/Users/eric/src/github.com/jetpks/repo-tender"
