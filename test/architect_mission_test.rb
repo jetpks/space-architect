@@ -106,7 +106,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     bare_wt_path = File.join(dir, bare_wt_rel)
     repo_path = File.join(dir, "repos", "my-repo")
     FileUtils.mkdir_p(File.dirname(bare_wt_path))
-    system("git", "-C", repo_path, "worktree", "add", bare_wt_path, "-b", "lane/my-slice-lane-a", "HEAD")
+    system("git", "-C", repo_path, "worktree", "add", bare_wt_path, "-b", "lane/my-slice-lane-a", "HEAD", out: File::NULL, err: File::NULL)
     assert_path_exists bare_wt_path
 
     sha, = Open3.capture3("git", "-C", repo_path, "rev-parse", "HEAD")
