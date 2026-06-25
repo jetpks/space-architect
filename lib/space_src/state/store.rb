@@ -7,7 +7,7 @@ require "dry/monads"
 
 module Space::Src
   module State
-    # Machine-managed state at $XDG_STATE_HOME/repo-tender/state.yaml.
+    # Machine-managed state at $XDG_STATE_HOME/space-src/state.yaml.
     # Never hand-edited (per PRD §3.2). Per-repo + per-org records with
     # a fixed status enum; the store validates the enum and timestamp
     # format on write.

@@ -7,16 +7,16 @@ require "space_src/test_helper"
 module CLITestHelpers
   def with_cli_env
     with_temp_home do |env, home|
-      Thread.current[:repo_tender_cli_env] = env
+      Thread.current[:space_src_cli_env] = env
       yield(env, home)
     end
   ensure
-    Thread.current[:repo_tender_cli_env] = nil
+    Thread.current[:space_src_cli_env] = nil
   end
 
   def invoke_command(command_class, **kwargs)
     Space::Src::CLI.last_outcome # drain
-    Thread.current[:repo_tender_cli_outcome] = nil
+    Thread.current[:space_src_cli_outcome] = nil
     out = StringIO.new
     err = StringIO.new
     cmd = command_class.new

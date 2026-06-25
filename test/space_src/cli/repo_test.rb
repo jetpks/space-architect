@@ -162,7 +162,7 @@ class CLIRepoTest < Minitest::Test
 
   def test_repo_add_no_color_with_no_color_env
     with_cli_env do |env, _home|
-      Thread.current[:repo_tender_cli_env] = env.merge("NO_COLOR" => "1")
+      Thread.current[:space_src_cli_env] = env.merge("NO_COLOR" => "1")
       tty_out = Class.new(StringIO) { def tty? = true }.new
       cmd = PristineCLI::Repo::Add.new
       cmd.instance_variable_set(:@out, tty_out)

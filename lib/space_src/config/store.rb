@@ -31,7 +31,7 @@ module Space::Src
         # The contract stays integer-typed (:integer, gt?: 0); this
         # is a load-layer normalization that lets a hand-edited
         # config.yaml round-trip without rejecting "6h" as a
-        # non-integer. See lib/repo_tender/config/duration.rb.
+        # non-integer. See lib/space_src/config/duration.rb.
         if hash.key?(:refresh_interval)
           result = Duration.parse(hash[:refresh_interval])
           return result if result.failure?

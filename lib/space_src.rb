@@ -2,7 +2,7 @@
 
 require "space_src/version"
 
-# repo-tender — keep local git clones evergreen.
+# space-src — keep local git clones evergreen.
 # (clean · on the remote's default branch · fetched within refresh_interval)
 #
 # Slice 1 surface: Paths, Shell, Config::{Model,Contract,Store},

@@ -11,21 +11,21 @@ class PathsTest < Minitest::Test
 
   def test_config_file_under_xdg_config_home_override
     with_paths do |env, paths|
-      expected = File.join(env["XDG_CONFIG_HOME"], "repo-tender", "config.yaml")
+      expected = File.join(env["XDG_CONFIG_HOME"], "space-src", "config.yaml")
       assert_equal expected, paths.config_file
     end
   end
 
   def test_state_file_under_xdg_state_home_override
     with_paths do |env, paths|
-      expected = File.join(env["XDG_STATE_HOME"], "repo-tender", "state.yaml")
+      expected = File.join(env["XDG_STATE_HOME"], "space-src", "state.yaml")
       assert_equal expected, paths.state_file
     end
   end
 
   def test_log_dir_under_xdg_state_home_override
     with_paths do |env, paths|
-      expected = File.join(env["XDG_STATE_HOME"], "repo-tender", "logs")
+      expected = File.join(env["XDG_STATE_HOME"], "space-src", "logs")
       assert_equal expected, paths.log_dir
     end
   end

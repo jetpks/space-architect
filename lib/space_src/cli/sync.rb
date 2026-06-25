@@ -99,7 +99,7 @@ module Space::Src
         end
 
         # Default log-rotation threshold: 10 MiB. Tunable via the
-        # env var `REPO_TENDER_LOG_MAX_BYTES` (introspection /
+        # env var `SPACE_SRC_LOG_MAX_BYTES` (introspection /
         # ops escape hatch). The LogRotator itself is unit-tested
         # with an injected threshold (gate G5).
         DEFAULT_LOG_MAX_BYTES = 10 * 1024 * 1024
@@ -114,7 +114,7 @@ module Space::Src
         end
 
         # CF6 (Slice 5): defensively parse the
-        # `REPO_TENDER_LOG_MAX_BYTES` env var so a malformed
+        # `SPACE_SRC_LOG_MAX_BYTES` env var so a malformed
         # operator value (e.g. `"10MB"`) falls back to the
         # 10 MiB default instead of raising `ArgumentError`
         # and crashing the entire `sync` run before any repo
@@ -131,13 +131,13 @@ module Space::Src
         # tests can pass arbitrary values without mutating
         # the real `ENV`; production callers invoke with
         # no args and the method reads `ENV` itself.
-        def log_max_bytes(env_value = ENV["REPO_TENDER_LOG_MAX_BYTES"])
+        def log_max_bytes(env_value = ENV["SPACE_SRC_LOG_MAX_BYTES"])
           return DEFAULT_LOG_MAX_BYTES if env_value.nil? || env_value.strip.empty?
 
           parsed = Integer(env_value, 10, exception: false)
           return parsed if parsed.is_a?(Integer) && parsed.positive?
 
-          warn "repo-tender: REPO_TENDER_LOG_MAX_BYTES=#{env_value.inspect} is invalid; " \
+          warn "src: SPACE_SRC_LOG_MAX_BYTES=#{env_value.inspect} is invalid; " \
             "falling back to #{DEFAULT_LOG_MAX_BYTES} bytes"
           DEFAULT_LOG_MAX_BYTES
         end

@@ -8,12 +8,13 @@ require "space_src/ui/mode"
 require "space_src/cli/options"
 require "space_src/launchd/agent"
 require "space_src/launchd/plist"
+require "space_src/migration"
 
 module Space::Src
   module CLI
     # `daemon` command group: install / uninstall / start / stop
     # / restart / status. Installs a per-user launchd agent
-    # (`gui/<UID>`) that fires `repo-tender sync` on a
+    # (`gui/<UID>`) that fires `src sync` on a
     # `StartInterval`. The launchctl side is exercised ONLY
     # through an injected command runner (slice-4 gates G2–G4);
     # the live domain is proven by the manual real-Mac checklist
@@ -57,7 +58,7 @@ module Space::Src
         #      toolchain-resolved ruby; pinned via mise.toml).
         #   * `bin_path` — `RbConfig.ruby` + the script path
         #      (we use `__dir__` of this file's caller; for the
-        #      gem install, this is `<gem>/bin/repo-tender`).
+        #      gem install, this is `<gem>/exe/src`).
         #
         # In tests, we inject these via the `Resolve` object
         # (see below) — never call out to the shell.
@@ -112,6 +113,15 @@ module Space::Src
 
           label = Launchd::Agent::DEFAULT_LABEL
           pp = plist_path(paths, label)
+
+          # Relabel: if old-identity plist exists, bootout (benign-failure-tolerant)
+          # and remove it before bootstrapping the new-label plist.
+          old_pp = plist_path(paths, Migration::OLD_LABEL)
+          if File.exist?(old_pp)
+            old_agent = make_agent(label: Migration::OLD_LABEL)
+            old_agent.uninstall
+            File.delete(old_pp) if File.exist?(old_pp)
+          end
 
           resolve = Resolve.detect(repo_root: Dir.pwd)
           xml = build_plist(resolve: resolve, config: config, paths: paths, label: label)
@@ -264,6 +274,12 @@ module Space::Src
           )
           pastel = Pastel.new(enabled: mode.color)
 
+          paths = CLI.make_paths
+          old_pp = plist_path(paths, Migration::OLD_LABEL)
+          if File.exist?(old_pp)
+            err.puts pastel.yellow("warning: stale agent #{Migration::OLD_LABEL} detected; run `src daemon install` to upgrade")
+          end
+
           label = Launchd::Agent::DEFAULT_LABEL
           agent = make_agent
           result = agent.status
@@ -283,11 +299,11 @@ module Space::Src
   end
 end
 
-# Detect the runtime paths the plist needs. The repo-tender
-# install path matters because the plist stores an absolute
-# `bin_path` — that is the script launchd invokes. We resolve
-# `bin_path` from the on-disk gem layout if we can, else fall
-# back to the directory the daemon command was run from.
+# Detect the runtime paths the plist needs. The src install path
+# matters because the plist stores an absolute `bin_path` — that
+# is the script launchd invokes. We resolve `bin_path` from the
+# on-disk gem layout if we can, else fall back to the directory
+# the daemon command was run from.
 class Space::Src::CLI::Daemon::Helpers::Resolve
   # @param repo_root [String]  absolute path of the working directory (where mise.toml is expected)
   # @return [Resolve]
@@ -300,7 +316,7 @@ class Space::Src::CLI::Daemon::Helpers::Resolve
   end
 
   def self.detect_mise_bin
-    path = ENV["REPO_TENDER_MISE_BIN"]
+    path = ENV["SPACE_SRC_MISE_BIN"]
     return path if path && !path.empty?
     require "open3"
     out, _e, st = Open3.capture3("which", "mise")
@@ -308,7 +324,7 @@ class Space::Src::CLI::Daemon::Helpers::Resolve
   end
 
   def self.detect_ruby_bin(repo_root, mise_bin)
-    path = ENV["REPO_TENDER_RUBY_BIN"]
+    path = ENV["SPACE_SRC_RUBY_BIN"]
     return path if path && !path.empty?
     # `mise exec -- which ruby` — but we avoid spawning in tests;
     # production path goes through here.
@@ -321,19 +337,19 @@ class Space::Src::CLI::Daemon::Helpers::Resolve
   end
 
   def self.detect_bin_path(repo_root)
-    path = ENV["REPO_TENDER_BIN_PATH"]
+    path = ENV["SPACE_SRC_BIN_PATH"]
     return path if path && !path.empty?
-    # Prefer the on-disk dev bin at `<repo_root>/bin/repo-tender`
+    # Prefer the on-disk dev bin at `<repo_root>/exe/src`
     # — it's what the human runs during testing, and the gem is
     # typically not `gem install`ed in a source checkout.
-    dev = File.join(repo_root, "bin", "repo-tender")
+    dev = File.join(repo_root, "exe", "src")
     return dev if File.exist?(dev)
     # Next, an installed binary on PATH.
     require "open3"
-    out, _e, st = Open3.capture3("which", "repo-tender")
+    out, _e, st = Open3.capture3("which", "src")
     return out.strip if st.success? && !out.strip.empty?
     # Last resort: the installed gem's bin (raises if not installed).
-    Gem.bin_path("repo-tender", "repo-tender")
+    Gem.bin_path("space-architect", "src")
   end
 end
 

@@ -23,7 +23,7 @@ module Space::Src
           "error" => :red
         }.freeze
 
-        desc "Show the per-repo evergreen status table (from $XDG_STATE_HOME/repo-tender/state.yaml)"
+        desc "Show the per-repo evergreen status table (from $XDG_STATE_HOME/space-src/state.yaml)"
 
         def call(plain: nil, json: nil, no_color: nil, quiet: nil, **)
           mode = UI::Mode.resolve(
@@ -37,7 +37,7 @@ module Space::Src
           state = State::Store.load(paths.state_file).success
 
           if state.repos.empty?
-            out.puts "(no repos in state — run `repo-tender sync` to populate)"
+            out.puts "(no repos in state — run `src sync` to populate)"
             return CLI.record_outcome(Outcome.new(exit_code: 0))
           end
 

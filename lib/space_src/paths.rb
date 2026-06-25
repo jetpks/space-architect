@@ -13,7 +13,7 @@ module Space::Src
   # resolved from the config at call time (passed in as an argument here
   # so this module owns nothing about config storage).
   class Paths
-    APP_NAME = "repo-tender"
+    APP_NAME = "space-src"
 
     DEFAULT_BASE_DIR = File.expand_path("~/architect/src")
 

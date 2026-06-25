@@ -14,7 +14,7 @@ class CLIConfigTest < Minitest::Test
     with_cli_env do |env, _home|
       out, _err = invoke_command(PristineCLI::ConfigCmd::Path)
       assert_equal 0, PristineCLI.last_outcome.exit_code
-      expected = File.join(env["XDG_CONFIG_HOME"], "repo-tender", "config.yaml")
+      expected = File.join(env["XDG_CONFIG_HOME"], "space-src", "config.yaml")
       assert_equal expected, out.string.chomp
     end
   end
@@ -76,7 +76,7 @@ class CLIConfigTest < Minitest::Test
     with_cli_env do |env, _home|
       stdout, _stderr, status = run_cli_subprocess(env: env, args: ["config", "path"])
       assert status.success?
-      expected = File.join(env["XDG_CONFIG_HOME"], "repo-tender", "config.yaml")
+      expected = File.join(env["XDG_CONFIG_HOME"], "space-src", "config.yaml")
       assert_includes stdout, expected
     end
   end

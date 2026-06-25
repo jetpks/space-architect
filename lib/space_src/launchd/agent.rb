@@ -26,7 +26,7 @@ module Space::Src
     class Agent
       extend Dry::Monads[:result]
 
-      DEFAULT_LABEL = "io.github.jetpks.repo-tender.sync"
+      DEFAULT_LABEL = "io.github.jetpks.space-src.sync"
 
       # The default real-runner. Wraps `Shell.run` in a `Sync{}`
       # block so the Fiber-scheduler requirement is satisfied.
