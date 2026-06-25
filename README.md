@@ -232,9 +232,8 @@ Each space also gets a workspace-local `tmp/`. Use it instead of `/tmp` or
 
 ## The `src` engine: evergreen checkouts 🌿
 
-`architect src …` exposes the **vendored** evergreen engine (from
-[repo-tender](https://github.com/jetpks/repo-tender)) directly — no separate
-installation needed. It keeps local clones under
+`architect src …` exposes the first-party evergreen engine (`Space::Src`, shipped as
+part of this gem). It keeps local clones under
 `~/src/evergreen/<host>/<owner>/<repo>` clean, on their default branch, and freshly
 fetched.
 
@@ -247,7 +246,7 @@ architect src status                                         # per-repo evergree
 When `architect space repo add` sees a matching evergreen copy, it copy-on-writes
 from it instead of hitting the network — instant provisioning. ⚡
 
-The vendored engine and space management share the same layout by design — both use
+The src engine and space management share the same layout by design — both use
 `<evergreen_dir>/<host>/<owner>/<repo>` — so they line up with zero configuration:
 
 ```sh
