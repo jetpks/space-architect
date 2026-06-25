@@ -78,8 +78,11 @@ architect freeze <iteration>                     # freeze Acceptance Criteria
 architect verify <iteration>                     # post-flight mechanical checks
 ```
 
-`architect install-skills` installs the bundled `architect` and `architect-research`
-skills for a harness. Default is `claude` (`~/.claude/skills/`); use `--provider
+`architect install-skills` installs the bundled `architect`, `architect-research`,
+and `architect-vocabulary` skills for a harness. (`architect-vocabulary` loads the
+system's terms and a short orientation when you're in a space but don't want to run
+the loop — see [The Architect Loop](#the-architect-loop-).) Default is `claude`
+(`~/.claude/skills/`); use `--provider
 opencode|codex|pi` for other harnesses, and `--project` to install into the current
 directory instead of globally. See the [command reference](docs/reference.md) for details.
 
