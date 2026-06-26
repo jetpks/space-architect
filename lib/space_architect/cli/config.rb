@@ -12,7 +12,7 @@ module SpaceArchitect
         def call(**opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
-            rows = SpaceArchitect::Config::EDITABLE_KEYS.map do |key|
+            rows = Space::Core::Config::EDITABLE_KEYS.map do |key|
               value = project_config.data[key]
               [key, value.nil? ? "" : value.to_s]
             end

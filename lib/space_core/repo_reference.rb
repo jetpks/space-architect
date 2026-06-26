@@ -2,7 +2,7 @@
 
 require "pathname"
 
-module SpaceArchitect
+module Space::Core
   RepoReference = Data.define(:provider, :owner, :name, :clone_url, :source) do
     def full_name
       "#{provider}/#{owner}/#{name}"

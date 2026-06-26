@@ -111,7 +111,7 @@ class SpaceStoreTest < SpaceArchitectTest
 
     result = store.find("20260531")
     assert result.failure?
-    assert_kind_of SpaceArchitect::AmbiguousSpaceError, result.failure
+    assert_kind_of Space::Core::AmbiguousSpaceError, result.failure
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
@@ -131,7 +131,7 @@ class SpaceStoreTest < SpaceArchitectTest
     assert store.current_from_pwd(from: setup.fetch(:root)).none?
     result = store.find(nil, from: setup.fetch(:root))
     assert result.failure?
-    assert_kind_of SpaceArchitect::CurrentSpaceMissingError, result.failure
+    assert_kind_of Space::Core::CurrentSpaceMissingError, result.failure
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
@@ -156,10 +156,10 @@ class SpaceStoreTest < SpaceArchitectTest
     space = store.create("Name of Space").value!
 
     space.update_status("done", now: fixed_time)
-    reloaded = SpaceArchitect::Space.load(space.path)
+    reloaded = Space::Core::Space.load(space.path)
 
     assert_equal "done", reloaded.status
-    assert_raises(SpaceArchitect::InvalidStatusError) { reloaded.update_status("unknown") }
+    assert_raises(Space::Core::InvalidStatusError) { reloaded.update_status("unknown") }
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
@@ -181,7 +181,7 @@ class SpaceStoreTest < SpaceArchitectTest
     assert add_result.success?
     results = add_result.value!
     assert_equal 6, results.length
-    assert_equal SpaceArchitect::SpaceStore::MAX_CONCURRENT_CLONES, fake_scm.max_active
+    assert_equal Space::Core::SpaceStore::MAX_CONCURRENT_CLONES, fake_scm.max_active
     assert_operator fake_scm.clone_count, :>, fake_scm.max_active
     assert_equal 6, mise_client.trust_count
   ensure
@@ -193,12 +193,12 @@ class SpaceStoreTest < SpaceArchitectTest
     evergreen = Pathname.new(setup.fetch(:root)).join("evergreen")
     FileUtils.mkdir_p(evergreen.join("github.com", "example-tools", "present", ".git"))
 
-    config = SpaceArchitect::Config.new(
+    config = Space::Core::Config.new(
       env: setup.fetch(:env),
       data: { "version" => 1, "src_dir" => evergreen.to_s }
     )
-    state = SpaceArchitect::State.new(env: setup.fetch(:env))
-    store = SpaceArchitect::SpaceStore.new(config: config, state: state, now: -> { fixed_time })
+    state = Space::Core::State.new(env: setup.fetch(:env))
+    store = Space::Core::SpaceStore.new(config: config, state: state, now: -> { fixed_time })
     space = store.create("Evergreen").value!
     fake_scm = TrackingSCM.new
     fake_cloner = TrackingCloner.new
@@ -233,7 +233,7 @@ class SpaceStoreTest < SpaceArchitectTest
 
     $stderr = old_stderr
     assert result.failure?
-    assert_kind_of SpaceArchitect::GitError, result.failure
+    assert_kind_of Space::Core::GitError, result.failure
     assert_match(/clone failed/, result.failure.message)
     refute_match(/Task may have ended with unhandled exception/, captured.string)
     refute_match(/"severity":"warn"/, captured.string)
@@ -256,12 +256,12 @@ class SpaceStoreTest < SpaceArchitectTest
     system(git_env, "git", "-C", repo_src.to_s, "commit", "--allow-empty", "-m", "init",
            out: File::NULL, err: File::NULL)
 
-    config = SpaceArchitect::Config.new(
+    config = Space::Core::Config.new(
       env: setup.fetch(:env),
       data: { "version" => 1, "src_dir" => evergreen.to_s }
     )
-    state = SpaceArchitect::State.new(env: setup.fetch(:env))
-    store = SpaceArchitect::SpaceStore.new(config: config, state: state, now: -> { fixed_time })
+    state = Space::Core::State.new(env: setup.fetch(:env))
+    store = Space::Core::SpaceStore.new(config: config, state: state, now: -> { fixed_time })
     space = store.create("Real Engine Test", git: false).value!
 
     store.add_repos_to(space, ["test-owner/test-repo"], mise_client: TrackingMiseClient.new)
@@ -281,7 +281,7 @@ class SpaceStoreTest < SpaceArchitectTest
                                 mise_client: TrackingMiseClient.new)
 
     assert result.failure?
-    assert_kind_of SpaceArchitect::RepoExistsError, result.failure
+    assert_kind_of Space::Core::RepoExistsError, result.failure
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
@@ -291,12 +291,12 @@ class SpaceStoreTest < SpaceArchitectTest
     store = build_store(env: setup.fetch(:env))
     corrupt_dir = File.join(setup[:root], "corrupt-space")
     FileUtils.mkdir_p(corrupt_dir)
-    File.write(File.join(corrupt_dir, SpaceArchitect::Space::METADATA_FILE), "just a string\n")
+    File.write(File.join(corrupt_dir, Space::Core::Space::METADATA_FILE), "just a string\n")
 
     result = store.current(from: corrupt_dir)
 
     assert result.failure?
-    assert_kind_of SpaceArchitect::Error, result.failure
+    assert_kind_of Space::Core::Error, result.failure
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end

@@ -7,15 +7,15 @@ module SpaceArchitect
     module Helpers
       include Dry::Monads[:result]
       def project_config
-        @project_config ||= SpaceArchitect::Config.load
+        @project_config ||= Space::Core::Config.load
       end
 
       def state
-        @state ||= SpaceArchitect::State.load
+        @state ||= Space::Core::State.load
       end
 
       def store
-        @store ||= SpaceArchitect::SpaceStore.new(config: project_config, state: state)
+        @store ||= Space::Core::SpaceStore.new(config: project_config, state: state)
       end
 
       def terminal
@@ -23,7 +23,7 @@ module SpaceArchitect
       end
 
       def setup_terminal(color: "auto", colors: nil)
-        @terminal = Terminal.new(
+        @terminal = Space::Core::Terminal.new(
           config: project_config,
           stdout: out,
           stderr: err,
@@ -40,7 +40,7 @@ module SpaceArchitect
 
       def handle_errors
         yield
-      rescue SpaceArchitect::Error => e
+      rescue Space::Core::Error => e
         if terminal
           terminal.error(e.message)
         else

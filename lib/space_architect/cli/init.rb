@@ -13,8 +13,8 @@ module SpaceArchitect
         setup_terminal(**opts.slice(:color, :colors))
         handle_errors do
           if force
-            @project_config = SpaceArchitect::Config.new
-            @state = SpaceArchitect::State.new
+            @project_config = Space::Core::Config.new
+            @state = Space::Core::State.new
             project_config.save
             state.save
           else

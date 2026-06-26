@@ -24,7 +24,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     system("git", "-C", dir, "add", "space.yaml")
     system("git", "-C", dir, "commit", "-q", "-m", "init")
 
-    SpaceArchitect::Space.load(dir)
+    Space::Core::Space.load(dir)
   end
 
   def create_real_repo(space_dir, name)
@@ -166,13 +166,13 @@ class ArchitectMissionTest < SpaceArchitectTest
     mission.new_iteration!("my-slice")
 
     # nil model raises, and error names --model
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.worktree_add("my-repo", "my-slice", "lane-bad", harness: "opencode")
     end
     assert_match(/--model/, err.message)
 
     # claude default model also raises
-    assert_raises(SpaceArchitect::Error) do
+    assert_raises(Space::Core::Error) do
       mission.worktree_add("my-repo", "my-slice", "lane-bad",
                            harness: "opencode",
                            model: SpaceArchitect::Harness::CLAUDE_DEFAULT_MODEL)
@@ -312,7 +312,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     mission.init!
     mission.new_iteration!("my-slice")
 
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.variant_add("my-repo", "my-slice", [["opencode", nil]])
     end
     assert_match(/--model/, err.message)
@@ -416,13 +416,13 @@ class ArchitectMissionTest < SpaceArchitectTest
     mission.worktree_add("my-repo", "my-slice", "lane-a")
 
     # (a) non-existent lane name
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.variant_promote("my-slice", "v99")
     end
     assert_match(/v99/, err.message)
 
     # (b) name of a non-variant lane
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.variant_promote("my-slice", "lane-a")
     end
     assert_match(/lane-a/, err.message)
@@ -537,7 +537,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     mission.init!
     mission.new_iteration!("my-slice")
 
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.worktree_add("my-repo", "my-slice", "lane-bad",
                            harness: "claude-code", effort: "high")
     end
@@ -563,7 +563,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     mission.new_iteration!("my-slice")
     mission.worktree_add("my-repo", "my-slice", "lane-a")
 
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.variant_promote("my-slice", "lane-a")
     end
     assert_match(/no variant/, err.message)
@@ -677,7 +677,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     mission.new_iteration!("my-slice")
     mission.worktree_add("my-repo", "my-slice", "lane-a")
 
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.variant_compare("my-slice")
     end
     assert_match(/no variant set — nothing to compare/, err.message)

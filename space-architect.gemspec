@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-require_relative "lib/space_architect/version"
+require_relative "lib/space_core/version"
 
 Gem::Specification.new do |spec|
   spec.name = "space-architect"
-  spec.version = SpaceArchitect::VERSION
+  spec.version = Space::Core::VERSION
   spec.authors = ["Eric Jacobs"]
   spec.email = ["eric@ebj.dev"]
 

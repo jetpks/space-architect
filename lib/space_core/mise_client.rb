@@ -4,7 +4,7 @@ require "async/process"
 require "pathname"
 require "tempfile"
 
-module SpaceArchitect
+module Space::Core
   class MiseClient
     def trust(path)
       path = Pathname.new(path)

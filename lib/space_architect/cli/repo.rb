@@ -76,7 +76,7 @@ module SpaceArchitect
               next
             end
 
-            references = specs.map { |spec| RepoResolver.new(project_config).resolve(spec) }
+            references = specs.map { |spec| Space::Core::RepoResolver.new(project_config).resolve(spec) }
             terminal.say terminal.table(["Repo", "Clone URL"], references.map { |ref| [ref.full_name, ref.clone_url] })
             CLI.record_outcome(Outcome.new(exit_code: 0))
           end
