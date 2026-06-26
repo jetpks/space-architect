@@ -99,4 +99,37 @@ class DispatcherTest < SpaceArchitectTest
   ensure
     FileUtils.rm_rf(root)
   end
+
+  FAKE_DETACH_SCRIPT = <<~RUBY
+    #!/usr/bin/env ruby
+    $stdout.puts "pid=\#{Process.pid}"
+    $stdout.flush
+    sleep 0.2
+    $stdout.puts "done"
+    $stdout.flush
+    exit 0
+  RUBY
+
+  def test_dispatcher_run_detached_returns_integer_pid
+    root = Dir.mktmpdir("dispatcher-test")
+    fake_bin = File.join(root, "fake_detach")
+    File.write(fake_bin, FAKE_DETACH_SCRIPT)
+    File.chmod(0o755, fake_bin)
+
+    wt_dir  = File.join(root, "wt")
+    FileUtils.mkdir_p(wt_dir)
+    prompt  = File.join(root, "prompt.md")
+    run_log = File.join(root, "run.jsonl")
+    File.write(prompt, "test prompt\n")
+
+    dispatcher = SpaceArchitect::Dispatcher.new(claude_bin: fake_bin)
+    pid = dispatcher.run_detached(prompt_path: prompt, run_log_path: run_log, chdir: wt_dir)
+
+    assert_instance_of Integer, pid
+    assert pid > 0
+    assert_equal pid, Process.getpgid(pid), "child must be its own pgroup leader"
+  ensure
+    sleep 0.25
+    FileUtils.rm_rf(root)
+  end
 end

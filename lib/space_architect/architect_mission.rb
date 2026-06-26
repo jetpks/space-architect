@@ -334,7 +334,7 @@ module SpaceArchitect
     end
 
     def dispatch(iteration, lane, model: nil, max_turns: 200,
-                 claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil)
+                 claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, detach: false)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
@@ -357,13 +357,21 @@ module SpaceArchitect
       harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
                                                   bin: bin, config_dir: build_dir, effort: resolved_effort)
 
-      exit_code = harness_obj.run(
-        prompt_path:  prompt_path,
-        run_log_path: run_log_path,
-        chdir:        wt_path
-      )
-
-      { exit_code: exit_code, run_log: run_log_path, report: report_path, worktree: wt_path }
+      if detach
+        pid = harness_obj.run_detached(
+          prompt_path:  prompt_path,
+          run_log_path: run_log_path,
+          chdir:        wt_path
+        )
+        { pid: pid, run_log: run_log_path, report: report_path, worktree: wt_path }
+      else
+        exit_code = harness_obj.run(
+          prompt_path:  prompt_path,
+          run_log_path: run_log_path,
+          chdir:        wt_path
+        )
+        { exit_code: exit_code, run_log: run_log_path, report: report_path, worktree: wt_path }
+      end
     end
 
     private
