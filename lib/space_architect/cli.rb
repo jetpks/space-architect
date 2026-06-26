@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "dry/cli"
+require_relative "cli/repeatable_options"
 
 module SpaceArchitect
   module CLI
