@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 require "dry/cli"
+require "pastel"
 require_relative "cli/repeatable_options"
+require_relative "cli/help"
 
 module SpaceArchitect
   module CLI
@@ -12,6 +14,15 @@ module SpaceArchitect
     def self.record_outcome(o) = (Thread.current[:space_architect_outcome] = o)
     def self.last_outcome = Thread.current[:space_architect_outcome]
 
+    # Pastel used by the colourful help listing (Help / the Usage reopen). Set
+    # per-invocation in .call from the output stream and --color; defaults to a
+    # disabled instance so non-CLI callers and tests render plain text.
+    def self.help_pastel = @help_pastel ||= Pastel.new(enabled: false)
+
+    def self.help_pastel=(pastel)
+      @help_pastel = pastel
+    end
+
     module Registry
       extend Dry::CLI::Registry
     end
@@ -21,6 +32,7 @@ module SpaceArchitect
 
     def self.call(argv, out = $stdout, err = $stderr)
       Thread.current[:space_architect_outcome] = nil
+      self.help_pastel = Pastel.new(enabled: help_colors?(argv, out, err))
 
       if TOP_LEVEL_HELP.include?(argv)
         out.puts Dry::CLI::Usage.call(Registry.get([]))
@@ -38,6 +50,27 @@ module SpaceArchitect
 
       Dry::CLI.new(Registry).call(arguments: normalize_args(argv), out: out, err: err)
       last_outcome&.exit_code || 0
+    end
+
+    # Whether the help listing should be colourised: honour an explicit
+    # --color/--colors (always/never), otherwise auto-detect from the streams the
+    # listing can land on (stdout for top-level help, stderr for bare namespaces).
+    def self.help_colors?(argv, out, err)
+      case color_mode(argv)
+      when "always" then true
+      when "never"  then false
+      else tty?(out) || tty?(err)
+      end
+    end
+
+    def self.tty?(io) = io.respond_to?(:tty?) && io.tty?
+
+    def self.color_mode(argv)
+      argv.each_with_index do |arg, i|
+        return arg.split("=", 2)[1].to_s.downcase if arg.start_with?("--color=", "--colors=")
+        return argv[i + 1].to_s.downcase if %w[--color --colors].include?(arg)
+      end
+      "auto"
     end
 
     # Move --color/--colors options to the end of the argument list so dry-cli's
