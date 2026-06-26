@@ -61,6 +61,23 @@ module SpaceArchitect
         end
       end
 
+      def run_detached(prompt_path:, run_log_path:, chdir:)
+        prompt_path  = Pathname.new(prompt_path)
+        run_log_path = Pathname.new(run_log_path)
+
+        prompt_io = File.open(prompt_path, "r")
+        log       = File.open(run_log_path, "w")
+        begin
+          pid = Process.spawn(*argv, chdir: chdir.to_s, pgroup: true,
+                              in: prompt_io, out: log, err: log)
+          Process.detach(pid)
+        ensure
+          prompt_io.close
+          log.close
+        end
+        pid
+      end
+
       private
 
       def argv
@@ -128,6 +145,29 @@ module SpaceArchitect
             status.exitstatus
           end
         end
+      end
+
+      def run_detached(prompt_path:, run_log_path:, chdir:)
+        prompt_path  = Pathname.new(prompt_path)
+        run_log_path = Pathname.new(run_log_path)
+        config_path  = write_config
+
+        env = {
+          "OPENCODE_CONFIG"                 => config_path.to_s,
+          "OPENCODE_DISABLE_PROJECT_CONFIG" => "1"
+        }
+
+        prompt_io = File.open(prompt_path, "r")
+        log       = File.open(run_log_path, "w")
+        begin
+          pid = Process.spawn(env, *argv(chdir), chdir: chdir.to_s, pgroup: true,
+                              in: prompt_io, out: log, err: log)
+          Process.detach(pid)
+        ensure
+          prompt_io.close
+          log.close
+        end
+        pid
       end
 
       private

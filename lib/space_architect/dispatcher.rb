@@ -17,5 +17,9 @@ module SpaceArchitect
     def run(prompt_path:, run_log_path:, chdir:)
       @harness.run(prompt_path: prompt_path, run_log_path: run_log_path, chdir: chdir)
     end
+
+    def run_detached(prompt_path:, run_log_path:, chdir:)
+      @harness.run_detached(prompt_path: prompt_path, run_log_path: run_log_path, chdir: chdir)
+    end
   end
 end

@@ -473,6 +473,71 @@ class HarnessTest < SpaceArchitectTest
     assert_match(/reasoningEffort/, err.message)
   end
 
+  # ── run_detached: ClaudeCodeHarness ──────────────────────────────────────────
+
+  FAKE_DETACH_SCRIPT = <<~RUBY
+    #!/usr/bin/env ruby
+    $stdout.puts "detach_pid=\#{Process.pid}"
+    $stdout.flush
+    sleep 0.2
+    $stdout.puts "detach_done"
+    $stdout.flush
+    exit 0
+  RUBY
+
+  def test_claude_code_harness_run_detached_returns_integer_pid
+    root = Dir.mktmpdir("harness-detach-test")
+    fake_bin = File.join(root, "fake_detach")
+    File.write(fake_bin, FAKE_DETACH_SCRIPT)
+    File.chmod(0o755, fake_bin)
+
+    wt_dir  = File.join(root, "wt")
+    FileUtils.mkdir_p(wt_dir)
+    prompt  = File.join(root, "prompt.md")
+    run_log = File.join(root, "run.jsonl")
+    File.write(prompt, "hello\n")
+
+    harness = SpaceArchitect::Harness::ClaudeCodeHarness.new(
+      model: "claude-sonnet-4-6", max_turns: 10, bin: fake_bin
+    )
+    pid = harness.run_detached(prompt_path: prompt, run_log_path: run_log, chdir: wt_dir)
+
+    assert_instance_of Integer, pid
+    assert pid > 0
+    assert_equal pid, Process.getpgid(pid), "child must be its own pgroup leader"
+  ensure
+    sleep 0.25
+    FileUtils.rm_rf(root)
+  end
+
+  def test_opencode_harness_run_detached_returns_integer_pid
+    root = Dir.mktmpdir("harness-detach-test")
+    fake_bin = File.join(root, "fake_oc_detach")
+    File.write(fake_bin, FAKE_DETACH_SCRIPT)
+    File.chmod(0o755, fake_bin)
+
+    config_dir = File.join(root, "config")
+    wt_dir     = File.join(root, "wt")
+    FileUtils.mkdir_p(config_dir)
+    FileUtils.mkdir_p(wt_dir)
+    prompt  = File.join(root, "prompt.md")
+    run_log = File.join(root, "run.jsonl")
+    File.write(prompt, "hello\n")
+
+    harness = SpaceArchitect::Harness::OpenCodeHarness.new(
+      model: "fireworks-ai/test-model", max_turns: 5, bin: fake_bin,
+      config_dir: config_dir
+    )
+    pid = harness.run_detached(prompt_path: prompt, run_log_path: run_log, chdir: wt_dir)
+
+    assert_instance_of Integer, pid
+    assert pid > 0
+    assert_equal pid, Process.getpgid(pid), "child must be its own pgroup leader"
+  ensure
+    sleep 0.25
+    FileUtils.rm_rf(root)
+  end
+
   # Claude-code dispatch: no --variant in argv (unchanged by effort feature).
   def test_claude_code_dispatch_argv_unchanged_by_effort_feature
     root = Dir.mktmpdir("harness-test")
