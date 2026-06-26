@@ -54,11 +54,22 @@ class CLISrcTest < SpaceArchitectTest
     end
   end
 
-  def test_src_unknown_command_propagates_system_exit
+  def test_src_unknown_token_routes_through_fuzzy_nav_and_returns_1
+    # Single unknown token is now a bare nav query (not dry-cli routing).
+    # No match → no-match message on stderr, returns exit code 1 (not SystemExit).
     out = StringIO.new
     err = StringIO.new
-    assert_raises(SystemExit) do
-      SpaceArchitect::CLI.call(["src", "definitely-not-a-command"], out, err)
+    Dir.mktmpdir do |d|
+      Thread.current[:space_src_cli_env] = {
+        "HOME" => d,
+        "XDG_CONFIG_HOME" => "#{d}/.config",
+        "XDG_STATE_HOME" => "#{d}/.local/state"
+      }
+      code = SpaceArchitect::CLI.call(["src", "zqxnomatch"], out, err)
+      assert_equal 1, code
+      assert_includes err.string, "zqxnomatch"
+    ensure
+      Thread.current[:space_src_cli_env] = nil
     end
   end
 end
