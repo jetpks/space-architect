@@ -24,6 +24,12 @@ module SpaceArchitect
         return 0
       end
 
+      if ::Space::Src::CLI.bare_query?(rest)
+        paths = ::Space::Src::CLI.make_paths
+        config = ::Space::Src::Config::Store.load(paths.config_file).success
+        return ::Space::Src::Nav.dispatch(rest[0], out, err, config.base_dir)
+      end
+
       Thread.current[:space_src_cli_outcome] = nil
       Dry::CLI.new(::Space::Src::CLI::Registry).call(arguments: rest, out: out, err: err)
       ::Space::Src::CLI.last_outcome&.exit_code || 0

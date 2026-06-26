@@ -63,6 +63,16 @@ module Space::Src
     TOP_LEVEL_HELP = [[], ["--help"], ["-h"], ["help"]].freeze
     VERSION_REQUEST = [["version"], ["--version"]].freeze
 
+    # True when argv is a single token that is not a registered top-level
+    # command or group, and not already handled by the help/version intercepts.
+    # Both CLI.run and dispatch_src delegate to this shared predicate so the
+    # routing logic is defined exactly once.
+    def self.bare_query?(argv)
+      return false if TOP_LEVEL_HELP.include?(argv)
+      return false if VERSION_REQUEST.include?(argv)
+      argv.length == 1 && !Registry.get([]).children.key?(argv[0])
+    end
+
     # Entrypoint. Called by exe/src. Intercepts the top-level
     # help/version forms (stdout, exit 0), otherwise hands argv to
     # Dry::CLI for command dispatch and translates the last Outcome to
@@ -79,6 +89,13 @@ module Space::Src
       return print_version(stdout) if VERSION_REQUEST.include?(argv)
 
       Migration.run(paths: make_paths, err: stderr)
+
+      if bare_query?(argv)
+        paths = make_paths
+        config = Config::Store.load(paths.config_file).success
+        exit_code = Nav.dispatch(argv[0], stdout, stderr, config.base_dir)
+        Kernel.exit(exit_code)
+      end
 
       begin
         Dry::CLI.new(Registry).call(arguments: argv, out: stdout, err: stderr)
@@ -138,3 +155,5 @@ require "space_src/cli/status"
 require "space_src/cli/config"
 require "space_src/cli/daemon"
 require "space_src/cli/clone"
+require "space_src/cli/shell"
+require "space_src/nav"
