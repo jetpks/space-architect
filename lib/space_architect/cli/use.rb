@@ -2,10 +2,7 @@
 
 module SpaceArchitect
   module CLI
-    class Use < Dry::CLI::Command
-      include GlobalOptions
-      include Helpers
-
+    class Use < BaseCommand
       desc "Remember a space in recent state and print its path"
       argument :identifier, required: true, desc: "Space ID or title slug"
 

@@ -2,21 +2,19 @@
 
 module SpaceArchitect
   module CLI
-    class New < Dry::CLI::Command
-      include GlobalOptions
-      include Helpers
-
+    class New < BaseCommand
       desc "Create a new project space"
       argument :title, required: true, desc: "Space title"
-      argument :repos, type: :array, required: false, desc: "Repo refs to clone"
+      option :repo, type: :array, aliases: ["-r"], desc: "Repo ref to clone (repeatable: pass -r once per repo)"
       option :git, type: :boolean, default: true, desc: "Initialize the space as a Git repository (use --no-git to skip)"
+      example "\"My Space\" -r org/repo -r example-tools/alpha   # clone two repos into the space"
 
-      def call(title:, repos: [], git: true, **opts)
+      def call(title:, repo: [], git: true, **opts)
         setup_terminal(**opts.slice(:color, :colors))
         result = store.create(title, git: git).bind do |space|
           terminal.success "Created #{space.id}"
 
-          repo_specs = Array(repos).compact
+          repo_specs = Array(repo).compact
           repo_specs.each { |spec| terminal.say "Queued #{spec}" }
 
           next Success(space) if repo_specs.empty?

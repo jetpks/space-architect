@@ -59,8 +59,8 @@ for convenience.
 
 ```sh
 architect space init                              # create XDG config + state files
-architect space new "Name of Space"              # blast off a new space 🚀
-architect space new "Name of Space" org/repo …  # with repos cloned in (variadic)
+architect space new "Name of Space"                  # blast off a new space 🚀
+architect space new "Name of Space" -r org/repo …   # with repos cloned in (repeat -r)
 architect space list                             # see all your spaces
 architect space show                             # show the space you're standing in
 architect space status done                      # mark the current mission complete
@@ -91,7 +91,7 @@ directory instead of globally. See the [command reference](docs/reference.md) fo
 ```sh
 architect space init
 architect space new "Name of Space"
-architect space new "Name of Space" org/repo example-tools/alpha example-tools/beta
+architect space new "Name of Space" -r org/repo -r example-tools/alpha -r example-tools/beta
 architect space list
 architect space show 20260531-name-of-space
 architect space path 20260531-name-of-space
