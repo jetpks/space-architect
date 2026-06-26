@@ -44,11 +44,11 @@ class SpaceArchitectTest < Minitest::Test
   end
 
   def build_store(env:, now: -> { fixed_time })
-    config = SpaceArchitect::Config.new(
+    config = Space::Core::Config.new(
       env: env,
       data: { "version" => 1 }
     )
-    state = SpaceArchitect::State.new(env: env)
-    SpaceArchitect::SpaceStore.new(config: config, state: state, now: now)
+    state = Space::Core::State.new(env: env)
+    Space::Core::SpaceStore.new(config: config, state: state, now: now)
   end
 end

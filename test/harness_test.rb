@@ -59,7 +59,7 @@ class HarnessTest < SpaceArchitectTest
     File.chmod(0o755, fake_claude)
     File.chmod(0o755, fake_opencode)
 
-    space   = SpaceArchitect::Space.load(space_dir)
+    space   = Space::Core::Space.load(space_dir)
     mission = SpaceArchitect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("demo")
@@ -257,7 +257,7 @@ class HarnessTest < SpaceArchitectTest
     root = Dir.mktmpdir("harness-test")
     _space_dir, mission, _fake_claude, _fake_oc, _build_dir = setup_space(root)
 
-    assert_raises(SpaceArchitect::Error) do
+    assert_raises(Space::Core::Error) do
       mission.dispatch("demo", "A", harness: "opencode")
     end
   ensure
@@ -279,7 +279,7 @@ class HarnessTest < SpaceArchitectTest
   end
 
   def test_harness_factory_raises_on_unknown_harness
-    assert_raises(SpaceArchitect::Error) do
+    assert_raises(Space::Core::Error) do
       SpaceArchitect::Harness.for("unknown-harness",
                                   model: "x", max_turns: 1, config_dir: Dir.mktmpdir)
     end
@@ -464,7 +464,7 @@ class HarnessTest < SpaceArchitectTest
 
   # Footgun: claude-code + effort raises with opencode-only / reasoningEffort message.
   def test_harness_for_raises_for_claude_code_with_effort
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       SpaceArchitect::Harness.for("claude-code",
                                   model: "claude-sonnet-4-6", max_turns: 10,
                                   bin: "/fake", effort: "high")

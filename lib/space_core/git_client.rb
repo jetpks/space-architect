@@ -5,7 +5,7 @@ require "async/process"
 require "pathname"
 require "tempfile"
 
-module SpaceArchitect
+module Space::Core
   class GitClient
     def init(path)
       path = Pathname.new(path)

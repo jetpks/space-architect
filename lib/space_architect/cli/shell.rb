@@ -13,7 +13,7 @@ module SpaceArchitect
         def call(shell_name:, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
-            terminal.say ShellIntegration.for(shell_name)
+            terminal.say Space::Core::ShellIntegration.for(shell_name)
             CLI.record_outcome(Outcome.new(exit_code: 0))
           end
         end
@@ -32,17 +32,17 @@ module SpaceArchitect
           handle_errors do
             case subcommand
             when "install"
-              result = ShellIntegration.install("fish", env: project_config.env, force: force)
+              result = Space::Core::ShellIntegration.install("fish", env: project_config.env, force: force)
               terminal.success fish_install_message(result.fetch(:action), result.fetch(:path))
               terminal.success fish_completions_install_message(result.fetch(:completions_action), result.fetch(:completions_path))
               terminal.say "Restart fish to load the integration in this terminal: exec fish"
             when "uninstall"
-              result = ShellIntegration.uninstall("fish", env: project_config.env, force: force)
+              result = Space::Core::ShellIntegration.uninstall("fish", env: project_config.env, force: force)
               terminal.success fish_uninstall_message(result.fetch(:action), result.fetch(:path))
               terminal.success fish_completions_uninstall_message(result.fetch(:completions_action), result.fetch(:completions_path))
             when "path"
-              terminal.say "Function:    #{terminal.path(ShellIntegration.path_for('fish', env: project_config.env))}"
-              terminal.say "Completions: #{terminal.path(ShellIntegration.completions_path_for('fish', env: project_config.env))}"
+              terminal.say "Function:    #{terminal.path(Space::Core::ShellIntegration.path_for('fish', env: project_config.env))}"
+              terminal.say "Completions: #{terminal.path(Space::Core::ShellIntegration.completions_path_for('fish', env: project_config.env))}"
             else
               err.puts "Usage: space shell fish [install|uninstall|path]"
               CLI.record_outcome(Outcome.new(exit_code: 1))
@@ -106,8 +106,8 @@ module SpaceArchitect
         def completion_candidates(kind, args)
           case kind
           when "spaces"          then store.list.map { |space| "#{space.id}\t#{space.title}" }
-          when "statuses"        then Space::VALID_STATUSES
-          when "config-keys"     then SpaceArchitect::Config::EDITABLE_KEYS
+          when "statuses"        then Space::Core::Space::VALID_STATUSES
+          when "config-keys"     then Space::Core::Config::EDITABLE_KEYS
           when "config-values"   then completion_values_for_config_key(args.first)
           when "shells"          then ["fish"]
           when "color-modes"     then %w[auto always never]
@@ -115,13 +115,13 @@ module SpaceArchitect
           when "config-subcommands" then %w[show path set]
           when "fish-subcommands"   then %w[install uninstall path]
           else
-            raise SpaceArchitect::Error, "Usage: space shell complete #{completion_kinds.join('|')}"
+            raise Space::Core::Error, "Usage: space shell complete #{completion_kinds.join('|')}"
           end
         end
 
         def completion_values_for_config_key(key)
           case key
-          when "git_clone_protocol" then SpaceArchitect::Config::VALID_GIT_CLONE_PROTOCOLS
+          when "git_clone_protocol" then Space::Core::Config::VALID_GIT_CLONE_PROTOCOLS
           when "default_provider"   then %w[github.com gitlab.com]
           else []
           end

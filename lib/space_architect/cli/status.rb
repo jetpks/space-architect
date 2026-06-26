@@ -30,7 +30,7 @@ module SpaceArchitect
         when 2
           args
         else
-          raise SpaceArchitect::Error, "Usage: space status [SPACE] STATUS"
+          raise Space::Core::Error, "Usage: space status [SPACE] STATUS"
         end
       end
     end

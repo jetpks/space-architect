@@ -60,14 +60,14 @@ class RepoResolverTest < SpaceArchitectTest
   def test_bare_repo_requires_default_organization
     resolver = build_resolver(default_organization: nil)
 
-    error = assert_raises(SpaceArchitect::RepoResolutionError) { resolver.resolve("example-app") }
+    error = assert_raises(Space::Core::RepoResolutionError) { resolver.resolve("example-app") }
     assert_match(/default_organization/, error.message)
   end
 
   private
 
   def build_resolver(default_organization:, git_clone_protocol: "ssh")
-    config = SpaceArchitect::Config.new(
+    config = Space::Core::Config.new(
       env: {
         "HOME" => "/tmp/project-spaces-test-home",
         "XDG_CONFIG_HOME" => "/tmp/project-spaces-test-config",
@@ -79,6 +79,6 @@ class RepoResolverTest < SpaceArchitectTest
         "git_clone_protocol" => git_clone_protocol
       }
     )
-    SpaceArchitect::RepoResolver.new(config)
+    Space::Core::RepoResolver.new(config)
   end
 end

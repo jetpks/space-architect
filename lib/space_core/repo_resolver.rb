@@ -2,7 +2,7 @@
 
 require "uri"
 
-module SpaceArchitect
+module Space::Core
   class RepoResolver
     SCP_LIKE_PATTERN = /\A(?:[^@\/]+@)?(?<provider>[^:\/]+):(?<path>.+)\z/
     URL_PATTERN = %r{\A[A-Za-z][A-Za-z0-9+\-.]*://}

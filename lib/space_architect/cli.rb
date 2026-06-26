@@ -27,7 +27,7 @@ module SpaceArchitect
       end
 
       if VERSION_REQUEST.include?(argv)
-        out.puts SpaceArchitect::VERSION
+        out.puts Space::Core::VERSION
         return 0
       end
 

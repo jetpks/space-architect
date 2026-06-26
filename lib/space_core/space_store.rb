@@ -9,7 +9,7 @@ require "dry/monads"
 require "space_src/scm/git"
 require "space_src/cloner"
 
-module SpaceArchitect
+module Space::Core
   class SpaceStore
     include Dry::Monads[:result, :maybe]
 
@@ -46,7 +46,7 @@ module SpaceArchitect
       init_git(path:, id:, git_client:) if git
       state.touch_recent(id)
       Success(space)
-    rescue SpaceArchitect::Error => e
+    rescue Error => e
       Failure(e)
     end
 
@@ -67,7 +67,7 @@ module SpaceArchitect
       if looks_like_path?(value)
         begin
           return Success(Space.load(File.expand_path(value)))
-        rescue SpaceArchitect::Error => e
+        rescue Error => e
           return Failure(e)
         end
       end
@@ -80,13 +80,13 @@ module SpaceArchitect
       end
 
       Failure(AmbiguousSpaceError.new("Space '#{value}' is ambiguous: #{matches.map(&:id).join(', ')}"))
-    rescue SpaceArchitect::Error => e
+    rescue Error => e
       Failure(e)
     end
 
     def current(from: Dir.pwd)
       current_from_pwd(from:).to_result(CurrentSpaceMissingError.new("No current space found from #{from}. Run this inside a space or pass a space id."))
-    rescue SpaceArchitect::Error => e
+    rescue Error => e
       Failure(e)
     end
 
@@ -148,7 +148,7 @@ module SpaceArchitect
         repo_data = space.add_repo(addition.fetch(:reference), relative_path: addition.fetch(:relative_path), now: now.call)
         { space: space, repo: repo_data, reference: addition.fetch(:reference), path: addition.fetch(:path) }
       end)
-    rescue SpaceArchitect::Error => e
+    rescue Error => e
       Failure(e)
     end
 

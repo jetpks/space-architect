@@ -4,7 +4,7 @@ require "yaml"
 require "pathname"
 require "time"
 
-module SpaceArchitect
+module Space::Core
   class Space
     METADATA_FILE = "space.yaml"
     VALID_STATUSES = %w[active paused done archived].freeze
