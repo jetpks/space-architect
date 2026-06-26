@@ -42,7 +42,7 @@ class DispatcherTest < SpaceArchitectTest
     File.write(fake, FAKE_CLAUDE_SCRIPT)
     File.chmod(0o755, fake)
 
-    space   = SpaceArchitect::Space.load(space_dir)
+    space   = Space::Core::Space.load(space_dir)
     mission = SpaceArchitect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("demo")
@@ -93,7 +93,7 @@ class DispatcherTest < SpaceArchitectTest
     _space_dir, mission, fake, build_dir = setup_space_with_worktree(root)
     File.delete(File.join(build_dir, "prompt.md"))
 
-    assert_raises(SpaceArchitect::Error) do
+    assert_raises(Space::Core::Error) do
       mission.dispatch("demo", "A", claude_bin: fake)
     end
   ensure

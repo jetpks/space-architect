@@ -172,8 +172,8 @@ class CLITest < SpaceArchitectTest
     File.write(function_path, "function space\n    echo custom\nend\n")
 
     with_env(env) do
-      error = assert_raises(SpaceArchitect::Error) do
-        SpaceArchitect::ShellIntegration.install("fish", env: env)
+      error = assert_raises(Space::Core::Error) do
+        Space::Core::ShellIntegration.install("fish", env: env)
       end
       assert_match(/Refusing to overwrite existing fish function/, error.message)
 
@@ -433,7 +433,7 @@ class CLITest < SpaceArchitectTest
       err = StringIO.new
       exit_code = SpaceArchitect::CLI.call(argv, out, err)
       assert_equal 0, exit_code, "#{argv.inspect} should exit 0"
-      assert_equal SpaceArchitect::VERSION, out.string.chomp, "#{argv.inspect} should print VERSION to stdout"
+      assert_equal Space::Core::VERSION, out.string.chomp, "#{argv.inspect} should print VERSION to stdout"
       assert_empty err.string, "#{argv.inspect} should write nothing to stderr"
     end
   end

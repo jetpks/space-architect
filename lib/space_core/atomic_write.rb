@@ -2,7 +2,7 @@
 
 require "fileutils"
 
-module SpaceArchitect
+module Space::Core
   module AtomicWrite
     module_function
 

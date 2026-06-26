@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module SpaceArchitect
+module Space::Core
   class Error < StandardError; end
   class NotFoundError < Error; end
   class AmbiguousSpaceError < Error; end

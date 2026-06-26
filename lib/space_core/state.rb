@@ -3,7 +3,7 @@
 require "yaml"
 require "pathname"
 
-module SpaceArchitect
+module Space::Core
   class State
     DEFAULT_DATA = {
       "version" => 1,

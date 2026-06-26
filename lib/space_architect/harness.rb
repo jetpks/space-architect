@@ -14,22 +14,22 @@ module SpaceArchitect
       case name.to_s
       when "claude-code"
         if effort
-          raise Error,
+          raise Space::Core::Error,
             "effort is opencode-only (sets opencode reasoningEffort) — " \
             "claude-code effort is set via the prompt"
         end
         ClaudeCodeHarness.new(model: model, max_turns: max_turns, bin: bin)
       when "opencode"
         if model == CLAUDE_DEFAULT_MODEL
-          raise Error,
+          raise Space::Core::Error,
             "Pass --model when using --harness opencode (the claude-sonnet-4-6 default " \
             "is a Claude model ID and will not work with opencode — " \
             "try e.g. fireworks-ai/accounts/fireworks/models/glm-5p2)"
         end
-        raise Error, "config_dir is required for opencode harness" unless config_dir
+        raise Space::Core::Error, "config_dir is required for opencode harness" unless config_dir
         OpenCodeHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir, effort: effort)
       else
-        raise Error, "Unknown harness '#{name}' — valid values: claude-code, opencode"
+        raise Space::Core::Error, "Unknown harness '#{name}' — valid values: claude-code, opencode"
       end
     end
 

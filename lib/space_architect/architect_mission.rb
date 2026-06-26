@@ -24,7 +24,7 @@ module SpaceArchitect
     def init!
       handoff_path = space.path.join("architecture", "ARCHITECT.md")
       if handoff_path.exist?
-        raise Error, "architecture/ARCHITECT.md already exists — remove it first or edit it directly (idempotent guard)"
+        raise Space::Core::Error, "architecture/ARCHITECT.md already exists — remove it first or edit it directly (idempotent guard)"
       end
 
       FileUtils.mkdir_p(handoff_path.dirname)
@@ -34,7 +34,7 @@ module SpaceArchitect
         b.merge("status" => "active", "current_iteration" => nil, "iterations" => [])
       end
 
-      git_run("-C", space.path.to_s, "add", "architecture/ARCHITECT.md", Space::METADATA_FILE)
+      git_run("-C", space.path.to_s, "add", "architecture/ARCHITECT.md", Space::Core::Space::METADATA_FILE)
       git_run("-C", space.path.to_s, "commit", "-m", "Initialize architect mission")
 
       handoff_path
@@ -45,14 +45,14 @@ module SpaceArchitect
       block = space.data["architect"] || {}
       iterations = block["iterations"] || []
       if iterations.any? { |s| s["name"] == name }
-        raise Error, "iteration '#{name}' already exists in space.yaml"
+        raise Space::Core::Error, "iteration '#{name}' already exists in space.yaml"
       end
 
       ordinal = (iterations.map { |s| s["ordinal"] || 0 }.max || 0) + 1
       nn = format("%02d", ordinal)
       rel = "architecture/I#{nn}-#{name}.md"
       path = space.path.join(rel)
-      raise Error, "#{rel} already exists" if path.exist?
+      raise Space::Core::Error, "#{rel} already exists" if path.exist?
 
       FileUtils.mkdir_p(path.dirname)
       path.write(render_iteration(nn, name))
@@ -68,7 +68,7 @@ module SpaceArchitect
         b
       end
 
-      git_run("-C", space.path.to_s, "add", rel, Space::METADATA_FILE)
+      git_run("-C", space.path.to_s, "add", rel, Space::Core::Space::METADATA_FILE)
       git_run("-C", space.path.to_s, "commit", "-m", "I#{nn}: scaffold #{name}")
 
       path
@@ -94,15 +94,15 @@ module SpaceArchitect
       entry = slice_entry(iteration)
       rel = entry["file"]
       path = space.path.join(rel)
-      raise Error, "#{rel} does not exist — run `architect new #{iteration}` first" unless path.exist?
+      raise Space::Core::Error, "#{rel} does not exist — run `architect new #{iteration}` first" unless path.exist?
       unless path.read.match?(/^## Acceptance Criteria/)
-        raise Error, "#{rel} has no '## Acceptance Criteria' section — write the Acceptance Criteria before freezing"
+        raise Space::Core::Error, "#{rel} has no '## Acceptance Criteria' section — write the Acceptance Criteria before freezing"
       end
 
       if entry["freeze_sha"]
         sha = entry["freeze_sha"]
         if frozen_region_changed?(sha, rel)
-          raise Error,
+          raise Space::Core::Error,
             "Frozen sections of #{rel} changed since freeze #{sha[0, 8]} — " \
             "refusing to re-freeze. Restore them to their frozen state or use a new iteration."
         end
@@ -135,20 +135,20 @@ module SpaceArchitect
 
     def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false, effort: nil)
       if harness.to_s == "opencode" && (model.nil? || model == Harness::CLAUDE_DEFAULT_MODEL)
-        raise Error,
+        raise Space::Core::Error,
           "Pass --model when using --harness opencode " \
           "(#{Harness::CLAUDE_DEFAULT_MODEL} is a Claude model ID, not valid for opencode — " \
           "try e.g. fireworks-ai/accounts/fireworks/models/glm-5p2)"
       end
       if effort && harness.to_s != "opencode"
-        raise Error,
+        raise Space::Core::Error,
           "effort is opencode-only (sets opencode reasoningEffort) — " \
           "set effort only on opencode lanes (harness: opencode)"
       end
 
       entry = slice_entry(iteration)
       repo_path = space.path.join("repos", repo)
-      raise Error, "repos/#{repo} does not exist" unless repo_path.exist?
+      raise Space::Core::Error, "repos/#{repo} does not exist" unless repo_path.exist?
 
       id = iteration_id(entry)
       wt_path = space.path.join("build", "#{id}-#{lane}", "wt")
@@ -156,7 +156,7 @@ module SpaceArchitect
 
       base_ref = base || "HEAD"
       base_sha, _, wt_status = git_capture("-C", repo_path.to_s, "rev-parse", base_ref)
-      raise Error, "Could not resolve base ref '#{base_ref}' in #{repo}" unless wt_status.success?
+      raise Space::Core::Error, "Could not resolve base ref '#{base_ref}' in #{repo}" unless wt_status.success?
       base_sha = base_sha.strip
 
       branch = "lane/#{id}-#{lane}"
@@ -216,10 +216,10 @@ module SpaceArchitect
     def variant_promote(iteration, winner)
       entry = slice_entry(iteration)
       variant_lanes = (entry["lanes"] || []).select { |l| l["variant"] }
-      raise Error, "Iteration '#{iteration}' has no variant set — nothing to promote" if variant_lanes.empty?
+      raise Space::Core::Error, "Iteration '#{iteration}' has no variant set — nothing to promote" if variant_lanes.empty?
 
       names = variant_lanes.map { |l| l["name"] }
-      raise Error, "Cannot promote '#{winner}' — not a variant lane of iteration '#{iteration}'" unless names.include?(winner)
+      raise Space::Core::Error, "Cannot promote '#{winner}' — not a variant lane of iteration '#{iteration}'" unless names.include?(winner)
       discarded_names = names - [winner]
 
       update_architect_block do |b|
@@ -242,7 +242,7 @@ module SpaceArchitect
     def variant_compare(iteration)
       entry = slice_entry(iteration)
       variant_lanes = (entry["lanes"] || []).select { |l| l["variant"] }
-      raise Error, "Iteration '#{iteration}' has no variant set — nothing to compare" if variant_lanes.empty?
+      raise Space::Core::Error, "Iteration '#{iteration}' has no variant set — nothing to compare" if variant_lanes.empty?
 
       winner = entry["winner"]
       {
@@ -265,7 +265,7 @@ module SpaceArchitect
     def worktree_remove(iteration, lane)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
-      raise Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
+      raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
 
       repo = lane_entry["repo"]
       repo_path = space.path.join("repos", repo)
@@ -337,7 +337,7 @@ module SpaceArchitect
                  claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, detach: false)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
-      raise Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
+      raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
 
       resolved_harness = harness || lane_entry["harness"] || "claude-code"
       resolved_model   = model   || lane_entry["model"]   || Harness::CLAUDE_DEFAULT_MODEL
@@ -345,13 +345,13 @@ module SpaceArchitect
 
       id = iteration_id(entry)
       wt_path = space.path.join(lane_entry["worktree"] || "build/#{id}-#{lane}/wt")
-      raise Error, "Worktree directory does not exist: #{wt_path}" unless wt_path.exist?
+      raise Space::Core::Error, "Worktree directory does not exist: #{wt_path}" unless wt_path.exist?
 
       build_dir    = space.path.join("build", "#{id}-#{lane}")
       prompt_path  = build_dir.join("prompt.md")
       run_log_path = build_dir.join("run.jsonl")
       report_path  = build_dir.join("report.md")
-      raise Error, "prompt.md not found: #{prompt_path}" unless prompt_path.exist?
+      raise Space::Core::Error, "prompt.md not found: #{prompt_path}" unless prompt_path.exist?
 
       bin = resolved_harness == "claude-code" ? claude_bin : opencode_bin
       harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
@@ -385,7 +385,7 @@ module SpaceArchitect
     def slice_entry(iteration)
       block = space.data["architect"] || {}
       entry = (block["iterations"] || []).find { |s| s["name"] == iteration }
-      raise Error, "Iteration '#{iteration}' not recorded in space.yaml — run `architect new #{iteration}` first" unless entry
+      raise Space::Core::Error, "Iteration '#{iteration}' not recorded in space.yaml — run `architect new #{iteration}` first" unless entry
       entry
     end
 
@@ -434,7 +434,7 @@ module SpaceArchitect
       out, err, status = Open3.capture3("git", *args)
       return if status.success?
       output = [out, err].map(&:strip).reject(&:empty?).join(" ")
-      raise Error, "git #{args.join(' ')} failed: #{output}"
+      raise Space::Core::Error, "git #{args.join(' ')} failed: #{output}"
     end
 
     def git_capture(*args)

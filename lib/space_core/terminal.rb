@@ -3,7 +3,7 @@
 require "async"
 require "pastel"
 
-module SpaceArchitect
+module Space::Core
   class Terminal
     SPINNER_FRAMES = %w[⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏].freeze
 

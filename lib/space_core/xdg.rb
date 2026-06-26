@@ -2,7 +2,7 @@
 
 require "pathname"
 
-module SpaceArchitect
+module Space::Core
   module XDG
     module_function
 

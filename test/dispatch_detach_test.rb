@@ -44,7 +44,7 @@ class DispatchDetachTest < SpaceArchitectTest
     File.write(fake_bin, FAKE_DETACH_BUILDER)
     File.chmod(0o755, fake_bin)
 
-    space   = SpaceArchitect::Space.load(space_dir)
+    space   = Space::Core::Space.load(space_dir)
     mission = SpaceArchitect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("demo")
