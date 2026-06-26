@@ -2,10 +2,7 @@
 
 module SpaceArchitect
   module CLI
-    class New < Dry::CLI::Command
-      include GlobalOptions
-      include Helpers
-
+    class New < BaseCommand
       desc "Create a new project space"
       argument :title, required: true, desc: "Space title"
       argument :repos, type: :array, required: false, desc: "Repo refs to clone"

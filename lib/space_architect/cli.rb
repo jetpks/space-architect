@@ -84,8 +84,8 @@ module SpaceArchitect
   end
 end
 
-require_relative "cli/options"
 require_relative "cli/helpers"
+require_relative "cli/base_command"
 require_relative "cli/init"
 require_relative "cli/new"
 require_relative "cli/list"

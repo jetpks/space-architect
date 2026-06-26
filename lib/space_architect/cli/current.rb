@@ -2,10 +2,7 @@
 
 module SpaceArchitect
   module CLI
-    class Current < Dry::CLI::Command
-      include GlobalOptions
-      include Helpers
-
+    class Current < BaseCommand
       desc "Show the current space"
 
       def call(**opts)

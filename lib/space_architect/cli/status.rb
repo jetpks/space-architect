@@ -2,10 +2,7 @@
 
 module SpaceArchitect
   module CLI
-    class Status < Dry::CLI::Command
-      include GlobalOptions
-      include Helpers
-
+    class Status < BaseCommand
       desc "Set a space status: active, paused, done, archived"
       argument :rest, type: :array, required: false, desc: "[SPACE] STATUS"
 
