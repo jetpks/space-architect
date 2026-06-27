@@ -15,7 +15,7 @@ module Space
     class App < Hanami::App
       config.settings_store = HanamiCredentials::Store.new(
         content_path: Pathname(__dir__).join("credentials.yml.enc"),
-        env_key: "ARCHITECT_MASTER_KEY",
+        env_key: "SPACE_SERVER_MASTER_KEY",
         key_path: Pathname(__dir__).join("master.key")
       )
 
