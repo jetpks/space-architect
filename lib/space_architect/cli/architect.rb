@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module SpaceArchitect
+module Space::Architect
   module CLI
     module Architect
       class Init < Dry::CLI::Command
@@ -379,19 +379,19 @@ module SpaceArchitect
   end
 end
 
-SpaceArchitect::CLI::Registry.register "init",   SpaceArchitect::CLI::Architect::Init
-SpaceArchitect::CLI::Registry.register "new",    SpaceArchitect::CLI::Architect::New
-SpaceArchitect::CLI::Registry.register "status", SpaceArchitect::CLI::Architect::Status
-SpaceArchitect::CLI::Registry.register "freeze", SpaceArchitect::CLI::Architect::Freeze
-SpaceArchitect::CLI::Registry.register "verify", SpaceArchitect::CLI::Architect::Verify
-SpaceArchitect::CLI::Registry.register "dispatch", SpaceArchitect::CLI::Architect::Dispatch
-SpaceArchitect::CLI::Registry.register "worktree" do |wt|
-  wt.register "add",    SpaceArchitect::CLI::Architect::Worktree::Add
-  wt.register "remove", SpaceArchitect::CLI::Architect::Worktree::Remove
-  wt.register "list",   SpaceArchitect::CLI::Architect::Worktree::List
+Space::Architect::CLI::Registry.register "init",   Space::Architect::CLI::Architect::Init
+Space::Architect::CLI::Registry.register "new",    Space::Architect::CLI::Architect::New
+Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Architect::Status
+Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
+Space::Architect::CLI::Registry.register "verify", Space::Architect::CLI::Architect::Verify
+Space::Architect::CLI::Registry.register "dispatch", Space::Architect::CLI::Architect::Dispatch
+Space::Architect::CLI::Registry.register "worktree" do |wt|
+  wt.register "add",    Space::Architect::CLI::Architect::Worktree::Add
+  wt.register "remove", Space::Architect::CLI::Architect::Worktree::Remove
+  wt.register "list",   Space::Architect::CLI::Architect::Worktree::List
 end
-SpaceArchitect::CLI::Registry.register "variant" do |v|
-  v.register "add",     SpaceArchitect::CLI::Architect::Variant::Add
-  v.register "promote", SpaceArchitect::CLI::Architect::Variant::Promote
-  v.register "compare", SpaceArchitect::CLI::Architect::Variant::Compare
+Space::Architect::CLI::Registry.register "variant" do |v|
+  v.register "add",     Space::Architect::CLI::Architect::Variant::Add
+  v.register "promote", Space::Architect::CLI::Architect::Variant::Promote
+  v.register "compare", Space::Architect::CLI::Architect::Variant::Compare
 end

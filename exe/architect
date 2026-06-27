@@ -10,4 +10,4 @@ end
 
 require "space_architect"
 
-SpaceArchitect::CLI.run(ARGV, $stdout, $stderr)
+Space::Architect::CLI.run(ARGV, $stdout, $stderr)

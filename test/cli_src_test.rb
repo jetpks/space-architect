@@ -2,11 +2,11 @@
 
 require_relative "test_helper"
 
-class CLISrcTest < SpaceArchitectTest
+class CLISrcTest < Space::ArchitectTest
   def test_src_help_prints_pristine_usage_and_exits_0
     out = StringIO.new
     err = StringIO.new
-    code = SpaceArchitect::CLI.call(["src"], out, err)
+    code = Space::Architect::CLI.call(["src"], out, err)
     assert_equal 0, code
     assert_match(/Commands:/, out.string)
     assert_match(/sync/, out.string)
@@ -15,7 +15,7 @@ class CLISrcTest < SpaceArchitectTest
   def test_src_help_flag_prints_pristine_usage_and_exits_0
     out = StringIO.new
     err = StringIO.new
-    code = SpaceArchitect::CLI.call(["src", "--help"], out, err)
+    code = Space::Architect::CLI.call(["src", "--help"], out, err)
     assert_equal 0, code
     assert_match(/Commands:/, out.string)
     assert_match(/sync/, out.string)
@@ -24,7 +24,7 @@ class CLISrcTest < SpaceArchitectTest
   def test_src_version_prints_pristine_version_and_exits_0
     out = StringIO.new
     err = StringIO.new
-    code = SpaceArchitect::CLI.call(["src", "version"], out, err)
+    code = Space::Architect::CLI.call(["src", "version"], out, err)
     assert_equal 0, code
     assert_equal Space::Src::VERSION, out.string.chomp
   end
@@ -32,7 +32,7 @@ class CLISrcTest < SpaceArchitectTest
   def test_src_version_flag_prints_pristine_version_and_exits_0
     out = StringIO.new
     err = StringIO.new
-    code = SpaceArchitect::CLI.call(["src", "--version"], out, err)
+    code = Space::Architect::CLI.call(["src", "--version"], out, err)
     assert_equal 0, code
     assert_equal Space::Src::VERSION, out.string.chomp
   end
@@ -46,7 +46,7 @@ class CLISrcTest < SpaceArchitectTest
         "XDG_CONFIG_HOME" => "#{d}/c",
         "XDG_STATE_HOME" => "#{d}/s"
       }
-      code = SpaceArchitect::CLI.call(["src", "status"], out, err)
+      code = Space::Architect::CLI.call(["src", "status"], out, err)
       assert_equal 0, code
       assert_match(/no repos in state/, out.string)
     ensure
@@ -65,7 +65,7 @@ class CLISrcTest < SpaceArchitectTest
         "XDG_CONFIG_HOME" => "#{d}/.config",
         "XDG_STATE_HOME" => "#{d}/.local/state"
       }
-      code = SpaceArchitect::CLI.call(["src", "zqxnomatch"], out, err)
+      code = Space::Architect::CLI.call(["src", "zqxnomatch"], out, err)
       assert_equal 1, code
       assert_includes err.string, "zqxnomatch"
     ensure

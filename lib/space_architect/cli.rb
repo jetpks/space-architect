@@ -2,7 +2,7 @@
 
 require "dry/cli"
 
-module SpaceArchitect
+module Space::Architect
   module CLI
     Outcome = Data.define(:exit_code, :message) do
       def initialize(exit_code:, message: nil) = super

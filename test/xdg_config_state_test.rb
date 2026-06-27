@@ -2,7 +2,7 @@
 
 require_relative "test_helper"
 
-class XDGConfigStateTest < SpaceArchitectTest
+class XDGConfigStateTest < Space::ArchitectTest
   def test_config_and_state_use_xdg_paths
     setup = temp_env
     env = setup.fetch(:env)

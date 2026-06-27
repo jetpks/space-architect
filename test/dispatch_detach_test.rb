@@ -4,7 +4,7 @@ require_relative "test_helper"
 require "yaml"
 require "tmpdir"
 
-class DispatchDetachTest < SpaceArchitectTest
+class DispatchDetachTest < Space::ArchitectTest
   # Fake builder: writes its PID line immediately, sleeps to give parent a window to inspect,
   # then writes "done" and exits. stdout is redirected to run.jsonl by run_detached.
   FAKE_DETACH_BUILDER = <<~RUBY
@@ -45,7 +45,7 @@ class DispatchDetachTest < SpaceArchitectTest
     File.chmod(0o755, fake_bin)
 
     space   = Space::Core::Space.load(space_dir)
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("demo")
 

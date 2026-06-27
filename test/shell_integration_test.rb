@@ -2,7 +2,7 @@
 
 require_relative "test_helper"
 
-class ShellIntegrationTest < SpaceArchitectTest
+class ShellIntegrationTest < Space::ArchitectTest
   def fish_script
     Space::Core::ShellIntegration.for("fish")
   end

@@ -6,11 +6,11 @@ require "tmpdir"
 require "minitest/autorun"
 require_relative "../lib/space_architect"
 
-class SpaceArchitectTest < Minitest::Test
+class Space::ArchitectTest < Minitest::Test
   def invoke(*argv)
     out = StringIO.new
     err = StringIO.new
-    SpaceArchitect::CLI.call(argv.flatten, out, err)
+    Space::Architect::CLI.call(argv.flatten, out, err)
     [out.string, err.string]
   end
   def with_env(vars)

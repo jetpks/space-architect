@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module SpaceArchitect
+module Space::Architect
   module CLI
     module Shell
       class ShellInit < Dry::CLI::Command

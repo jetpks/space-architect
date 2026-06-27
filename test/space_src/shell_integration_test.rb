@@ -15,17 +15,17 @@ class SrcShellIntegrationTest < Minitest::Test
     @fish_script ||= ShellIntegration.for("fish")
   end
 
-  # ---- module standalone — no SpaceArchitect reference ----
+  # ---- module standalone — no Space::Architect reference ----
 
   def test_module_has_no_space_architect_reference
     src = File.read(File.expand_path("../../lib/space_src/shell_integration.rb", __dir__))
     refute_match(/space_?architect/i, src,
-      "shell_integration.rb must not reference SpaceArchitect")
+      "shell_integration.rb must not reference Space::Architect")
   end
 
   def test_fish_script_has_no_space_architect_reference
     refute_match(/space_?architect/i, fish_script,
-      "generated fish script must not reference SpaceArchitect")
+      "generated fish script must not reference Space::Architect")
   end
 
   # ---- script defines function src ----
