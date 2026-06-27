@@ -1,0 +1,7 @@
+{"type":"mode","mode":"default","sessionId":"sess-1"}
+{"type":"ai-title","aiTitle":"Test conversation","sessionId":"sess-1"}
+{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"Hello there"},"timestamp":"2026-06-06T12:00:00Z","sessionId":"sess-1","cwd":"/tmp/proj","gitBranch":"main","version":"2.1.0"}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","model":"claude-opus-4-8","content":[{"type":"thinking","thinking":"hmm"},{"type":"text","text":"Hi!"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]},"timestamp":"2026-06-06T12:00:01Z","sessionId":"sess-1"}
+{"type":"user","uuid":"u2","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"file.txt","is_error":false}]},"timestamp":"2026-06-06T12:00:02Z","sessionId":"sess-1"}
+{"type":"user","uuid":"meta1","isMeta":true,"message":{"role":"user","content":"meta noise to skip"},"sessionId":"sess-1"}
+{"type":"file-history-snapshot","messageId":"a1","snapshot":{}}

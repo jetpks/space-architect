@@ -1,0 +1,10 @@
+{
+  "entrypoints/inertia.tsx": {
+    "file": "assets/inertia-Cm3cH5UV.js",
+    "css": ["assets/inertia-Cm3cH5UV.css"],
+    "imports": ["_chunk-7FE5REVM.js"]
+  },
+  "_chunk-7FE5REVM.js": {
+    "file": "assets/chunk-7FE5REVM.js"
+  }
+}

@@ -1,0 +1,45 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Development launcher — runs the three long-lived dev processes side by side:
+#   • Vite dev server  (frontend HMR; port 3036 per config/vite.json)
+#   • Falcon           (the Hanami web app on http://localhost:3000)
+#   • Import worker    (dequeues conversation imports from Redis; bin/import_worker.rb)
+#
+# Ctrl-C — or any process exiting — tears them all down cleanly. Runs from any cwd
+# (chdirs to the architect root). For the production-shaped supervised web+worker
+# topology in one host process, use `falcon host falcon.rb` instead.
+#
+# Usage: bin/dev
+
+Dir.chdir(File.expand_path("..", __dir__))
+ENV["HANAMI_ENV"] ||= "development"
+
+# The Vite dev server needs the frontend deps present.
+unless Dir.exist?("node_modules")
+  warn "[bin/dev] node_modules missing — running npm install"
+  abort "[bin/dev] npm install failed" unless system("npm", "install")
+end
+
+COMMANDS = {
+  "vite"   => %w[npx vite],
+  "falcon" => %w[bundle exec falcon serve --bind http://localhost:3000 --count 1],
+  "worker" => %w[bundle exec ruby bin/import_worker.rb]
+}.freeze
+
+# Each child runs in its own process group, so the terminal's Ctrl-C reaches only
+# this launcher — we are the single point that fans shutdown out to all groups.
+pids = COMMANDS.to_h do |name, cmd|
+  pid = Process.spawn(*cmd, pgroup: true)
+  warn "[bin/dev] #{name} up (pid #{pid}): #{cmd.join(' ')}"
+  [pid, name]
+end
+
+stop = -> { pids.each_key { |pid| Process.kill("TERM", -pid) rescue nil } }
+%w[INT TERM].each { |sig| Signal.trap(sig) { stop.call } }
+
+# First child to exit takes the others down with it.
+exited = Process.wait
+warn "[bin/dev] #{pids.delete(exited) || "a process"} exited — stopping the rest"
+stop.call
+pids.each_key { Process.wait rescue nil }

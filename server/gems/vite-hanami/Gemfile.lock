@@ -1,0 +1,57 @@
+PATH
+  remote: .
+  specs:
+    vite-hanami (0.1.0)
+      vite_ruby (~> 3.10)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    drb (2.2.3)
+    dry-cli (1.4.1)
+    logger (1.7.0)
+    minitest (6.0.6)
+      drb (~> 2.0)
+      prism (~> 1.5)
+    mutex_m (0.3.0)
+    prism (1.9.0)
+    rack (3.2.6)
+    rack-proxy (0.8.2)
+      rack
+    rake (13.4.2)
+    vite_ruby (3.10.2)
+      dry-cli (>= 0.7, < 2)
+      logger (~> 1.6)
+      mutex_m
+      rack-proxy (~> 0.6, >= 0.6.1)
+      zeitwerk (~> 2.2)
+    zeitwerk (2.8.2)
+
+PLATFORMS
+  arm64-darwin-25
+  ruby
+
+DEPENDENCIES
+  minitest
+  rake
+  vite-hanami!
+
+CHECKSUMS
+  drb (2.2.3) sha256=0b00d6fdb50995fe4a45dea13663493c841112e4068656854646f418fda13373
+  dry-cli (1.4.1) sha256=b8015bb76c708aa8705a36faf694973e75eeeffca39b89c8e172dc6f66a7d874
+  logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
+  minitest (6.0.6) sha256=153ea36d1d987a62942382b61075745042a2b3123b1cd48f4c3675af9cc7d6f1
+  mutex_m (0.3.0) sha256=cfcb04ac16b69c4813777022fdceda24e9f798e48092a2b817eb4c0a782b0751
+  prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
+  rack (3.2.6) sha256=5ed78e1f73b2e25679bec7d45ee2d4483cc4146eb1be0264fc4d94cb5ef212c2
+  rack-proxy (0.8.2) sha256=d3086e865cbe74e627d41d2c6cd24521206c68d9e0308576760ea06d68e11ab0
+  rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
+  vite-hanami (0.1.0)
+  vite_ruby (3.10.2) sha256=db465451eb180abbdc81f596ba63671d2b2552e2bb7bf3c1f7b79f9d58ca9a86
+  zeitwerk (2.8.2) sha256=7212a61311083c604184b1ea2574b9aa05cd14f855a0841c06985cabe9181d12
+
+RUBY VERSION
+  ruby 4.0.5
+
+BUNDLED WITH
+  4.0.10
