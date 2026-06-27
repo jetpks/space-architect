@@ -4,10 +4,7 @@ module Space::Architect
   module CLI
     module Architect
       module Research
-        class Dispatch < Dry::CLI::Command
-          include GlobalOptions
-          include Helpers
-
+        class Dispatch < BaseCommand
           desc "Dispatch detached read-only research lanes (one per prompt file)"
           argument :prompts, required: true,
                              desc: "Prompt file(s) to dispatch (space-separated paths)"
@@ -32,10 +29,7 @@ module Space::Architect
           end
         end
 
-        class Status < Dry::CLI::Command
-          include GlobalOptions
-          include Helpers
-
+        class Status < BaseCommand
           desc "Show status of dispatched research runs"
           argument :space, required: false, desc: "Space identifier (default: $PWD)"
 
@@ -60,10 +54,7 @@ module Space::Architect
           end
         end
 
-        class Wait < Dry::CLI::Command
-          include GlobalOptions
-          include Helpers
-
+        class Wait < BaseCommand
           desc "Wait for all dispatched research runs to complete"
           argument :space,    required: false, desc: "Space identifier (default: $PWD)"
           option   :quiet,    type: :boolean, default: false,

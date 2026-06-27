@@ -1,10 +1,7 @@
 # frozen_string_literal: true
 
 module Space::Core::CLI
-class Init < Dry::CLI::Command
-  include GlobalOptions
-  include Helpers
-
+class Init < BaseCommand
   desc "Create default XDG config and state files"
   option :force, type: :boolean, default: false, desc: "Overwrite existing config and state files"
 

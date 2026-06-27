@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "dry/cli"
+require "pastel"
 require "space_core/cli"
 
 module Space::Architect
@@ -8,9 +9,9 @@ module Space::Architect
     # Delegate the outcome seam to Space::Core::CLI so both architect commands
     # (which call CLI.record_outcome lexically) and the moved Helpers (which call
     # CLI.record_outcome with Space::Core::CLI as lexical root) share one slot.
-    Outcome       = Space::Core::CLI::Outcome
-    Helpers       = Space::Core::CLI::Helpers
-    GlobalOptions = Space::Core::CLI::GlobalOptions
+    Outcome     = Space::Core::CLI::Outcome
+    Helpers     = Space::Core::CLI::Helpers
+    BaseCommand = Space::Core::CLI::BaseCommand
 
     def self.record_outcome(o) = Space::Core::CLI.record_outcome(o)
     def self.last_outcome      = Space::Core::CLI.last_outcome
@@ -24,6 +25,7 @@ module Space::Architect
 
     def self.call(argv, out = $stdout, err = $stderr)
       Thread.current[:space_core_cli_outcome] = nil
+      Space::Core::CLI.help_pastel = Pastel.new(enabled: Space::Core::CLI.help_colors?(argv, out, err))
 
       if TOP_LEVEL_HELP.include?(argv)
         out.puts Dry::CLI::Usage.call(Registry.get([]))

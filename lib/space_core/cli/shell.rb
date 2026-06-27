@@ -2,10 +2,7 @@
 
 module Space::Core::CLI
 module Shell
-  class ShellInit < Dry::CLI::Command
-    include GlobalOptions
-    include Helpers
-
+  class ShellInit < BaseCommand
     desc "Print shell integration script"
     argument :shell_name, required: true, desc: "Shell name (e.g. fish)"
 
@@ -18,10 +15,7 @@ module Shell
     end
   end
 
-  class Fish < Dry::CLI::Command
-    include GlobalOptions
-    include Helpers
-
+  class Fish < BaseCommand
     desc "Manage fish shell integration: install, uninstall, path"
     argument :subcommand, required: false, desc: "install, uninstall, or path (default: install)"
     option :force, type: :boolean, default: false, desc: "Overwrite or remove existing shell files"
@@ -84,10 +78,7 @@ module Shell
     end
   end
 
-  class Complete < Dry::CLI::Command
-    include GlobalOptions
-    include Helpers
-
+  class Complete < BaseCommand
     desc "Print completion candidates"
     argument :kind, required: true, desc: "Completion kind"
     argument :extra, type: :array, required: false, desc: "Extra args for completion"

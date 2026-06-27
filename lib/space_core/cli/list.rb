@@ -1,10 +1,7 @@
 # frozen_string_literal: true
 
 module Space::Core::CLI
-class List < Dry::CLI::Command
-  include GlobalOptions
-  include Helpers
-
+class List < BaseCommand
   desc "List spaces"
 
   def call(**opts)

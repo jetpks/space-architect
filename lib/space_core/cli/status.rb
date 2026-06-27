@@ -1,10 +1,7 @@
 # frozen_string_literal: true
 
 module Space::Core::CLI
-class Status < Dry::CLI::Command
-  include GlobalOptions
-  include Helpers
-
+class Status < BaseCommand
   desc "Set a space status: active, paused, done, archived"
   argument :rest, type: :array, required: false, desc: "[SPACE] STATUS"
 

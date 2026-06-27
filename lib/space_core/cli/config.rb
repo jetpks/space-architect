@@ -2,10 +2,7 @@
 
 module Space::Core::CLI
 module Config
-  class Show < Dry::CLI::Command
-    include GlobalOptions
-    include Helpers
-
+  class Show < BaseCommand
     desc "Show current config"
 
     def call(**opts)
@@ -21,10 +18,7 @@ module Config
     end
   end
 
-  class ConfigPath < Dry::CLI::Command
-    include GlobalOptions
-    include Helpers
-
+  class ConfigPath < BaseCommand
     desc "Print the config file path"
 
     def call(**opts)
@@ -36,10 +30,7 @@ module Config
     end
   end
 
-  class Set < Dry::CLI::Command
-    include GlobalOptions
-    include Helpers
-
+  class Set < BaseCommand
     desc "Set a config key"
     argument :key, required: true, desc: "Config key"
     argument :value, required: true, desc: "Config value"

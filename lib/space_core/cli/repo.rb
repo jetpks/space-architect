@@ -2,10 +2,7 @@
 
 module Space::Core::CLI
 module Repo
-  class Add < Dry::CLI::Command
-    include GlobalOptions
-    include Helpers
-
+  class Add < BaseCommand
     desc "Clone repos into the current space"
     argument :repos, type: :array, required: false, desc: "REPO [REPO...]"
 
@@ -34,10 +31,7 @@ module Repo
     end
   end
 
-  class RepoList < Dry::CLI::Command
-    include GlobalOptions
-    include Helpers
-
+  class RepoList < BaseCommand
     desc "List repos in the current space"
 
     def call(**opts)
@@ -58,10 +52,7 @@ module Repo
     end
   end
 
-  class Resolve < Dry::CLI::Command
-    include GlobalOptions
-    include Helpers
-
+  class Resolve < BaseCommand
     desc "Resolve repo refs without cloning"
     argument :repos, type: :array, required: false, desc: "REPO [REPO...]"
 

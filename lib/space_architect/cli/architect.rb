@@ -3,10 +3,7 @@
 module Space::Architect
   module CLI
     module Architect
-      class Init < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Init < BaseCommand
         desc "Scaffold architect mission memory in the current space"
         argument :space, required: false, desc: "Space identifier (default: $PWD)"
 
@@ -23,10 +20,7 @@ module Space::Architect
         end
       end
 
-      class New < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class New < BaseCommand
         desc "Scaffold the next iteration file (architecture/I<NN>-<iteration>.md)"
         argument :iteration, required: true,  desc: "Iteration name (kebab-case)"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -44,10 +38,7 @@ module Space::Architect
         end
       end
 
-      class Status < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Status < BaseCommand
         desc "Show architect mission state (read-only)"
         argument :space, required: false, desc: "Space identifier (default: $PWD)"
 
@@ -92,10 +83,7 @@ module Space::Architect
         end
       end
 
-      class Freeze < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Freeze < BaseCommand
         desc "Freeze gates for an iteration"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -119,10 +107,7 @@ module Space::Architect
         end
       end
 
-      class Verify < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Verify < BaseCommand
         desc "Post-flight mechanical checks for an iteration (reports only, no judgment)"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -168,10 +153,7 @@ module Space::Architect
         end
       end
 
-      class Dispatch < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Dispatch < BaseCommand
         desc "Dispatch a builder for a lane (streams to build/<id>-<lane>/run.jsonl)"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name"
@@ -210,10 +192,7 @@ module Space::Architect
         end
       end
 
-      class Section < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Section < BaseCommand
         desc "Write a section of the iteration file and commit it (one call)"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :section,   required: true,  desc: "Section: grounds, specification, prompt, verdict"
@@ -252,10 +231,7 @@ module Space::Architect
         end
       end
 
-      class Evidence < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Evidence < BaseCommand
         desc "Transcribe a lane's scratch report VERBATIM into Builder Report and commit"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -276,10 +252,7 @@ module Space::Architect
         end
       end
 
-      class Merge < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Merge < BaseCommand
         desc "Integrate ONE judged-passing lane (merges --no-ff; runs no gates, makes no verdict)"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name (architect-judged passing)"
@@ -301,10 +274,7 @@ module Space::Architect
         end
       end
 
-      class Integrate < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Integrate < BaseCommand
         desc "Integrate the architect-supplied set of passing lanes, in order (stops on conflict)"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -328,10 +298,7 @@ module Space::Architect
         end
       end
 
-      class Gate < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Gate < BaseCommand
         desc "Run the frozen Acceptance Criteria gate commands and stream raw output (no PASS/FAIL)"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: false, desc: "Run in a lane worktree (default: the integration repo)"
@@ -357,10 +324,7 @@ module Space::Architect
         end
       end
 
-      class InstallSkills < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class InstallSkills < BaseCommand
         desc "Install bundled skills (architect, architect-research, architect-vocabulary) for a harness"
         option :provider, default: "claude", desc: "Harness: claude, codex, opencode, pi"
         option :project, type: :boolean, default: false, desc: "Install to CWD instead of global"
@@ -383,10 +347,7 @@ module Space::Architect
       end
 
       module Worktree
-        class Add < Dry::CLI::Command
-          include GlobalOptions
-          include Helpers
-
+        class Add < BaseCommand
           desc "Create a worktree for a lane"
           argument :repo,      required: true, desc: "Repo name (under repos/)"
           argument :iteration, required: true, desc: "Iteration name"
@@ -413,10 +374,7 @@ module Space::Architect
           end
         end
 
-        class Remove < Dry::CLI::Command
-          include GlobalOptions
-          include Helpers
-
+        class Remove < BaseCommand
           desc "Remove a lane worktree"
           argument :iteration, required: true, desc: "Iteration name"
           argument :lane,      required: true, desc: "Lane name"
@@ -434,10 +392,7 @@ module Space::Architect
           end
         end
 
-        class List < Dry::CLI::Command
-          include GlobalOptions
-          include Helpers
-
+        class List < BaseCommand
           desc "List active architect worktrees"
 
           def call(**opts)
@@ -459,10 +414,7 @@ module Space::Architect
       end
 
       module Variant
-        class Add < Dry::CLI::Command
-          include GlobalOptions
-          include Helpers
-
+        class Add < BaseCommand
           desc "Create a variant set (competing lanes over one frozen spec)"
           argument :repo,      required: true,  desc: "Repo name (under repos/)"
           argument :iteration, required: true,  desc: "Iteration name"
@@ -492,10 +444,7 @@ module Space::Architect
           end
         end
 
-        class Promote < Dry::CLI::Command
-          include GlobalOptions
-          include Helpers
-
+        class Promote < BaseCommand
           desc "Promote one variant of a variant set as the winner"
           argument :iteration, required: true,  desc: "Iteration name"
           argument :winner,    required: true,  desc: "Variant lane name to promote (e.g. v02)"
@@ -518,10 +467,7 @@ module Space::Architect
           end
         end
 
-        class Compare < Dry::CLI::Command
-          include GlobalOptions
-          include Helpers
-
+        class Compare < BaseCommand
           desc "Compare variants of an iteration's variant set (read-only)"
           argument :iteration, required: true,  desc: "Iteration name"
           argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -557,10 +503,7 @@ module Space::Architect
       end
 
       module Brief
-        class New < Dry::CLI::Command
-          include GlobalOptions
-          include Helpers
-
+        class New < BaseCommand
           desc "Scaffold the durable mission brief (architecture/BRIEF.md)"
           argument :space, required: false, desc: "Space identifier (default: $PWD)"
           option   :force, type: :boolean, default: false, desc: "Overwrite an existing BRIEF.md"

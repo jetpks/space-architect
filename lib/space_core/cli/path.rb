@@ -1,10 +1,7 @@
 # frozen_string_literal: true
 
 module Space::Core::CLI
-class Path < Dry::CLI::Command
-  include GlobalOptions
-  include Helpers
-
+class Path < BaseCommand
   desc "Print the path for a space or the current space"
   argument :identifier, required: false, desc: "Space ID or title slug"
 

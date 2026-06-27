@@ -345,8 +345,8 @@ class CLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  # G5 — D5 proof: new TITLE REPO [REPO...] positional syntax
-  def test_new_with_positional_repos_records_both_in_space_yaml
+  # new TITLE -r REPO -r REPO: repeated -r flags accumulate and both clone
+  def test_new_with_repeated_repo_flags_records_both_in_space_yaml
     setup = temp_env
     env = setup.fetch(:env)
     install_fake_git(setup)
@@ -354,7 +354,7 @@ class CLITest < Space::ArchitectTest
     with_env(env.merge("PATH" => "#{setup.fetch(:git_bin)}:#{ENV.fetch('PATH')}",
                        "PROJECT_SPACES_GIT_LOG" => setup.fetch(:git_log),
                        "PROJECT_SPACES_MISE_LOG" => setup.fetch(:mise_log))) do
-      out, err = invoke("space", "new", "D5 Space", "example-tools/alpha", "example-tools/beta")
+      out, err = invoke("space", "new", "D5 Space", "-r", "example-tools/alpha", "-r", "example-tools/beta")
 
       assert_empty err
       space_id = out[/Created (\d{8}-d5-space)/, 1]
@@ -419,7 +419,7 @@ class CLITest < Space::ArchitectTest
       invoke("space", "init")
       out = StringIO.new
       err = StringIO.new
-      code = Space::Architect::CLI.call(["space", "new", "Dup Space", "foo/dup", "foo/dup"], out, err)
+      code = Space::Architect::CLI.call(["space", "new", "Dup Space", "-r", "foo/dup", "-r", "foo/dup"], out, err)
       assert_equal 1, code
       assert_match(/Multiple repos resolve to the same destination/, err.string)
     end
