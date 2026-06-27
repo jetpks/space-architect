@@ -1,0 +1,24 @@
+# frozen_string_literal: true
+
+module Architect
+  module Structs
+    class Run < Architect::DB::Struct
+      def pending?  = status == :pending
+      def live?     = status == :live
+      def complete? = status == :complete
+      def failed?   = status == :failed
+
+      def published?
+        !!published
+      end
+
+      def owned_by?(user)
+        !user.nil? && user.id == user_id
+      end
+
+      def visible_to?(user)
+        published? || owned_by?(user)
+      end
+    end
+  end
+end

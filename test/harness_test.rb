@@ -668,4 +668,92 @@ class HarnessTest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(root)
   end
+
+  # I13 R6 DECISIVE (AC-B3): after a mid-stream non-Closed push error, tee_pipe must
+  # stop writing to the body (write called exactly once) while the log gets ALL lines.
+  # On base, body.write is called for every chunk (inline rescue catches all StandardErrors
+  # but keeps retrying each chunk), so write_count > 1 → FAILS.
+  # With fix (pushing flag), body.write is called exactly once → PASSES.
+  def test_tee_pipe_stops_writing_to_body_after_first_push_error
+    harness = Space::Architect::Harness::ClaudeCodeHarness.new(
+      model: "x", max_turns: 1
+    )
+
+    root = Dir.mktmpdir("tee-pipe-econnreset")
+    log_path = File.join(root, "run.jsonl")
+
+    r, w = IO.pipe
+    write_count = 0
+
+    fake_body = Object.new
+    fake_body.define_singleton_method(:write) do |_chunk|
+      write_count += 1
+      raise Errno::ECONNRESET, "Connection reset by peer"
+    end
+    fake_body.define_singleton_method(:close_write) { }
+
+    w.write("line1\n")
+    w.write("line2\n")
+    w.write("line3\n")
+    w.close
+
+    File.open(log_path, "w") do |log|
+      Sync { harness.send(:tee_pipe, r, log, fake_body) }
+    end
+
+    assert_equal "line1\nline2\nline3\n", File.read(log_path),
+      "log must contain all lines even when push write raises Errno::ECONNRESET"
+    assert_equal 1, write_count,
+      "body.write must be called exactly once — push disabled after first error (was called #{write_count} times on base)"
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  # I13 R6 AC-B4: harness.run survives a push_client whose post raises.
+  # run must return the child exit status and the log must be intact.
+  def test_harness_run_survives_push_client_post_failure
+    root = Dir.mktmpdir("harness-push-fail")
+    space_dir, _mission, fake_claude, _fake_oc, build_dir = setup_space(root)
+
+    wt_path      = File.join(space_dir, "build", "I01-demo-A", "wt")
+    prompt_path  = File.join(build_dir, "prompt.md")
+    run_log_path = File.join(build_dir, "push-fail-run.jsonl")
+
+    failing_client = Object.new
+    def failing_client.post(*, **)
+      raise Errno::ECONNREFUSED, "Connection refused"
+    end
+
+    harness = Space::Architect::Harness::ClaudeCodeHarness.new(
+      model: Space::Architect::Harness::CLAUDE_DEFAULT_MODEL, max_turns: 10, bin: fake_claude
+    )
+
+    exit_code = Sync do
+      harness.run(
+        prompt_path:  prompt_path,
+        run_log_path: run_log_path,
+        chdir:        wt_path,
+        push_url:     "http://localhost/runs/test/ingest",
+        push_client:  failing_client
+      )
+    end
+
+    assert_equal 0, exit_code, "run must return child exit status even when push transport fails"
+    log = File.read(run_log_path)
+    assert_includes log, "argv=", "log must be intact after push transport failure"
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  # I13 R7 (AC-B5): real claude binary's --help must list --include-partial-messages.
+  def test_claude_binary_supports_include_partial_messages_flag
+    bin = ENV.fetch("ARCHITECT_CLAUDE_BIN", "claude")
+    unless File.exist?(bin) || system("which #{bin} > /dev/null 2>&1")
+      skip "claude binary not found at '#{bin}' — skipping real-flag check"
+    end
+
+    output = IO.popen([bin, "--help"], err: [:child, :out]) { |f| f.read }
+    assert_includes output, "--include-partial-messages",
+      "claude --help must list --include-partial-messages; got:\n#{output}"
+  end
 end
