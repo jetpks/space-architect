@@ -2,9 +2,11 @@
 
 require "hanami/db/relation"
 
-module Architect
-  module DB
-    class Relation < Hanami::DB::Relation
+module Space
+  module Server
+    module DB
+      class Relation < Hanami::DB::Relation
+      end
     end
   end
 end

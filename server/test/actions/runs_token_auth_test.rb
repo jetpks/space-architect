@@ -14,8 +14,8 @@ class RunsTokenAuthTest < Minitest::Test
     setup_db
     OmniAuth.config.test_mode = true
     @owner     = Factory[:user, github_uid: "ingest-owner", username: "ingest_owner"]
-    @runs_repo = Architect::App["repos.runs_repo"]
-    @settings  = Architect::App["settings"]
+    @runs_repo = Space::Server::App["repos.runs_repo"]
+    @settings  = Space::Server::App["settings"]
   end
 
   def teardown
@@ -131,7 +131,7 @@ class RunsTokenAuthTest < Minitest::Test
 
   def test_csrf_required_for_cookie_post
     # No bearer → verify_csrf_token? returns true (CSRF check is required for browser/cookie POSTs)
-    action = Architect::Actions::Runs::Create.new
+    action = Space::Server::Actions::Runs::Create.new
     req = make_post_request
     assert action.send(:verify_csrf_token?, req, nil),
       "cookie/session POST must have CSRF enforcement active (verify_csrf_token? must return true)"
@@ -140,7 +140,7 @@ class RunsTokenAuthTest < Minitest::Test
   def test_csrf_exempt_for_valid_bearer_post
     # Valid bearer → verify_csrf_token? returns false (CSRF check bypassed for machine pushes)
     with_token_settings do
-      action = Architect::Actions::Runs::Create.new
+      action = Space::Server::Actions::Runs::Create.new
       req = make_post_request(bearer: TOKEN)
       refute action.send(:verify_csrf_token?, req, nil),
         "valid bearer POST must be CSRF-exempt (verify_csrf_token? must return false)"
@@ -151,7 +151,7 @@ class RunsTokenAuthTest < Minitest::Test
   # Was assert (true) on base 06fa13d — that was the bug. Now refute (false).
   def test_csrf_not_exempt_for_wrong_bearer
     with_token_settings do
-      action = Architect::Actions::Runs::Create.new
+      action = Space::Server::Actions::Runs::Create.new
       req = make_post_request(bearer: "wrong-token")
       refute action.send(:verify_csrf_token?, req, nil),
         "wrong bearer must be CSRF-exempt for Create (bearer presence, not validity)"
@@ -161,7 +161,7 @@ class RunsTokenAuthTest < Minitest::Test
   # --- Ingest CSRF seam tests (R5: bearer presence exempts CSRF) ---
 
   def test_csrf_required_for_cookie_post_ingest
-    action = Architect::Actions::Runs::Ingest.new
+    action = Space::Server::Actions::Runs::Ingest.new
     req = make_post_request
     assert action.send(:verify_csrf_token?, req, nil),
       "cookie/session POST to Ingest must have CSRF enforcement (verify_csrf_token? must return true)"
@@ -169,7 +169,7 @@ class RunsTokenAuthTest < Minitest::Test
 
   def test_csrf_exempt_for_valid_bearer_post_ingest
     with_token_settings do
-      action = Architect::Actions::Runs::Ingest.new
+      action = Space::Server::Actions::Runs::Ingest.new
       req = make_post_request(bearer: TOKEN)
       refute action.send(:verify_csrf_token?, req, nil),
         "valid bearer POST to Ingest must be CSRF-exempt (verify_csrf_token? must return false)"
@@ -178,7 +178,7 @@ class RunsTokenAuthTest < Minitest::Test
 
   def test_csrf_not_exempt_for_wrong_bearer_ingest
     with_token_settings do
-      action = Architect::Actions::Runs::Ingest.new
+      action = Space::Server::Actions::Runs::Ingest.new
       req = make_post_request(bearer: "wrong-token")
       refute action.send(:verify_csrf_token?, req, nil),
         "wrong bearer must be CSRF-exempt for Ingest (bearer presence, not validity)"

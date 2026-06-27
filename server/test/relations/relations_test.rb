@@ -7,11 +7,11 @@ class RelationsTest < Minitest::Test
   TABLES = %i[users conversations messages annotations conversation_shares].freeze
 
   def rom
-    @rom ||= Architect::App["db.rom"]
+    @rom ||= Space::Server::App["db.rom"]
   end
 
   def conn
-    @conn ||= Architect::App["db.gateway"].connection
+    @conn ||= Space::Server::App["db.gateway"].connection
   end
 
   def setup

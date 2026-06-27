@@ -3,7 +3,9 @@
 
 require "dry/operation"
 
-module Architect
-  class Operation < Dry::Operation
+module Space
+  module Server
+    class Operation < Dry::Operation
+    end
   end
 end

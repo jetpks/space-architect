@@ -5,7 +5,7 @@
 $LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
 
 require "json"
-require "architect/normalizer"
+require "space/server/normalizer"
 require "minitest/autorun"
 
 class Minitest::Test

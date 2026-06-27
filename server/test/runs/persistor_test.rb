@@ -1,19 +1,19 @@
 # frozen_string_literal: true
 
 require_relative "../test_helper"
-require "architect/runs/persistor"
+require "space/server/runs/persistor"
 
 class PersistorTest < Minitest::Test
   def setup
-    conn = Architect::App["db.gateway"].connection
+    conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
     [:annotations, :conversation_shares, :messages, :conversations, :runs, :users].each { |t| conn[t].delete }
     @user              = Factory[:user]
-    @conversations_repo = Architect::App["repos.conversations_repo"]
-    @messages_repo      = Architect::App["repos.messages_repo"]
-    @runs_repo          = Architect::App["repos.runs_repo"]
-    @persistor          = Architect::Runs::Persistor.new(@conversations_repo, @messages_repo)
+    @conversations_repo = Space::Server::App["repos.conversations_repo"]
+    @messages_repo      = Space::Server::App["repos.messages_repo"]
+    @runs_repo          = Space::Server::App["repos.runs_repo"]
+    @persistor          = Space::Server::Runs::Persistor.new(@conversations_repo, @messages_repo)
   end
 
   def test_setup_creates_conversation_owned_by_run_user

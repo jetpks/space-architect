@@ -17,8 +17,8 @@ require_relative "../../app/services/import_worker_service"
 class ImportWorkerServiceTest < Minitest::Test
   REDIS_SKIP_MSG = "Redis unreachable".freeze
 
-  def conn = @conn ||= Architect::App["db.gateway"].connection
-  def conversations_repo = Architect::Repos::ConversationsRepo.new
+  def conn = @conn ||= Space::Server::App["db.gateway"].connection
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
 
   def fixture_path(name)
     File.join(__dir__, "..", "fixtures", "files", name)
@@ -55,13 +55,13 @@ class ImportWorkerServiceTest < Minitest::Test
   end
 
   def test_service_lifecycle_processes_job
-    data = Architect::SourceFileUploader.store(File.open(fixture_path("transcript.jsonl")))
+    data = Space::Server::SourceFileUploader.store(File.open(fixture_path("transcript.jsonl")))
     conv = Factory[:conversation, source_file_data: data]
 
     prefix = "architect-svc-test-#{SecureRandom.hex(8)}"
     environment = build_environment(prefix: prefix)
     evaluator = environment.evaluator
-    service = Architect::Services::ImportWorkerService.new(environment, evaluator)
+    service = Space::Server::Services::ImportWorkerService.new(environment, evaluator)
 
     Sync do |task|
       service.start
@@ -74,7 +74,7 @@ class ImportWorkerServiceTest < Minitest::Test
       end
 
       # Enqueue a job using a client-side call to build_redis_processor with the same prefix.
-      enqueue_server = Architect::Jobs::ImportConversation.build_redis_processor(prefix: prefix)
+      enqueue_server = Space::Server::Jobs::ImportConversation.build_redis_processor(prefix: prefix)
       enqueue_server.call({ "conversation_id" => conv.id })
 
       begin

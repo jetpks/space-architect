@@ -8,7 +8,7 @@ require_relative "action_test_helper"
 # G5: sessions flash round-trips.
 #
 # All render requests use X-Inertia (XHR) for hermetic, manifest-free execution.
-# The version header = Architect::App["vite"].digest (hashes app/frontend sources,
+# The version header = Space::Server::App["vite"].digest (hashes app/frontend sources,
 # not the manifest) so no node/npm/build is required.
 class InertiaRenderTest < Minitest::Test
   include ActionTestHelper
@@ -288,7 +288,7 @@ class InertiaRenderTest < Minitest::Test
   end
 
   def test_can_note_and_manage_false_for_published_anon
-    Architect::App["repos.conversations_repo"].update(@conv.id, published: true, updated_at: Time.now)
+    Space::Server::App["repos.conversations_repo"].update(@conv.id, published: true, updated_at: Time.now)
     data = inertia_page("/conversations/#{@conv.id}")
     assert_equal false, data["props"]["conversation"]["can_manage"]
     assert_equal false, data["props"]["conversation"]["can_note"]

@@ -3,7 +3,7 @@
 require_relative "support"
 
 class EntityTest < Minitest::Test
-  include Architect::Transcript
+  include Space::Server::Transcript
 
   def setup
     @id = 0

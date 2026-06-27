@@ -3,7 +3,7 @@
 # Real-HTTP integration test for POST /runs/:id/ingest.
 #
 # Boots an in-process Async::HTTP::Server + Protocol::Rack::Adapter serving the
-# real Architect::App (same code path as Falcon in production), so rack.input is
+# real Space::Server::App (same code path as Falcon in production), so rack.input is
 # a genuine Protocol::Rack::Input wrapping a Protocol::HTTP1::Body::Fixed — the
 # non-rewindable one-shot body that the Rack::MockRequest tests never exercise.
 #
@@ -20,10 +20,10 @@ require "async/http/endpoint"
 require "protocol/rack/adapter"
 require "protocol/http/body/buffered"
 
-Architect::App.start(:redis)
+Space::Server::App.start(:redis)
 
 # Install once at load time: track Protocol::Rack::Input#read calls whose
-# backtrace is outside Architect::Runs::Ingest (i.e. pre-action drains).
+# backtrace is outside Space::Server::Runs::Ingest (i.e. pre-action drains).
 # Cleared in setup before each test.
 INGEST_FALCON_PRE_ACTION_READS = []
 
@@ -44,7 +44,7 @@ class IngestFalconTest < Minitest::Test
     noop = Object.new
     def noop.xadd(*); end
     def noop.expire(*); end
-    Architect::Runs::Ingest.new(noop).call(
+    Space::Server::Runs::Ingest.new(noop).call(
       Struct.new(:id).new(0),
       StringIO.new(FIXTURE_JSONL)
     )[:events]
@@ -52,13 +52,13 @@ class IngestFalconTest < Minitest::Test
   TOKEN = "ingest-falcon-integration-test-deadbeef0123"
 
   def setup
-    conn = Architect::App["db.gateway"].connection
+    conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
     [:annotations, :conversation_shares, :messages, :conversations, :runs, :users].each { |t| conn[t].delete }
     @user  = Factory[:user]
     @run   = Factory[:run, user_id: @user.id, status: 0]
-    @redis = Architect::App["redis"]
+    @redis = Space::Server::App["redis"]
     Sync { @redis.call("DEL", "run:#{@run.id}") }
     INGEST_FALCON_PRE_ACTION_READS.clear
   end
@@ -66,7 +66,7 @@ class IngestFalconTest < Minitest::Test
   # Boots a real Protocol::Rack::Adapter server, POSTs the JSONL fixture with a
   # valid bearer, and asserts the happy path + streaming-preservation property.
   def test_full_body_ingested_and_not_drained_before_action
-    settings = Architect::App["settings"]
+    settings = Space::Server::App["settings"]
     port     = 49200 + rand(700)
     endpoint = Async::HTTP::Endpoint.parse("http://localhost:#{port}")
 
@@ -74,7 +74,7 @@ class IngestFalconTest < Minitest::Test
       settings.stub(:ingest_user_id, @user.id) do
         Sync do |task|
           server_task = task.async do
-            Async::HTTP::Server.new(Protocol::Rack::Adapter.new(Architect::App), endpoint).run
+            Async::HTTP::Server.new(Protocol::Rack::Adapter.new(Space::Server::App), endpoint).run
           rescue => _e
             nil
           end

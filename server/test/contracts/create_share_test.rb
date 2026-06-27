@@ -4,7 +4,7 @@ require_relative "../test_helper"
 require_relative "../../app/contracts/create_share"
 
 class CreateShareContractTest < Minitest::Test
-  def contract = Architect::Contracts::CreateShare.new
+  def contract = Space::Server::Contracts::CreateShare.new
 
   def test_valid_with_login_and_access
     r = contract.call(share: {login: "jetpks", access: "view"})

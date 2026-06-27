@@ -4,7 +4,7 @@ require_relative "../test_helper"
 
 class PiImporterTreeTest < Minitest::Test
   def conn
-    @conn ||= Architect::App["db.gateway"].connection
+    @conn ||= Space::Server::App["db.gateway"].connection
   end
 
   def setup
@@ -15,30 +15,30 @@ class PiImporterTreeTest < Minitest::Test
     end
     @conv = Factory[:conversation]
     io = File.open(fixture_path("pi_session.jsonl"))
-    Architect::Importers::Pi.new.import!(@conv, io)
+    Space::Server::Importers::Pi.new.import!(@conv, io)
     io.close
     @conv     = conversations_repo.by_pk(@conv.id)
     @messages = messages_repo.for_conversation(@conv.id)
   end
 
   def test_matches_predicate
-    assert Architect::Importers::Pi.matches?({ "type" => "session", "version" => 3 })
-    assert Architect::Importers::Pi.matches?({ "type" => "message", "id" => "a", "parentId" => nil, "message" => {} })
-    assert Architect::Importers::Pi.matches?({ "type" => "model_change", "id" => "a", "parentId" => nil, "provider" => "p", "modelId" => "m" })
-    assert Architect::Importers::Pi.matches?({ "type" => "compaction", "id" => "a", "parentId" => "b", "summary" => "..." })
-    refute Architect::Importers::Pi.matches?({ "type" => "session_meta", "payload" => {} })
-    refute Architect::Importers::Pi.matches?({ "type" => "user", "message" => {} })
-    refute Architect::Importers::Pi.matches?({ "type" => "message", "message" => {} }) # missing id/parentId
-    refute Architect::Importers::Pi.matches?(nil)
+    assert Space::Server::Importers::Pi.matches?({ "type" => "session", "version" => 3 })
+    assert Space::Server::Importers::Pi.matches?({ "type" => "message", "id" => "a", "parentId" => nil, "message" => {} })
+    assert Space::Server::Importers::Pi.matches?({ "type" => "model_change", "id" => "a", "parentId" => nil, "provider" => "p", "modelId" => "m" })
+    assert Space::Server::Importers::Pi.matches?({ "type" => "compaction", "id" => "a", "parentId" => "b", "summary" => "..." })
+    refute Space::Server::Importers::Pi.matches?({ "type" => "session_meta", "payload" => {} })
+    refute Space::Server::Importers::Pi.matches?({ "type" => "user", "message" => {} })
+    refute Space::Server::Importers::Pi.matches?({ "type" => "message", "message" => {} }) # missing id/parentId
+    refute Space::Server::Importers::Pi.matches?(nil)
   end
 
   def test_matches_streaming_lifecycle_events
-    assert Architect::Importers::Pi.matches?({ "type" => "agent_start" })
-    assert Architect::Importers::Pi.matches?({ "type" => "turn_start" })
-    assert Architect::Importers::Pi.matches?({ "type" => "message_start" })
-    assert Architect::Importers::Pi.matches?({ "type" => "message_end", "message" => {} })
+    assert Space::Server::Importers::Pi.matches?({ "type" => "agent_start" })
+    assert Space::Server::Importers::Pi.matches?({ "type" => "turn_start" })
+    assert Space::Server::Importers::Pi.matches?({ "type" => "message_start" })
+    assert Space::Server::Importers::Pi.matches?({ "type" => "message_end", "message" => {} })
     # Codex envelope still wins
-    refute Architect::Importers::Pi.matches?({ "type" => "message_start", "payload" => {} })
+    refute Space::Server::Importers::Pi.matches?({ "type" => "message_start", "payload" => {} })
   end
 
   def test_source_status_metadata_and_title
@@ -116,14 +116,14 @@ class PiImporterTreeTest < Minitest::Test
 
   private
 
-  def conversations_repo = Architect::Repos::ConversationsRepo.new
-  def messages_repo      = Architect::Repos::MessagesRepo.new
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
+  def messages_repo      = Space::Server::Repos::MessagesRepo.new
   def fixture_path(name) = File.join(__dir__, "..", "fixtures", "files", name)
 end
 
 class PiImporterStreamingTest < Minitest::Test
   def conn
-    @conn ||= Architect::App["db.gateway"].connection
+    @conn ||= Space::Server::App["db.gateway"].connection
   end
 
   def setup
@@ -134,7 +134,7 @@ class PiImporterStreamingTest < Minitest::Test
     end
     @conv = Factory[:conversation]
     io = File.open(fixture_path("pi_streaming_session.jsonl"))
-    Architect::Importers::Pi.new.import!(@conv, io)
+    Space::Server::Importers::Pi.new.import!(@conv, io)
     io.close
     @conv     = conversations_repo.by_pk(@conv.id)
     @messages = messages_repo.for_conversation(@conv.id)
@@ -204,14 +204,14 @@ class PiImporterStreamingTest < Minitest::Test
 
   private
 
-  def conversations_repo = Architect::Repos::ConversationsRepo.new
-  def messages_repo      = Architect::Repos::MessagesRepo.new
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
+  def messages_repo      = Space::Server::Repos::MessagesRepo.new
   def fixture_path(name) = File.join(__dir__, "..", "fixtures", "files", name)
 end
 
 class PiImporterNulTest < Minitest::Test
   def conn
-    @conn ||= Architect::App["db.gateway"].connection
+    @conn ||= Space::Server::App["db.gateway"].connection
   end
 
   def setup
@@ -222,7 +222,7 @@ class PiImporterNulTest < Minitest::Test
     end
     @conv = Factory[:conversation]
     io = File.open(fixture_path("pi_streaming_with_nul.jsonl"))
-    Architect::Importers::Pi.new.import!(@conv, io)
+    Space::Server::Importers::Pi.new.import!(@conv, io)
     io.close
     @conv     = conversations_repo.by_pk(@conv.id)
     @messages = messages_repo.for_conversation(@conv.id)
@@ -256,8 +256,8 @@ class PiImporterNulTest < Minitest::Test
 
   private
 
-  def conversations_repo = Architect::Repos::ConversationsRepo.new
-  def messages_repo      = Architect::Repos::MessagesRepo.new
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
+  def messages_repo      = Space::Server::Repos::MessagesRepo.new
   def fixture_path(name) = File.join(__dir__, "..", "fixtures", "files", name)
 
   def walk_strings(value, &block)
@@ -271,7 +271,7 @@ end
 
 class PiImporterErrorTest < Minitest::Test
   def conn
-    @conn ||= Architect::App["db.gateway"].connection
+    @conn ||= Space::Server::App["db.gateway"].connection
   end
 
   def setup
@@ -292,8 +292,8 @@ class PiImporterErrorTest < Minitest::Test
     conv = Factory[:conversation]
     io   = StringIO.new(empty_lines)
 
-    assert_raises(Architect::Importers::Pi::PiImportError) do
-      Architect::Importers::Pi.new.import!(conv, io)
+    assert_raises(Space::Server::Importers::Pi::PiImportError) do
+      Space::Server::Importers::Pi.new.import!(conv, io)
     end
 
     conv_after = conversations_repo.by_pk(conv.id)
@@ -306,8 +306,8 @@ class PiImporterErrorTest < Minitest::Test
     conv = Factory[:conversation]
     io   = StringIO.new(tree_only)
 
-    assert_raises(Architect::Importers::Pi::PiImportError) do
-      Architect::Importers::Pi.new.import!(conv, io)
+    assert_raises(Space::Server::Importers::Pi::PiImportError) do
+      Space::Server::Importers::Pi.new.import!(conv, io)
     end
 
     conv_after = conversations_repo.by_pk(conv.id)
@@ -316,6 +316,6 @@ class PiImporterErrorTest < Minitest::Test
 
   private
 
-  def conversations_repo = Architect::Repos::ConversationsRepo.new
-  def messages_repo      = Architect::Repos::MessagesRepo.new
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
+  def messages_repo      = Space::Server::Repos::MessagesRepo.new
 end

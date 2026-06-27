@@ -16,9 +16,9 @@ class AuthzActionTest < Minitest::Test
     setup_db
     OmniAuth.config.test_mode = true
 
-    @conv_repo = Architect::App["repos.conversations_repo"]
-    @msg_repo  = Architect::App["repos.messages_repo"]
-    @ann_repo  = Architect::App["repos.annotations_repo"]
+    @conv_repo = Space::Server::App["repos.conversations_repo"]
+    @msg_repo  = Space::Server::App["repos.messages_repo"]
+    @ann_repo  = Space::Server::App["repos.annotations_repo"]
 
     @owner     = Factory[:user, github_uid: "uid-owner", username: "owner"]
     @stranger  = Factory[:user, github_uid: "uid-stranger", username: "stranger"]
@@ -389,8 +389,8 @@ class AuthzActionTest < Minitest::Test
 
   def test_share_create_owner_redirects_back
     sign_in(@owner)
-    fake_account = Architect::Github::Account.new(id: "42", login: "octocat", kind: "user")
-    Architect::Github.stub(:lookup, fake_account) do
+    fake_account = Space::Server::Github::Account.new(id: "42", login: "octocat", kind: "user")
+    Space::Server::Github.stub(:lookup, fake_account) do
       status, _, _ = post("/conversations/#{@conv.id}/shares", params: share_create_params)
       assert_equal 302, status
     end

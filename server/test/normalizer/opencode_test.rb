@@ -3,7 +3,7 @@
 require_relative "support"
 
 class OpencodeTest < Minitest::Test
-  def parser = Architect::Normalizer::Opencode.new
+  def parser = Space::Server::Normalizer::Opencode.new
 
   def parse_fixture(filename)
     p = parser

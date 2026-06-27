@@ -23,20 +23,20 @@ require "async/http/client"
 require "async/http/endpoint"
 require "protocol/rack/adapter"
 require "protocol/http/body/buffered"
-require "architect/runs/stream_fanout"
-require "architect/runs/stream_key"
+require "space/server/runs/stream_fanout"
+require "space/server/runs/stream_key"
 
-Architect::App.start(:redis)
+Space::Server::App.start(:redis)
 
 class TerminalRunReplayTest < Minitest::Test
   def setup
-    conn = Architect::App["db.gateway"].connection
+    conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
     [:annotations, :conversation_shares, :messages, :conversations, :runs, :users].each { |t| conn[t].delete }
     @user      = Factory[:user]
-    @redis     = Architect::App["redis"]
-    @runs_repo = Architect::App["repos.runs_repo"]
+    @redis     = Space::Server::App["redis"]
+    @runs_repo = Space::Server::App["repos.runs_repo"]
   end
 
   # Stream /runs/:id/stream via Rack mock, with an 8-second bounded timeout.
@@ -46,7 +46,7 @@ class TerminalRunReplayTest < Minitest::Test
       "/runs/#{run.id}/stream",
       "REQUEST_METHOD" => "GET"
     )
-    _, _, body_proc = Architect::App.call(env)
+    _, _, body_proc = Space::Server::App.call(env)
 
     chunks = []
     mock_stream = Object.new.tap do |s|
@@ -62,7 +62,7 @@ class TerminalRunReplayTest < Minitest::Test
       rescue Async::TimeoutError
         # live-tail loop hung → SSE will lack run_complete → assert_match below fails
       ensure
-        Architect::Runs::StreamFanout.stop(run.id)
+        Space::Server::Runs::StreamFanout.stop(run.id)
       end
     end
 
@@ -84,7 +84,7 @@ class TerminalRunReplayTest < Minitest::Test
     @runs_repo.update(run_record.id, status: 3, conversation_id: conv.id)
     run = @runs_repo.by_pk(run_record.id)
 
-    Sync { @redis.call("DEL", Architect::Runs::StreamKey.for(run.id)) }
+    Sync { @redis.call("DEL", Space::Server::Runs::StreamKey.for(run.id)) }
 
     sse = stream_sse(run)
 
@@ -102,7 +102,7 @@ class TerminalRunReplayTest < Minitest::Test
     @runs_repo.update(run_record.id, status: 2)
     run = @runs_repo.by_pk(run_record.id)
 
-    Sync { @redis.call("DEL", Architect::Runs::StreamKey.for(run.id)) }
+    Sync { @redis.call("DEL", Space::Server::Runs::StreamKey.for(run.id)) }
 
     sse = stream_sse(run)
 

@@ -5,17 +5,17 @@ require_relative "../test_helper"
 # G1 (crux): Conversation struct predicate tests — 8 oracle scenarios.
 # Structs are loaded via conversations_repo.with_messages_and_shares so that
 # :messages and :shares associations are combined (required by the predicates).
-# Users are loaded via users_repo so Architect::Structs::User (with org_ids) is used.
+# Users are loaded via users_repo so Space::Server::Structs::User (with org_ids) is used.
 class ConversationStructTest < Minitest::Test
   def setup
-    conn = Architect::App["db.gateway"].connection
+    conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
     [:annotations, :conversation_shares, :messages, :conversations, :users].each { |t| conn[t].delete }
 
-    @repo       = Architect::App["repos.conversations_repo"]
-    @users_repo = Architect::App["repos.users_repo"]
-    @msg_repo   = Architect::App["repos.messages_repo"]
+    @repo       = Space::Server::App["repos.conversations_repo"]
+    @users_repo = Space::Server::App["repos.users_repo"]
+    @msg_repo   = Space::Server::App["repos.messages_repo"]
 
     @owner      = load_user(Factory[:user, github_uid: "1",  username: "owner"])
     @stranger   = load_user(Factory[:user, github_uid: "2",  username: "stranger"])

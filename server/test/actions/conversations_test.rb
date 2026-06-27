@@ -185,7 +185,7 @@ class ConversationsActionTest < Minitest::Test
     assert errors.key?("source_file"), "errors must have top-level source_file key (flat shape), got: #{errors.inspect}"
 
     # No row persisted
-    assert_equal 0, Architect::App["db.gateway"].connection[:conversations].count,
+    assert_equal 0, Space::Server::App["db.gateway"].connection[:conversations].count,
       "No conversation must be persisted on missing source_file"
   end
 
@@ -196,7 +196,7 @@ class ConversationsActionTest < Minitest::Test
     sign_in(@owner)
 
     # Ensure the provider is started so we can get a reference to the processor
-    processor = Architect::App["import_queue"]
+    processor = Space::Server::App["import_queue"]
     recorded_jobs = []
 
     # Stub the processor's call method — same object the action holds in @import_queue
@@ -217,7 +217,7 @@ class ConversationsActionTest < Minitest::Test
       assert_equal({ "conversation_id" => conv_id }, recorded_jobs.first)
 
       # Conversation persisted with correct user_id, source_file_data, pending status
-      conv = Architect::Repos::ConversationsRepo.new.by_pk(conv_id)
+      conv = Space::Server::Repos::ConversationsRepo.new.by_pk(conv_id)
       refute_nil conv, "Conversation must be persisted"
       assert_equal @owner.id, conv.user_id
       refute_nil conv.source_file_data, "source_file_data must be present"

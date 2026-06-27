@@ -4,7 +4,7 @@ require_relative "../test_helper"
 
 class CodexImporterTest < Minitest::Test
   def conn
-    @conn ||= Architect::App["db.gateway"].connection
+    @conn ||= Space::Server::App["db.gateway"].connection
   end
 
   def setup
@@ -15,16 +15,16 @@ class CodexImporterTest < Minitest::Test
     end
     @conv = Factory[:conversation]
     io = File.open(fixture_path("codex_rollout.jsonl"))
-    Architect::Importers::Codex.new.import!(@conv, io)
+    Space::Server::Importers::Codex.new.import!(@conv, io)
     io.close
     @conv     = conversations_repo.by_pk(@conv.id)
     @messages = messages_repo.for_conversation(@conv.id)
   end
 
   def test_matches_predicate
-    assert Architect::Importers::Codex.matches?({ "type" => "session_meta", "payload" => {} })
-    refute Architect::Importers::Codex.matches?({ "type" => "user", "message" => {} })
-    refute Architect::Importers::Codex.matches?(nil)
+    assert Space::Server::Importers::Codex.matches?({ "type" => "session_meta", "payload" => {} })
+    refute Space::Server::Importers::Codex.matches?({ "type" => "user", "message" => {} })
+    refute Space::Server::Importers::Codex.matches?(nil)
   end
 
   def test_source_and_status
@@ -102,7 +102,7 @@ class CodexImporterTest < Minitest::Test
     }.to_json
 
     conv = Factory[:conversation]
-    Architect::Importers::Codex.new.import!(conv, StringIO.new(line))
+    Space::Server::Importers::Codex.new.import!(conv, StringIO.new(line))
 
     msgs = messages_repo.for_conversation(conv.id)
     assert_equal 1, msgs.size, "one message must be created from the reasoning line"
@@ -123,7 +123,7 @@ class CodexImporterTest < Minitest::Test
 
   private
 
-  def conversations_repo = Architect::Repos::ConversationsRepo.new
-  def messages_repo      = Architect::Repos::MessagesRepo.new
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
+  def messages_repo      = Space::Server::Repos::MessagesRepo.new
   def fixture_path(name) = File.join(__dir__, "..", "fixtures", "files", name)
 end
