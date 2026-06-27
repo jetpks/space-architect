@@ -126,8 +126,8 @@ loop.
   an iteration index pointing at each iteration file; per-iteration detail lives
   in the iteration file, never duplicated into the handoff. `architect status`
   prints mission state (iterations, freeze_shas, lanes, verdicts) at any point.
-- **Space setup (first time):** `architect space new "Mission Name" org/repo …`
-  (repos are variadic positionals after the title), then `architect init` inside
+- **Space setup (first time):** `architect space new "Mission Name" -r org/repo -r …`
+  (each repo is a repeatable `-r` flag after the title), then `architect init` inside
   the space to scaffold `architecture/ARCHITECT.md`.
 - Scale to the task: trivial fixes don't need the loop — say so and let the
   human do it inline or in a normal session. The loop is for iteration-sized

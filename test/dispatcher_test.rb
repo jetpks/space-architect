@@ -4,7 +4,7 @@ require_relative "test_helper"
 require "yaml"
 require "tmpdir"
 
-class DispatcherTest < SpaceArchitectTest
+class DispatcherTest < Space::ArchitectTest
   FAKE_CLAUDE_SCRIPT = <<~RUBY
     #!/usr/bin/env ruby
     a = ARGV; c = Dir.pwd; s = $stdin.gets
@@ -42,8 +42,8 @@ class DispatcherTest < SpaceArchitectTest
     File.write(fake, FAKE_CLAUDE_SCRIPT)
     File.chmod(0o755, fake)
 
-    space   = SpaceArchitect::Space.load(space_dir)
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    space   = Space::Core::Space.load(space_dir)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("demo")
     mission.worktree_add("my-repo", "demo", "A")
@@ -78,7 +78,7 @@ class DispatcherTest < SpaceArchitectTest
 
   def test_dispatch_reflects_nonzero_exit_code
     root = Dir.mktmpdir("dispatcher-test")
-    _space_dir, mission, fake, _build_dir = setup_space_with_worktree(root)
+    _space_dir, mission, fake, build_dir = setup_space_with_worktree(root)
 
     with_env("FAKE_EXIT" => "7") do
       res = mission.dispatch("demo", "A", claude_bin: fake)
@@ -93,10 +93,43 @@ class DispatcherTest < SpaceArchitectTest
     _space_dir, mission, fake, build_dir = setup_space_with_worktree(root)
     File.delete(File.join(build_dir, "prompt.md"))
 
-    assert_raises(SpaceArchitect::Error) do
+    assert_raises(Space::Core::Error) do
       mission.dispatch("demo", "A", claude_bin: fake)
     end
   ensure
+    FileUtils.rm_rf(root)
+  end
+
+  FAKE_DETACH_SCRIPT = <<~RUBY
+    #!/usr/bin/env ruby
+    $stdout.puts "pid=\#{Process.pid}"
+    $stdout.flush
+    sleep 0.2
+    $stdout.puts "done"
+    $stdout.flush
+    exit 0
+  RUBY
+
+  def test_dispatcher_run_detached_returns_integer_pid
+    root = Dir.mktmpdir("dispatcher-test")
+    fake_bin = File.join(root, "fake_detach")
+    File.write(fake_bin, FAKE_DETACH_SCRIPT)
+    File.chmod(0o755, fake_bin)
+
+    wt_dir  = File.join(root, "wt")
+    FileUtils.mkdir_p(wt_dir)
+    prompt  = File.join(root, "prompt.md")
+    run_log = File.join(root, "run.jsonl")
+    File.write(prompt, "test prompt\n")
+
+    dispatcher = Space::Architect::Dispatcher.new(claude_bin: fake_bin)
+    pid = dispatcher.run_detached(prompt_path: prompt, run_log_path: run_log, chdir: wt_dir)
+
+    assert_instance_of Integer, pid
+    assert pid > 0
+    assert_equal pid, Process.getpgid(pid), "child must be its own pgroup leader"
+  ensure
+    sleep 0.25
     FileUtils.rm_rf(root)
   end
 end

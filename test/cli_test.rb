@@ -2,7 +2,7 @@
 
 require_relative "test_helper"
 
-class CLITest < SpaceArchitectTest
+class CLITest < Space::ArchitectTest
   def test_init_creates_xdg_files_and_default_spaces_dir
     setup = temp_env
     env = setup.fetch(:env)
@@ -172,8 +172,8 @@ class CLITest < SpaceArchitectTest
     File.write(function_path, "function space\n    echo custom\nend\n")
 
     with_env(env) do
-      error = assert_raises(SpaceArchitect::Error) do
-        SpaceArchitect::ShellIntegration.install("fish", env: env)
+      error = assert_raises(Space::Core::Error) do
+        Space::Core::ShellIntegration.install("fish", env: env)
       end
       assert_match(/Refusing to overwrite existing fish function/, error.message)
 
@@ -419,7 +419,7 @@ class CLITest < SpaceArchitectTest
       invoke("space", "init")
       out = StringIO.new
       err = StringIO.new
-      code = SpaceArchitect::CLI.call(["space", "new", "Dup Space", "-r", "foo/dup", "-r", "foo/dup"], out, err)
+      code = Space::Architect::CLI.call(["space", "new", "Dup Space", "-r", "foo/dup", "-r", "foo/dup"], out, err)
       assert_equal 1, code
       assert_match(/Multiple repos resolve to the same destination/, err.string)
     end
@@ -431,22 +431,35 @@ class CLITest < SpaceArchitectTest
     [["--version"], ["version"]].each do |argv|
       out = StringIO.new
       err = StringIO.new
-      exit_code = SpaceArchitect::CLI.call(argv, out, err)
+      exit_code = Space::Architect::CLI.call(argv, out, err)
       assert_equal 0, exit_code, "#{argv.inspect} should exit 0"
-      assert_equal SpaceArchitect::VERSION, out.string.chomp, "#{argv.inspect} should print VERSION to stdout"
+      assert_equal Space::Core::VERSION, out.string.chomp, "#{argv.inspect} should print VERSION to stdout"
       assert_empty err.string, "#{argv.inspect} should write nothing to stderr"
     end
   end
 
   def test_help_forms_print_listing_to_stdout_and_exit_0
+    # Post-split: architect registry has worktree + variant groups; space is an intercept, not a group.
     [[], ["--help"], ["-h"], ["help"]].each do |argv|
       out = StringIO.new
       err = StringIO.new
-      exit_code = SpaceArchitect::CLI.call(argv, out, err)
+      exit_code = Space::Architect::CLI.call(argv, out, err)
       assert_equal 0, exit_code, "#{argv.inspect} should exit 0"
-      assert_match(/\bspace\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should list space group at root")
-      assert_match(/\bworktree\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should list worktree loop verb at root")
+      assert_match(/\bworktree\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should list worktree group at root")
+      assert_match(/\bvariant\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should list variant group at root")
+      refute_match(/\bspace\b \[SUBCOMMAND\]/, out.string, "#{argv.inspect} space is now an intercept, not a registry group")
       assert_empty err.string, "#{argv.inspect} should write nothing to stderr"
+    end
+
+    # Space::Core::CLI registry lists space surface groups directly at top level.
+    [[], ["--help"], ["-h"], ["help"]].each do |argv|
+      out = StringIO.new
+      err = StringIO.new
+      exit_code = Space::Core::CLI.call(argv, out, err)
+      assert_equal 0, exit_code, "space #{argv.inspect} should exit 0"
+      assert_match(/\brepo\b.*\[SUBCOMMAND\]/m, out.string, "space #{argv.inspect} should list repo group")
+      assert_match(/\bshell\b.*\[SUBCOMMAND\]/m, out.string, "space #{argv.inspect} should list shell group")
+      assert_empty err.string, "space #{argv.inspect} should write nothing to stderr"
     end
   end
 
@@ -483,32 +496,32 @@ class CLITest < SpaceArchitectTest
     with_env(env) do
       # mid --color=always: color flag between group and subcommand
       out = StringIO.new; err = StringIO.new
-      code = SpaceArchitect::CLI.call(["space", "repo", "--color=always", "resolve", "foo/a", "foo/b"], out, err)
+      code = Space::Architect::CLI.call(["space", "repo", "--color=always", "resolve", "foo/a", "foo/b"], out, err)
       assert_equal 0, code, "mid --color=always should exit 0"
       assert_empty err.string, "mid --color=always should produce no stderr"
       assert_match(/\e\[/, out.string, "mid --color=always should produce colored output")
 
       # mid --color=never: output should be plain
       out = StringIO.new; err = StringIO.new
-      code = SpaceArchitect::CLI.call(["space", "repo", "--color=never", "resolve", "foo/a", "foo/b"], out, err)
+      code = Space::Architect::CLI.call(["space", "repo", "--color=never", "resolve", "foo/a", "foo/b"], out, err)
       assert_equal 0, code, "mid --color=never should exit 0"
       refute_match(/\e\[/, out.string, "mid --color=never should produce plain output")
 
       # mid --colors= alias
       out = StringIO.new; err = StringIO.new
-      code = SpaceArchitect::CLI.call(["space", "repo", "--colors=always", "resolve", "foo/a", "foo/b"], out, err)
+      code = Space::Architect::CLI.call(["space", "repo", "--colors=always", "resolve", "foo/a", "foo/b"], out, err)
       assert_equal 0, code, "mid --colors=always should exit 0"
       assert_match(/\e\[/, out.string, "mid --colors=always alias should produce colored output")
 
       # trailing --color=always
       out = StringIO.new; err = StringIO.new
-      code = SpaceArchitect::CLI.call(["space", "repo", "resolve", "foo/a", "foo/b", "--color=always"], out, err)
+      code = Space::Architect::CLI.call(["space", "repo", "resolve", "foo/a", "foo/b", "--color=always"], out, err)
       assert_equal 0, code, "trailing --color=always should exit 0"
       assert_match(/\e\[/, out.string, "trailing --color=always should produce colored output")
 
       # leading --color=always (regression: existing behavior must be preserved)
       out = StringIO.new; err = StringIO.new
-      code = SpaceArchitect::CLI.call(["--color=always", "space", "repo", "resolve", "foo/a", "foo/b"], out, err)
+      code = Space::Architect::CLI.call(["--color=always", "space", "repo", "resolve", "foo/a", "foo/b"], out, err)
       assert_equal 0, code, "leading --color=always should exit 0"
       assert_match(/\e\[/, out.string, "leading --color=always should produce colored output")
     end

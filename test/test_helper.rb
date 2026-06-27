@@ -6,11 +6,11 @@ require "tmpdir"
 require "minitest/autorun"
 require_relative "../lib/space_architect"
 
-class SpaceArchitectTest < Minitest::Test
+class Space::ArchitectTest < Minitest::Test
   def invoke(*argv)
     out = StringIO.new
     err = StringIO.new
-    SpaceArchitect::CLI.call(argv.flatten, out, err)
+    Space::Architect::CLI.call(argv.flatten, out, err)
     [out.string, err.string]
   end
   def with_env(vars)
@@ -44,11 +44,11 @@ class SpaceArchitectTest < Minitest::Test
   end
 
   def build_store(env:, now: -> { fixed_time })
-    config = SpaceArchitect::Config.new(
+    config = Space::Core::Config.new(
       env: env,
       data: { "version" => 1 }
     )
-    state = SpaceArchitect::State.new(env: env)
-    SpaceArchitect::SpaceStore.new(config: config, state: state, now: now)
+    state = Space::Core::State.new(env: env)
+    Space::Core::SpaceStore.new(config: config, state: state, now: now)
   end
 end

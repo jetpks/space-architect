@@ -2,7 +2,7 @@
 
 require_relative "harness"
 
-module SpaceArchitect
+module Space::Architect
   # Thin backward-compat wrapper around Harness::ClaudeCodeHarness.
   # Existing callers that construct Dispatcher.new(...).run(...) continue to work byte-for-byte.
   class Dispatcher
@@ -16,6 +16,10 @@ module SpaceArchitect
 
     def run(prompt_path:, run_log_path:, chdir:)
       @harness.run(prompt_path: prompt_path, run_log_path: run_log_path, chdir: chdir)
+    end
+
+    def run_detached(prompt_path:, run_log_path:, chdir:)
+      @harness.run_detached(prompt_path: prompt_path, run_log_path: run_log_path, chdir: chdir)
     end
   end
 end

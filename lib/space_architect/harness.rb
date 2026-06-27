@@ -4,7 +4,7 @@ require "async/process"
 require "json"
 require "pathname"
 
-module SpaceArchitect
+module Space::Architect
   module Harness
     CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-6"
 
@@ -14,22 +14,22 @@ module SpaceArchitect
       case name.to_s
       when "claude-code"
         if effort
-          raise Error,
+          raise Space::Core::Error,
             "effort is opencode-only (sets opencode reasoningEffort) — " \
             "claude-code effort is set via the prompt"
         end
         ClaudeCodeHarness.new(model: model, max_turns: max_turns, bin: bin)
       when "opencode"
         if model == CLAUDE_DEFAULT_MODEL
-          raise Error,
+          raise Space::Core::Error,
             "Pass --model when using --harness opencode (the claude-sonnet-4-6 default " \
             "is a Claude model ID and will not work with opencode — " \
             "try e.g. fireworks-ai/accounts/fireworks/models/glm-5p2)"
         end
-        raise Error, "config_dir is required for opencode harness" unless config_dir
+        raise Space::Core::Error, "config_dir is required for opencode harness" unless config_dir
         OpenCodeHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir, effort: effort)
       else
-        raise Error, "Unknown harness '#{name}' — valid values: claude-code, opencode"
+        raise Space::Core::Error, "Unknown harness '#{name}' — valid values: claude-code, opencode"
       end
     end
 
@@ -41,10 +41,13 @@ module SpaceArchitect
         "Bash(git branch:*)"
       ].join(",")
 
-      def initialize(model:, max_turns:, bin: nil)
-        @model     = model
-        @max_turns = max_turns
-        @bin       = bin || ENV.fetch("ARCHITECT_CLAUDE_BIN", "claude")
+      def initialize(model:, max_turns:, bin: nil,
+                     allowed_tools: ALLOWED_TOOLS, disallowed_tools: DISALLOWED_TOOLS)
+        @model            = model
+        @max_turns        = max_turns
+        @bin              = bin || ENV.fetch("ARCHITECT_CLAUDE_BIN", "claude")
+        @allowed_tools    = allowed_tools
+        @disallowed_tools = disallowed_tools
       end
 
       def run(prompt_path:, run_log_path:, chdir:)
@@ -61,19 +64,37 @@ module SpaceArchitect
         end
       end
 
+      def run_detached(prompt_path:, run_log_path:, chdir:)
+        prompt_path  = Pathname.new(prompt_path)
+        run_log_path = Pathname.new(run_log_path)
+
+        prompt_io = File.open(prompt_path, "r")
+        log       = File.open(run_log_path, "w")
+        begin
+          pid = Process.spawn(*argv, chdir: chdir.to_s, pgroup: true,
+                              in: prompt_io, out: log, err: log)
+          Process.detach(pid)
+        ensure
+          prompt_io.close
+          log.close
+        end
+        pid
+      end
+
       private
 
       def argv
-        [
+        args = [
           @bin, "-p",
           "--model", @model,
           "--permission-mode", "acceptEdits",
-          "--allowedTools", ALLOWED_TOOLS,
-          "--disallowedTools", DISALLOWED_TOOLS,
+          "--allowedTools", @allowed_tools,
           "--output-format", "stream-json",
           "--verbose",
           "--max-turns", @max_turns.to_s
         ]
+        args += ["--disallowedTools", @disallowed_tools] unless @disallowed_tools.to_s.empty?
+        args
       end
     end
 
@@ -128,6 +149,29 @@ module SpaceArchitect
             status.exitstatus
           end
         end
+      end
+
+      def run_detached(prompt_path:, run_log_path:, chdir:)
+        prompt_path  = Pathname.new(prompt_path)
+        run_log_path = Pathname.new(run_log_path)
+        config_path  = write_config
+
+        env = {
+          "OPENCODE_CONFIG"                 => config_path.to_s,
+          "OPENCODE_DISABLE_PROJECT_CONFIG" => "1"
+        }
+
+        prompt_io = File.open(prompt_path, "r")
+        log       = File.open(run_log_path, "w")
+        begin
+          pid = Process.spawn(env, *argv(chdir), chdir: chdir.to_s, pgroup: true,
+                              in: prompt_io, out: log, err: log)
+          Process.detach(pid)
+        ensure
+          prompt_io.close
+          log.close
+        end
+        pid
       end
 
       private

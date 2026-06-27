@@ -3,7 +3,7 @@
 require_relative "test_helper"
 require "yaml"
 
-class ArchitectCLITest < SpaceArchitectTest
+class ArchitectCLITest < Space::ArchitectTest
   # Build a real git-backed space in a temp dir so architect commands can commit.
   # Does not go through `space new` (which uses Async::Process). Instead writes
   # space.yaml and calls the real git binary directly.
@@ -419,6 +419,109 @@ class ArchitectCLITest < SpaceArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # ── dispatch --detach: exits 0 immediately, prints PID + paths ───────────────
+
+  def test_dispatch_cli_detach_flag_returns_immediately_exit_zero
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    # Fake builder that sleeps briefly — with --detach the CLI must return before it finishes
+    fake = File.join(setup[:root], "fake_detach_claude")
+    File.write(fake, <<~RUBY)
+      #!/usr/bin/env ruby
+      $stdout.puts "child_pid=\#{Process.pid}"
+      $stdout.flush
+      sleep 0.3
+      $stdout.puts "done"
+      $stdout.flush
+      exit 0
+    RUBY
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        t0 = Time.now
+        out, err = invoke("dispatch", "demo", "A", "--detach")
+        elapsed = Time.now - t0
+
+        assert_empty err
+        # Exits 0 (launched successfully)
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        # Output includes PID
+        assert_match(/PID:\s+\d+/, out, "output must include PID")
+        # Output includes run.jsonl path
+        assert_includes out, "run.jsonl"
+        # Output includes report.md path
+        assert_includes out, "report.md"
+        # Output includes detach confirmation
+        assert_match(/[Dd]ispatched detached/, out)
+        # Returned before the fake builder finished (builder sleeps 0.3s)
+        assert elapsed < 0.1, "dispatch --detach should return immediately (took #{elapsed.round(3)}s)"
+
+        # No "Builder exited with status" line (that's the blocking path)
+        refute_match(/Builder exited/, out)
+      end
+    end
+  ensure
+    sleep 0.35 # let any lingering child exit
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Without --detach: existing behavior unchanged ("Builder exited with status N")
+  def test_dispatch_cli_no_detach_flag_is_blocking_and_unchanged
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake = File.join(setup[:root], "fake_blocking_claude")
+    File.write(fake, <<~RUBY)
+      #!/usr/bin/env ruby
+      a = ARGV; c = Dir.pwd; s = $stdin.gets
+      $stdout.puts "argv=" + a.inspect
+      $stdout.puts "cwd=" + c.inspect
+      $stdout.puts "stdin=" + (s || "").chomp
+      $stdout.flush
+      exit 0
+    RUBY
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out, err = invoke("dispatch", "demo", "A")
+
+        assert_empty err
+        assert_match(/Builder exited with status 0/, out)
+        refute_match(/Dispatched detached/, out)
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   def test_verify_reports_pass_when_clean
     setup = temp_env
     env = setup.fetch(:env)
@@ -647,7 +750,7 @@ class ArchitectCLITest < SpaceArchitectTest
         assert_match(/\(default\)\s+-\s+discarded/, v01_line)
 
         # exit code 0
-        assert_equal 0, SpaceArchitect::CLI.last_outcome&.exit_code
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
       end
     end
   ensure

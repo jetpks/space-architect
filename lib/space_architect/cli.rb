@@ -2,26 +2,19 @@
 
 require "dry/cli"
 require "pastel"
-require_relative "cli/repeatable_options"
-require_relative "cli/help"
+require "space_core/cli"
 
-module SpaceArchitect
+module Space::Architect
   module CLI
-    Outcome = Data.define(:exit_code, :message) do
-      def initialize(exit_code:, message: nil) = super
-    end
+    # Delegate the outcome seam to Space::Core::CLI so both architect commands
+    # (which call CLI.record_outcome lexically) and the moved Helpers (which call
+    # CLI.record_outcome with Space::Core::CLI as lexical root) share one slot.
+    Outcome     = Space::Core::CLI::Outcome
+    Helpers     = Space::Core::CLI::Helpers
+    BaseCommand = Space::Core::CLI::BaseCommand
 
-    def self.record_outcome(o) = (Thread.current[:space_architect_outcome] = o)
-    def self.last_outcome = Thread.current[:space_architect_outcome]
-
-    # Pastel used by the colourful help listing (Help / the Usage reopen). Set
-    # per-invocation in .call from the output stream and --color; defaults to a
-    # disabled instance so non-CLI callers and tests render plain text.
-    def self.help_pastel = @help_pastel ||= Pastel.new(enabled: false)
-
-    def self.help_pastel=(pastel)
-      @help_pastel = pastel
-    end
+    def self.record_outcome(o) = Space::Core::CLI.record_outcome(o)
+    def self.last_outcome      = Space::Core::CLI.last_outcome
 
     module Registry
       extend Dry::CLI::Registry
@@ -31,8 +24,8 @@ module SpaceArchitect
     VERSION_REQUEST   = [["version"], ["--version"]].freeze
 
     def self.call(argv, out = $stdout, err = $stderr)
-      Thread.current[:space_architect_outcome] = nil
-      self.help_pastel = Pastel.new(enabled: help_colors?(argv, out, err))
+      Thread.current[:space_core_cli_outcome] = nil
+      Space::Core::CLI.help_pastel = Pastel.new(enabled: Space::Core::CLI.help_colors?(argv, out, err))
 
       if TOP_LEVEL_HELP.include?(argv)
         out.puts Dry::CLI::Usage.call(Registry.get([]))
@@ -40,7 +33,7 @@ module SpaceArchitect
       end
 
       if VERSION_REQUEST.include?(argv)
-        out.puts SpaceArchitect::VERSION
+        out.puts Space::Core::VERSION
         return 0
       end
 
@@ -48,29 +41,14 @@ module SpaceArchitect
         return dispatch_src(argv[1..], out, err)
       end
 
-      Dry::CLI.new(Registry).call(arguments: normalize_args(argv), out: out, err: err)
+      normalized = normalize_args(argv)
+
+      if normalized.first == "space"
+        return dispatch_space(normalized[1..], out, err)
+      end
+
+      Dry::CLI.new(Registry).call(arguments: normalized, out: out, err: err)
       last_outcome&.exit_code || 0
-    end
-
-    # Whether the help listing should be colourised: honour an explicit
-    # --color/--colors (always/never), otherwise auto-detect from the streams the
-    # listing can land on (stdout for top-level help, stderr for bare namespaces).
-    def self.help_colors?(argv, out, err)
-      case color_mode(argv)
-      when "always" then true
-      when "never"  then false
-      else tty?(out) || tty?(err)
-      end
-    end
-
-    def self.tty?(io) = io.respond_to?(:tty?) && io.tty?
-
-    def self.color_mode(argv)
-      argv.each_with_index do |arg, i|
-        return arg.split("=", 2)[1].to_s.downcase if arg.start_with?("--color=", "--colors=")
-        return argv[i + 1].to_s.downcase if %w[--color --colors].include?(arg)
-      end
-      "auto"
     end
 
     # Move --color/--colors options to the end of the argument list so dry-cli's
@@ -118,19 +96,7 @@ module SpaceArchitect
   end
 end
 
-require_relative "cli/helpers"
-require_relative "cli/base_command"
-require_relative "cli/init"
-require_relative "cli/new"
-require_relative "cli/list"
-require_relative "cli/show"
-require_relative "cli/path"
-require_relative "cli/use"
-require_relative "cli/current"
-require_relative "cli/status"
-require_relative "cli/config"
-require_relative "cli/repo"
-require_relative "cli/shell"
 require_relative "cli/architect"
 require_relative "cli/space"
 require_relative "cli/src"
+require_relative "cli/research"

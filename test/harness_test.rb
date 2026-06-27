@@ -5,7 +5,7 @@ require "yaml"
 require "json"
 require "tmpdir"
 
-class HarnessTest < SpaceArchitectTest
+class HarnessTest < Space::ArchitectTest
   FAKE_CLAUDE_SCRIPT = <<~RUBY
     #!/usr/bin/env ruby
     a = ARGV; c = Dir.pwd; s = $stdin.gets
@@ -59,8 +59,8 @@ class HarnessTest < SpaceArchitectTest
     File.chmod(0o755, fake_claude)
     File.chmod(0o755, fake_opencode)
 
-    space   = SpaceArchitect::Space.load(space_dir)
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    space   = Space::Core::Space.load(space_dir)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("demo")
     mission.worktree_add("my-repo", "demo", "A")
@@ -94,15 +94,15 @@ class HarnessTest < SpaceArchitectTest
   end
 
   def test_harness_factory_default_is_claude_code
-    harness = SpaceArchitect::Harness.for("claude-code",
+    harness = Space::Architect::Harness.for("claude-code",
                                           model: "claude-sonnet-4-6", max_turns: 10, bin: "/fake")
-    assert_instance_of SpaceArchitect::Harness::ClaudeCodeHarness, harness
+    assert_instance_of Space::Architect::Harness::ClaudeCodeHarness, harness
   end
 
   # ── OpenCodeHarness unit tests ────────────────────────────────────────────
 
   def test_builder_config_steps_equals_max_turns
-    harness = SpaceArchitect::Harness::OpenCodeHarness.new(
+    harness = Space::Architect::Harness::OpenCodeHarness.new(
       model: "fireworks-ai/test", max_turns: 42, bin: "opencode",
       config_dir: Dir.mktmpdir
     )
@@ -111,7 +111,7 @@ class HarnessTest < SpaceArchitectTest
   end
 
   def test_builder_config_denies_git_commit_and_push
-    harness = SpaceArchitect::Harness::OpenCodeHarness.new(
+    harness = Space::Architect::Harness::OpenCodeHarness.new(
       model: "fireworks-ai/test", max_turns: 10, bin: "opencode",
       config_dir: Dir.mktmpdir
     )
@@ -257,7 +257,7 @@ class HarnessTest < SpaceArchitectTest
     root = Dir.mktmpdir("harness-test")
     _space_dir, mission, _fake_claude, _fake_oc, _build_dir = setup_space(root)
 
-    assert_raises(SpaceArchitect::Error) do
+    assert_raises(Space::Core::Error) do
       mission.dispatch("demo", "A", harness: "opencode")
     end
   ensure
@@ -279,8 +279,8 @@ class HarnessTest < SpaceArchitectTest
   end
 
   def test_harness_factory_raises_on_unknown_harness
-    assert_raises(SpaceArchitect::Error) do
-      SpaceArchitect::Harness.for("unknown-harness",
+    assert_raises(Space::Core::Error) do
+      Space::Architect::Harness.for("unknown-harness",
                                   model: "x", max_turns: 1, config_dir: Dir.mktmpdir)
     end
   end
@@ -297,7 +297,7 @@ class HarnessTest < SpaceArchitectTest
   # AC1: effort "high" + GLM model → builder_config injects reasoningEffort at correct path;
   #      agent.builder block (steps, bash permission deny map) is unchanged.
   def test_builder_config_injects_reasoning_effort_for_glm
-    harness = SpaceArchitect::Harness::OpenCodeHarness.new(
+    harness = Space::Architect::Harness::OpenCodeHarness.new(
       model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
       max_turns: 10, bin: "opencode", config_dir: Dir.mktmpdir,
       effort: "high"
@@ -316,7 +316,7 @@ class HarnessTest < SpaceArchitectTest
 
   # AC2: effort nil → builder_config returns exactly the pre-I07 hash (no "provider" key).
   def test_builder_config_no_provider_key_when_effort_nil
-    harness = SpaceArchitect::Harness::OpenCodeHarness.new(
+    harness = Space::Architect::Harness::OpenCodeHarness.new(
       model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
       max_turns: 10, bin: "opencode", config_dir: Dir.mktmpdir
     )
@@ -380,7 +380,7 @@ class HarnessTest < SpaceArchitectTest
 
   # AC4: effort "high" + Kimi model → reasoningEffort injected under Kimi's config path.
   def test_builder_config_injects_reasoning_effort_for_kimi
-    harness = SpaceArchitect::Harness::OpenCodeHarness.new(
+    harness = Space::Architect::Harness::OpenCodeHarness.new(
       model: "fireworks-ai/accounts/fireworks/models/kimi-k2p7-code",
       max_turns: 5, bin: "opencode", config_dir: Dir.mktmpdir,
       effort: "high"
@@ -464,13 +464,78 @@ class HarnessTest < SpaceArchitectTest
 
   # Footgun: claude-code + effort raises with opencode-only / reasoningEffort message.
   def test_harness_for_raises_for_claude_code_with_effort
-    err = assert_raises(SpaceArchitect::Error) do
-      SpaceArchitect::Harness.for("claude-code",
+    err = assert_raises(Space::Core::Error) do
+      Space::Architect::Harness.for("claude-code",
                                   model: "claude-sonnet-4-6", max_turns: 10,
                                   bin: "/fake", effort: "high")
     end
     assert_match(/opencode-only/, err.message)
     assert_match(/reasoningEffort/, err.message)
+  end
+
+  # ── run_detached: ClaudeCodeHarness ──────────────────────────────────────────
+
+  FAKE_DETACH_SCRIPT = <<~RUBY
+    #!/usr/bin/env ruby
+    $stdout.puts "detach_pid=\#{Process.pid}"
+    $stdout.flush
+    sleep 0.2
+    $stdout.puts "detach_done"
+    $stdout.flush
+    exit 0
+  RUBY
+
+  def test_claude_code_harness_run_detached_returns_integer_pid
+    root = Dir.mktmpdir("harness-detach-test")
+    fake_bin = File.join(root, "fake_detach")
+    File.write(fake_bin, FAKE_DETACH_SCRIPT)
+    File.chmod(0o755, fake_bin)
+
+    wt_dir  = File.join(root, "wt")
+    FileUtils.mkdir_p(wt_dir)
+    prompt  = File.join(root, "prompt.md")
+    run_log = File.join(root, "run.jsonl")
+    File.write(prompt, "hello\n")
+
+    harness = Space::Architect::Harness::ClaudeCodeHarness.new(
+      model: "claude-sonnet-4-6", max_turns: 10, bin: fake_bin
+    )
+    pid = harness.run_detached(prompt_path: prompt, run_log_path: run_log, chdir: wt_dir)
+
+    assert_instance_of Integer, pid
+    assert pid > 0
+    assert_equal pid, Process.getpgid(pid), "child must be its own pgroup leader"
+  ensure
+    sleep 0.25
+    FileUtils.rm_rf(root)
+  end
+
+  def test_opencode_harness_run_detached_returns_integer_pid
+    root = Dir.mktmpdir("harness-detach-test")
+    fake_bin = File.join(root, "fake_oc_detach")
+    File.write(fake_bin, FAKE_DETACH_SCRIPT)
+    File.chmod(0o755, fake_bin)
+
+    config_dir = File.join(root, "config")
+    wt_dir     = File.join(root, "wt")
+    FileUtils.mkdir_p(config_dir)
+    FileUtils.mkdir_p(wt_dir)
+    prompt  = File.join(root, "prompt.md")
+    run_log = File.join(root, "run.jsonl")
+    File.write(prompt, "hello\n")
+
+    harness = Space::Architect::Harness::OpenCodeHarness.new(
+      model: "fireworks-ai/test-model", max_turns: 5, bin: fake_bin,
+      config_dir: config_dir
+    )
+    pid = harness.run_detached(prompt_path: prompt, run_log_path: run_log, chdir: wt_dir)
+
+    assert_instance_of Integer, pid
+    assert pid > 0
+    assert_equal pid, Process.getpgid(pid), "child must be its own pgroup leader"
+  ensure
+    sleep 0.25
+    FileUtils.rm_rf(root)
   end
 
   # Claude-code dispatch: no --variant in argv (unchanged by effort feature).

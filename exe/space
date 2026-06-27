@@ -8,6 +8,6 @@ if File.exist?(source_gemfile)
   $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 end
 
-require "space_architect"
+require "space_core"
 
-SpaceArchitect::CLI.run(["space", *ARGV], $stdout, $stderr)
+Space::Core::CLI.run(ARGV, $stdout, $stderr)

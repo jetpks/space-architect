@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module SpaceArchitect
+module Space::Architect
   module CLI
     module Architect
       class Init < BaseCommand
@@ -158,35 +158,41 @@ module SpaceArchitect
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-        option   :model,     default: nil,   desc: "Model to use (default: lane entry or claude-sonnet-4-6)"
-        option   :max_turns, default: "200", desc: "Max turns for the builder"
-        option   :harness,   default: nil,   desc: "Harness override (claude-code, opencode)"
-        option   :effort,    default: nil,   desc: "Reasoning effort override (opencode only; sets reasoningEffort in the model config)"
+        option   :model,     default: nil,    desc: "Model to use (default: lane entry or claude-sonnet-4-6)"
+        option   :max_turns, default: "200",  desc: "Max turns for the builder"
+        option   :harness,   default: nil,    desc: "Harness override (claude-code, opencode)"
+        option   :effort,    default: nil,    desc: "Reasoning effort override (opencode only; sets reasoningEffort in the model config)"
+        option   :detach,    type: :boolean, default: false, desc: "Detach the builder process (returns immediately with PID; poll report for completion)"
 
         def call(iteration:, lane:, space: nil, model: nil,
-                 max_turns: "200", harness: nil, effort: nil, **opts)
+                 max_turns: "200", harness: nil, effort: nil, detach: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               mission = ArchitectMission.new(space: sp)
-              kwargs = { max_turns: max_turns.to_i }
+              kwargs = { max_turns: max_turns.to_i, detach: detach }
               kwargs[:model]   = model   if model
               kwargs[:harness] = harness if harness
               kwargs[:effort]  = effort  if effort
               res = mission.dispatch(iteration, lane, **kwargs)
-              terminal.say "Run log: #{terminal.path(res[:run_log])}"
-              terminal.say "Report:  #{terminal.path(res[:report])}"
-              terminal.say "Builder exited with status #{res[:exit_code]}"
-              CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
+              if detach
+                terminal.say "PID:     #{res[:pid]}"
+                terminal.say "Run log: #{terminal.path(res[:run_log])}"
+                terminal.say "Report:  #{terminal.path(res[:report])}"
+                terminal.say "Dispatched detached — poll #{terminal.path(res[:report])} for completion"
+                CLI.record_outcome(Outcome.new(exit_code: 0))
+              else
+                terminal.say "Run log: #{terminal.path(res[:run_log])}"
+                terminal.say "Report:  #{terminal.path(res[:report])}"
+                terminal.say "Builder exited with status #{res[:exit_code]}"
+                CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
+              end
             end
           end
         end
       end
 
-      class Section < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Section < BaseCommand
         desc "Write a section of the iteration file and commit it (one call)"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :section,   required: true,  desc: "Section: grounds, specification, prompt, verdict"
@@ -221,14 +227,11 @@ module SpaceArchitect
           return File.read(from) if from
           return body if body
           return $stdin.read if stdin
-          raise SpaceArchitect::Error, "provide the section body via --from <file>, --body <text>, or --stdin"
+          raise Space::Core::Error, "provide the section body via --from <file>, --body <text>, or --stdin"
         end
       end
 
-      class Evidence < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Evidence < BaseCommand
         desc "Transcribe a lane's scratch report VERBATIM into Builder Report and commit"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -249,10 +252,7 @@ module SpaceArchitect
         end
       end
 
-      class Merge < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Merge < BaseCommand
         desc "Integrate ONE judged-passing lane (merges --no-ff; runs no gates, makes no verdict)"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name (architect-judged passing)"
@@ -274,10 +274,7 @@ module SpaceArchitect
         end
       end
 
-      class Integrate < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Integrate < BaseCommand
         desc "Integrate the architect-supplied set of passing lanes, in order (stops on conflict)"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -301,10 +298,7 @@ module SpaceArchitect
         end
       end
 
-      class Gate < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class Gate < BaseCommand
         desc "Run the frozen Acceptance Criteria gate commands and stream raw output (no PASS/FAIL)"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: false, desc: "Run in a lane worktree (default: the integration repo)"
@@ -330,10 +324,7 @@ module SpaceArchitect
         end
       end
 
-      class InstallSkills < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
-
+      class InstallSkills < BaseCommand
         desc "Install bundled skills (architect, architect-research, architect-vocabulary) for a harness"
         option :provider, default: "claude", desc: "Harness: claude, codex, opencode, pi"
         option :project, type: :boolean, default: false, desc: "Install to CWD instead of global"
@@ -351,29 +342,6 @@ module SpaceArchitect
               terminal.say "  #{s[:name]}: #{terminal.style_skill_action(s[:action])} (#{terminal.path(s[:path])})"
             end
             CLI.record_outcome(Outcome.new(exit_code: 0))
-          end
-        end
-      end
-
-      module Brief
-        class New < Dry::CLI::Command
-          include GlobalOptions
-          include Helpers
-
-          desc "Scaffold the durable mission brief (architecture/BRIEF.md)"
-          argument :space, required: false, desc: "Space identifier (default: $PWD)"
-          option   :force, type: :boolean, default: false, desc: "Overwrite an existing BRIEF.md"
-
-          def call(space: nil, force: false, **opts)
-            setup_terminal(**opts.slice(:color, :colors))
-            handle_errors do
-              render(store.find(space)) do |sp|
-                mission = ArchitectMission.new(space: sp)
-                path = mission.brief_new!(force: force)
-                terminal.say "Brief ready: #{terminal.path(path)}"
-                CLI.record_outcome(Outcome.new(exit_code: 0))
-              end
-            end
           end
         end
       end
@@ -533,32 +501,52 @@ module SpaceArchitect
           end
         end
       end
+
+      module Brief
+        class New < BaseCommand
+          desc "Scaffold the durable mission brief (architecture/BRIEF.md)"
+          argument :space, required: false, desc: "Space identifier (default: $PWD)"
+          option   :force, type: :boolean, default: false, desc: "Overwrite an existing BRIEF.md"
+
+          def call(space: nil, force: false, **opts)
+            setup_terminal(**opts.slice(:color, :colors))
+            handle_errors do
+              render(store.find(space)) do |sp|
+                mission = ArchitectMission.new(space: sp)
+                path = mission.brief_new!(force: force)
+                terminal.say "Brief ready: #{terminal.path(path)}"
+                CLI.record_outcome(Outcome.new(exit_code: 0))
+              end
+            end
+          end
+        end
+      end
     end
   end
 end
 
-SpaceArchitect::CLI::Registry.register "init",   SpaceArchitect::CLI::Architect::Init
-SpaceArchitect::CLI::Registry.register "new",    SpaceArchitect::CLI::Architect::New
-SpaceArchitect::CLI::Registry.register "status", SpaceArchitect::CLI::Architect::Status
-SpaceArchitect::CLI::Registry.register "freeze", SpaceArchitect::CLI::Architect::Freeze
-SpaceArchitect::CLI::Registry.register "verify", SpaceArchitect::CLI::Architect::Verify
-SpaceArchitect::CLI::Registry.register "dispatch", SpaceArchitect::CLI::Architect::Dispatch
-SpaceArchitect::CLI::Registry.register "section",   SpaceArchitect::CLI::Architect::Section
-SpaceArchitect::CLI::Registry.register "evidence",  SpaceArchitect::CLI::Architect::Evidence
-SpaceArchitect::CLI::Registry.register "merge",     SpaceArchitect::CLI::Architect::Merge
-SpaceArchitect::CLI::Registry.register "integrate", SpaceArchitect::CLI::Architect::Integrate
-SpaceArchitect::CLI::Registry.register "gate",      SpaceArchitect::CLI::Architect::Gate
-SpaceArchitect::CLI::Registry.register "install-skills", SpaceArchitect::CLI::Architect::InstallSkills
-SpaceArchitect::CLI::Registry.register "brief" do |b|
-  b.register "new", SpaceArchitect::CLI::Architect::Brief::New
+Space::Architect::CLI::Registry.register "init",   Space::Architect::CLI::Architect::Init
+Space::Architect::CLI::Registry.register "new",    Space::Architect::CLI::Architect::New
+Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Architect::Status
+Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
+Space::Architect::CLI::Registry.register "verify", Space::Architect::CLI::Architect::Verify
+Space::Architect::CLI::Registry.register "dispatch", Space::Architect::CLI::Architect::Dispatch
+Space::Architect::CLI::Registry.register "section",   Space::Architect::CLI::Architect::Section
+Space::Architect::CLI::Registry.register "evidence",  Space::Architect::CLI::Architect::Evidence
+Space::Architect::CLI::Registry.register "merge",     Space::Architect::CLI::Architect::Merge
+Space::Architect::CLI::Registry.register "integrate", Space::Architect::CLI::Architect::Integrate
+Space::Architect::CLI::Registry.register "gate",      Space::Architect::CLI::Architect::Gate
+Space::Architect::CLI::Registry.register "install-skills", Space::Architect::CLI::Architect::InstallSkills
+Space::Architect::CLI::Registry.register "brief" do |b|
+  b.register "new", Space::Architect::CLI::Architect::Brief::New
 end
-SpaceArchitect::CLI::Registry.register "worktree" do |wt|
-  wt.register "add",    SpaceArchitect::CLI::Architect::Worktree::Add
-  wt.register "remove", SpaceArchitect::CLI::Architect::Worktree::Remove
-  wt.register "list",   SpaceArchitect::CLI::Architect::Worktree::List
+Space::Architect::CLI::Registry.register "worktree" do |wt|
+  wt.register "add",    Space::Architect::CLI::Architect::Worktree::Add
+  wt.register "remove", Space::Architect::CLI::Architect::Worktree::Remove
+  wt.register "list",   Space::Architect::CLI::Architect::Worktree::List
 end
-SpaceArchitect::CLI::Registry.register "variant" do |v|
-  v.register "add",     SpaceArchitect::CLI::Architect::Variant::Add
-  v.register "promote", SpaceArchitect::CLI::Architect::Variant::Promote
-  v.register "compare", SpaceArchitect::CLI::Architect::Variant::Compare
+Space::Architect::CLI::Registry.register "variant" do |v|
+  v.register "add",     Space::Architect::CLI::Architect::Variant::Add
+  v.register "promote", Space::Architect::CLI::Architect::Variant::Promote
+  v.register "compare", Space::Architect::CLI::Architect::Variant::Compare
 end

@@ -265,7 +265,7 @@ architect space shell complete spaces        # print completion candidates
 
 ## Evergreen engine: `architect src …` 🌲
 
-The vendored evergreen engine (`repo-tender`) keeps canonical copies of tracked repos in sync so spaces can clone via fast APFS copy-on-write. Run `architect src --help` to list available subcommands.
+The evergreen engine (`space-src`, exposed as `src`) keeps canonical copies of tracked repos in sync so spaces can clone via fast APFS copy-on-write. Run `architect src --help` to list available subcommands.
 
 > **Note:** these commands appear under `architect src <verb>` but are not listed in root `architect --help`. Discover them via `architect src --help`.
 
@@ -297,7 +297,7 @@ architect src sync --repo github.com/example-org/api   # scope to one repo
 
 ### `architect src status`
 
-Show the per-repo evergreen status table (source: `$XDG_STATE_HOME/repo-tender/state.yaml`).
+Show the per-repo evergreen status table (source: `$XDG_STATE_HOME/space-src/state.yaml`).
 
 ```sh
 architect src status

@@ -1,27 +1,11 @@
 # frozen_string_literal: true
 
-$LOAD_PATH.unshift File.expand_path("../vendor/repo-tender/lib", __dir__)
-require "space_architect/pristine"
+require "space_core"
+require "space_src"
 
-require_relative "space_architect/version"
-require_relative "space_architect/errors"
-require_relative "space_architect/warnings"
-SpaceArchitect::Warnings.disable_experimental!
-require_relative "space_architect/atomic_write"
-require_relative "space_architect/xdg"
-require_relative "space_architect/config"
-require_relative "space_architect/state"
-require_relative "space_architect/slugger"
-require_relative "space_architect/space"
-require_relative "space_architect/repo_reference"
-require_relative "space_architect/repo_resolver"
-require_relative "space_architect/git_client"
-require_relative "space_architect/mise_client"
-require_relative "space_architect/space_store"
-require_relative "space_architect/shell_integration"
-require_relative "space_architect/skill_installer"
-require_relative "space_architect/terminal"
 require_relative "space_architect/harness"
 require_relative "space_architect/dispatcher"
 require_relative "space_architect/architect_mission"
+require_relative "space_architect/skill_installer"
+require_relative "space_architect/research"
 require_relative "space_architect/cli"

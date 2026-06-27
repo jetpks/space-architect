@@ -4,7 +4,7 @@ require_relative "test_helper"
 require "open3"
 require "yaml"
 
-class ArchitectMissionTest < SpaceArchitectTest
+class ArchitectMissionTest < Space::ArchitectTest
   def create_real_space(dir)
     FileUtils.mkdir_p(File.join(dir, "architecture"))
     FileUtils.mkdir_p(File.join(dir, "repos"))
@@ -24,7 +24,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     system("git", "-C", dir, "add", "space.yaml")
     system("git", "-C", dir, "commit", "-q", "-m", "init")
 
-    SpaceArchitect::Space.load(dir)
+    Space::Core::Space.load(dir)
   end
 
   def create_real_repo(space_dir, name)
@@ -47,7 +47,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     result = mission.worktree_add("my-repo", "my-slice", "lane-a")
@@ -72,7 +72,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.freeze!("my-slice")
@@ -97,7 +97,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.freeze!("my-slice")
@@ -133,7 +133,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.worktree_add("my-repo", "my-slice", "lane-a",
@@ -161,21 +161,21 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
 
     # nil model raises, and error names --model
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.worktree_add("my-repo", "my-slice", "lane-bad", harness: "opencode")
     end
     assert_match(/--model/, err.message)
 
     # claude default model also raises
-    assert_raises(SpaceArchitect::Error) do
+    assert_raises(Space::Core::Error) do
       mission.worktree_add("my-repo", "my-slice", "lane-bad",
                            harness: "opencode",
-                           model: SpaceArchitect::Harness::CLAUDE_DEFAULT_MODEL)
+                           model: Space::Architect::Harness::CLAUDE_DEFAULT_MODEL)
     end
   ensure
     FileUtils.rm_rf(dir)
@@ -187,7 +187,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.worktree_add("my-repo", "my-slice", "lane-a")
@@ -210,7 +210,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.variant_add("my-repo", "my-slice",
@@ -259,7 +259,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     prompt_src = File.join(dir, "prompt_src.md")
     File.binwrite(prompt_src, "# Frozen Prompt\nWith special bytes: \xC3\xA9\n")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.variant_add("my-repo", "my-slice",
@@ -282,7 +282,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.variant_add("my-repo", "my-slice",
@@ -308,11 +308,11 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
 
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.variant_add("my-repo", "my-slice", [["opencode", nil]])
     end
     assert_match(/--model/, err.message)
@@ -335,7 +335,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     dir = Dir.mktmpdir("architect-mission-test")
     space = create_real_space(dir)
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
 
@@ -358,7 +358,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.variant_add("my-repo", "my-slice",
@@ -407,7 +407,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.variant_add("my-repo", "my-slice",
@@ -416,13 +416,13 @@ class ArchitectMissionTest < SpaceArchitectTest
     mission.worktree_add("my-repo", "my-slice", "lane-a")
 
     # (a) non-existent lane name
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.variant_promote("my-slice", "v99")
     end
     assert_match(/v99/, err.message)
 
     # (b) name of a non-variant lane
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.variant_promote("my-slice", "lane-a")
     end
     assert_match(/lane-a/, err.message)
@@ -447,7 +447,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.variant_add("my-repo", "my-slice",
@@ -481,7 +481,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.worktree_add("my-repo", "my-slice", "lane-e",
@@ -512,7 +512,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.worktree_add("my-repo", "my-slice", "lane-f",
@@ -533,11 +533,11 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
 
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.worktree_add("my-repo", "my-slice", "lane-bad",
                            harness: "claude-code", effort: "high")
     end
@@ -558,12 +558,12 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.worktree_add("my-repo", "my-slice", "lane-a")
 
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.variant_promote("my-slice", "lane-a")
     end
     assert_match(/no variant/, err.message)
@@ -587,7 +587,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.freeze!("my-slice")
@@ -631,7 +631,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.variant_add("my-repo", "my-slice",
@@ -652,7 +652,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.variant_add("my-repo", "my-slice", [["claude-code", nil]])
@@ -672,12 +672,12 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.worktree_add("my-repo", "my-slice", "lane-a")
 
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.variant_compare("my-slice")
     end
     assert_match(/no variant set — nothing to compare/, err.message)
@@ -692,7 +692,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.variant_add("my-repo", "my-slice",
@@ -742,7 +742,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     dir = Dir.mktmpdir("architect-mission-test")
     space = create_real_space(dir)
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
 
@@ -768,12 +768,12 @@ class ArchitectMissionTest < SpaceArchitectTest
     dir = Dir.mktmpdir("architect-mission-test")
     space = create_real_space(dir)
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.freeze!("my-slice")
 
-    err = assert_raises(SpaceArchitect::Error) do
+    err = assert_raises(Space::Core::Error) do
       mission.write_section!("my-slice", "specification", body: "tampered")
     end
     assert_match(/frozen/i, err.message)
@@ -790,7 +790,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     dir = Dir.mktmpdir("architect-mission-test")
     space = create_real_space(dir)
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
 
@@ -811,7 +811,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     dir = Dir.mktmpdir("architect-mission-test")
     space = create_real_space(dir)
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
 
@@ -838,7 +838,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     dir = Dir.mktmpdir("architect-mission-test")
     space = create_real_space(dir)
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     path = mission.brief_new!
 
@@ -848,7 +848,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     assert_match(/^## 7\. Definition of done/, brief)
     assert_match(/BRIEF §N/, brief)
 
-    err = assert_raises(SpaceArchitect::Error) { mission.brief_new! }
+    err = assert_raises(Space::Core::Error) { mission.brief_new! }
     assert_match(/already exists/, err.message)
   ensure
     FileUtils.rm_rf(dir)
@@ -861,7 +861,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.freeze!("my-slice")
@@ -885,7 +885,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.freeze!("my-slice")
@@ -896,7 +896,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     system("git", "-C", wt, "add", "work.rb")
     system("git", "-C", wt, "commit", "-q", "-m", "builder commit")
 
-    err = assert_raises(SpaceArchitect::Error) { mission.merge_lane!("my-slice", "lane-a") }
+    err = assert_raises(Space::Core::Error) { mission.merge_lane!("my-slice", "lane-a") }
     assert_match(/builder commits/i, err.message)
   ensure
     FileUtils.rm_rf(dir)
@@ -909,7 +909,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
     mission.freeze!("my-slice")
@@ -940,7 +940,7 @@ class ArchitectMissionTest < SpaceArchitectTest
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("my-slice")
 

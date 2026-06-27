@@ -1,28 +1,27 @@
 # frozen_string_literal: true
 
-require_relative "lib/space_architect/version"
+require_relative "lib/space_core/version"
 
 Gem::Specification.new do |spec|
   spec.name = "space-architect"
-  spec.version = SpaceArchitect::VERSION
+  spec.version = Space::Core::VERSION
   spec.authors = ["Eric Jacobs"]
   spec.email = ["eric@ebj.dev"]
 
   spec.summary = "Task-scoped project workspaces (repos · notes · artifacts under one self-describing root)"
-  spec.description = "A dry-cli CLI for spaces: date-prefixed directories with a YAML identity file, $PWD-based current-space resolution, and XDG config/state. Provisions repos at copy-on-write speed from evergreen checkouts (pairs with repo-tender), concurrently on fibers. Ships fish shell integration and completions."
+  spec.description = "A dry-cli CLI for spaces: date-prefixed directories with a YAML identity file, $PWD-based current-space resolution, and XDG config/state. Provisions repos at copy-on-write speed from evergreen checkouts, concurrently on fibers. Ships fish shell integration and completions."
   spec.homepage = "https://github.com/jetpks/space-architect"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 4.0.5"
 
   spec.metadata["homepage_uri"] = spec.homepage
+  spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
 
   spec.files = Dir.chdir(__dir__) do
-    Dir["lib/**/*.rb", "lib/**/*.erb", "exe/*", "README.md", "LICENSE.txt",
-        "skill/**/*"] +
-      Dir["vendor/repo-tender/lib/**/*.rb"]
+    Dir["lib/**/*.rb", "lib/**/*.erb", "exe/*", "skill/**/*", "README.md", "CHANGELOG.md", "LICENSE.txt"]
   end
   spec.bindir = "exe"
-  spec.executables = ["architect", "space"]
+  spec.executables = ["architect", "space", "src"]
   spec.require_paths = ["lib"]
 
   spec.add_dependency "async", "~> 2.39"

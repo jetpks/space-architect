@@ -4,10 +4,22 @@
 
 > **Task-scoped workspaces that double as Architect Loop missions — for humans and their agents!** ✨🛰️
 
-`space-architect` is a Ruby CLI for creating and managing **spaces** — task-scoped
-project workspaces that hold repos, notes, and artifacts under one obvious
-filesystem root — fused with the **Architect Loop**: a structured judgment-and-build
-cycle for you and a fleet of headless AI builders. 🌌
+`space-architect` is a Ruby toolkit for **spaces** — task-scoped project
+workspaces that hold repos, notes, and artifacts under one obvious filesystem
+root — fused with the **Architect Loop**: a structured judgment-and-build cycle
+for you and a fleet of headless AI builders. 🌌
+
+The gem ships **three composable binaries** over clean library seams:
+
+| Binary | What it does | Library |
+|--------|--------------|---------|
+| **`space`** 🪐 | Create and manage task-scoped workspaces | `Space::Core` |
+| **`architect`** 🏗️ | Run the Architect Loop — judgment + headless builders | `Space::Architect` |
+| **`src`** 🌲 | Tend evergreen repo checkouts for copy-on-write provisioning | `Space::Src` |
+
+Each is a first-class executable. `architect` also forwards `architect space …`
+and `architect src …` to the other two, so a mission can drive everything from
+one command when that's handier. 🎀
 
 ## What's a space? 🪐
 
@@ -15,19 +27,20 @@ A space is just a regular directory with a tiny YAML identity file and room for
 everything a task needs:
 
 ```text
-~/src/spaces/20260531-name-of-space/
+~/architect/spaces/20260531-name-of-space/
   space.yaml        # identity: id, title, status, repos, notes, tags
   README.md
   repos/            # cloned (or copy-on-write'd) repositories
   notes/            # scratch, prompts, logs
-  architecture/     # iteration files: I<NN>-<name>.md + ARCHITECT.md index
+  architecture/     # iteration files: I<NN>-<name>.md + ARCHITECT.md index + BRIEF.md
   build/            # lane worktrees + scratch (build/<id>-<lane>/)
   tmp/              # workspace-local temp — use this instead of /tmp
 ```
 
-Run a command from anywhere inside a space and it just works — `architect` walks
-up from `$PWD` until it finds the nearest `space.yaml`. No "current space" state to
-get out of sync; where you *are* is the space you mean. 🧭
+Run a command from anywhere inside a space and it just works — `space` and
+`architect` walk up from `$PWD` until they find the nearest `space.yaml`. No
+"current space" state to get out of sync; where you *are* is the space you
+mean. 🧭
 
 ## Installation 📦
 
@@ -36,8 +49,6 @@ Add it to your `Gemfile`:
 ```ruby
 gem "space-architect"
 ```
-
-Then:
 
 ```bash
 bundle install
@@ -49,225 +60,284 @@ Or grab it yourself:
 gem install space-architect
 ```
 
-The primary executable is `architect`. The gem is `space-architect`. 🎀
-A `space` shim is also installed and forwards all arguments to `architect space …`
-for convenience.
+The gem is `space-architect`; it installs three executables — `space`,
+`architect`, and `src`. 🎀
 
-## Quick Start 🎀
-
-**Space management:**
+## Quick start 🎀
 
 ```sh
-architect space init                              # create XDG config + state files
-architect space new "Name of Space"                  # blast off a new space 🚀
-architect space new "Name of Space" -r org/repo …   # with repos cloned in (repeat -r)
-architect space list                             # see all your spaces
-architect space show                             # show the space you're standing in
-architect space status done                      # mark the current mission complete
+# Spaces
+space init                                        # create XDG config + state files
+space new "Name of Space"                         # blast off a new space 🚀
+space new "Name of Space" -r org/repo -r org/lib  # …with repos cloned in (repeat -r)
+space list                                        # see all your spaces
+space show                                        # show the space you're standing in
+
+# Evergreen checkouts (copy-on-write sources for fast provisioning)
+src repo add github.com/example-org/example-app     # tend it 🌲
+src sync                                            # one sync pass
+src status                                          # per-repo evergreen status
+
+# Architect Loop (run from inside a space)
+architect install-skills                          # install agent skills (once per machine)
+architect init                                    # scaffold ARCHITECT.md + architecture/
+architect new my-feature                          # scaffold the next iteration file
+architect freeze my-feature                       # lock the Acceptance Criteria ❄️
+architect dispatch my-feature lane-a              # send a headless builder to work
 ```
 
-**Architect Loop (run from inside a space):**
+## `space` — task-scoped workspaces 🌌
 
 ```sh
-architect install-skills                          # install skills for your harness (once per machine)
-architect init                                   # scaffold ARCHITECT.md + architecture/
-architect new <iteration>                        # scaffold next iteration file
-architect dispatch <iteration> <lane>            # dispatch a builder for a lane
-architect status                                 # show mission state (read-only)
-architect freeze <iteration>                     # freeze Acceptance Criteria
-architect verify <iteration>                     # post-flight mechanical checks
+space init
+space new "Name of Space"
+space new "Name of Space" -r org/repo -r example-tools/alpha -r example-tools/beta
+space list                                   # alias: space ls
+space show 20260531-name-of-space
+space path 20260531-name-of-space
+space current                                # based on $PWD
+space show                                   # based on $PWD
+space status done                            # based on $PWD
+space status 20260531-name-of-space done
+space config set default_provider github.com
+space config set default_organization example-org
+space repo add example-app                   # github.com/example-org/example-app
+space repo add example-tools/alpha example-tools/beta
+space repo add gitlab.com/example-org/api
+space repo resolve example-app example-tools/async
+space repo ls                                # alias: space repos ls
+space use 20260531-name-of-space             # records recent state, prints the path
+space ls --color=always                      # auto | always | never (--colors also accepted)
 ```
 
-`architect install-skills` installs the bundled `architect`, `architect-research`,
-and `architect-vocabulary` skills for a harness. (`architect-vocabulary` loads the
-system's terms and a short orientation when you're in a space but don't want to run
-the loop — see [The Architect Loop](#the-architect-loop-).) Default is `claude`
-(`~/.claude/skills/`); use `--provider
-opencode|codex|pi` for other harnesses, and `--project` to install into the current
-directory instead of globally. See the [command reference](docs/reference.md) for details.
+Repos are passed with a repeatable `-r` flag (`-r org/repo -r org/lib`); the
+comma form (`-r a,b`) works too. Space ids are date-prefixed
+(`20260531-name-of-space`) so they sort naturally, and duplicate names on the
+same day get a counter (`…-name-of-space-2`). 📅
 
-## Usage 🛰️
+Everything `space` does is also reachable as `architect space …` from within a
+mission.
+
+## `src` — the evergreen engine 🌲
+
+`src` keeps local clones under `<src_dir>/<host>/<owner>/<repo>` (default
+`~/architect/src/…`) clean, on their default branch, and freshly fetched — so
+spaces can provision repos by **copy-on-write** instead of cloning over the
+network.
 
 ```sh
-architect space init
-architect space new "Name of Space"
-architect space new "Name of Space" -r org/repo -r example-tools/alpha -r example-tools/beta
-architect space list
-architect space show 20260531-name-of-space
-architect space path 20260531-name-of-space
-architect space current                      # based on $PWD
-architect space show                         # based on $PWD
-architect space status done                  # based on $PWD
-architect space status 20260531-name-of-space done
-architect space config set default_provider github.com
-architect space config set default_organization example-org
-architect space repo add example-app         # github.com/example-org/example-app
-architect space repo add example-tools/alpha example-tools/beta
-architect space repo add gitlab.com/example-org/api
-architect space repo resolve example-app example-tools/async
-architect space repo ls
-architect space use 20260531-name-of-space   # records recent state and prints the path
-architect space ls --color=always            # auto, always, or never; --colors is also accepted
+src repo add github.com/example-org/example-app     # track + tend a repo
+src org add github.com/example-org                  # track a whole org
+src sync                                            # run one sync pass (--repo to scope)
+src status                                          # per-repo evergreen status table
+src clone example-app                               # APFS copy-on-write into $PWD
+src daemon install                                  # per-user launchd agent for background sync
 ```
 
-Space ids are date-prefixed (`20260531-name-of-space`) so they sort naturally,
-and duplicate names on the same day get a counter (`...-name-of-space-2`). 📅
+When `space repo add` finds a matching evergreen checkout, it copy-on-writes
+from it instead of hitting the network — instant provisioning. ⚡ The two
+surfaces share one layout by design, so they line up with zero configuration:
 
-## The Architect Loop 🏗️
+```sh
+src repo add github.com/example-org/example-app   # tend it: keep it evergreen 🌲
+space repo add example-app                          # copies it instantly ⚡
+```
 
-Space Architect ships a structured build cycle for you and headless AI builders
-called the **Architect Loop**. Each loop lives inside a space as a *mission*.
+`src` has its own `--plain` / `--json` output modes for scripting, and its own
+fish integration (`src shell fish install`).
+
+## `architect` — the Architect Loop 🏗️
+
+The **Architect Loop** is a structured build cycle for you and headless AI
+builders. Each loop lives inside a space as a *mission*.
 
 **Roles:**
 
-- **Architect** — you (or Claude Opus 4.8 in judgment mode): arbitrates disagreements,
-  writes and freezes iteration files, calls kill/continue, merges builder output.
-- **Builder** — Claude Sonnet 4.6 run headless via `architect dispatch`; reads the
-  iteration's Builder Prompt from `architecture/`, does the work, writes its report
-  to `build/<id>-<lane>/`.
+- **Architect** — you (or Claude Opus 4.8 in judgment mode): arbitrates
+  disagreements, writes and freezes iteration files, calls kill/continue, merges
+  builder output. Never writes implementation code.
+- **Builder** — Claude Sonnet 4.6 run headless via `architect dispatch`, one per
+  lane in its own git worktree: reads the iteration's Builder Prompt, does the
+  work, writes raw evidence to `build/<id>-<lane>/report.md`. Never grades its
+  own work; never edits `architecture/`.
 
 **Filesystem layout:**
 
 ```text
 architecture/
   ARCHITECT.md              # cross-iteration index; mission-wide state
-  I01-<iteration>.md        # one file per iteration
-  I02-<iteration>.md
+  BRIEF.md                  # durable §-numbered mission contract (optional)
+  I01-<iteration>.md        # one self-contained file per iteration
 build/
   I01-<iteration>-<lane>/   # lane worktree + scratch per dispatch
     run.jsonl               # streamed builder output
-    report.md               # builder report (transcribed to iteration file verbatim)
+    report.md               # builder report (transcribed into the iteration file verbatim)
 ```
 
-**Iteration file anatomy** (in `architecture/I<NN>-<name>.md`):
+**Iteration file anatomy** — one file, grown section by section. You author the
+*content*; the CLI owns the *persistence* (each command writes the section,
+commits it with the canonical message, and prints back what changed):
 
-| Section | Who writes it | When |
-|---------|--------------|------|
-| `## Grounds` | Architect | Before dispatch — research, PRD, decisions |
-| `## Specification` | Architect | Before dispatch — full delegation contract |
-| `## Acceptance Criteria` | Architect | Before `architect freeze` — frozen, read-only after |
-| `## Builder Prompt` | Architect | Records the exact prompt dispatched |
-| `## Builder Report` | Architect | Transcribed verbatim from `build/…/report.md` |
-| `## Verdict` | Architect | After reviewing evidence — KILL / CONTINUE |
+| Section | Holds | How you persist it |
+|---------|-------|--------------------|
+| `## Grounds` | why — research / brief distilled (optional) | `architect section <it> grounds --from <f>` |
+| `## Specification` | what/how — the full delegation contract | `architect section <it> specification --from <f>` |
+| `## Acceptance Criteria` | proof — exact gate commands + thresholds | `architect freeze <it>` ❄️ |
+| `## Builder Prompt` | the exact lane-prompt(s) dispatched | `architect section <it> prompt --append --lane <l> --from <f>` |
+| `## Builder Report` | raw evidence, transcribed verbatim | `architect evidence <it> --lane <l>` |
+| `## Verdict` | rulings + per-AC PASS/FAIL + KILL/CONTINUE | `architect section <it> verdict --from <f>` |
 
-**Acceptance Criteria freeze before results** — `architect freeze <iteration>` commits
-the frozen sections and records `freeze_sha`; any change to Grounds, Specification,
-or Acceptance Criteria after that point is an automatic iteration FAIL. The builder
-never edits the iteration file.
+**The freeze ❄️** — `architect freeze <iteration>` commits the frozen region
+(Grounds / Specification / Acceptance Criteria), records the `freeze_sha`, and
+prints the frozen Acceptance Criteria back. Any change to those sections
+afterward is an automatic iteration FAIL. The builder never edits the iteration
+file.
 
-**Typical loop session:**
+**Command surface:**
 
 ```sh
-# From inside your space:
-architect init                                   # first time: scaffold ARCHITECT.md
-architect new my-feature                         # scaffold architecture/I01-my-feature.md
-# … write Grounds + Specification + Acceptance Criteria …
-architect freeze my-feature                      # lock it
-architect dispatch my-feature lane-A             # send builder to work
-# … builder runs, writes build/I01-my-feature-lane-A/report.md …
-architect verify my-feature                      # mechanical post-flight checks
-architect status                                 # review mission state
-# … architect reads evidence and writes Verdict …
+architect init                              # scaffold ARCHITECT.md + the space.yaml architect: block
+architect brief new                         # scaffold the durable mission BRIEF.md
+architect new <iteration>                   # scaffold architecture/I<NN>-<iteration>.md
+architect section <it> <section> --from <f> # write + commit a section
+architect freeze <iteration>                # freeze the Acceptance Criteria ❄️
+architect worktree add <repo> <it> <lane>   # isolated worktree per lane (2–4 lanes)
+architect dispatch <it> <lane>              # dispatch a builder (add --detach to survive long runs)
+architect verify <iteration>                # post-flight mechanical checks (reports only)
+architect evidence <it> --lane <lane>       # transcribe the builder's report verbatim
+architect gate <iteration>                  # run the frozen gate commands, stream raw output
+architect merge <it> <lane>                 # integrate ONE judged-passing lane (--no-ff)
+architect integrate <it> --lanes a,b        # integrate a set of passing lanes, in order
+architect status                            # mission state (read-only)
+architect variant add|compare|promote …     # competing (harness, model) lanes over one frozen spec
+architect research dispatch|status|wait …   # parallel read-only research lanes (see below)
 ```
+
+A typical session:
+
+```sh
+architect init                                   # first time
+architect new my-feature                         # scaffold I01-my-feature.md
+architect section my-feature specification --from spec.md
+architect freeze my-feature                      # lock it ❄️
+architect dispatch my-feature lane-a --detach    # send a builder; poll the report
+architect verify my-feature                      # mechanical post-flight checks
+architect evidence my-feature --lane lane-a      # transcribe raw evidence
+architect gate my-feature                        # run the frozen gates yourself
+# … read the diff against the spec, then write the Verdict …
+```
+
+### Research lanes 🔭
+
+When an iteration needs facts the repo doesn't already have, fan out parallel
+**read-only** research lanes — detached `claude -p` researchers (no
+Edit/Write/Bash) that you supervise:
+
+```sh
+architect research dispatch 01-official-api.prompt.md 02-changelog.prompt.md
+architect research wait        # tails each lane's run.jsonl; --level 1-4, --quiet, --thinking
+architect research status      # status of dispatched runs
+```
+
+Researchers gather; the architect verifies the load-bearing claims against
+sources and writes the iteration's **Grounds** section.
+
+### Skills 🧠
+
+`architect install-skills` installs the bundled `architect`,
+`architect-research`, and `architect-vocabulary` skills for your harness:
+
+```sh
+architect install-skills                         # default: claude (~/.claude/skills/)
+architect install-skills --provider opencode     # or codex | pi
+architect install-skills --project               # into ./… instead of globally
+architect install-skills --dry-run               # show what would change
+```
+
+`architect-vocabulary` loads the system's terms and a short orientation when
+you're in a space but don't want to run the loop.
 
 ## Fish shell integration 🐟
 
-Shells can't let a child process change *their* working directory, so `architect`
-ships a small fish wrapper function. It also installs fish completions for commands,
-subcommands, spaces, statuses, config keys, and common config values. Install both
-into fish's autoloaded directories:
+Shells can't let a child process change *their* working directory, so `space`
+and `src` each ship a small fish wrapper function plus completions (commands,
+subcommands, spaces, statuses, config keys, repo refs). Install into fish's
+autoloaded directories:
 
 ```fish
-architect space shell fish install
+space shell fish install
+src shell fish install
 exec fish
 ```
 
-Restarting fish (or `exec fish`) lets the current terminal pick up the new autoloaded
-wrapper function. After that, `architect space new "Name of Space"` and
-`architect space use 20260531-name-of-space` will `cd` into the selected space once the
-CLI command succeeds. Every other command keeps normal CLI behavior. 🚪
-
-The function is written to `~/.config/fish/functions/space.fish` and completions to
-`~/.config/fish/completions/space.fish`, so there's no need to edit `config.fish`.
+After restarting fish (or `exec fish`), `space new "…"` and
+`space use <id>` will `cd` into the selected space once the command succeeds;
+every other command keeps normal CLI behavior. 🚪 The functions and completions
+are written under `~/.config/fish/`, so there's no need to edit `config.fish`.
 For one-off testing without installing:
 
 ```fish
-architect space shell init fish | source
+space shell init fish | source
 ```
 
 ## Configuration ⚙️
 
-Configuration follows the XDG base directory spec:
+Config lives at `~/.config/space-architect/config.yml` (XDG-aware) and defaults to:
 
 ```yaml
 version: 1
-spaces_dir: ~/src/spaces
-evergreen_dir: ~/src/evergreen
+base_dir: ~/architect            # spaces_dir + src_dir hang off this by default
 default_provider: github.com
 default_organization:
-git_clone_protocol: ssh
+git_clone_protocol: ssh          # ssh | https
 ```
 
-View current values: `architect space config show`. Set a value: `architect space config set KEY VALUE`.
+Derived defaults: `spaces_dir` → `<base_dir>/spaces`, `src_dir` (evergreen
+checkout root) → `<base_dir>/src`. Override either explicitly. View values with
+`space config show`; set one with `space config set KEY VALUE`. Editable keys:
+`base_dir`, `spaces_dir`, `src_dir`, `default_provider`, `default_organization`,
+`git_clone_protocol`.
 
-## Repos: evergreen, copy-on-write, concurrent 🌲
+## Repos: evergreen, copy-on-write, concurrent ⚡
 
 Repos are added to the current space under `repos/` and tracked in `space.yaml`.
-When an up-to-date local copy exists under `evergreen_dir` at
-`<evergreen_dir>/<provider>/<owner>/<name>` (e.g.
-`~/src/evergreen/github.com/example-org/example-app`), `architect` copies it into the
-space instead of cloning over the network — much faster, and a copy-on-write clone
-on APFS. ⚡ Set `evergreen_dir` to empty to always clone:
+When an up-to-date evergreen checkout exists at
+`<src_dir>/<host>/<owner>/<name>` (e.g.
+`~/architect/src/github.com/example-org/example-app`), `space` copies it into the
+space instead of cloning over the network — a copy-on-write clone on APFS. ⚡
+Set `src_dir` empty to always clone:
 
 ```sh
-architect space config set evergreen_dir ""
+space config set src_dir ""
 ```
 
-When no evergreen copy is found, the repo is cloned over the network. Clone URLs
-default to SSH (`git@github.com:example-org/example-app.git`). Prefer HTTPS?
+Clone URLs default to SSH (`git@github.com:example-org/example-app.git`); switch
+with `space config set git_clone_protocol https`. Multiple repos passed to
+`space repo add` are fetched **concurrently**, up to five at a time, on fibers —
+no threads, all cooperative. 🧵 After each repo lands, `space` runs `mise trust`
+in it. Each space also gets a workspace-local `tmp/` — use it instead of `/tmp`.
 
-```sh
-architect space config set git_clone_protocol https
-```
+## Embedding 📚
 
-When stdout/stderr are attached to a TTY, long-running repo operations show an
-interactive spinner. Multiple repos passed to `architect space repo add` are fetched
-**concurrently**, up to five at a time, on fibers — no threads, all cooperative. 🧵
-After each repo is in place, `architect` runs `mise trust` in it so local mise config
-is ready to go.
+The library is split into three namespaces you can require independently:
 
-Each space also gets a workspace-local `tmp/`. Use it instead of `/tmp` or
-`/var/tmp`; when using `mktemp`, point it at `tmp/`. 🗑️
+- **`Space::Core`** — the foundation: config, state, XDG, terminal, git/mise
+  clients, the space store. The `space` CLI runs on this alone.
+- **`Space::Architect`** — mission state, the builder harness, dispatch, and the
+  research supervisor.
+- **`Space::Src`** — the evergreen engine (tracking, sync, copy-on-write clone).
 
-## The `src` engine: evergreen checkouts 🌿
-
-`architect src …` exposes the **vendored** evergreen engine (from
-[repo-tender](https://github.com/jetpks/repo-tender)) directly — no separate
-installation needed. It keeps local clones under
-`~/src/evergreen/<host>/<owner>/<repo>` clean, on their default branch, and freshly
-fetched.
-
-```sh
-architect src repo add github.com/example-org/example-app   # tend it 🌲
-architect src sync                                           # run one sync pass
-architect src status                                         # per-repo evergreen status
-```
-
-When `architect space repo add` sees a matching evergreen copy, it copy-on-writes
-from it instead of hitting the network — instant provisioning. ⚡
-
-The vendored engine and space management share the same layout by design — both use
-`<evergreen_dir>/<host>/<owner>/<repo>` — so they line up with zero configuration:
-
-```sh
-architect src repo add github.com/example-org/example-app   # tend it: keep it evergreen 🌲
-architect space repo add example-app                         # copies it instantly ⚡
+```ruby
+require "space_core"       # just spaces
+require "space_architect"  # the full loop (pulls in core + src)
+require "space_src"        # just the evergreen engine
 ```
 
 ## Documentation 📖
 
 - **[Command Reference](docs/reference.md)** — every command, flag, and behavior
-- **[Design](docs/design.md)** — why spaces and the Architect Loop exist and how they're shaped
+- **[Design](docs/design.md)** — why spaces and the Architect Loop exist, and how they're shaped
+- **[Changelog](CHANGELOG.md)** — release history
 
 ## Development 🛠️
 

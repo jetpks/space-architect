@@ -1,35 +1,29 @@
 # frozen_string_literal: true
 
-SpaceArchitect::CLI::Registry.register "space" do |prefix|
-  prefix.register "init",    SpaceArchitect::CLI::Init
-  prefix.register "new",     SpaceArchitect::CLI::New
-  prefix.register "list",    SpaceArchitect::CLI::List
-  prefix.register "ls",      SpaceArchitect::CLI::List
-  prefix.register "show",    SpaceArchitect::CLI::Show
-  prefix.register "path",    SpaceArchitect::CLI::Path
-  prefix.register "use",     SpaceArchitect::CLI::Use
-  prefix.register "current", SpaceArchitect::CLI::Current
-  prefix.register "status",  SpaceArchitect::CLI::Status
-  prefix.register "config" do |c|
-    c.register "show", SpaceArchitect::CLI::Config::Show
-    c.register "path", SpaceArchitect::CLI::Config::ConfigPath
-    c.register "set",  SpaceArchitect::CLI::Config::Set
-  end
-  prefix.register "repo" do |r|
-    r.register "add",     SpaceArchitect::CLI::Repo::Add
-    r.register "list",    SpaceArchitect::CLI::Repo::RepoList
-    r.register "ls",      SpaceArchitect::CLI::Repo::RepoList
-    r.register "resolve", SpaceArchitect::CLI::Repo::Resolve
-  end
-  prefix.register "repos" do |r|
-    r.register "add",     SpaceArchitect::CLI::Repo::Add
-    r.register "list",    SpaceArchitect::CLI::Repo::RepoList
-    r.register "ls",      SpaceArchitect::CLI::Repo::RepoList
-    r.register "resolve", SpaceArchitect::CLI::Repo::Resolve
-  end
-  prefix.register "shell" do |s|
-    s.register "init",     SpaceArchitect::CLI::Shell::ShellInit
-    s.register "fish",     SpaceArchitect::CLI::Shell::Fish
-    s.register "complete", SpaceArchitect::CLI::Shell::Complete
+require "space_core/cli"
+
+module Space::Architect
+  module CLI
+    # Exit-code bridge to the Space::Core CLI engine.
+    # `architect space <args>` (and `exe/space <args>` via Space::Core::CLI directly)
+    # hands the raw remainder to Space::Core's own dry-cli registry and translates
+    # Space::Core's recorded Outcome into the host exit code.
+    # Space::Core has its own Registry, Outcome, and :space_core_cli_outcome thread-local;
+    # this is the seam between the two registries (NOT a re-registration).
+    def self.dispatch_space(rest, out = $stdout, err = $stderr)
+      if ::Space::Core::CLI::TOP_LEVEL_HELP.include?(rest)
+        out.puts Dry::CLI::Usage.call(::Space::Core::CLI::Registry.get([]))
+        return 0
+      end
+
+      if ::Space::Core::CLI::VERSION_REQUEST.include?(rest)
+        out.puts ::Space::Core::VERSION
+        return 0
+      end
+
+      Thread.current[:space_core_cli_outcome] = nil
+      Dry::CLI.new(::Space::Core::CLI::Registry).call(arguments: rest, out: out, err: err)
+      ::Space::Core::CLI.last_outcome&.exit_code || 0
+    end
   end
 end
