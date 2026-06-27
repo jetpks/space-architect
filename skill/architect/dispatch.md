@@ -102,20 +102,33 @@ lands somewhere instead of vanishing.
 
 ### Integration (architect-only, after per-lane post-flight passes)
 
+You decide which lanes pass; the CLI does the git mechanics. Canonical path:
+
+```bash
+architect integrate <iteration> --lanes <passing-set>   # e.g. --lanes lane-a,lane-b
+architect gate <iteration>                              # integration smoke (raw output; verdict stays yours)
+architect integrate <iteration> --lanes <passing-set> --teardown   # or remove worktrees + lane branches after
+```
+
+`architect integrate` commits each named lane on its branch and merges it
+`--no-ff` into the repo's `lane/<iteration>` integration branch, in order. It
+**refuses** a lane that left builder commits or wrote out-of-bounds (the
+mechanical post-flight checks), and aborts on a merge conflict. A merge conflict
+= the lane plan wasn't disjoint = a spec defect: kill the conflicting lane and
+re-spec; don't hand-resolve builder conflicts. It runs **no gates and makes no
+verdict** — `architect gate` streams the raw gate output for you to judge.
+
+Under the hood / manual fallback (one lane shown):
+
 ```bash
 git -C repos/<repo> checkout -b lane/<iteration> <repo-base>
-# per passing lane, sequentially:
 git -C build/<id>-<lane>/wt add -A
 git -C build/<id>-<lane>/wt commit -m "lane <lane>: <what>"
 git -C repos/<repo> merge --no-ff lane/<iteration>-<lane>
 <run the gate commands>          # integration smoke after every merge
-# cleanup:
 architect worktree remove <iteration> <lane>
 git -C repos/<repo> branch -d lane/<iteration>-<lane>
 ```
-
-A merge conflict = the lane plan wasn't disjoint = a spec defect. Kill the
-conflicting lane and re-spec; don't hand-resolve builder conflicts.
 
 ## Operating guidance
 

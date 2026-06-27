@@ -204,6 +204,31 @@ module Space::Architect
         end
       end
 
+      class InstallSkills < Dry::CLI::Command
+        include GlobalOptions
+        include Helpers
+
+        desc "Install bundled skills (architect, architect-research, architect-vocabulary) for a harness"
+        option :provider, default: "claude", desc: "Harness: claude, codex, opencode, pi"
+        option :project, type: :boolean, default: false, desc: "Install to CWD instead of global"
+        option :force,   type: :boolean, default: false, desc: "Overwrite existing skills that differ"
+        option :dry_run, type: :boolean, default: false, desc: "Print what would happen without writing files"
+
+        def call(provider: "claude", project: false, force: false, dry_run: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            result = SkillInstaller.install(provider, project: project, force: force,
+                                             env: project_config.env, dry_run: dry_run)
+            verb = dry_run ? "Would install" : "Installed"
+            terminal.say "#{verb} skills for #{provider} → #{terminal.path(result[:dest_root])}"
+            result[:skills].each do |s|
+              terminal.say "  #{s[:name]}: #{terminal.style_skill_action(s[:action])} (#{terminal.path(s[:path])})"
+            end
+            CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
       module Worktree
         class Add < Dry::CLI::Command
           include GlobalOptions
@@ -385,6 +410,7 @@ Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Archit
 Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
 Space::Architect::CLI::Registry.register "verify", Space::Architect::CLI::Architect::Verify
 Space::Architect::CLI::Registry.register "dispatch", Space::Architect::CLI::Architect::Dispatch
+Space::Architect::CLI::Registry.register "install-skills", Space::Architect::CLI::Architect::InstallSkills
 Space::Architect::CLI::Registry.register "worktree" do |wt|
   wt.register "add",    Space::Architect::CLI::Architect::Worktree::Add
   wt.register "remove", Space::Architect::CLI::Architect::Worktree::Remove

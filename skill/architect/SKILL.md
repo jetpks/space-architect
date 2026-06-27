@@ -25,28 +25,51 @@ have enough information to act, act.
 
 Each iteration is **one self-contained file**,
 `architecture/I<NN>-<name>.md` (`<NN>` = zero-padded ordinality), grown section
-by section, **one commit per section** — the commits give the differentiation
-and git gives the change guarantees, so there are no separate `gates/`,
-`lanes/`, or `prd/` dirs:
+by section. The `architect` CLI writes and commits each section for you with the
+canonical message — the commits give the differentiation and git gives the
+change guarantees, so there are no separate `gates/`, `lanes/`, or `prd/` dirs:
 
-| Section | Holds | Written by | Commit |
-|---|---|---|---|
-| **Grounds** | why — research/PRD distilled (optional) | architect | `I<NN>: grounds` |
-| **Specification** | what/how — the full delegation contract | architect | `I<NN>: specification` |
-| **Acceptance Criteria** | proof — exact gate commands + thresholds | architect | `I<NN>: acceptance criteria` ❄️ **= the freeze** |
-| **Builder Prompt** | the exact lane-prompt(s) dispatched | architect | `I<NN>: dispatched` |
-| **Builder Report** | raw evidence, transcribed verbatim from scratch | architect | `I<NN>: evidence` |
-| **Verdict** | rulings + per-AC PASS/FAIL/INVALID + KILL/CONTINUE | architect (later session) | `I<NN>: verdict` |
+| Section | Holds | How you persist it |
+|---|---|---|
+| **Grounds** | why — research/brief distilled (optional) | `architect section <it> grounds --from <f>` |
+| **Specification** | what/how — the full delegation contract | `architect section <it> specification --from <f>` |
+| **Acceptance Criteria** | proof — exact gate commands + thresholds | `architect freeze <it>` ❄️ **= the freeze** |
+| **Builder Prompt** | the exact lane-prompt(s) dispatched | `architect section <it> prompt --append --lane <l> --from <f>` |
+| **Builder Report** | raw evidence, transcribed verbatim from scratch | `architect evidence <it> --lane <l>` |
+| **Verdict** | rulings + per-AC PASS/FAIL/INVALID + KILL/CONTINUE | `architect section <it> verdict --from <f>` (later session) |
+
+Each command writes the section, commits it with the canonical `I<NN>: …`
+message, and prints back what changed (SHA + diff stat; `freeze` prints the
+frozen AC; `evidence` echoes the builder's STATUS line) — so you don't hand-edit
+the file or run a separate `git add`/`commit`, and you don't run three follow-ups
+to see what happened. You still author the *content*; the CLI owns the
+*persistence*.
 
 The builder **never** writes this file — the Acceptance Criteria must stay out
 of its editable blast radius. Each lane builder writes raw evidence to a scratch
-report in `build/<id>-<lane>/report.md`; the architect transcribes it
+report in `build/<id>-<lane>/report.md`; `architect evidence` transcribes it
 **verbatim** into Builder Report. Frozen sections
 (Grounds/Specification/Acceptance Criteria) are read-only after the freeze
-commit; only Builder Prompt, Builder Report, and Verdict are appended after.
+commit — `architect section` refuses to write a frozen section once frozen; only
+Builder Prompt, Builder Report, and Verdict are appended after.
+
+**The mission brief (`architecture/BRIEF.md`).** A mission with a durable spec
+carries one brief — numbered §sections (§1 goal, §2 constraints, … §N definition
+of done) that span iterations. Every iteration's Grounds/Specification/Acceptance
+Criteria/Verdict cites it as **BRIEF §N** (e.g. `(BRIEF §3.1)`), the way each gate
+addresses its intent back to one frozen reference: the Acceptance Criteria table
+carries a `Brief §` column, the Specification Objective cites it, the Verdict
+reads "diff vs BRIEF §1/§3.3 — CONTINUE". Scaffold it with `architect brief new`.
+The brief is frozen at the mission level — edits to a §section are logged
+decisions in `ARCHITECT.md`, never silent per-iteration drift. Discovery missions
+that are still finding their shape defer the brief, cite per-iteration Grounds,
+and promote the consolidated picture into BRIEF.md once it stabilizes.
 
 Full rationale and citations: `DESIGN.md` in this skill's repo. Exact dispatch
-commands and the lane-prompt template: `dispatch.md` next to this file.
+commands and the lane-prompt template: `dispatch.md` next to this file. To load
+this system's vocabulary without running the loop (e.g. when working *on* the
+skill), invoke the `/architect-vocabulary` skill — it is the glossary, not the
+loop.
 
 ## Hard rules
 
@@ -94,9 +117,10 @@ commands and the lane-prompt template: `dispatch.md` next to this file.
   resolves (`echo ok | claude -p --model claude-sonnet-4-6 --max-turns 1`;
   details in `dispatch.md`). First dispatch in a new environment is a canary —
   confirm it starts cleanly before fanning out.
-- Read `architecture/ARCHITECT.md` (the cross-iteration table of contents) and
-  the iteration file `architecture/I<NN>-<name>.md` for any in-flight
-  iteration. If `ARCHITECT.md` is missing, run `architect init` (scaffolds
+- Read `architecture/ARCHITECT.md` (the cross-iteration table of contents),
+  `architecture/BRIEF.md` if present (the durable §-numbered mission contract you
+  cite as BRIEF §N), and the iteration file `architecture/I<NN>-<name>.md` for any
+  in-flight iteration. If `ARCHITECT.md` is missing, run `architect init` (scaffolds
   `architecture/ARCHITECT.md` and the `architect:` block in `space.yaml`,
   commits). Keep the handoff a short TOC (~150 lines): TL;DR + repos in scope +
   an iteration index pointing at each iteration file; per-iteration detail lives
@@ -117,15 +141,18 @@ Verdict. No deferrals.
 
 ### 2. Judge
 
-Read the frozen Acceptance Criteria from the freeze commit
-(`git show <freeze-sha>:architecture/I<NN>-<name>.md`). For each gate: run the
-gate command yourself (in the relevant repo under `repos/`), compare the output
-against the verbatim frozen text → **PASS / FAIL / INVALID** (INVALID = not
-measured the way the gate specifies). Check
-`git diff <freeze-sha> HEAD -- architecture/I<NN>-<name>.md` — any change to
-Grounds/Specification/Acceptance Criteria lines is an automatic FAIL.
+Read the frozen Acceptance Criteria from the freeze commit (`architect freeze`
+re-prints them, or `git show <freeze-sha>:architecture/I<NN>-<name>.md`). For each
+gate: run the gate command yourself — `architect gate <iteration>` runs the
+frozen gate commands in the resolved repo/worktree and streams raw output (it is a
+runner, never a judge), or run them by hand — then compare the output against the
+verbatim frozen text → **PASS / FAIL / INVALID** (INVALID = not measured the way
+the gate specifies). Check `git diff <freeze-sha> HEAD --
+architecture/I<NN>-<name>.md` — any change to Grounds/Specification/Acceptance
+Criteria lines is an automatic FAIL.
 Gate-pass is necessary, not sufficient: read the diff against the
-Specification's intent before the verdict — test-passing changes are frequently
+Specification's intent **and the cited BRIEF §sections** before the verdict —
+test-passing changes are frequently
 unmergeable, and iterating against visible tests is a known gaming vector. Read
 for **idiomaticity and style**, not just correctness: does the code match the
 target repo's house conventions (naming, guards, predicates, error/persistence
@@ -166,7 +193,9 @@ Two scales, two routes:
   state-of-the-art surveys → invoke the `/architect-research` skill (a scout
   researcher maps the topic, the orchestrator designs topic-specific parallel
   researcher lanes, claims verified against sources, synthesized into a cited
-  report). Its report then distills into the iteration's **Grounds** section.
+  report). Its report then distills into `architecture/BRIEF.md` §sections when
+  it is mission-scope (a durable contract that spans iterations), or the
+  iteration's **Grounds** section when it is iteration-scope.
 - **Iteration scale** — run the inline fan-out below only when at least one
   trigger holds: (a) the iteration depends on external APIs, libraries, or
   versions not already used in the target repo; (b) a narrow approach choice
@@ -186,11 +215,13 @@ and write Grounds. Findings without a source URL don't enter Grounds.
 
 One-PR-sized. Run `architect new <name>` to scaffold
 `architecture/I<NN>-<name>.md` (it allocates the next ordinal and records the
-iteration in `space.yaml`), then write the **Specification** section — the
-full delegation contract, self-contained:
+iteration in `space.yaml`), then write the **Specification** section with
+`architect section <name> specification --from <file>` — the full delegation
+contract, self-contained:
 
-- **Objective** — what to build and why (give the reason, not just the ask). If
-  a Grounds section exists, cite it rather than restating it.
+- **Objective** — what to build and why (give the reason, not just the ask).
+  Cite **BRIEF §N** for durable context and a Grounds section for
+  iteration-local research, rather than restating either.
 - **Output format** — what the builder reports: raw tables, numbers, commit
   SHAs, test output paths. No interpretation.
 - **Tool guidance** — the exact verification commands for the target repo, and
@@ -212,12 +243,15 @@ full delegation contract, self-contained:
   Code has no per-invocation effort flag — see `dispatch.md`.
 
 Then write the **Acceptance Criteria** section — exact gate commands +
-thresholds — and run `architect freeze <name>`. It commits the iteration file
-and records the `freeze_sha` in `space.yaml`; **that commit is the freeze** ❄️
-and is the last thing before dispatch. Commit Grounds and Specification in
-their own commits first so the freeze diff stays clean. (Plain-git equivalent:
-commit the file yourself and note the SHA — `freeze` also refuses to re-freeze
-once a frozen section changed.)
+thresholds, each row carrying a `Brief §` column that addresses it back to
+intent — and run `architect freeze <name>`. What must be frozen before dispatch
+is the Acceptance Criteria: `architect freeze` commits any pending content in the
+frozen region (Grounds/Specification/Acceptance Criteria) in one freeze commit,
+records the `freeze_sha` in `space.yaml`, and prints the frozen AC back; **that
+commit is the freeze** ❄️ and is the last thing before dispatch. You needn't
+sequence Grounds and Specification into separate commits first — the freeze
+snapshots the whole frozen region and refuses to re-freeze once a frozen section
+changed afterward.
 
 ### 5. Dispatch (one fresh `claude -p` per lane, worktree-isolated)
 
@@ -230,10 +264,11 @@ Per the mechanics in `dispatch.md`:
   space commit — and records it in `space.yaml`).
 
 Assemble each lane's lane-prompt (the template in `dispatch.md` + this lane's
-section of the Specification + the frozen Acceptance Criteria), record it in the
-iteration file's **Builder Prompt** section (committed — the dispatched-prompt
-provenance), and write a copy to `build/<id>-<lane>/prompt.md` to feed on
-stdin. Then run `architect dispatch <iteration> <lane>` — it assembles the
+section of the Specification + the frozen Acceptance Criteria) and write it to
+`build/<id>-<lane>/prompt.md` (fed to the builder on stdin); record it in the
+iteration file's **Builder Prompt** section — the dispatched-prompt provenance —
+with `architect section <iteration> prompt --append --lane <lane> --from
+build/<id>-<lane>/prompt.md`. Then run `architect dispatch <iteration> <lane>` — it assembles the
 canonical `claude -p` argv, pins the model, and streams stream-json to
 `build/<id>-<lane>/run.jsonl`. Launch one dispatch per worktree — each as its
 **own background Bash tool call** (your harness's `run_in_background`), **not**
@@ -264,23 +299,24 @@ shows **only files inside the lane's declared set** — an out-of-bounds write
 fails the lane, (e) `git -C <worktree> log <repo-base>..` is empty — a builder
 commit means a tampered worktree (reset and re-dispatch).
 
-**Transcribe** each lane's scratch report (`build/<id>-<lane>/report.md`)
-**verbatim** into the iteration file's **Builder Report** section — per-lane
-subsections for a multi-lane iteration — and commit. The builder never wrote
-into `architecture/`; you transcribe, preserving raw-results-only (no
-interpretation).
+**Transcribe** each lane's scratch report into the **Builder Report** section
+with `architect evidence <iteration> --lane <lane>` — it copies
+`build/<id>-<lane>/report.md` **verbatim** (byte-for-byte, no interpretation),
+commits it, and echoes the builder's STATUS line. The builder never wrote into
+`architecture/`; the CLI transcribes, preserving raw-results-only.
 
-**Then integrate** (you do this — Claude Code has no sandbox, so confirm the
-lane made no commits with `git -C <worktree> log <repo-base>..` before
-trusting it), **per repo**: commit each passing lane on its lane branch, then
-merge that repo's lanes sequentially into that repo's integration branch
-`lane/<iteration>`, running the gate commands after each merge as an
-integration smoke check. A merge conflict means the lane plan wasn't disjoint —
-that's a spec defect: kill the conflicting lane and re-spec it. A cross-repo
-mission yields one `lane/<iteration>` branch per touched repo. Update the
-iteration index in `architecture/ARCHITECT.md` (recording each repo's
-integration branch), remove the worktrees
-(`architect worktree remove <iteration> <lane>`), and commit the space.
+**Then integrate** — you decide which lanes pass, the CLI does the git
+mechanics. `architect integrate <iteration> --lanes <passing-set>` commits each
+named lane on its branch and merges it `--no-ff` into the repo's integration
+branch `lane/<iteration>`, in order; it **refuses** a lane that left builder
+commits or wrote out-of-bounds, and stops on a merge conflict — which means the
+lane plan wasn't disjoint, a spec defect: kill the conflicting lane and re-spec
+it (never hand-resolve). Then run `architect gate <iteration>` against the
+integration branch as a smoke check (raw output; the verdict stays yours). A
+cross-repo mission yields one `lane/<iteration>` branch per touched repo. Update
+the iteration index in `architecture/ARCHITECT.md` (recording each repo's
+integration branch), remove the worktrees (`architect integrate … --teardown`,
+or `architect worktree remove <iteration> <lane>`), and commit the space.
 
 **Do not judge now** — the Verdict on the integration branch belongs to the
 next architect session; merge to each repo's main only on a CONTINUE verdict
