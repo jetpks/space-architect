@@ -155,4 +155,31 @@ class RendererTest < Space::ArchitectTest
     out = renderer(level: 1).render(lane: "e", events: ev, alive: false)
     assert_includes out, "✗", "error must surface at L1"
   end
+
+  # ── D1: mux-style incremental drive at L1 prints `running` exactly once ───
+
+  def test_l1_incremental_drive_running_once
+    ev = load_events("success")
+    r = renderer(level: 1)
+    out = +""
+    out << r.render(lane: "a", events: [], alive: true)
+    ev.each { |e| out << r.render(lane: "a", events: [e], alive: e["type"] != "result") }
+    count = out.lines.count { |l| l.include?("running") }
+    assert_equal 1, count, "running must appear exactly once in incremental drive, got #{count}"
+    assert_includes out, "complete"
+  end
+
+  # ── D3: #lifecycle? predicate ─────────────────────────────────────────────
+
+  def test_lifecycle_predicate_true_at_l1
+    assert renderer(level: 1).lifecycle?
+  end
+
+  def test_lifecycle_predicate_false_at_l0
+    refute renderer(level: 0).lifecycle?
+  end
+
+  def test_lifecycle_predicate_false_when_jsonl
+    refute renderer(level: 1, jsonl: true).lifecycle?
+  end
 end

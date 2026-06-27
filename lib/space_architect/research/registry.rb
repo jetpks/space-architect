@@ -12,7 +12,7 @@ module Space::Architect
 
       def add(run)
         runs = load_runs
-        runs.reject! { |r| r[:id] == run.id }
+        runs.reject! { |r| r["id"] == run.id }
         runs << serialize(run)
         write(runs)
         run
@@ -23,7 +23,7 @@ module Space::Architect
       end
 
       def find(id)
-        load_runs.find { |h| h[:id] == id }.then { |h| h ? deserialize(h) : nil }
+        load_runs.find { |h| h["id"] == id }.then { |h| h ? deserialize(h) : nil }
       end
 
       private

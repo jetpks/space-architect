@@ -77,8 +77,7 @@ module Space::Architect
               end
 
               if Time.now - last_emit > HEARTBEAT_EVERY
-                emit("[#{run.id}] ⏳ still running…\n") if @renderer.instance_variable_get(:@level).to_i >= 1 &&
-                                                           !@renderer.instance_variable_get(:@jsonl)
+                emit("[#{run.id}] ⏳ still running…\n") if @renderer.lifecycle?
                 last_emit = Time.now
               end
 
