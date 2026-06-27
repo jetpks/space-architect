@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Stub claude bin for research supervisor tests.
+# Reads prompt from stdin (ignored), writes the success fixture to stdout
+# (which run_detached redirects to run.jsonl), then exits 0.
+#
+# Set STUB_CLAUDE_FIXTURE env to "error" to emit the error fixture instead.
+fixture_name = ENV.fetch("STUB_CLAUDE_FIXTURE", "success")
+fixture_path = File.join(__dir__, "../fixtures/research/#{fixture_name}.jsonl")
+$stdin.read  # consume stdin (the prompt)
+File.foreach(fixture_path) do |line|
+  $stdout.print line
+  $stdout.flush
+end
+exit 0

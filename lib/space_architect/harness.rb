@@ -41,10 +41,13 @@ module Space::Architect
         "Bash(git branch:*)"
       ].join(",")
 
-      def initialize(model:, max_turns:, bin: nil)
-        @model     = model
-        @max_turns = max_turns
-        @bin       = bin || ENV.fetch("ARCHITECT_CLAUDE_BIN", "claude")
+      def initialize(model:, max_turns:, bin: nil,
+                     allowed_tools: ALLOWED_TOOLS, disallowed_tools: DISALLOWED_TOOLS)
+        @model            = model
+        @max_turns        = max_turns
+        @bin              = bin || ENV.fetch("ARCHITECT_CLAUDE_BIN", "claude")
+        @allowed_tools    = allowed_tools
+        @disallowed_tools = disallowed_tools
       end
 
       def run(prompt_path:, run_log_path:, chdir:)
@@ -81,16 +84,17 @@ module Space::Architect
       private
 
       def argv
-        [
+        args = [
           @bin, "-p",
           "--model", @model,
           "--permission-mode", "acceptEdits",
-          "--allowedTools", ALLOWED_TOOLS,
-          "--disallowedTools", DISALLOWED_TOOLS,
+          "--allowedTools", @allowed_tools,
           "--output-format", "stream-json",
           "--verbose",
           "--max-turns", @max_turns.to_s
         ]
+        args += ["--disallowedTools", @disallowed_tools] unless @disallowed_tools.to_s.empty?
+        args
       end
     end
 
