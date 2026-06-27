@@ -2,7 +2,7 @@
 
 require_relative "harness"
 
-module SpaceArchitect
+module Space::Architect
   # Thin backward-compat wrapper around Harness::ClaudeCodeHarness.
   # Existing callers that construct Dispatcher.new(...).run(...) continue to work byte-for-byte.
   class Dispatcher

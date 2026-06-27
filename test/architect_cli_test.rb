@@ -3,7 +3,7 @@
 require_relative "test_helper"
 require "yaml"
 
-class ArchitectCLITest < SpaceArchitectTest
+class ArchitectCLITest < Space::ArchitectTest
   # Build a real git-backed space in a temp dir so architect commands can commit.
   # Does not go through `space new` (which uses Async::Process). Instead writes
   # space.yaml and calls the real git binary directly.
@@ -458,7 +458,7 @@ class ArchitectCLITest < SpaceArchitectTest
 
         assert_empty err
         # Exits 0 (launched successfully)
-        assert_equal 0, SpaceArchitect::CLI.last_outcome&.exit_code
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
         # Output includes PID
         assert_match(/PID:\s+\d+/, out, "output must include PID")
         # Output includes run.jsonl path
@@ -515,7 +515,7 @@ class ArchitectCLITest < SpaceArchitectTest
         assert_empty err
         assert_match(/Builder exited with status 0/, out)
         refute_match(/Dispatched detached/, out)
-        assert_equal 0, SpaceArchitect::CLI.last_outcome&.exit_code
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
       end
     end
   ensure
@@ -750,7 +750,7 @@ class ArchitectCLITest < SpaceArchitectTest
         assert_match(/\(default\)\s+-\s+discarded/, v01_line)
 
         # exit code 0
-        assert_equal 0, SpaceArchitect::CLI.last_outcome&.exit_code
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
       end
     end
   ensure

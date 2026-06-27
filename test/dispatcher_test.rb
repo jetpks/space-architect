@@ -4,7 +4,7 @@ require_relative "test_helper"
 require "yaml"
 require "tmpdir"
 
-class DispatcherTest < SpaceArchitectTest
+class DispatcherTest < Space::ArchitectTest
   FAKE_CLAUDE_SCRIPT = <<~RUBY
     #!/usr/bin/env ruby
     a = ARGV; c = Dir.pwd; s = $stdin.gets
@@ -43,7 +43,7 @@ class DispatcherTest < SpaceArchitectTest
     File.chmod(0o755, fake)
 
     space   = Space::Core::Space.load(space_dir)
-    mission = SpaceArchitect::ArchitectMission.new(space: space)
+    mission = Space::Architect::ArchitectMission.new(space: space)
     mission.init!
     mission.new_iteration!("demo")
     mission.worktree_add("my-repo", "demo", "A")
@@ -122,7 +122,7 @@ class DispatcherTest < SpaceArchitectTest
     run_log = File.join(root, "run.jsonl")
     File.write(prompt, "test prompt\n")
 
-    dispatcher = SpaceArchitect::Dispatcher.new(claude_bin: fake_bin)
+    dispatcher = Space::Architect::Dispatcher.new(claude_bin: fake_bin)
     pid = dispatcher.run_detached(prompt_path: prompt, run_log_path: run_log, chdir: wt_dir)
 
     assert_instance_of Integer, pid

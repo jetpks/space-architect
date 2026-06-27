@@ -4,7 +4,7 @@ require "async/process"
 require "json"
 require "pathname"
 
-module SpaceArchitect
+module Space::Architect
   module Harness
     CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-6"
 
