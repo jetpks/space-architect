@@ -97,3 +97,4 @@ end
 require_relative "cli/architect"
 require_relative "cli/space"
 require_relative "cli/src"
+require_relative "cli/research"
