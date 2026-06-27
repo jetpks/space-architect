@@ -1,0 +1,20 @@
+{"timestamp":"2026-06-10T17:53:06.721Z","type":"session_meta","payload":{"id":"sess-codex-1","timestamp":"2026-06-10T17:53:06.721Z","cwd":"/tmp/space","originator":"codex-tui","cli_version":"0.133.0","source":"cli","model_provider":"openai"}}
+{"timestamp":"2026-06-10T17:59:43.932Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
+{"timestamp":"2026-06-10T17:59:43.938Z","type":"turn_context","payload":{"turn_id":"turn-1","cwd":"/tmp/space","model":"gpt-5.5","approval_policy":"never"}}
+{"timestamp":"2026-06-10T17:59:43.938Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions>\nsandbox stuff\n</permissions instructions>"}]}}
+{"timestamp":"2026-06-10T17:59:43.938Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/tmp/space</cwd>\n</environment_context>"}]}}
+{"timestamp":"2026-06-10T17:59:43.946Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"fix the flappy alert\nit pages us every night"}]}}
+{"timestamp":"2026-06-10T17:59:43.946Z","type":"event_msg","payload":{"type":"user_message","message":"fix the flappy alert\nit pages us every night"}}
+{"timestamp":"2026-06-10T17:59:47.340Z","type":"response_item","payload":{"type":"reasoning","summary":[],"encrypted_content":"abc123=="}}
+{"timestamp":"2026-06-10T17:59:50.553Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls -la\",\"workdir\":\"/tmp/space\"}","call_id":"call_1"}}
+{"timestamp":"2026-06-10T17:59:50.600Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"total 0"}}
+{"timestamp":"2026-06-10T18:02:16.891Z","type":"response_item","payload":{"type":"custom_tool_call","status":"completed","call_id":"call_2","name":"apply_patch","input":"*** Begin Patch\n*** Update File: /tmp/space/foo.rb\n@@\n-a\n+b\n*** End Patch"}}
+{"timestamp":"2026-06-10T18:02:16.915Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call_2","output":"Success. Updated the following files:\nM /tmp/space/foo.rb"}}
+{"timestamp":"2026-06-10T18:26:52.298Z","type":"response_item","payload":{"type":"web_search_call","status":"completed"}}
+{"timestamp":"2026-06-11T02:06:32.299Z","type":"response_item","payload":{"type":"function_call","name":"request_user_input","arguments":"{\"questions\":[{\"header\":\"Scope\",\"id\":\"q1\",\"question\":\"Ship it?\",\"options\":[{\"label\":\"Yes\",\"description\":\"do it\"}]}]}","call_id":"call_3"}}
+{"timestamp":"2026-06-11T02:07:36.106Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_3","output":"{\"answers\":{\"q1\":{\"answers\":[\"Yes\"]}}}"}}
+{"timestamp":"2026-06-11T02:08:00.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"All done."}]}}
+{"timestamp":"2026-06-11T02:08:00.001Z","type":"event_msg","payload":{"type":"agent_message","message":"All done."}}
+{"timestamp":"2026-06-11T02:08:01.000Z","type":"compacted","payload":{"message":"","replacement_history":[{"type":"message","role":"user","content":[{"type":"input_text","text":"fix the flappy alert"}]}]}}
+{"timestamp":"2026-06-11T02:08:02.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total":1}}}
+{"timestamp":"2026-06-11T02:09:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<turn_aborted>\nThe user interrupted the previous turn on purpose.\n</turn_aborted>"}]}}

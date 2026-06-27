@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ruby-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      HANAMI_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/architect_test
+      REDIS_URL: redis://localhost:6379/0
+      SESSION_SECRET: test-secret-change-in-production-must-be-at-least-64-chars-min-padding-ok
+      BUNDLE_PATH: vendor/bundle
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v4
+      - uses: actions/cache@v5
+        with:
+          path: vendor/bundle
+          key: bundle-ruby-${{ hashFiles('Gemfile.lock') }}
+          restore-keys: bundle-ruby-
+      - uses: actions/cache@v5
+        with:
+          path: /tmp/pgdg-debs
+          key: pgdg-debs-postgresql-client-17.10
+      # config/db/structure.sql is a PostgreSQL 17 dump (uses transaction_timeout);
+      # ubuntu-latest bundles psql 16, which can neither load it nor run the
+      # pg_database existence check against a v17 server. Install psql 17 directly
+      # from the PGDG pool (skips apt-get update — 3 debs, ~3s vs ~17s).
+      # Cached so we don't re-download from apt.postgresql.org every run.
+      - name: Install PostgreSQL 17 client
+        run: |
+          if [ ! -d /tmp/pgdg-debs ]; then
+            mkdir -p /tmp/pgdg-debs
+            base="https://apt.postgresql.org/pub/repos/apt/pool/main"
+            curl -fsSL "$base/p/postgresql-common/postgresql-client-common_291.pgdg24.04+1_all.deb" -o /tmp/pgdg-debs/pcc.deb
+            curl -fsSL "$base/p/postgresql-18/libpq5_18.4-1.pgdg24.04+1_amd64.deb" -o /tmp/pgdg-debs/libpq5.deb
+            curl -fsSL "$base/p/postgresql-17/postgresql-client-17_17.10-1.pgdg24.04+1_amd64.deb" -o /tmp/pgdg-debs/pc17.deb
+          fi
+          sudo dpkg -i /tmp/pgdg-debs/pcc.deb /tmp/pgdg-debs/libpq5.deb /tmp/pgdg-debs/pc17.deb
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+      - run: bundle install
+      - run: bundle exec hanami db prepare
+      - run: bundle exec rake test 2>&1 | tee /tmp/rake-test.log
+      - if: always()
+        name: Summary
+        run: |
+          echo "## Ruby tests" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^\d+ runs,' /tmp/rake-test.log >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm test
+      - run: npm run check
+
+  gem-suites:
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_PATH: vendor/bundle
+    strategy:
+      matrix:
+        gem:
+          - hanami-credentials
+          - hanami-force-ssl
+          - hanami-healthcheck
+          - inertia-hanami
+          - vite-hanami
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v4
+      - uses: actions/cache@v5
+        with:
+          path: gems/${{ matrix.gem }}/vendor/bundle
+          key: bundle-gem-${{ matrix.gem }}-${{ hashFiles(format('gems/{0}/Gemfile.lock', matrix.gem)) }}
+          restore-keys: bundle-gem-${{ matrix.gem }}-
+      - run: bundle install
+        working-directory: gems/${{ matrix.gem }}
+      - run: bundle exec rake test 2>&1 | tee /tmp/rake-test.log
+        working-directory: gems/${{ matrix.gem }}
+      - if: always()
+        name: Summary
+        run: |
+          echo "## Gem suite: ${{ matrix.gem }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^\d+ runs,' /tmp/rake-test.log >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  security-audit:
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_PATH: vendor/bundle
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v4
+      - uses: actions/cache@v5
+        with:
+          path: vendor/bundle
+          key: bundle-ruby-${{ hashFiles('Gemfile.lock') }}
+          restore-keys: bundle-ruby-
+      - run: bundle install
+      - run: gem install bundler-audit
+      - run: bundler-audit check --update 2>&1 | tee /tmp/audit.log
+      - if: always()
+        name: Summary
+        run: |
+          echo "## Security audit" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -5 /tmp/audit.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

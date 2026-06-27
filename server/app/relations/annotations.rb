@@ -1,0 +1,15 @@
+# frozen_string_literal: true
+
+module Architect
+  module Relations
+    class Annotations < Architect::DB::Relation
+      schema(:annotations, infer: true) do
+        associations do
+          belongs_to :conversation
+          belongs_to :user
+          belongs_to :anchor_message, relation: :messages
+        end
+      end
+    end
+  end
+end
