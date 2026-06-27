@@ -15,7 +15,11 @@ class SrcShellIntegrationTest < Minitest::Test
     @fish_script ||= ShellIntegration.for("fish")
   end
 
-  # ---- module standalone — no Space::Architect reference ----
+  def fish_completions
+    @fish_completions ||= ShellIntegration.completions_for("fish")
+  end
+
+  # ---- independence: no Space::Architect, no Space::Core ----
 
   def test_module_has_no_space_architect_reference
     src = File.read(File.expand_path("../../lib/space_src/shell_integration.rb", __dir__))
@@ -23,9 +27,42 @@ class SrcShellIntegrationTest < Minitest::Test
       "shell_integration.rb must not reference Space::Architect")
   end
 
+  def test_module_has_no_space_core_reference
+    src = File.read(File.expand_path("../../lib/space_src/shell_integration.rb", __dir__))
+    refute_match(/Space::Core|space_core/i, src,
+      "shell_integration.rb must not reference Space::Core / space_core")
+  end
+
+  def test_cli_shell_has_no_space_architect_reference
+    src = File.read(File.expand_path("../../lib/space_src/cli/shell.rb", __dir__))
+    refute_match(/space_?architect/i, src,
+      "cli/shell.rb must not reference Space::Architect")
+  end
+
+  def test_cli_shell_has_no_space_core_reference
+    src = File.read(File.expand_path("../../lib/space_src/cli/shell.rb", __dir__))
+    refute_match(/Space::Core|space_core/i, src,
+      "cli/shell.rb must not reference Space::Core / space_core")
+  end
+
   def test_fish_script_has_no_space_architect_reference
     refute_match(/space_?architect/i, fish_script,
       "generated fish script must not reference Space::Architect")
+  end
+
+  def test_fish_script_has_no_space_core_reference
+    refute_match(/Space::Core|space_core/i, fish_script,
+      "generated fish script must not reference Space::Core / space_core")
+  end
+
+  def test_fish_completions_have_no_space_architect_reference
+    refute_match(/space_?architect/i, fish_completions,
+      "generated fish completions must not reference Space::Architect")
+  end
+
+  def test_fish_completions_have_no_space_core_reference
+    refute_match(/Space::Core|space_core/i, fish_completions,
+      "generated fish completions must not reference Space::Core / space_core")
   end
 
   # ---- script defines function src ----
@@ -83,14 +120,11 @@ class SrcShellIntegrationTest < Minitest::Test
   # ---- known subcommands do NOT cd ----
 
   def test_fish_script_passes_through_known_subcommands_without_cd
-    # The known subcommands are in a 'case' branch that calls `command src`
-    # directly without any cd logic.
     assert_match(/case repo org sync status config daemon clone shell/, fish_script,
       "fish script must list known subcommands in a pass-through case")
   end
 
   def test_fish_script_known_subcommands_branch_has_no_cd
-    # Extract the pass-through branch lines (between "case repo..." and "case '*'")
     lines = fish_script.lines
     passthrough_start = lines.index { |l| l.include?("case repo org") }
     wildcard_start = lines.index { |l| l.strip == "case '*'" }
@@ -99,6 +133,180 @@ class SrcShellIntegrationTest < Minitest::Test
     passthrough_lines = lines[passthrough_start...wildcard_start].join
     refute_includes passthrough_lines, "cd \"$__src_target\"",
       "pass-through branch must not contain a cd call"
+  end
+
+  # ---- version check in function ----
+
+  def test_fish_script_contains_version_check
+    assert_includes fish_script, "__src_compat_checked",
+      "fish script must contain the version-compat guard"
+  end
+
+  def test_fish_script_version_substituted
+    assert_includes fish_script, Space::Src::VERSION,
+      "fish script must have __SRC_VERSION__ substituted with the gem version"
+    refute_includes fish_script, "__SRC_VERSION__",
+      "fish script must not contain the raw placeholder"
+  end
+
+  # ---- completions_for ----
+
+  def test_completions_for_fish_returns_complete_c_src
+    assert_includes fish_completions, "complete -c src",
+      "completions must contain complete -c src"
+  end
+
+  def test_completions_for_fish_defines_helper_predicates
+    assert_includes fish_completions, "__src_complete_needs_command",
+      "completions must define __src_complete_needs_command"
+    assert_includes fish_completions, "__src_complete_using_command",
+      "completions must define __src_complete_using_command"
+    assert_includes fish_completions, "__src_complete_first_argument_is",
+      "completions must define __src_complete_first_argument_is"
+  end
+
+  def test_completions_for_fish_includes_checkouts_callback
+    assert_includes fish_completions, "command src shell complete",
+      "completions must call back into command src shell complete"
+    assert_includes fish_completions, "checkouts",
+      "completions must reference checkouts kind"
+  end
+
+  def test_completions_for_fish_includes_top_level_subcommands
+    %w[clone config daemon org repo shell status sync].each do |cmd|
+      assert_includes fish_completions, cmd,
+        "completions must include top-level subcommand #{cmd}"
+    end
+  end
+
+  def test_completions_for_unsupported_shell_raises
+    assert_raises(RuntimeError) { ShellIntegration.completions_for("zsh") }
+  end
+
+  # ---- path_for / completions_path_for ----
+
+  def test_path_for_fish_returns_under_config_home
+    with_temp_home do |env, home|
+      path = ShellIntegration.path_for("fish", env: env)
+      assert path.to_s.start_with?(home),
+        "path_for must be under the injected temp home"
+      assert path.to_s.end_with?("fish/functions/src.fish"),
+        "path_for must be the fish/functions/src.fish file"
+    end
+  end
+
+  def test_completions_path_for_fish_returns_under_config_home
+    with_temp_home do |env, home|
+      path = ShellIntegration.completions_path_for("fish", env: env)
+      assert path.to_s.start_with?(home),
+        "completions_path_for must be under the injected temp home"
+      assert path.to_s.end_with?("fish/completions/src.fish"),
+        "completions_path_for must be the fish/completions/src.fish file"
+    end
+  end
+
+  # ---- install / uninstall isolation and idempotency ----
+
+  def test_install_writes_both_files_under_temp_home
+    with_temp_home do |env, home|
+      ShellIntegration.install("fish", env: env, force: false)
+      fn_path = ShellIntegration.path_for("fish", env: env)
+      co_path = ShellIntegration.completions_path_for("fish", env: env)
+
+      assert fn_path.to_s.start_with?(home), "function file must be under temp home"
+      assert File.exist?(fn_path), "function file must exist after install"
+      assert co_path.to_s.start_with?(home), "completions file must be under temp home"
+      assert File.exist?(co_path), "completions file must exist after install"
+    end
+  end
+
+  def test_install_completions_file_is_src_completions
+    with_temp_home do |env, _home|
+      ShellIntegration.install("fish", env: env, force: false)
+      co_path = ShellIntegration.completions_path_for("fish", env: env)
+      assert_includes File.read(co_path), "complete -c src",
+        "installed completions file must be the src completions"
+    end
+  end
+
+  def test_install_is_idempotent
+    with_temp_home do |env, _home|
+      ShellIntegration.install("fish", env: env, force: false)
+      result = ShellIntegration.install("fish", env: env, force: false)
+      assert_equal :unchanged, result.fetch(:action),
+        "second install must be :unchanged"
+      assert_equal :unchanged, result.fetch(:completions_action),
+        "second completions install must be :unchanged"
+    end
+  end
+
+  def test_install_returns_installed_on_first_run
+    with_temp_home do |env, _home|
+      result = ShellIntegration.install("fish", env: env, force: false)
+      assert_equal :installed, result.fetch(:action)
+      assert_equal :installed, result.fetch(:completions_action)
+    end
+  end
+
+  def test_uninstall_removes_both_files
+    with_temp_home do |env, _home|
+      ShellIntegration.install("fish", env: env, force: false)
+      fn_path = ShellIntegration.path_for("fish", env: env)
+      co_path = ShellIntegration.completions_path_for("fish", env: env)
+
+      result = ShellIntegration.uninstall("fish", env: env, force: false)
+      assert_equal :removed, result.fetch(:action)
+      assert_equal :removed, result.fetch(:completions_action)
+      refute File.exist?(fn_path), "function file must be removed"
+      refute File.exist?(co_path), "completions file must be removed"
+    end
+  end
+
+  def test_uninstall_on_missing_files_returns_missing
+    with_temp_home do |env, _home|
+      result = ShellIntegration.uninstall("fish", env: env, force: false)
+      assert_equal :missing, result.fetch(:action)
+      assert_equal :missing, result.fetch(:completions_action)
+    end
+  end
+
+  def test_install_refuses_to_clobber_unmanaged_file
+    with_temp_home do |env, _home|
+      fn_path = ShellIntegration.path_for("fish", env: env)
+      FileUtils.mkdir_p(File.dirname(fn_path))
+      File.write(fn_path, "# some other fish config\n")
+      assert_raises(RuntimeError) do
+        ShellIntegration.install("fish", env: env, force: false)
+      end
+    end
+  end
+
+  def test_install_force_overwrites_unmanaged_file
+    with_temp_home do |env, _home|
+      fn_path = ShellIntegration.path_for("fish", env: env)
+      FileUtils.mkdir_p(File.dirname(fn_path))
+      File.write(fn_path, "# some other fish config\n")
+      result = ShellIntegration.install("fish", env: env, force: true)
+      assert_equal :updated, result.fetch(:action)
+      assert_includes File.read(fn_path), "function src"
+    end
+  end
+
+  def test_install_does_not_touch_real_fish_config
+    with_temp_home do |env, home|
+      ShellIntegration.install("fish", env: env, force: false)
+      real_fish = File.expand_path("~/.config/fish")
+      # Only assert isolation if the real fish dir exists
+      if File.exist?(real_fish)
+        fn_path = ShellIntegration.path_for("fish", env: env)
+        refute fn_path.to_s.start_with?(real_fish),
+          "installed path must not be inside the real ~/.config/fish"
+      end
+      # Primary assertion: everything is under the temp home
+      fn_path = ShellIntegration.path_for("fish", env: env)
+      assert fn_path.to_s.start_with?(home),
+        "must be isolated under temp home #{home}"
+    end
   end
 
   # ---- src shell init fish command ----
