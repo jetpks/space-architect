@@ -69,11 +69,15 @@ module Space::Architect
 
         if terminal
           lines << terminal_line(lane, terminal)
-        elsif alive && @level >= 1
+        elsif alive && @level >= 1 && events.empty?
           lines << "[#{lane}] running"
         end
 
         lines.reject(&:empty?).join("\n").then { |s| s.empty? ? s : "#{s}\n" }
+      end
+
+      def lifecycle?
+        @level >= 1 && !@jsonl
       end
 
       private
