@@ -194,9 +194,7 @@ module SpaceArchitect
         end
       end
 
-      class Section < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
+      class Section < BaseCommand
 
         desc "Write a section of the iteration file and commit it (one call)"
         argument :iteration, required: true,  desc: "Iteration name"
@@ -236,9 +234,7 @@ module SpaceArchitect
         end
       end
 
-      class Evidence < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
+      class Evidence < BaseCommand
 
         desc "Transcribe a lane's scratch report VERBATIM into Builder Report and commit"
         argument :iteration, required: true,  desc: "Iteration name"
@@ -260,9 +256,7 @@ module SpaceArchitect
         end
       end
 
-      class Merge < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
+      class Merge < BaseCommand
 
         desc "Integrate ONE judged-passing lane (merges --no-ff; runs no gates, makes no verdict)"
         argument :iteration, required: true,  desc: "Iteration name"
@@ -285,9 +279,7 @@ module SpaceArchitect
         end
       end
 
-      class Integrate < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
+      class Integrate < BaseCommand
 
         desc "Integrate the architect-supplied set of passing lanes, in order (stops on conflict)"
         argument :iteration, required: true,  desc: "Iteration name"
@@ -312,9 +304,7 @@ module SpaceArchitect
         end
       end
 
-      class Gate < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
+      class Gate < BaseCommand
 
         desc "Run the frozen Acceptance Criteria gate commands and stream raw output (no PASS/FAIL)"
         argument :iteration, required: true,  desc: "Iteration name"
@@ -341,9 +331,7 @@ module SpaceArchitect
         end
       end
 
-      class InstallSkills < Dry::CLI::Command
-        include GlobalOptions
-        include Helpers
+      class InstallSkills < BaseCommand
 
         desc "Install bundled skills (architect, architect-research, architect-vocabulary) for a harness"
         option :provider, default: "claude", desc: "Harness: claude, codex, opencode, pi"
@@ -367,9 +355,7 @@ module SpaceArchitect
       end
 
       module Brief
-        class New < Dry::CLI::Command
-          include GlobalOptions
-          include Helpers
+        class New < BaseCommand
 
           desc "Scaffold the durable mission brief (architecture/BRIEF.md)"
           argument :space, required: false, desc: "Space identifier (default: $PWD)"
