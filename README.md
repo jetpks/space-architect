@@ -59,8 +59,8 @@ for convenience.
 
 ```sh
 architect space init                              # create XDG config + state files
-architect space new "Name of Space"              # blast off a new space 🚀
-architect space new "Name of Space" org/repo …  # with repos cloned in (variadic)
+architect space new "Name of Space"                  # blast off a new space 🚀
+architect space new "Name of Space" -r org/repo …   # with repos cloned in (repeat -r)
 architect space list                             # see all your spaces
 architect space show                             # show the space you're standing in
 architect space status done                      # mark the current mission complete
@@ -69,6 +69,7 @@ architect space status done                      # mark the current mission comp
 **Architect Loop (run from inside a space):**
 
 ```sh
+architect install-skills                          # install skills for your harness (once per machine)
 architect init                                   # scaffold ARCHITECT.md + architecture/
 architect new <iteration>                        # scaffold next iteration file
 architect dispatch <iteration> <lane>            # dispatch a builder for a lane
@@ -77,12 +78,20 @@ architect freeze <iteration>                     # freeze Acceptance Criteria
 architect verify <iteration>                     # post-flight mechanical checks
 ```
 
+`architect install-skills` installs the bundled `architect`, `architect-research`,
+and `architect-vocabulary` skills for a harness. (`architect-vocabulary` loads the
+system's terms and a short orientation when you're in a space but don't want to run
+the loop — see [The Architect Loop](#the-architect-loop-).) Default is `claude`
+(`~/.claude/skills/`); use `--provider
+opencode|codex|pi` for other harnesses, and `--project` to install into the current
+directory instead of globally. See the [command reference](docs/reference.md) for details.
+
 ## Usage 🛰️
 
 ```sh
 architect space init
 architect space new "Name of Space"
-architect space new "Name of Space" org/repo example-tools/alpha example-tools/beta
+architect space new "Name of Space" -r org/repo -r example-tools/alpha -r example-tools/beta
 architect space list
 architect space show 20260531-name-of-space
 architect space path 20260531-name-of-space
