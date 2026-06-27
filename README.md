@@ -67,14 +67,14 @@ The gem is `space-architect`; it installs three executables — `space`,
 
 ```sh
 # Spaces
-space init                                       # create XDG config + state files
+space init                                        # create XDG config + state files
 space new "Name of Space"                         # blast off a new space 🚀
 space new "Name of Space" -r org/repo -r org/lib  # …with repos cloned in (repeat -r)
 space list                                        # see all your spaces
-space show                                         # show the space you're standing in
+space show                                        # show the space you're standing in
 
 # Evergreen checkouts (copy-on-write sources for fast provisioning)
-src repo add github.com/example-org/example-app   # tend it 🌲
+src repo add github.com/example-org/example-app     # tend it 🌲
 src sync                                            # one sync pass
 src status                                          # per-repo evergreen status
 
@@ -126,8 +126,8 @@ spaces can provision repos by **copy-on-write** instead of cloning over the
 network.
 
 ```sh
-src repo add github.com/example-org/example-app   # track + tend a repo
-src org add github.com/example-org                 # track a whole org
+src repo add github.com/example-org/example-app     # track + tend a repo
+src org add github.com/example-org                  # track a whole org
 src sync                                            # run one sync pass (--repo to scope)
 src status                                          # per-repo evergreen status table
 src clone example-app                               # APFS copy-on-write into $PWD
@@ -210,7 +210,7 @@ architect merge <it> <lane>                 # integrate ONE judged-passing lane 
 architect integrate <it> --lanes a,b        # integrate a set of passing lanes, in order
 architect status                            # mission state (read-only)
 architect variant add|compare|promote …     # competing (harness, model) lanes over one frozen spec
-architect research dispatch|status|wait …    # parallel read-only research lanes (see below)
+architect research dispatch|status|wait …   # parallel read-only research lanes (see below)
 ```
 
 A typical session:
