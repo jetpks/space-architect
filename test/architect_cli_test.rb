@@ -756,4 +756,135 @@ class ArchitectCLITest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
+
+  # ── section / evidence / brief / freeze-prints-AC / integrate ───────────────
+
+  def test_section_cli_writes_and_commits_from_body
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+
+        out, err = invoke("section", "s1", "specification", "--body", "- Objective — the seam (BRIEF §3.1)")
+        assert_empty err
+        assert_match(/Committed ## Specification/, out)
+
+        text = File.read(File.join(space_path, "architecture", "I01-s1.md"))
+        assert_match(/the seam \(BRIEF §3\.1\)/, text)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_freeze_cli_prints_frozen_acceptance_criteria
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+
+        slice = File.join(space_path, "architecture", "I01-s1.md")
+        text = File.read(slice).sub(/(\|-----\|---------\|-----------\|---------\|\n)/,
+          "\\1| G0 | `rake test` | green | §1 |\n")
+        File.write(slice, text)
+
+        out, err = invoke("freeze", "s1")
+        assert_empty err
+        assert_match(/Frozen Acceptance Criteria/, out)
+        assert_match(/rake test/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_evidence_cli_transcribes_report_and_surfaces_status
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+
+        FileUtils.mkdir_p(File.join(space_path, "build", "I01-s1-lane-a"))
+        File.write(File.join(space_path, "build", "I01-s1-lane-a", "report.md"),
+          "raw numbers\nSTATUS: COMPLETE\n")
+
+        out, err = invoke("evidence", "s1", "--lane", "lane-a")
+        assert_empty err
+        assert_match(/Builder STATUS: STATUS: COMPLETE/, out)
+
+        text = File.read(File.join(space_path, "architecture", "I01-s1.md"))
+        assert_includes text, "raw numbers"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_brief_new_cli_scaffolds_brief
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        out, err = invoke("brief", "new")
+        assert_empty err
+        assert_match(/Brief ready/, out)
+        assert_path_exists File.join(space_path, "architecture", "BRIEF.md")
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_integrate_cli_merges_clean_lane
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+
+        wt = File.join(space_path, "build", "I01-s1-lane-a", "wt")
+        File.write(File.join(wt, "feature.rb"), "def feature; end\n")
+
+        out, err = invoke("integrate", "s1", "--lanes", "lane-a")
+        assert_empty err
+        assert_match(%r{Merged lane-a → lane/I01-s1}, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
 end
