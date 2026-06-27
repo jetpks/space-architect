@@ -27,11 +27,11 @@ class SessionsActionTest < Minitest::Test
 
   # G1 + G3(b1) — token present: org memberships synced, user created, session set, 302
   def test_sign_in_syncs_org_memberships_from_callback_token
-    Architect::Github.stub(:user_orgs, [{"id" => "55", "login" => "acme"}]) do
+    Space::Server::Github.stub(:user_orgs, [{"id" => "55", "login" => "acme"}]) do
       mock_callback(token: "t0ken")
     end
 
-    users_repo = Architect::App["repos.users_repo"]
+    users_repo = Space::Server::App["repos.users_repo"]
     user = users_repo.by_github_uid("9")
     refute_nil user
     assert_equal ["55"], user.org_ids
@@ -42,7 +42,7 @@ class SessionsActionTest < Minitest::Test
   def test_token_less_callback_skips_sync
     status, headers, _ = mock_callback
 
-    users_repo = Architect::App["repos.users_repo"]
+    users_repo = Space::Server::App["repos.users_repo"]
     user = users_repo.by_github_uid("9")
     refute_nil user
     assert_empty user.org_ids
@@ -53,14 +53,14 @@ class SessionsActionTest < Minitest::Test
 
   # G3(b3) — Github::Error raised: still signs in (302), stale org cache intact
   def test_failed_sync_keeps_stale_cache_and_still_signs_in
-    users_repo = Architect::App["repos.users_repo"]
+    users_repo = Space::Server::App["repos.users_repo"]
     users_repo.create(
       github_uid: "9", username: "orgy", name: "Orgy",
       github_orgs: [{"id" => "55", "login" => "acme"}],
       created_at: Time.now, updated_at: Time.now
     )
 
-    Architect::Github.stub(:user_orgs, ->(_t) { raise Architect::Github::Error, "boom" }) do
+    Space::Server::Github.stub(:user_orgs, ->(_t) { raise Space::Server::Github::Error, "boom" }) do
       status, headers, _ = mock_callback(token: "t0ken")
       assert_equal 302, status
       assert_equal "/", headers["location"]
@@ -77,7 +77,7 @@ class SessionsActionTest < Minitest::Test
     assert_equal 302, status
     assert_equal "/", headers["location"]
 
-    users_repo = Architect::App["repos.users_repo"]
+    users_repo = Space::Server::App["repos.users_repo"]
     user = users_repo.by_github_uid("9")
     refute_nil user
     assert_equal "orgy",             user.username

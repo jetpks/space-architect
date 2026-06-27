@@ -17,12 +17,12 @@ service "architect.web" do
 end
 
 # Import-worker service: a single managed child process that dequeues from Redis
-# and runs Architect::Jobs::ImportConversation for each job. Supervised and
+# and runs Space::Server::Jobs::ImportConversation for each job. Supervised and
 # restarted by async-container on failure. Stop is container-driven — no signal traps.
 service "architect.import-worker" do
   include Async::Service::Managed::Environment
 
-  service_class { Architect::Services::ImportWorkerService }
+  service_class { Space::Server::Services::ImportWorkerService }
 
   count 1
   redis_prefix { "architect-import" }

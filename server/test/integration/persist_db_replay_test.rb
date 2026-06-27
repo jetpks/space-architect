@@ -18,10 +18,10 @@ require "async/http/client"
 require "async/http/endpoint"
 require "protocol/rack/adapter"
 require "protocol/http/body/buffered"
-require "architect/runs/stream_fanout"
-require "architect/runs/stream_key"
+require "space/server/runs/stream_fanout"
+require "space/server/runs/stream_key"
 
-Architect::App.start(:redis)
+Space::Server::App.start(:redis)
 
 class PersistDbReplayTest < Minitest::Test
   FIXTURE_JSONL = File.read(File.join(__dir__, "..", "fixtures", "files", "claude_code_stream_tooluse.jsonl"))
@@ -29,20 +29,20 @@ class PersistDbReplayTest < Minitest::Test
   TOKEN = "persist-db-replay-integration-test-deadbeef0123"
 
   def setup
-    conn = Architect::App["db.gateway"].connection
+    conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
     [:annotations, :conversation_shares, :messages, :conversations, :runs, :users].each { |t| conn[t].delete }
     @user  = Factory[:user]
     @run   = Factory[:run, user_id: @user.id, status: 0, published: true]
-    @redis = Architect::App["redis"]
+    @redis = Space::Server::App["redis"]
     Sync { @redis.call("DEL", "run:#{@run.id}") }
   end
 
   def test_ingest_persists_db_and_stream_replays_after_redis_expiry
-    settings      = Architect::App["settings"]
-    runs_repo     = Architect::App["repos.runs_repo"]
-    messages_repo = Architect::App["repos.messages_repo"]
+    settings      = Space::Server::App["settings"]
+    runs_repo     = Space::Server::App["repos.runs_repo"]
+    messages_repo = Space::Server::App["repos.messages_repo"]
     port          = 50100 + rand(400)
     endpoint      = Async::HTTP::Endpoint.parse("http://localhost:#{port}")
 
@@ -50,7 +50,7 @@ class PersistDbReplayTest < Minitest::Test
       settings.stub(:ingest_user_id, @user.id) do
         Sync do |task|
           server_task = task.async do
-            Async::HTTP::Server.new(Protocol::Rack::Adapter.new(Architect::App), endpoint).run
+            Async::HTTP::Server.new(Protocol::Rack::Adapter.new(Space::Server::App), endpoint).run
           rescue => _e
             nil
           end
@@ -105,7 +105,7 @@ class PersistDbReplayTest < Minitest::Test
 
               # ── Phase 3: Simulate Redis TTL expiry ────────────────────────────
 
-              @redis.call("DEL", Architect::Runs::StreamKey.for(run.id))
+              @redis.call("DEL", Space::Server::Runs::StreamKey.for(run.id))
 
               # ── Phase 4: GET stream — must replay from DB via db_replay ────────
               #
@@ -117,7 +117,7 @@ class PersistDbReplayTest < Minitest::Test
                 "/runs/#{run.id}/stream",
                 "REQUEST_METHOD" => "GET"
               )
-              _, _, body_proc = Architect::App.call(env)
+              _, _, body_proc = Space::Server::App.call(env)
 
               chunks = []
               mock_stream = Object.new.tap do |s|
@@ -132,7 +132,7 @@ class PersistDbReplayTest < Minitest::Test
               rescue Async::TimeoutError
                 # db_replay missing → stream loops on heartbeat; timeout = test fail below
               ensure
-                Architect::Runs::StreamFanout.stop(run.id)
+                Space::Server::Runs::StreamFanout.stop(run.id)
               end
 
               sse = chunks.join

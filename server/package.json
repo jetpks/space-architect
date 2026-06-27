@@ -1,4 +1,5 @@
 {
+  "name": "space-server",
   "private": true,
   "type": "module",
   "devDependencies": {

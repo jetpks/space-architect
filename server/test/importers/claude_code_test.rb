@@ -4,7 +4,7 @@ require_relative "../test_helper"
 
 class ClaudeCodeImporterTest < Minitest::Test
   def conn
-    @conn ||= Architect::App["db.gateway"].connection
+    @conn ||= Space::Server::App["db.gateway"].connection
   end
 
   def setup
@@ -15,7 +15,7 @@ class ClaudeCodeImporterTest < Minitest::Test
     end
     @conv = Factory[:conversation]
     io = File.open(fixture_path("transcript.jsonl"))
-    Architect::Importers::ClaudeCode.new.import!(@conv, io)
+    Space::Server::Importers::ClaudeCode.new.import!(@conv, io)
     io.close
     @conv     = conversations_repo.by_pk(@conv.id)
     @messages = messages_repo.for_conversation(@conv.id)
@@ -64,7 +64,7 @@ class ClaudeCodeImporterTest < Minitest::Test
 
   private
 
-  def conversations_repo = Architect::Repos::ConversationsRepo.new
-  def messages_repo      = Architect::Repos::MessagesRepo.new
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
+  def messages_repo      = Space::Server::Repos::MessagesRepo.new
   def fixture_path(name) = File.join(__dir__, "..", "fixtures", "files", name)
 end

@@ -2,7 +2,7 @@
 
 require_relative "support"
 
-S = Architect::Serializers::Conversation
+S = Space::Server::Serializers::Conversation
 
 class ConversationListJsonTest < Minitest::Test
   EXPECTED_KEYS = %i[id title status published turns_count owned shared].freeze

@@ -7,12 +7,12 @@ require "async/redis/endpoint"
 
 Hanami.app.register_provider(:import_queue) do
   start do
-    delegate = Architect::Jobs::ImportConversation::Delegate.new
+    delegate = Space::Server::Jobs::ImportConversation::Delegate.new
 
     processor = if Hanami.env?(:test)
       Async::Job::Processor::Inline.new(delegate)
     else
-      Architect::Jobs::ImportConversation.build_redis_processor
+      Space::Server::Jobs::ImportConversation.build_redis_processor
     end
 
     register("import_queue", processor)

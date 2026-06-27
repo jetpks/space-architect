@@ -15,7 +15,7 @@ FIBER_COUNT   = Integer(ENV.fetch("FIBER_COUNT", "10"))
 EXPECTED_ROWS = FIBER_COUNT  # each fiber commits exactly 1 user row
 SMOKE_TIMEOUT = 30           # seconds
 
-conn = Architect::App["db.gateway"].connection
+conn = Space::Server::App["db.gateway"].connection
 
 fiber_concurrency_on = Sequel.current == Fiber.current
 

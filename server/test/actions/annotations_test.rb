@@ -15,7 +15,7 @@ class AnnotationsActionTest < Minitest::Test
     @conv     = Factory[:conversation, user_id: @owner.id, published: true]
     @msg      = Factory[:message, conversation_id: @conv.id, role: "user",
                          content: [{"type" => "text", "text" => "q"}], position: 1, published: true]
-    @ann_repo = Architect::App["repos.annotations_repo"]
+    @ann_repo = Space::Server::App["repos.annotations_repo"]
   end
 
   def teardown

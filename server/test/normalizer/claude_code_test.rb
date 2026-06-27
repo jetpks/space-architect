@@ -3,7 +3,7 @@
 require_relative "support"
 
 class ClaudeCodeTest < Minitest::Test
-  def parser = Architect::Normalizer::ClaudeCode.new
+  def parser = Space::Server::Normalizer::ClaudeCode.new
 
   def parse_fixture(filename)
     p = parser

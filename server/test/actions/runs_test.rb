@@ -4,8 +4,8 @@ require_relative "action_test_helper"
 require "async"
 require "async/redis"
 require "async/redis/endpoint"
-require "architect/runs/stream_fanout"
-require "architect/runs/stream_key"
+require "space/server/runs/stream_fanout"
+require "space/server/runs/stream_key"
 
 class RunsActionTest < Minitest::Test
   include ActionTestHelper
@@ -15,7 +15,7 @@ class RunsActionTest < Minitest::Test
     OmniAuth.config.test_mode = true
     @owner   = Factory[:user, github_uid: "owner-uid", username: "owner"]
     @other   = Factory[:user, github_uid: "other-uid", username: "other"]
-    @runs_repo = Architect::App["repos.runs_repo"]
+    @runs_repo = Space::Server::App["repos.runs_repo"]
   end
 
   def teardown
@@ -183,7 +183,7 @@ class RunsActionTest < Minitest::Test
 
     Sync do
       redis_client = Async::Redis::Client.new(redis_endpoint)
-      key = Architect::Runs::StreamKey.for(run.id)
+      key = Space::Server::Runs::StreamKey.for(run.id)
       redis_client.del(key)
       redis_client.xadd(key, "*", "type", "text_delta",   "data", '{"type":"text_delta","text":"hello"}')
       redis_client.xadd(key, "*", "type", "run_complete", "data", '{"type":"run_complete"}')
@@ -198,7 +198,7 @@ class RunsActionTest < Minitest::Test
       assert chunks.any? { |c| c.include?("run_complete") }, "Expected run_complete event"
     ensure
       redis_client&.close
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 
@@ -208,7 +208,7 @@ class RunsActionTest < Minitest::Test
 
     Sync do
       redis_client = Async::Redis::Client.new(redis_endpoint)
-      key = Architect::Runs::StreamKey.for(run.id)
+      key = Space::Server::Runs::StreamKey.for(run.id)
       redis_client.del(key)
 
       _, _, body = get_stream("/runs/#{run.id}/stream")
@@ -237,7 +237,7 @@ class RunsActionTest < Minitest::Test
       assert_match "run_complete", text
     ensure
       redis_client&.close
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 
@@ -247,7 +247,7 @@ class RunsActionTest < Minitest::Test
 
     Sync do
       redis_client = Async::Redis::Client.new(redis_endpoint)
-      key = Architect::Runs::StreamKey.for(run.id)
+      key = Space::Server::Runs::StreamKey.for(run.id)
       redis_client.del(key)
       redis_client.xadd(key, "*", "type", "message_start", "data", '{"type":"message_start"}')
       redis_client.xadd(key, "*", "type", "run_complete",  "data", '{"type":"run_complete"}')
@@ -259,7 +259,7 @@ class RunsActionTest < Minitest::Test
       # proc must have terminated — if chunks is empty the proc never ran; either way no timeout
     ensure
       redis_client&.close
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 
@@ -269,7 +269,7 @@ class RunsActionTest < Minitest::Test
 
     Sync do
       redis_client = Async::Redis::Client.new(redis_endpoint)
-      key = Architect::Runs::StreamKey.for(run.id)
+      key = Space::Server::Runs::StreamKey.for(run.id)
       redis_client.del(key)
 
       first_entry  = redis_client.xadd(key, "*", "type", "text_delta",   "data", '{"seq":1}')
@@ -289,7 +289,7 @@ class RunsActionTest < Minitest::Test
       assert_match "run_complete", text
     ensure
       redis_client&.close
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 
@@ -302,7 +302,7 @@ class RunsActionTest < Minitest::Test
 
     Sync do
       redis_client = Async::Redis::Client.new(redis_endpoint)
-      key = Architect::Runs::StreamKey.for(run.id)
+      key = Space::Server::Runs::StreamKey.for(run.id)
       redis_client.del(key)
 
       # Seed one entry; the client will reconnect from its id.
@@ -334,7 +334,7 @@ class RunsActionTest < Minitest::Test
       assert_match "run_complete", text
     ensure
       redis_client&.close
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 
@@ -348,7 +348,7 @@ class RunsActionTest < Minitest::Test
 
     Sync do
       redis_client = Async::Redis::Client.new(redis_endpoint)
-      key = Architect::Runs::StreamKey.for(run.id)
+      key = Space::Server::Runs::StreamKey.for(run.id)
       redis_client.del(key)
 
       first_id = redis_client.xadd(key, "*", "type", "text_delta", "data", '{"seq":1}')
@@ -369,7 +369,7 @@ class RunsActionTest < Minitest::Test
       assert_match "run_complete", text
     ensure
       redis_client&.close
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 
@@ -382,7 +382,7 @@ class RunsActionTest < Minitest::Test
 
     Sync do
       redis_client = Async::Redis::Client.new(redis_endpoint)
-      key = Architect::Runs::StreamKey.for(run.id)
+      key = Space::Server::Runs::StreamKey.for(run.id)
       redis_client.del(key)
 
       # Stream has no entries yet; body proc will block on fanout.
@@ -394,7 +394,7 @@ class RunsActionTest < Minitest::Test
         define_method(:close) { |err| closed_with_error = !err.nil? }
       end.new
 
-      fanout = Architect::Runs::StreamFanout.for(run.id, redis_client)
+      fanout = Space::Server::Runs::StreamFanout.for(run.id, redis_client)
 
       body_task = Async do
         body.call(mock_stream)
@@ -411,14 +411,14 @@ class RunsActionTest < Minitest::Test
       assert task.nil? || !task.alive?, "Fanout task must be stopped after last subscriber disconnects"
     ensure
       redis_client&.close
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 
   def test_stream_db_fallback_replays_messages_when_redis_expired
     sign_in(@owner)
-    conversations_repo = Architect::App["repos.conversations_repo"]
-    messages_repo      = Architect::App["repos.messages_repo"]
+    conversations_repo = Space::Server::App["repos.conversations_repo"]
+    messages_repo      = Space::Server::App["repos.messages_repo"]
 
     conv = conversations_repo.create(
       user_id: @owner.id, status: 0, published: false,
@@ -435,7 +435,7 @@ class RunsActionTest < Minitest::Test
 
     Sync do
       redis_client = Async::Redis::Client.new(redis_endpoint)
-      key = Architect::Runs::StreamKey.for(run.id)
+      key = Space::Server::Runs::StreamKey.for(run.id)
       redis_client.del(key)
 
       _, _, body = get_stream("/runs/#{run.id}/stream")
@@ -446,7 +446,7 @@ class RunsActionTest < Minitest::Test
       assert_match "hello from db", text
     ensure
       redis_client&.close
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 end

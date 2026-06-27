@@ -5,7 +5,7 @@ require_relative "../test_helper"
 # G3: Struct enum coercion, JSONB read-through, blocks interface.
 class StructsTest < Minitest::Test
   def conn
-    @conn ||= Architect::App["db.gateway"].connection
+    @conn ||= Space::Server::App["db.gateway"].connection
   end
 
   def setup
@@ -16,10 +16,10 @@ class StructsTest < Minitest::Test
     end
   end
 
-  def conversations_repo = Architect::Repos::ConversationsRepo.new
-  def messages_repo      = Architect::Repos::MessagesRepo.new
-  def users_repo         = Architect::Repos::UsersRepo.new
-  def annotations_repo   = Architect::Repos::AnnotationsRepo.new
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
+  def messages_repo      = Space::Server::Repos::MessagesRepo.new
+  def users_repo         = Space::Server::Repos::UsersRepo.new
+  def annotations_repo   = Space::Server::Repos::AnnotationsRepo.new
 
   # --- Conversation: status enum coercion (all 4 values) ------------------
 
@@ -46,7 +46,7 @@ class StructsTest < Minitest::Test
   def test_conversation_struct_class
     c    = Factory[:conversation]
     read = conversations_repo.by_pk(c.id)
-    assert_kind_of Architect::Structs::Conversation, read
+    assert_kind_of Space::Server::Structs::Conversation, read
   end
 
   # --- Message: blocks == Array(content) -----------------------------------
@@ -72,7 +72,7 @@ class StructsTest < Minitest::Test
     conv  = Factory[:conversation]
     msg   = Factory[:message, conversation_id: conv.id, position: 1]
     found = messages_repo.by_pk(msg.id)
-    assert_kind_of Architect::Structs::Message, found
+    assert_kind_of Space::Server::Structs::Message, found
   end
 
   # --- User: github_orgs JSONB surfaces as Ruby Array ---------------------
@@ -87,7 +87,7 @@ class StructsTest < Minitest::Test
   def test_user_struct_class
     user  = Factory[:user]
     found = users_repo.by_pk(user.id)
-    assert_kind_of Architect::Structs::User, found
+    assert_kind_of Space::Server::Structs::User, found
   end
 
   # --- Annotation: selector JSONB surfaces as Ruby Hash -------------------
@@ -115,6 +115,6 @@ class StructsTest < Minitest::Test
     user = Factory[:user]
     ann  = Factory[:annotation, conversation_id: conv.id, user_id: user.id]
     found = annotations_repo.by_pk(ann.id)
-    assert_kind_of Architect::Structs::Annotation, found
+    assert_kind_of Space::Server::Structs::Annotation, found
   end
 end

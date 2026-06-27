@@ -6,7 +6,7 @@ class SchemaTest < Minitest::Test
   DOMAIN_TABLES = %i[users conversations messages annotations conversation_shares].freeze
 
   def conn
-    @conn ||= Architect::App["db.gateway"].connection
+    @conn ||= Space::Server::App["db.gateway"].connection
   end
 
   def col(table, name)

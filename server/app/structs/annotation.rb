@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
-module Architect
-  module Structs
-    class Annotation < Architect::DB::Struct
-      def owned_by?(user)
-        !user.nil? && user.id == user_id
+module Space
+  module Server
+    module Structs
+      class Annotation < Space::Server::DB::Struct
+        def owned_by?(user)
+          !user.nil? && user.id == user_id
+        end
       end
     end
   end

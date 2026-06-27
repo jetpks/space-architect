@@ -4,7 +4,7 @@ require_relative "../test_helper"
 
 class SourceFileUploaderTest < Minitest::Test
   def conn
-    @conn ||= Architect::App["db.gateway"].connection
+    @conn ||= Space::Server::App["db.gateway"].connection
   end
 
   def setup
@@ -17,7 +17,7 @@ class SourceFileUploaderTest < Minitest::Test
 
   # G3 — storages configured at uploader load (not via provider), test env = Memory
   def test_storages_configured_as_memory_in_test
-    storages = Architect::SourceFileUploader.storages
+    storages = Space::Server::SourceFileUploader.storages
     assert storages.key?(:cache), "storages missing :cache"
     assert storages.key?(:store), "storages missing :store"
     assert_equal "Shrine::Storage::Memory", storages[:cache].class.name
@@ -27,7 +27,7 @@ class SourceFileUploaderTest < Minitest::Test
   # G4 — round-trip: store → repo → reload struct → open → read/each_line
   def test_round_trip_store_persist_reload_read
     content = "hello shrine\nline two\n"
-    data = Architect::SourceFileUploader.store(StringIO.new(content))
+    data = Space::Server::SourceFileUploader.store(StringIO.new(content))
 
     assert_kind_of String, data
     parsed = JSON.parse(data)
@@ -40,7 +40,7 @@ class SourceFileUploaderTest < Minitest::Test
 
     sf = reloaded.source_file
     refute_nil sf
-    assert_instance_of Architect::SourceFileUploader::UploadedFile, sf
+    assert_instance_of Space::Server::SourceFileUploader::UploadedFile, sf
 
     read_bytes = sf.open { |io| io.read }
     assert_equal content, read_bytes
@@ -58,5 +58,5 @@ class SourceFileUploaderTest < Minitest::Test
 
   private
 
-  def conversations_repo = Architect::Repos::ConversationsRepo.new
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
 end

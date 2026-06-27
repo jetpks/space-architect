@@ -8,11 +8,11 @@ require "omniauth"
 # Test helper uses hanami/prepare (not hanami/boot), so providers don't auto-start.
 # Start :inertia so shared_props (flash, current_user) are configured before tests.
 # Start :redis so the ingest action can access the Redis client.
-Architect::App.start(:inertia)
-Architect::App.start(:redis)
+Space::Server::App.start(:inertia)
+Space::Server::App.start(:redis)
 
 module ActionTestHelper
-  def app = Architect::App
+  def app = Space::Server::App
 
   def get(path, params: {})
     query = params.empty? ? "" : URI.encode_www_form(params)
@@ -27,7 +27,7 @@ module ActionTestHelper
   # Accepts an optional cookie: override so flash round-trips can supply the
   # redirect's set-cookie rather than @session_cookie.
   def inertia_get(path, params: {}, cookie: nil)
-    vite_version = Architect::App["vite"].digest
+    vite_version = Space::Server::App["vite"].digest
     query = params.empty? ? "" : URI.encode_www_form(params)
     path_with_query = params.empty? ? path : "#{path}?#{query}"
     env = Rack::MockRequest.env_for(path_with_query, "REQUEST_METHOD" => "GET")
@@ -73,7 +73,7 @@ module ActionTestHelper
       input: body
     )
     env["HTTP_X_INERTIA"] = "true"
-    env["HTTP_X_INERTIA_VERSION"] = Architect::App["vite"].digest
+    env["HTTP_X_INERTIA_VERSION"] = Space::Server::App["vite"].digest
     env["HTTP_COOKIE"] = @session_cookie if @session_cookie
     app.call(env)
   end
@@ -101,7 +101,7 @@ module ActionTestHelper
   def inertia_delete(path)
     env = Rack::MockRequest.env_for(path, "REQUEST_METHOD" => "DELETE")
     env["HTTP_X_INERTIA"] = "true"
-    env["HTTP_X_INERTIA_VERSION"] = Architect::App["vite"].digest
+    env["HTTP_X_INERTIA_VERSION"] = Space::Server::App["vite"].digest
     env["HTTP_COOKIE"] = @session_cookie if @session_cookie
     app.call(env)
   end
@@ -112,7 +112,7 @@ module ActionTestHelper
   end
 
   def setup_db
-    conn = Architect::App["db.gateway"].connection
+    conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
     [:annotations, :conversation_shares, :messages, :conversations, :runs, :users].each { |t| conn[t].delete }

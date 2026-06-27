@@ -4,7 +4,7 @@ require_relative "../test_helper"
 require_relative "../../app/contracts/create_annotation"
 
 class CreateAnnotationContractTest < Minitest::Test
-  def contract = Architect::Contracts::CreateAnnotation.new
+  def contract = Space::Server::Contracts::CreateAnnotation.new
 
   def test_valid_full_annotation
     r = contract.call(annotation: {

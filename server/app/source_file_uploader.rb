@@ -20,8 +20,10 @@ else
   }
 end
 
-module Architect
-  class SourceFileUploader < Shrine
-    def self.store(io) = upload(io, :store).to_json
+module Space
+  module Server
+    class SourceFileUploader < Shrine
+      def self.store(io) = upload(io, :store).to_json
+    end
   end
 end

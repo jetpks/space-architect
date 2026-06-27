@@ -19,12 +19,12 @@ OmniAuth.config.logger = Logger.new(File::NULL)
 Console.logger.level = :fatal
 
 # Force-load conversation_share.rb before any test runs so that
-# Architect::Structs::Share is defined as a ConversationShare subclass
+# Space::Server::Structs::Share is defined as a ConversationShare subclass
 # before ROM's struct compiler ever processes the :shares combine alias.
 # Without this, a seed-dependent race exists: the combine fires first,
 # ROM pre-creates Share < ROM::Struct, and subsequent file loading raises
 # TypeError: superclass mismatch for class Share.
-_ = Architect::Structs::ConversationShare
+_ = Space::Server::Structs::ConversationShare
 
 # minitest 6 dropped minitest/mock. This stub shim allows swapping a named
 # singleton method for a value or callable within a block, then restoring it.
