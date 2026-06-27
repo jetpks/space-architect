@@ -2,7 +2,7 @@
 
 require_relative "test_helper"
 
-class SpaceStoreTest < SpaceArchitectTest
+class SpaceStoreTest < Space::ArchitectTest
   def test_create_space_with_date_prefixed_unique_id_and_structure
     setup = temp_env
     store = build_store(env: setup.fetch(:env))

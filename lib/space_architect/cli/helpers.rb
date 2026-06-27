@@ -2,7 +2,7 @@
 
 require "dry/monads"
 
-module SpaceArchitect
+module Space::Architect
   module CLI
     module Helpers
       include Dry::Monads[:result]

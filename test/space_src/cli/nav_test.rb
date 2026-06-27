@@ -170,7 +170,7 @@ class CLINavTest < Minitest::Test
     with_nav_env(checkouts: ["github.com/alice/myrepo"]) do
       out = StringIO.new
       err = StringIO.new
-      result = SpaceArchitect::CLI.dispatch_src(["zqxnomatch"], out, err)
+      result = Space::Architect::CLI.dispatch_src(["zqxnomatch"], out, err)
       assert_equal 1, result
       assert_includes err.string, "zqxnomatch"
     end
@@ -180,7 +180,7 @@ class CLINavTest < Minitest::Test
     with_nav_env(checkouts: ["github.com/alice/myrepo"]) do |_env, home, base|
       out = StringIO.new
       err = StringIO.new
-      result = SpaceArchitect::CLI.dispatch_src(["alice/myrepo"], out, err)
+      result = Space::Architect::CLI.dispatch_src(["alice/myrepo"], out, err)
       assert_equal 0, result
       last_line = out.string.chomp.split("\n").last
       assert_equal File.join(base, "github.com", "alice", "myrepo"), last_line

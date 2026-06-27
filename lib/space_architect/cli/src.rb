@@ -2,7 +2,7 @@
 
 require "space_src/cli"
 
-module SpaceArchitect
+module Space::Architect
   module CLI
     # Exit-code bridge to the Space::Src CLI engine.
     # `architect src <args>` hands the raw remainder to Space::Src's own dry-cli

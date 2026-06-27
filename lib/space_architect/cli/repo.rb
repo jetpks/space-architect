@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-module SpaceArchitect
+module Space::Architect
   module CLI
     module Repo
       class Add < Dry::CLI::Command

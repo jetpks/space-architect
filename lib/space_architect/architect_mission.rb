@@ -6,7 +6,7 @@ require "open3"
 require "fileutils"
 require "pathname"
 
-module SpaceArchitect
+module Space::Architect
   # Manages an architect-loop mission inside a space: one self-contained file per
   # iteration at architecture/I<NN>-<iteration>.md (Grounds / Specification / Acceptance Criteria / Builder
   # Prompt / Builder Report / Verdict), grown one commit per section. The freeze
