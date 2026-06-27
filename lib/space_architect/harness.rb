@@ -128,13 +128,23 @@ module Space::Architect
             c.post(path, headers: headers, body: body).discard
           end
         end
+      rescue StandardError => e
+        $stderr.puts "push_body: transport error (best-effort, run log intact): #{e.class}: #{e.message}"
       end
 
       def tee_pipe(r, log, body)
+        pushing = true
         while (chunk = r.gets)
           log.write(chunk)
           log.flush
-          body.write(chunk) rescue Protocol::HTTP::Body::Writable::Closed
+          if pushing
+            begin
+              body.write(chunk)
+            rescue StandardError => e
+              $stderr.puts "tee_pipe: push write failed (best-effort, continuing log): #{e.class}: #{e.message}"
+              pushing = false
+            end
+          end
         end
       ensure
         body.close_write
