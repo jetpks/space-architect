@@ -15,9 +15,10 @@ Gem::Specification.new do |spec|
   spec.required_ruby_version = ">= 4.0.5"
 
   spec.metadata["homepage_uri"] = spec.homepage
+  spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
 
   spec.files = Dir.chdir(__dir__) do
-    Dir["lib/**/*.rb", "lib/**/*.erb", "exe/*", "skill/**/*", "README.md", "LICENSE.txt"]
+    Dir["lib/**/*.rb", "lib/**/*.erb", "exe/*", "skill/**/*", "README.md", "CHANGELOG.md", "LICENSE.txt"]
   end
   spec.bindir = "exe"
   spec.executables = ["architect", "space", "src"]
