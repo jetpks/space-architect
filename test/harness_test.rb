@@ -4,6 +4,9 @@ require_relative "test_helper"
 require "yaml"
 require "json"
 require "tmpdir"
+require "async/http/mock"
+require "async/http/client"
+require "protocol/http/response"
 
 class HarnessTest < Space::ArchitectTest
   FAKE_CLAUDE_SCRIPT = <<~RUBY
@@ -555,6 +558,114 @@ class HarnessTest < Space::ArchitectTest
     refute_includes recorded, "--variant", "claude-code argv must not contain --variant"
   ensure
     ENV.delete("ARGV_RECORD_FILE")
+    FileUtils.rm_rf(root)
+  end
+
+  # ── I06: --include-partial-messages and push tee ──────────────────────────
+
+  # AC10: --include-partial-messages appears in the spawned argv.
+  def test_claude_code_harness_includes_partial_messages_in_argv
+    root = Dir.mktmpdir("harness-partial")
+    _space_dir, mission, fake_claude, _fake_oc, build_dir = setup_space(root)
+
+    mission.dispatch("demo", "A", claude_bin: fake_claude)
+    log = File.read(File.join(build_dir, "run.jsonl"))
+
+    assert_includes log, "--include-partial-messages"
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  # Push tee: both the log file and the HTTP server receive the same lines.
+  def test_claude_code_harness_push_tee_sends_to_both_log_and_http
+    root = Dir.mktmpdir("harness-push")
+    space_dir, _mission, fake_claude, _fake_oc, build_dir = setup_space(root)
+
+    wt_path      = File.join(space_dir, "build", "I01-demo-A", "wt")
+    prompt_path  = File.join(build_dir, "prompt.md")
+    run_log_path = File.join(build_dir, "push-run.jsonl")
+
+    server_chunks = []
+    mock_endpoint = Async::HTTP::Mock::Endpoint.new
+
+    Sync do
+      server_task = Async do
+        mock_endpoint.run do |request|
+          while (chunk = request.body&.read)
+            server_chunks << chunk
+          end
+          Protocol::HTTP::Response[200, [], nil]
+        end
+      end
+
+      push_client = Async::HTTP::Client.new(mock_endpoint)
+
+      harness = Space::Architect::Harness::ClaudeCodeHarness.new(
+        model: Space::Architect::Harness::CLAUDE_DEFAULT_MODEL, max_turns: 10, bin: fake_claude
+      )
+      harness.run(
+        prompt_path:  prompt_path,
+        run_log_path: run_log_path,
+        chdir:        wt_path,
+        push_url:     "http://localhost/runs/test-run/ingest",
+        push_client:  push_client
+      )
+
+      push_client.close
+      server_task.stop
+    end
+
+    log          = File.read(run_log_path)
+    http_content = server_chunks.join
+
+    assert_includes log, "argv=",          "log file must contain fake-claude output"
+    assert_includes http_content, "argv=", "HTTP server must receive same content"
+    assert_equal log, http_content,        "log and HTTP sink must receive identical bytes"
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  # Writable body uses SizedQueue for backpressure (queue raises if maxed without pop).
+  def test_protocol_http_body_writable_sized_queue_backpressure
+    q    = Thread::SizedQueue.new(2)
+    body = Protocol::HTTP::Body::Writable.new(queue: q)
+
+    body.write("a")
+    body.write("b")
+    # Queue is full — push to a separate thread to unblock
+    reader = Thread.new { [body.read, body.read] }
+    body.write("c")
+    body.close_write
+
+    chunks = reader.value
+    assert_equal ["a", "b"], chunks
+  end
+
+  # I07: tee_pipe continues writing to the log even when the push body is closed.
+  # Simulates push-side close (e.g. connection drop) before tee_pipe has finished.
+  def test_tee_pipe_continues_log_after_push_body_closes
+    harness = Space::Architect::Harness::ClaudeCodeHarness.new(
+      model: "x", max_turns: 1
+    )
+
+    root = Dir.mktmpdir("tee-pipe-fail")
+    log_path = File.join(root, "run.jsonl")
+
+    r, w = IO.pipe
+    body = Protocol::HTTP::Body::Writable.new(queue: Thread::SizedQueue.new(4))
+    body.close_write  # push side closed early — body.write raises Closed
+
+    w.write("line1\n")
+    w.write("line2\n")
+    w.close
+
+    File.open(log_path, "w") do |log|
+      Sync { harness.send(:tee_pipe, r, log, body) }
+    end
+
+    assert_equal "line1\nline2\n", File.read(log_path),
+      "log must contain all lines even after push body closes"
+  ensure
     FileUtils.rm_rf(root)
   end
 end

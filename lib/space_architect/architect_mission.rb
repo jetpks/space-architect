@@ -536,7 +536,14 @@ module Space::Architect
     end
 
     def dispatch(iteration, lane, model: nil, max_turns: 200,
-                 claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, detach: false)
+                 claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, detach: false,
+                 push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
+                 push_client: nil)
+      raise Space::Core::Error, "Specify --push-host or --push-url, not both" if push_host && push_url
+      raise Space::Core::Error, "--push-host requires --push-token"           if push_host && !push_token
+      raise Space::Core::Error, "--detach cannot be combined with --push-url or --push-host" \
+        if detach && (push_url || push_host)
+
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
@@ -544,6 +551,9 @@ module Space::Architect
       resolved_harness = harness || lane_entry["harness"] || "claude-code"
       resolved_model   = model   || lane_entry["model"]   || Harness::CLAUDE_DEFAULT_MODEL
       resolved_effort  = effort  || lane_entry["effort"]
+
+      raise Space::Core::Error, "--push-host is only supported with the claude-code harness" \
+        if push_host && resolved_harness != "claude-code"
 
       id = iteration_id(entry)
       wt_path = space.path.join(lane_entry["worktree"] || "build/#{id}-#{lane}/wt")
@@ -567,12 +577,25 @@ module Space::Architect
         )
         { pid: pid, run_log: run_log_path, report: report_path, worktree: wt_path }
       else
-        exit_code = harness_obj.run(
-          prompt_path:  prompt_path,
-          run_log_path: run_log_path,
-          chdir:        wt_path
-        )
-        { exit_code: exit_code, run_log: run_log_path, report: report_path, worktree: wt_path }
+        created_run_id = nil
+        if push_host
+          creator        = run_creator || RunCreator.new(push_host, push_token)
+          created_run_id = creator.create
+          push_url       = "#{push_host.chomp('/')}/runs/#{created_run_id}/ingest"
+        end
+
+        run_kwargs = { prompt_path: prompt_path, run_log_path: run_log_path, chdir: wt_path }
+        if resolved_harness == "claude-code"
+          run_kwargs[:push_url]    = push_url    if push_url
+          run_kwargs[:push_token]  = push_token  if push_token
+          run_kwargs[:push_client] = push_client if push_client
+        end
+        exit_code = harness_obj.run(**run_kwargs)
+
+        result = { exit_code: exit_code, run_log: run_log_path, report: report_path, worktree: wt_path }
+        result[:created_run_id] = created_run_id if created_run_id
+        result[:push_url]       = push_url       if push_url
+        result
       end
     end
 

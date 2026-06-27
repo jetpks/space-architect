@@ -26,6 +26,8 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "async", "~> 2.39"
   spec.add_dependency "async-process", "~> 1.4"
+  spec.add_dependency "async-http", "~> 0.95"
+  spec.add_dependency "protocol-http", "~> 0.62"
   spec.add_dependency "pastel", "~> 0.8"
   spec.add_dependency "dry-cli", "~> 1.4"
   spec.add_dependency "dry-monads", "~> 1.10"

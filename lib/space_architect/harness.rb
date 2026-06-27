@@ -1,8 +1,12 @@
 # frozen_string_literal: true
 
 require "async/process"
+require "async/http/client"
+require "async/http/endpoint"
+require "protocol/http/body/writable"
 require "json"
 require "pathname"
+require "uri"
 
 module Space::Architect
   module Harness
@@ -50,16 +54,21 @@ module Space::Architect
         @disallowed_tools = disallowed_tools
       end
 
-      def run(prompt_path:, run_log_path:, chdir:)
+      def run(prompt_path:, run_log_path:, chdir:, push_url: nil, push_token: nil, push_client: nil)
         prompt_path  = Pathname.new(prompt_path)
         run_log_path = Pathname.new(run_log_path)
 
         File.open(prompt_path, "r") do |prompt_io|
           File.open(run_log_path, "w") do |log|
-            status = Sync do
-              Async::Process.spawn(*argv, chdir: chdir.to_s, in: prompt_io, out: log, err: log)
+            r, w = IO.pipe
+            Sync do
+              child = Async::Process::Child.new(*argv, chdir: chdir.to_s, in: prompt_io, out: w, err: log)
+              w.close
+              tasks = start_tee(r, log, push_url: push_url, push_token: push_token, push_client: push_client)
+              status = child.wait
+              tasks.each(&:wait)
+              status.exitstatus
             end
-            status.exitstatus
           end
         end
       end
@@ -91,10 +100,54 @@ module Space::Architect
           "--allowedTools", @allowed_tools,
           "--output-format", "stream-json",
           "--verbose",
+          "--include-partial-messages",
           "--max-turns", @max_turns.to_s
         ]
         args += ["--disallowedTools", @disallowed_tools] unless @disallowed_tools.to_s.empty?
         args
+      end
+
+      def start_tee(r, log, push_url:, push_token:, push_client:)
+        if push_url || push_client
+          body = Protocol::HTTP::Body::Writable.new(queue: Thread::SizedQueue.new(32))
+          push = Async { push_body(body, push_url: push_url, push_token: push_token, push_client: push_client) }
+          [Async { tee_pipe(r, log, body) }, push]
+        else
+          [Async { drain_pipe(r, log) }]
+        end
+      end
+
+      def push_body(body, push_url:, push_token:, push_client:)
+        path    = push_url ? URI.parse(push_url).path : "/"
+        headers = [["content-type", "application/x-ndjson"]]
+        headers << ["authorization", "Bearer #{push_token}"] if push_token
+        if push_client
+          push_client.post(path, headers: headers, body: body).discard
+        else
+          Async::HTTP::Client.open(Async::HTTP::Endpoint.parse(push_url)) do |c|
+            c.post(path, headers: headers, body: body).discard
+          end
+        end
+      end
+
+      def tee_pipe(r, log, body)
+        while (chunk = r.gets)
+          log.write(chunk)
+          log.flush
+          body.write(chunk) rescue Protocol::HTTP::Body::Writable::Closed
+        end
+      ensure
+        body.close_write
+        r.close
+      end
+
+      def drain_pipe(r, log)
+        while (chunk = r.gets)
+          log.write(chunk)
+          log.flush
+        end
+      ensure
+        r.close
       end
     end
 

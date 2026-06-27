@@ -3,6 +3,7 @@ PATH
   specs:
     space-architect (2.0.0)
       async (~> 2.39)
+      async-http (~> 0.95)
       async-process (~> 1.4)
       dry-cli (~> 1.4)
       dry-monads (~> 1.10)
@@ -11,6 +12,7 @@ PATH
       dry-types (~> 1.9)
       dry-validation (~> 1.11)
       pastel (~> 0.8)
+      protocol-http (~> 0.62)
       tty-cursor (~> 0.7)
       xdg (~> 10.2)
 
@@ -23,6 +25,19 @@ GEM
       io-event (~> 1.11)
       metrics (~> 0.12)
       traces (~> 0.18)
+    async-http (0.95.1)
+      async (>= 2.10.2)
+      async-pool (~> 0.11)
+      io-endpoint (~> 0.14)
+      io-stream (~> 0.6)
+      metrics (~> 0.12)
+      protocol-http (~> 0.62)
+      protocol-http1 (~> 0.39)
+      protocol-http2 (~> 0.26)
+      protocol-url (~> 0.2)
+      traces (~> 0.10)
+    async-pool (0.11.2)
+      async (>= 2.0)
     async-process (1.4.0)
       async (~> 2.0)
     bigdecimal (4.1.2)
@@ -82,7 +97,9 @@ GEM
       fiber-storage
     fiber-storage (1.0.1)
     ice_nine (0.11.2)
+    io-endpoint (0.17.2)
     io-event (1.16.1)
+    io-stream (0.13.1)
     json (2.19.7)
     logger (1.7.0)
     metrics (0.15.0)
@@ -92,6 +109,14 @@ GEM
     pastel (0.8.0)
       tty-color (~> 0.5)
     prism (1.9.0)
+    protocol-hpack (1.5.1)
+    protocol-http (0.62.2)
+    protocol-http1 (0.39.0)
+      protocol-http (~> 0.62)
+    protocol-http2 (0.26.0)
+      protocol-hpack (~> 1.4)
+      protocol-http (~> 0.62)
+    protocol-url (0.4.0)
     rake (13.4.2)
     traces (0.18.2)
     tty-color (0.6.0)
@@ -110,6 +135,8 @@ DEPENDENCIES
 
 CHECKSUMS
   async (2.39.0) sha256=df18730073f2bbb45788077dfa20cb365ecc1b9453969f44de6796b5191a00aa
+  async-http (0.95.1) sha256=0c3dd458c204c06d5c4b20b01bbec4794a1203db627fb2ce536e1799ec14786c
+  async-pool (0.11.2) sha256=0a43a17b02b04d9c451b7d12fafa9a50e55dc6dd00d4369aca00433f16a7e3ed
   async-process (1.4.0) sha256=859c2901b9047b6b8843e9a21ec7f3c626eb04efdcff66185a05ede99257f590
   bigdecimal (4.1.2) sha256=53d217666027eab4280346fba98e7d5b66baaae1b9c3c1c0ffe89d48188a3fbd
   concurrent-ruby (1.3.7) sha256=4412caec3a5ea2e5fdc52076724c071a81f2c0593d83b2ac8cbb8ca63b3151b0
@@ -130,13 +157,20 @@ CHECKSUMS
   fiber-local (1.1.0) sha256=c885f94f210fb9b05737de65d511136ea602e00c5105953748aa0f8793489f06
   fiber-storage (1.0.1) sha256=f48e5b6d8b0be96dac486332b55cee82240057065dc761c1ea692b2e719240e1
   ice_nine (0.11.2) sha256=5d506a7d2723d5592dc121b9928e4931742730131f22a1a37649df1c1e2e63db
+  io-endpoint (0.17.2) sha256=3feaf766c116b35839c11fac68b6aaadc47887bb488902a57bf8e1d288fb3338
   io-event (1.16.1) sha256=641686f1e919a4890f788b86393026f8ef1394ee4af4d2ab9c24c81e237736ed
+  io-stream (0.13.1) sha256=570d7c4dfb0fbd767480b4a222048a2be6d9b78febc1ec68258d0e0a4cde20de
   json (2.19.7) sha256=fe432c8639f6efff69f9d73b518a3705d9581ab93156f981ea72806e1e5bcc3e
   logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
   metrics (0.15.0) sha256=61ded5bac95118e995b1bc9ed4a5f19bc9814928a312a85b200abbdac9039072
   minitest (6.0.6) sha256=153ea36d1d987a62942382b61075745042a2b3123b1cd48f4c3675af9cc7d6f1
   pastel (0.8.0) sha256=481da9fb7d2f6e6b1a08faf11fa10363172dc40fd47848f096ae21209f805a75
   prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
+  protocol-hpack (1.5.1) sha256=6feca238b8078da1cd295677d6f306c6001af92d75fe0643d33e6956cbc3ad91
+  protocol-http (0.62.2) sha256=e1c1f2f56029c1af8c4e2b8a67d0d096c76620f3afd8d99d1dcd2f6b8ffa773b
+  protocol-http1 (0.39.0) sha256=e49b3f4cda6f5d94c76a323d2b7f6977cba3ebd082d2da437039594da77ad8eb
+  protocol-http2 (0.26.0) sha256=bac89cd78082b241ccd0cf7246f5160e4bb0c9c975fb4bf7deef5f88cc317486
+  protocol-url (0.4.0) sha256=64d4c03b6b51ad815ac6fdaf77a1d91e5baf9220d26becb846c5459dacdea9e1
   rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
   space-architect (2.0.0)
   traces (0.18.2) sha256=80f1649cb4daace1d7174b81f3b3b7427af0b93047759ba349960cb8f315e214
