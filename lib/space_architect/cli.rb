@@ -1,15 +1,19 @@
 # frozen_string_literal: true
 
 require "dry/cli"
+require "space_core/cli"
 
 module Space::Architect
   module CLI
-    Outcome = Data.define(:exit_code, :message) do
-      def initialize(exit_code:, message: nil) = super
-    end
+    # Delegate the outcome seam to Space::Core::CLI so both architect commands
+    # (which call CLI.record_outcome lexically) and the moved Helpers (which call
+    # CLI.record_outcome with Space::Core::CLI as lexical root) share one slot.
+    Outcome       = Space::Core::CLI::Outcome
+    Helpers       = Space::Core::CLI::Helpers
+    GlobalOptions = Space::Core::CLI::GlobalOptions
 
-    def self.record_outcome(o) = (Thread.current[:space_architect_outcome] = o)
-    def self.last_outcome = Thread.current[:space_architect_outcome]
+    def self.record_outcome(o) = Space::Core::CLI.record_outcome(o)
+    def self.last_outcome      = Space::Core::CLI.last_outcome
 
     module Registry
       extend Dry::CLI::Registry
@@ -19,7 +23,7 @@ module Space::Architect
     VERSION_REQUEST   = [["version"], ["--version"]].freeze
 
     def self.call(argv, out = $stdout, err = $stderr)
-      Thread.current[:space_architect_outcome] = nil
+      Thread.current[:space_core_cli_outcome] = nil
 
       if TOP_LEVEL_HELP.include?(argv)
         out.puts Dry::CLI::Usage.call(Registry.get([]))
@@ -35,7 +39,13 @@ module Space::Architect
         return dispatch_src(argv[1..], out, err)
       end
 
-      Dry::CLI.new(Registry).call(arguments: normalize_args(argv), out: out, err: err)
+      normalized = normalize_args(argv)
+
+      if normalized.first == "space"
+        return dispatch_space(normalized[1..], out, err)
+      end
+
+      Dry::CLI.new(Registry).call(arguments: normalized, out: out, err: err)
       last_outcome&.exit_code || 0
     end
 
@@ -84,19 +94,6 @@ module Space::Architect
   end
 end
 
-require_relative "cli/options"
-require_relative "cli/helpers"
-require_relative "cli/init"
-require_relative "cli/new"
-require_relative "cli/list"
-require_relative "cli/show"
-require_relative "cli/path"
-require_relative "cli/use"
-require_relative "cli/current"
-require_relative "cli/status"
-require_relative "cli/config"
-require_relative "cli/repo"
-require_relative "cli/shell"
 require_relative "cli/architect"
 require_relative "cli/space"
 require_relative "cli/src"

@@ -439,14 +439,27 @@ class CLITest < Space::ArchitectTest
   end
 
   def test_help_forms_print_listing_to_stdout_and_exit_0
+    # Post-split: architect registry has worktree + variant groups; space is an intercept, not a group.
     [[], ["--help"], ["-h"], ["help"]].each do |argv|
       out = StringIO.new
       err = StringIO.new
       exit_code = Space::Architect::CLI.call(argv, out, err)
       assert_equal 0, exit_code, "#{argv.inspect} should exit 0"
-      assert_match(/\bspace\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should list space group at root")
-      assert_match(/\bworktree\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should list worktree loop verb at root")
+      assert_match(/\bworktree\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should list worktree group at root")
+      assert_match(/\bvariant\b.*\[SUBCOMMAND\]/m, out.string, "#{argv.inspect} should list variant group at root")
+      refute_match(/\bspace\b \[SUBCOMMAND\]/, out.string, "#{argv.inspect} space is now an intercept, not a registry group")
       assert_empty err.string, "#{argv.inspect} should write nothing to stderr"
+    end
+
+    # Space::Core::CLI registry lists space surface groups directly at top level.
+    [[], ["--help"], ["-h"], ["help"]].each do |argv|
+      out = StringIO.new
+      err = StringIO.new
+      exit_code = Space::Core::CLI.call(argv, out, err)
+      assert_equal 0, exit_code, "space #{argv.inspect} should exit 0"
+      assert_match(/\brepo\b.*\[SUBCOMMAND\]/m, out.string, "space #{argv.inspect} should list repo group")
+      assert_match(/\bshell\b.*\[SUBCOMMAND\]/m, out.string, "space #{argv.inspect} should list shell group")
+      assert_empty err.string, "space #{argv.inspect} should write nothing to stderr"
     end
   end
 
