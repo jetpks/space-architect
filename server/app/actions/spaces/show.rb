@@ -37,16 +37,17 @@ module Space
 
             iterations_props = iterations.map do |iter|
               {
-                id:          iter.id,
-                ordinal:     iter.ordinal,
-                name:        iter.name,
-                freeze_sha:  iter.freeze_sha,
-                verdict:     iter.verdict,
-                created_at:  iter.created_at.iso8601,
-                occurred_at: iter.occurred_at&.iso8601,
-                decisions:   decisions_for(iter, iter_artifacts),
-                artifacts:   Array(iter_artifacts[iter.id]).map { |a| artifact_props(a) },
-                runs:        Array(iter_runs[iter.id]).map { |r| run_props(r) }
+                id:                     iter.id,
+                ordinal:                iter.ordinal,
+                name:                   iter.name,
+                freeze_sha:             iter.freeze_sha,
+                verdict:                iter.verdict,
+                created_at:             iter.created_at.iso8601(6),
+                occurred_at:            iter.occurred_at&.iso8601(6),
+                occurred_at_utc_offset: iter.occurred_at_utc_offset,
+                decisions:              decisions_for(iter, iter_artifacts),
+                artifacts:              Array(iter_artifacts[iter.id]).map { |a| artifact_props(a) },
+                runs:                   Array(iter_runs[iter.id]).map { |r| run_props(r) }
               }
             end
 
@@ -64,11 +65,12 @@ module Space
 
             render_inertia(req, res, "Spaces/Show", props: {
               space: {
-                id:     space.id,
-                slug:   space.slug,
-                title:  space.title,
-                status: space.status.to_s,
-                repos:  Array(space.repos)
+                id:             space.id,
+                slug:           space.slug,
+                title:          space.title,
+                status:         space.status.to_s,
+                repos:          Array(space.repos),
+                git_utc_offset: space.git_utc_offset
               },
               iterations:      iterations_props,
               architect_runs:  architect_runs,
@@ -96,14 +98,14 @@ module Space
 
           def run_props(r)
             { id: r.id, lane: r.lane, role: r.role, status: r.status.to_s,
-              conversation_id: r.conversation_id, created_at: r.created_at.iso8601 }
+              conversation_id: r.conversation_id, created_at: r.created_at.iso8601(6) }
           end
 
           def architect_run_props(r)
             { id: r.id, role: r.role, status: r.status.to_s,
               session_id: r.session_id, conversation_id: r.conversation_id,
-              created_at: r.created_at.iso8601,
-              occurred_at: r.occurred_at&.iso8601,
+              created_at: r.created_at.iso8601(6),
+              occurred_at: r.occurred_at&.iso8601(6),
               has_transcript: !r.conversation_id.nil? }
           end
         end
