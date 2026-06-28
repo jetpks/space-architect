@@ -15,12 +15,20 @@ module Space
       # shift round boundaries. Here machinery rides along inside whatever round its
       # position falls in instead of being filtered out, leaving the boundaries a
       # function of the transcript alone.
+      #
+      # A Message is the atomic unit of round membership and is never split across
+      # rounds. For builder/claude-code imports, an entire assistant turn is persisted
+      # as a single bundled message (blocks: [thinking?, text, tool_use, …]). The
+      # round boundary predicate uses leads_with_narrative? to handle both the
+      # one-block-per-message (architect) shape and the bundled (builder) shape
+      # uniformly: a message that leads with a narrative block opens a new round.
       class Round
         attr_reader :messages
 
         # Partition the turn's non-prompt members, in order. A new round opens at a
-        # structural (non-machinery) non-action message once the current round holds
-        # at least one action; machinery never opens or splits a round.
+        # structural (non-machinery) message that leads with narrative once the current
+        # round holds at least one action; machinery never opens or splits a round.
+        # For single-block messages, leads_with_narrative? is equivalent to !action?.
         def self.group(turn)
           prompt_id = turn.prompt&.id
           rounds = []
@@ -28,7 +36,7 @@ module Space
           turn.messages.each do |message|
             next if message.id == prompt_id
             action = action?(message)
-            if rounds.empty? || (!action && has_action && !machinery?(message))
+            if rounds.empty? || (leads_with_narrative?(message) && has_action && !machinery?(message))
               rounds << new
               has_action = false
             end
@@ -42,6 +50,19 @@ module Space
         # reasoning/narrative.
         def self.action?(message)
           message.blocks.any? { |b| b["type"] == "tool_use" }
+        end
+
+        # True iff a narrative block (text, thinking, or redacted_thinking) precedes
+        # the message's first tool_use block — or the message has no tool_use at all.
+        # For single-block messages this is equivalent to !action?: a lone text/thinking
+        # block returns true; a lone tool_use returns false.
+        def self.leads_with_narrative?(message)
+          narrative_types = %w[text thinking redacted_thinking]
+          message.blocks.each do |b|
+            return true if narrative_types.include?(b["type"])
+            return false if b["type"] == "tool_use"
+          end
+          true
         end
 
         # Plumbing that rides along without shaping the round structure: tool_result
