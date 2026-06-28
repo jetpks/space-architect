@@ -320,4 +320,70 @@ class SpacesShowI03Test < Minitest::Test
     assert_equal [run_a.id, run_b.id], ids,
       "architect_runs must be ordered by created_at asc"
   end
+
+  # ── occurred_at and has_transcript on architect_run_props ────────────────────
+
+  def test_show_architect_run_includes_occurred_at_and_has_transcript
+    sign_in(@owner)
+    space   = Factory[:space, user_id: @owner.id, slug: "arch-occurred-space"]
+    arch_run = Factory[:run, user_id: @owner.id, space_id: space.id,
+                       iteration_id: nil, role: "architect", session_id: "sess-occ-1"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    r = parse_json(body)["props"]["architect_runs"].first
+
+    assert r.key?("occurred_at"),    "architect_run must include occurred_at"
+    assert r.key?("has_transcript"), "architect_run must include has_transcript"
+  end
+
+  def test_show_architect_run_has_transcript_false_when_no_conversation
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "arch-no-conv-space"]
+    Factory[:run, user_id: @owner.id, space_id: space.id,
+            iteration_id: nil, role: "architect", conversation_id: nil]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    r = parse_json(body)["props"]["architect_runs"].first
+
+    assert_equal false, r["has_transcript"]
+    assert_nil r["occurred_at"]
+  end
+
+  def test_show_architect_run_has_transcript_true_when_conversation_present
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "arch-conv-space"]
+    conv  = Factory[:conversation, user_id: @owner.id]
+    Factory[:run, user_id: @owner.id, space_id: space.id,
+            iteration_id: nil, role: "architect", conversation_id: conv.id]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    r = parse_json(body)["props"]["architect_runs"].first
+
+    assert_equal true, r["has_transcript"]
+  end
+
+  # ── occurred_at on iterations ─────────────────────────────────────────────────
+
+  def test_show_iteration_includes_occurred_at_key
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "iter-occurred-space"]
+    Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-occ"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    iter = parse_json(body)["props"]["iterations"].first
+
+    assert iter.key?("occurred_at"), "iteration must include occurred_at key"
+  end
+
+  def test_show_iteration_occurred_at_nil_by_default
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "iter-nil-occurred-space"]
+    Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-nil"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    iter = parse_json(body)["props"]["iterations"].first
+
+    # Factory creates without occurred_at; must serialize as null
+    assert_nil iter["occurred_at"]
+  end
 end

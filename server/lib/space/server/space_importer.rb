@@ -2,6 +2,8 @@
 
 require "yaml"
 require "json"
+require "open3"
+require "time"
 require_relative "normalizer"
 require_relative "runs/persistor"
 require_relative "section_parser"
@@ -66,11 +68,13 @@ module Space
       def upsert_iterations(space, arch_iters)
         arch_iters.each_with_object({}) do |iter_data, map|
           ordinal = iter_data["ordinal"]
+          sha     = iter_data["freeze_sha"]
           iter = @iterations_repo.upsert_by_ordinal(space.id, ordinal, {
-            name:       iter_data["name"],
-            freeze_sha: iter_data["freeze_sha"],
-            verdict:    iter_data["verdict"],
-            status:     iter_data["status"]
+            name:        iter_data["name"],
+            freeze_sha:  sha,
+            verdict:     iter_data["verdict"],
+            status:      iter_data["status"],
+            occurred_at: git_commit_time(space.source_path, sha)
           })
           map[ordinal] = iter
         end
@@ -253,17 +257,26 @@ module Space
           updated_at:   Time.now
         )
 
-        persistor = Runs::Persistor.new(@conversations_repo, @messages_repo)
+        persistor   = Runs::Persistor.new(@conversations_repo, @messages_repo)
         persistor.setup(run)
 
-        parser = Normalizer::ClaudeSession.new
+        parser      = Normalizer::ClaudeSession.new
+        occurred_at = nil
 
         File.open(session_jsonl) do |io|
           io.each_line do |line|
             line = line.strip
             next if line.empty?
 
-            parser.process(line).each { |event| persistor.process(event) }
+            record = begin
+              JSON.parse(line)
+            rescue JSON::ParserError
+              next
+            end
+
+            occurred_at ||= parse_iso8601(record["timestamp"])
+
+            parser.process(record).each { |event| persistor.process(event) }
           end
         end
 
@@ -271,6 +284,7 @@ module Space
           status:          2,
           producer:        "claude_session",
           session_id:      session_id,
+          occurred_at:     occurred_at,
           conversation_id: persistor.conversation_id,
           updated_at:      Time.now
         }.compact)
@@ -283,6 +297,27 @@ module Space
         when /Opencode/      then "opencode"
         else "unknown"
         end
+      end
+
+      # Returns the git committer timestamp for +sha+ in +space_dir+, or nil on any failure.
+      # sha is passed as a positional arg to avoid shell interpolation.
+      def git_commit_time(space_dir, sha)
+        return nil if sha.nil? || sha.to_s.strip.empty?
+
+        out, status = Open3.capture2e("git", "-C", space_dir.to_s, "show", "-s", "--format=%cI", sha.to_s)
+        return nil unless status.success?
+
+        ts = out.lines.first&.strip
+        parse_iso8601(ts)
+      rescue StandardError
+        nil
+      end
+
+      def parse_iso8601(str)
+        return nil if str.nil? || str.strip.empty?
+        Time.iso8601(str.strip).utc
+      rescue ArgumentError
+        nil
       end
     end
   end

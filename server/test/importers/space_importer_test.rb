@@ -274,6 +274,81 @@ class SpaceImporterTest < Minitest::Test
     end
   end
 
+  # ── occurred_at — architect runs ─────────────────────────────────────────────
+
+  def test_architect_run_occurred_at_from_first_jsonl_timestamp
+    with_staged_session_root do |root|
+      import!(claude_projects_root: root)
+      run = conn[:runs].where(role: "architect").first
+      refute_nil run[:occurred_at], "occurred_at must be populated from session jsonl"
+      # Fixture's first timestamp is 2026-06-28T00:00:01.000Z
+      expected = Time.iso8601("2026-06-28T00:00:01.000Z").utc
+      assert_equal expected, run[:occurred_at].utc
+    end
+  end
+
+  def test_architect_run_occurred_at_not_import_time
+    with_staged_session_root do |root|
+      before = Time.now - 1
+      import!(claude_projects_root: root)
+      run = conn[:runs].where(role: "architect").first
+      # occurred_at must be the session timestamp (2026-06-28), not Time.now
+      refute run[:occurred_at].utc >= before,
+        "occurred_at must come from the jsonl, not import time"
+    end
+  end
+
+  # ── occurred_at — iterations ──────────────────────────────────────────────────
+
+  def test_iteration_occurred_at_nil_when_not_a_git_repo
+    # FIXTURE_DIR is not a git repo; freeze_sha abc123def456 cannot resolve
+    import!
+    iters = conn[:iterations].all
+    iters.each do |iter|
+      assert_nil iter[:occurred_at],
+        "occurred_at must be nil when space is not a git repo (ordinal #{iter[:ordinal]})"
+    end
+  end
+
+  def test_iteration_occurred_at_nil_when_freeze_sha_blank
+    # second-iteration has freeze_sha: '' — must not raise
+    import!
+    iter2 = conn[:iterations].where(ordinal: 2).first
+    assert_nil iter2[:occurred_at]
+  end
+
+  # ── git_commit_time helper (unit) ────────────────────────────────────────────
+
+  def test_git_commit_time_nil_for_nil_sha
+    assert_nil @importer.send(:git_commit_time, FIXTURE_DIR, nil)
+  end
+
+  def test_git_commit_time_nil_for_blank_sha
+    assert_nil @importer.send(:git_commit_time, FIXTURE_DIR, "")
+  end
+
+  def test_git_commit_time_nil_for_non_git_dir
+    Dir.mktmpdir("not_a_git") do |dir|
+      assert_nil @importer.send(:git_commit_time, dir, "abc123")
+    end
+  end
+
+  def test_git_commit_time_returns_time_for_real_commit
+    Dir.mktmpdir("git_fixture") do |dir|
+      system("git", "-C", dir, "init", "-q",
+             "--initial-branch=main", exception: false) ||
+        system("git", "-C", dir, "init", "-q", exception: false)
+      system("git", "-C", dir, "config", "user.email", "test@test.com", exception: false)
+      system("git", "-C", dir, "config", "user.name", "Test", exception: false)
+      File.write(File.join(dir, "x"), "x")
+      system("git", "-C", dir, "add", ".", exception: false)
+      system("git", "-C", dir, "commit", "-m", "init", "--no-gpg-sign", exception: false)
+      sha = `git -C #{dir} rev-parse HEAD`.strip
+      result = @importer.send(:git_commit_time, dir, sha)
+      assert_kind_of Time, result
+    end
+  end
+
   private
 
   def snapshot_counts
