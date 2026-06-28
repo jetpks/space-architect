@@ -525,4 +525,95 @@ class SpacesShowI03Test < Minitest::Test
 
     assert_equal(-21600, space_prop["git_utc_offset"])
   end
+
+  # ── harness and model on run_props (builder rows) ────────────────────────────
+
+  def test_show_builder_run_includes_harness_and_model_keys
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "run-harness-space"]
+    iter  = Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-harness"]
+    Factory[:run, user_id: @owner.id, space_id: space.id,
+            iteration_id: iter.id, role: "builder", lane: "lane-a"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    r = parse_json(body)["props"]["iterations"].first["runs"].first
+
+    assert r.key?("harness"), "builder run must include harness key"
+    assert r.key?("model"),   "builder run must include model key"
+  end
+
+  # ── harness and model on architect_run_props ──────────────────────────────────
+
+  def test_show_architect_run_includes_harness_and_model_keys
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "arch-harness-space"]
+    Factory[:run, user_id: @owner.id, space_id: space.id,
+            iteration_id: nil, role: "architect", session_id: "sess-harness-1"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    r = parse_json(body)["props"]["architect_runs"].first
+
+    assert r.key?("harness"), "architect_run must include harness key"
+    assert r.key?("model"),   "architect_run must include model key"
+  end
+
+  # ── eager turns on architect_run_props ───────────────────────────────────────
+
+  def test_show_architect_run_includes_turns_key
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "arch-turns-key-space"]
+    Factory[:run, user_id: @owner.id, space_id: space.id,
+            iteration_id: nil, role: "architect", session_id: "sess-turns-1"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    r = parse_json(body)["props"]["architect_runs"].first
+
+    assert r.key?("turns"), "architect_run must include turns key"
+    assert_kind_of Array, r["turns"]
+  end
+
+  def test_show_architect_run_turns_empty_when_no_conversation
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "arch-turns-empty-space"]
+    Factory[:run, user_id: @owner.id, space_id: space.id,
+            iteration_id: nil, role: "architect", conversation_id: nil]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    r = parse_json(body)["props"]["architect_runs"].first
+
+    assert_equal [], r["turns"],
+      "turns must be empty array when conversation_id is nil"
+  end
+
+  def test_show_architect_run_turns_populated_from_conversation
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "arch-turns-pop-space"]
+    conv  = Factory[:conversation, user_id: @owner.id]
+    Factory[:message, conversation_id: conv.id, role: "user",
+            content: [{ "type" => "text", "text" => "hello" }], position: 1]
+    Factory[:message, conversation_id: conv.id, role: "assistant",
+            content: [{ "type" => "text", "text" => "world" }], position: 2]
+    Factory[:run, user_id: @owner.id, space_id: space.id,
+            iteration_id: nil, role: "architect", conversation_id: conv.id]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    r = parse_json(body)["props"]["architect_runs"].first
+
+    refute_empty r["turns"], "turns must be non-empty when conversation has messages"
+    turn = r["turns"].first
+    assert turn.key?("anchor_id"), "each turn must include anchor_id"
+  end
+
+  def test_show_builder_run_does_not_include_turns
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "run-no-turns-space"]
+    iter  = Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-no-turns"]
+    Factory[:run, user_id: @owner.id, space_id: space.id,
+            iteration_id: iter.id, role: "builder", lane: "lane-a"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    r = parse_json(body)["props"]["iterations"].first["runs"].first
+
+    refute r.key?("turns"), "builder run props must not include turns"
+  end
 end

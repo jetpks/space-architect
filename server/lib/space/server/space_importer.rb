@@ -156,7 +156,7 @@ module Space
             worktree = lane_data["worktree"]
             next unless worktree
             build_rel = File.dirname(worktree)
-            map[build_rel] = { iteration: iter, lane: lane_data["name"] }
+            map[build_rel] = { iteration: iter, lane: lane_data["name"], harness: lane_data["harness"] }
           end
         end
       end
@@ -165,13 +165,13 @@ module Space
         m = dir_name.match(/^I(\d+)-.+-([^-]+)$/)
         if m
           ordinal = m[1].to_i
-          { iteration: iteration_map[ordinal], lane: m[2] }
+          { iteration: iteration_map[ordinal], lane: m[2], harness: nil }
         else
-          { iteration: nil, lane: dir_name }
+          { iteration: nil, lane: dir_name, harness: nil }
         end
       end
 
-      def import_builder_run(run_jsonl, space:, iteration:, lane:, user:)
+      def import_builder_run(run_jsonl, space:, iteration:, lane:, harness:, user:)
         existing = @runs_repo.find_builder_run(space.id, iteration&.id, lane)
 
         if existing&.conversation_id
@@ -227,6 +227,8 @@ module Space
           producer:        producer,
           session_id:      session_id,
           conversation_id: persistor.conversation_id,
+          harness:         harness,
+          model:           persistor.first_model,
           updated_at:      Time.now
         }.compact)
       end
@@ -290,6 +292,8 @@ module Space
           session_id:      session_id,
           occurred_at:     occurred_at,
           conversation_id: persistor.conversation_id,
+          harness:         "claude-code",
+          model:           persistor.first_model,
           updated_at:      Time.now
         }.compact)
       end

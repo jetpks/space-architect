@@ -15,7 +15,7 @@ module Space
       #   events.each { persistor.process(_1) }
       #   run_record.conversation_id  # use persistor.conversation_id to link
       class Persistor
-        attr_reader :conversation_id
+        attr_reader :conversation_id, :first_model
 
         def initialize(conversations_repo, messages_repo)
           @conversations_repo = conversations_repo
@@ -56,6 +56,7 @@ module Space
           @conversation_id = nil
           @position        = 0
           @current_msg     = nil
+          @first_model     = nil
         end
 
         def start_message(event)
@@ -102,6 +103,9 @@ module Space
 
         def flush_message
           return unless @current_msg && @conversation_id
+          if @first_model.nil? && @current_msg[:role] == "assistant" && @current_msg[:model]
+            @first_model = @current_msg[:model]
+          end
           @messages_repo.create(
             conversation_id: @conversation_id,
             role:            @current_msg[:role],
