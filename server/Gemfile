@@ -30,7 +30,7 @@ gem "async-job-processor-redis", "0.3.1"
 gem "async-redis", "0.13.1"
 
 # File attachments
-gem "shrine", "3.7.1"
+gem "shrine", "3.8.0"
 
 # Persistence
 gem "rom", "5.4.3"
