@@ -203,4 +203,89 @@ class RoundTest < Minitest::Test
     assert_equal [result], rounds.first.messages
     assert_equal result.id, rounds.first.anchor_id
   end
+
+  # ── bundled builder-shape tests ────────────────────────────────────────────
+
+  test "bundled builder messages: each leading-narrative bundled message opens its own round" do
+    prompt  = text("user", "go")
+    # Each bundled assistant message carries all blocks for one agentic step.
+    bundledA = msg("assistant", [
+      { "type" => "text",     "text"  => "first, I'll look" },
+      { "type" => "tool_use", "id"   => "t1", "name" => "Bash", "input" => {} }
+    ])
+    result1  = tool_result
+    bundledB = msg("assistant", [
+      { "type" => "text",     "text"  => "now I'll fix it" },
+      { "type" => "tool_use", "id"   => "t2", "name" => "Bash", "input" => {} }
+    ])
+    result2  = tool_result
+
+    rounds = rounds_for([prompt, bundledA, result1, bundledB, result2])
+
+    assert_equal 2, rounds.size
+    assert_equal [bundledA, result1], rounds.first.messages
+    assert_equal [bundledB, result2], rounds.last.messages
+    assert_equal bundledA.id, rounds.first.anchor_id
+    assert_equal bundledB.id, rounds.last.anchor_id
+  end
+
+  test "thinking-led bundled messages also open one round per message" do
+    prompt   = text("user", "go")
+    bundledA = msg("assistant", [
+      { "type" => "thinking", "thinking" => "plan hmm" },
+      { "type" => "text",     "text"     => "plan A" },
+      { "type" => "tool_use", "id"       => "t1", "name" => "Bash", "input" => {} }
+    ])
+    result1  = tool_result
+    bundledB = msg("assistant", [
+      { "type" => "thinking", "thinking" => "more hmm" },
+      { "type" => "text",     "text"     => "plan B" },
+      { "type" => "tool_use", "id"       => "t2", "name" => "Bash", "input" => {} }
+    ])
+    result2  = tool_result
+
+    rounds = rounds_for([prompt, bundledA, result1, bundledB, result2])
+
+    assert_equal 2, rounds.size
+    assert_equal [bundledA, result1], rounds.first.messages
+    assert_equal [bundledB, result2], rounds.last.messages
+    assert_equal bundledA.id, rounds.first.anchor_id
+    assert_equal bundledB.id, rounds.last.anchor_id
+  end
+
+  test "a bundled message that leads with tool_use rides in the current round" do
+    # Documented boundary: [tool_use, text] in one message does not split rounds —
+    # the Message is the atomic unit, never partitioned across rounds.
+    prompt  = text("user", "go")
+    lead    = text("assistant", "looking")
+    call    = tool_use   # has_action becomes true after this
+    bundled = msg("assistant", [
+      { "type" => "tool_use", "id"   => "t1", "name" => "Bash", "input" => {} },
+      { "type" => "text",     "text" => "trailing narrative" }
+    ])
+
+    rounds = rounds_for([prompt, lead, call, bundled])
+
+    assert_equal 1, rounds.size
+    assert_equal [lead, call, bundled], rounds.first.messages
+  end
+
+  test "single-block messages behave identically under leads_with_narrative? (equivalence guard)" do
+    # For one-block-per-message inputs, leads_with_narrative?(m) == !action?(m).
+    # This assertion explicitly guards the cardinal invariant so any regression
+    # in the new predicate for single-block inputs is immediately visible.
+    prompt = text("user", "go")
+    lead1  = text("assistant", "first, I'll look around")
+    call1  = tool_use
+    lead2  = text("assistant", "now I'll fix it")
+    call2  = tool_use
+
+    rounds = rounds_for([prompt, lead1, call1, lead2, call2])
+
+    assert_equal 2, rounds.size
+    assert_equal [lead1, call1], rounds.first.messages
+    assert_equal [lead2, call2], rounds.last.messages
+    assert_equal lead1.id, rounds.first.anchor_id
+    assert_equal lead2.id, rounds.last.anchor_id
+  end
 end
