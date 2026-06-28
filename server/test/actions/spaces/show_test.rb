@@ -131,6 +131,72 @@ class SpacesShowI03Test < Minitest::Test
     assert_equal [], decisions
   end
 
+  # ── content fidelity (nested ## subsections) ─────────────────────────────────
+
+  NESTED_ITERATION_MARKDOWN = <<~MD
+    # I01: Real Iteration
+
+    ## Grounds
+
+    The grounds content.
+
+    ## Specification
+
+    Top-level spec intro.
+
+    ## Objective
+
+    The nested objective subsection.
+
+    ## Boundaries
+
+    The nested boundaries subsection.
+
+    ## Acceptance Criteria
+
+    - AC-1: criterion
+
+    ## Builder Prompt
+
+    Build this.
+
+    ## Verdict
+
+    continue
+  MD
+
+  def test_show_decisions_specification_body_includes_nested_subsections
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "nested-spec-space"]
+    iter  = Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-nested"]
+    Factory[:artifact, space_id: space.id, iteration_id: iter.id,
+            kind: "iteration", path: "architecture/I01-nested.md", title: "I01 Nested",
+            raw: NESTED_ITERATION_MARKDOWN]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    decisions = parse_json(body)["props"]["iterations"].first["decisions"]
+
+    spec = decisions.find { |d| d["name"] == "Specification" }
+    refute_nil spec, "Specification decision must be present"
+    assert_match "Top-level spec intro",           spec["body"]
+    assert_match "## Objective",                   spec["body"],
+      "nested ## Objective header must be preserved in Specification body"
+    assert_match "The nested objective subsection", spec["body"],
+      "nested Objective content must be in Specification body"
+    assert_match "## Boundaries",                  spec["body"],
+      "nested ## Boundaries header must be preserved in Specification body"
+
+    # Nested non-canonical headers must NOT become top-level decisions
+    names = decisions.map { |d| d["name"] }
+    refute_includes names, "Objective",  "Objective must not be its own decision"
+    refute_includes names, "Boundaries", "Boundaries must not be its own decision"
+
+    # Canonical order preserved
+    canonical = ["Grounds", "Specification", "Acceptance Criteria",
+                 "Builder Prompt", "Builder Report", "Verdict"]
+    assert_equal canonical & names, names, "decisions must be in canonical order"
+  end
+
   # ── created_at ───────────────────────────────────────────────────────────────
 
   def test_show_iteration_includes_created_at

@@ -4,6 +4,10 @@ module Space
   module Server
     module Repos
       class ArtifactsRepo < Space::Server::DB::Repo
+        def by_pk(id)
+          artifacts.by_pk(id).one
+        end
+
         def for_space(space_id)
           artifacts.where(space_id: space_id).to_a
         end

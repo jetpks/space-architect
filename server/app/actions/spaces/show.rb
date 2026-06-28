@@ -82,7 +82,7 @@ module Space
             iter_art = Array(iter_artifacts[iter.id]).find { |a| a.kind == "iteration" }
             return [] unless iter_art
 
-            sections = Space::Server::SectionParser.parse(iter_art.raw)
+            sections = Space::Server::SectionParser.split_canonical(iter_art.raw, CANONICAL_SECTIONS)
             CANONICAL_SECTIONS.filter_map do |name|
               next unless sections.key?(name)
               { name: name, body: sections[name] }

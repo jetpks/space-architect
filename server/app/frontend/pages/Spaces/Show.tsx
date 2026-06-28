@@ -14,13 +14,19 @@ type Props = {
   other_artifacts: SpaceArtifact[]
 }
 
-function ArtifactRow({ artifact }: { artifact: SpaceArtifact }) {
+function ArtifactRow({ spaceId, artifact }: { spaceId: number; artifact: SpaceArtifact }) {
   return (
     <li className="flex items-start gap-2 py-1 text-sm">
       <Badge variant={KIND_VARIANT[artifact.kind] ?? 'outline'} className="mt-0.5 shrink-0">
         {artifact.kind}
       </Badge>
       <Markdown text={artifact.title} />
+      <Link
+        href={`/spaces/${spaceId}/artifacts/${artifact.id}`}
+        className="ml-auto text-xs font-medium hover:underline"
+      >
+        View
+      </Link>
     </li>
   )
 }
@@ -53,7 +59,7 @@ function DecisionSection({ decision }: { decision: { name: string; body: string 
       <summary className="cursor-pointer px-3 py-2 text-sm font-medium select-none hover:bg-muted/30">
         {decision.name}
       </summary>
-      <div className="px-3 pb-3 pt-1">
+      <div className="overflow-x-auto max-w-full px-3 pb-3 pt-1">
         <Markdown text={decision.body} />
       </div>
     </details>
@@ -109,7 +115,7 @@ function IterationSection({
           </p>
           <ul className="space-y-0.5">
             {iteration.artifacts.map((a) => (
-              <ArtifactRow key={a.id} artifact={a} />
+              <ArtifactRow key={a.id} spaceId={space.id} artifact={a} />
             ))}
           </ul>
         </div>
@@ -131,7 +137,7 @@ function IterationSection({
   )
 }
 
-function ArchitectRunMarker({ run }: { run: ArchitectRun }) {
+function ArchitectRunMarker({ spaceId, run }: { spaceId: number; run: ArchitectRun }) {
   return (
     <div className="relative flex items-center py-2">
       <div className="flex-1 border-t border-dashed border-border/60" />
@@ -141,6 +147,14 @@ function ArchitectRunMarker({ run }: { run: ArchitectRun }) {
           {run.status}
         </Badge>
         <span>{relativeTime(run.created_at)}</span>
+        {run.conversation_id != null && (
+          <Link
+            href={`/spaces/${spaceId}/runs/${run.id}`}
+            className="font-medium hover:underline"
+          >
+            View transcript
+          </Link>
+        )}
       </div>
       <div className="flex-1 border-t border-dashed border-border/60" />
     </div>
@@ -208,7 +222,7 @@ export default function Show({
                 iteration={item.data}
               />
             ) : (
-              <ArchitectRunMarker key={`arun-${item.data.id}`} run={item.data} />
+              <ArchitectRunMarker key={`arun-${item.data.id}`} spaceId={space.id} run={item.data} />
             ),
           )}
         </div>
@@ -230,7 +244,7 @@ export default function Show({
           <h2 className="mb-3 text-lg font-semibold">Other Artifacts</h2>
           <ul className="space-y-0.5 rounded-lg border border-border p-4">
             {other_artifacts.map((a) => (
-              <ArtifactRow key={a.id} artifact={a} />
+              <ArtifactRow key={a.id} spaceId={space.id} artifact={a} />
             ))}
           </ul>
         </section>
