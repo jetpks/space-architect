@@ -1,8 +1,27 @@
+import { useMemo, useState } from 'react'
 import { Head, Link } from '@inertiajs/react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import AppLayout from '@/layouts/AppLayout'
 import Markdown from '@/components/Markdown'
-import type { ArchitectRun, Space, SpaceArtifact, SpaceIteration, SpaceRun } from '@/types'
+import TurnComponent from '@/components/Turn'
+import {
+  buildCommandPairs,
+  buildFoldedIndex,
+  buildToolResultIndex,
+  isAbsorbed,
+} from '@/lib/message-pairing'
+import { isEncryptedThinking } from '@/lib/tools'
+import type {
+  Annotation,
+  ArchitectRun,
+  Round as RoundType,
+  Space,
+  SpaceArtifact,
+  SpaceIteration,
+  SpaceRun,
+  Turn as TurnType,
+} from '@/types'
 import { KIND_VARIANT, STATUS_VARIANT, VERDICT_VARIANT, relativeTime } from './helpers'
 import { interleaveTimeline } from './timeline'
 
@@ -90,9 +109,9 @@ function IterationSection({
             {iteration.verdict}
           </Badge>
         )}
-        {iteration.created_at && (
+        {iteration.occurred_at && (
           <span className="ml-auto text-xs text-muted-foreground">
-            {relativeTime(iteration.created_at)}
+            {relativeTime(iteration.occurred_at)}
           </span>
         )}
       </div>
@@ -137,27 +156,136 @@ function IterationSection({
   )
 }
 
-function ArchitectRunMarker({ spaceId, run }: { spaceId: number; run: ArchitectRun }) {
+function ArchitectSessionSection({ space, run }: { space: Space; run: ArchitectRun }) {
+  const [expanded, setExpanded] = useState(false)
+  const [turns, setTurns] = useState<TurnType[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [fetchError, setFetchError] = useState(false)
+
+  const handleToggle = async () => {
+    const opening = !expanded
+    setExpanded(opening)
+    if (opening && turns === null) {
+      if (!run.has_transcript) {
+        setTurns([])
+      } else {
+        setLoading(true)
+        try {
+          const res = await fetch(`/spaces/${space.id}/runs/${run.id}/transcript`)
+          if (!res.ok) throw new Error('fetch failed')
+          const data = (await res.json()) as { turns: TurnType[] }
+          setTurns(data.turns)
+        } catch {
+          setFetchError(true)
+          setTurns([])
+        } finally {
+          setLoading(false)
+        }
+      }
+    }
+  }
+
+  const allMessages = useMemo(
+    () =>
+      (turns ?? []).flatMap((t) => [
+        ...(t.prompt ? [t.prompt] : []),
+        ...t.rounds.flatMap((r) => r.messages),
+      ]),
+    [turns],
+  )
+  const toolResults = useMemo(() => buildToolResultIndex(allMessages), [allMessages])
+  const commandPairs = useMemo(() => buildCommandPairs(allMessages), [allMessages])
+  const emptyAnnotatedIds = useMemo(() => new Set<number>(), [])
+  const folded = useMemo(
+    () =>
+      buildFoldedIndex(
+        allMessages,
+        toolResults,
+        commandPairs.foldedByCommandId,
+        emptyAnnotatedIds,
+      ),
+    [allMessages, toolResults, commandPairs, emptyAnnotatedIds],
+  )
+  const visibleRounds = useMemo(() => {
+    const visible = (turn: TurnType): RoundType[] =>
+      turn.rounds
+        .map((round) => ({
+          anchor_id: round.anchor_id,
+          messages: round.messages.filter((m) => {
+            if (isEncryptedThinking(m)) return false
+            return !isAbsorbed(m, toolResults, emptyAnnotatedIds)
+          }),
+        }))
+        .filter((round) => round.messages.length > 0)
+    return new Map((turns ?? []).map((t) => [t.anchor_id, visible(t)]))
+  }, [turns, toolResults, emptyAnnotatedIds])
+  const emptyAnnotations = useMemo(() => new Map<string, Annotation[]>(), [])
+  const owner = useMemo(
+    () => ({ username: run.role, name: null, avatar_url: null }),
+    [run.role],
+  )
+
+  const displayTime = run.occurred_at ?? run.created_at
+  const Chevron = expanded ? ChevronDown : ChevronRight
+
   return (
-    <div className="relative flex items-center py-2">
-      <div className="flex-1 border-t border-dashed border-border/60" />
-      <div className="mx-4 flex items-center gap-2 text-xs text-muted-foreground">
-        <span>architect</span>
-        <Badge variant={STATUS_VARIANT[run.status] ?? 'outline'} className="text-[10px]">
-          {run.status}
-        </Badge>
-        <span>{relativeTime(run.created_at)}</span>
-        {run.conversation_id != null && (
-          <Link
-            href={`/spaces/${spaceId}/runs/${run.id}`}
-            className="font-medium hover:underline"
-          >
-            View transcript
-          </Link>
+    <section
+      id={`architect-run-${run.id}`}
+      className="scroll-mt-20 rounded-lg border border-border p-4"
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => void handleToggle()}
+          aria-label={expanded ? 'Collapse architect session' : 'Expand architect session'}
+          className="flex shrink-0 items-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+        >
+          <Chevron className="size-4" />
+        </button>
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          architect
+        </span>
+        <Badge variant={STATUS_VARIANT[run.status] ?? 'outline'}>{run.status}</Badge>
+        {displayTime && (
+          <span className="ml-auto text-xs text-muted-foreground">{relativeTime(displayTime)}</span>
         )}
       </div>
-      <div className="flex-1 border-t border-dashed border-border/60" />
-    </div>
+
+      {expanded && (
+        <div className="mt-3">
+          {loading && (
+            <p className="text-sm text-muted-foreground">Loading transcript…</p>
+          )}
+          {fetchError && (
+            <p className="text-sm text-muted-foreground">Failed to load transcript.</p>
+          )}
+          {!loading && !fetchError && turns !== null && turns.length === 0 && (
+            <p className="text-sm text-muted-foreground">No transcript available.</p>
+          )}
+          {!loading && !fetchError && turns !== null && turns.length > 0 && (
+            <ol className="mt-2 space-y-3">
+              {turns.map((turn, i) => (
+                <TurnComponent
+                  key={turn.anchor_id}
+                  anchorId={turn.anchor_id}
+                  number={i + 1}
+                  prompt={turn.prompt}
+                  rounds={visibleRounds.get(turn.anchor_id) ?? []}
+                  conversationId={run.conversation_id ?? 0}
+                  annotations={emptyAnnotations}
+                  toolResults={toolResults}
+                  commandStdout={commandPairs.stdoutByMessageId}
+                  folded={folded}
+                  reveal={null}
+                  color="transparent"
+                  projectRoot={null}
+                  owner={owner}
+                />
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -222,7 +350,11 @@ export default function Show({
                 iteration={item.data}
               />
             ) : (
-              <ArchitectRunMarker key={`arun-${item.data.id}`} spaceId={space.id} run={item.data} />
+              <ArchitectSessionSection
+                key={`arun-${item.data.id}`}
+                space={space}
+                run={item.data}
+              />
             ),
           )}
         </div>

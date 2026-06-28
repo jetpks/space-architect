@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { ArchitectRun, SpaceArtifact, SpaceIteration, SpaceRun } from '@/types'
+import type { ArchitectRun, SpaceArtifact, SpaceIteration, SpaceRun, Turn as TurnType } from '@/types'
 
 vi.mock('@inertiajs/react', () => ({
   Link: ({ href, children }: { href: string; children?: ReactNode }) => (
@@ -14,6 +14,13 @@ vi.mock('@inertiajs/react', () => ({
 
 vi.mock('@/layouts/AppLayout', () => ({
   default: ({ children }: { children?: ReactNode }) => <div data-testid="layout">{children}</div>,
+}))
+
+// Isolate Turn from its deep dependency tree; we verify it's invoked by data-testid.
+vi.mock('@/components/Turn', () => ({
+  default: ({ anchorId }: { anchorId: number }) => (
+    <li data-testid={`turn-${anchorId}`}>turn-{anchorId}</li>
+  ),
 }))
 
 import Show from './Show'
@@ -36,6 +43,7 @@ const ITERATION_1: SpaceIteration = {
   freeze_sha: 'abc1234',
   verdict: 'continue',
   created_at: '2026-06-01T00:00:00Z',
+  occurred_at: '2026-06-01T00:00:00Z',
   decisions: [{ name: 'Grounds', body: 'The grounds section body.' }],
   artifacts: [],
   runs: [RUN],
@@ -48,6 +56,7 @@ const ITERATION_2: SpaceIteration = {
   freeze_sha: null,
   verdict: null,
   created_at: '2026-06-02T00:00:00Z',
+  occurred_at: '2026-06-02T00:00:00Z',
   decisions: [],
   artifacts: [],
   runs: [],
@@ -67,6 +76,8 @@ const ARCHITECT_RUN: ArchitectRun = {
   session_id: null,
   conversation_id: null,
   created_at: '2026-06-01T12:00:00Z',
+  occurred_at: '2026-06-01T12:00:00Z',
+  has_transcript: false,
 }
 
 const DEFAULT_PROPS = {
@@ -113,7 +124,7 @@ describe('Spaces/Show', () => {
     expect(anchor!.getAttribute('href')).toBe('#iteration-10')
   })
 
-  it('interleaves architect_runs on the timeline by created_at (descending order)', () => {
+  it('interleaves architect_runs on the timeline by occurred_at (descending order)', () => {
     const { container } = render(
       <Show {...DEFAULT_PROPS} architect_runs={[ARCHITECT_RUN]} />,
     )
@@ -137,18 +148,89 @@ describe('Spaces/Show', () => {
     expect(screen.queryByText('Other Artifacts')).not.toBeNull()
   })
 
-  it('renders an architect marker with view transcript link when conversation_id is set', () => {
-    const linkedRun: ArchitectRun = { ...ARCHITECT_RUN, conversation_id: 55 }
-    render(<Show {...DEFAULT_PROPS} architect_runs={[linkedRun]} />)
-    const links = screen.queryAllByRole('link', { name: /view transcript/i })
-    const archLink = links.find((l) => l.getAttribute('href') === '/spaces/1/runs/200')
-    expect(archLink).not.toBeUndefined()
-  })
-
   it('renders an artifact row linking to /spaces/:id/artifacts/:artifact_id', () => {
     render(<Show {...DEFAULT_PROPS} other_artifacts={[OTHER_ARTIFACT]} />)
     const link = screen.queryByRole('link', { name: /^view$/i })
     expect(link).not.toBeNull()
     expect(link!.getAttribute('href')).toBe('/spaces/1/artifacts/1')
+  })
+
+  it('renders architect session as a collapsed card (transcript not in DOM initially)', () => {
+    render(<Show {...DEFAULT_PROPS} architect_runs={[ARCHITECT_RUN]} />)
+    // Card is present in the DOM
+    expect(document.getElementById('architect-run-200')).not.toBeNull()
+    // No turns rendered while collapsed
+    expect(screen.queryByTestId('turn-99')).toBeNull()
+    // Loading / error states not visible while collapsed
+    expect(screen.queryByText(/loading transcript/i)).toBeNull()
+  })
+})
+
+describe('ArchitectSessionSection — expand / fetch', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('expanding a session with has_transcript triggers a fetch and renders turns via Turn', async () => {
+    const run: ArchitectRun = { ...ARCHITECT_RUN, has_transcript: true }
+    const mockTurn: TurnType = { anchor_id: 99, prompt: null, rounds: [] }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ turns: [mockTurn] }) }),
+    )
+
+    render(<Show {...DEFAULT_PROPS} architect_runs={[run]} />)
+    expect(screen.queryByTestId('turn-99')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /expand architect session/i }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('turn-99')).not.toBeNull()
+    })
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith('/spaces/1/runs/200/transcript')
+  })
+
+  it('does not refetch transcript on subsequent toggles', async () => {
+    const run: ArchitectRun = { ...ARCHITECT_RUN, has_transcript: true }
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ turns: [{ anchor_id: 99, prompt: null, rounds: [] }] }),
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    render(<Show {...DEFAULT_PROPS} architect_runs={[run]} />)
+
+    // First expand — triggers fetch
+    fireEvent.click(screen.getByRole('button', { name: /expand architect session/i }))
+    await waitFor(() => expect(screen.getByTestId('turn-99')).not.toBeNull())
+
+    // Collapse
+    fireEvent.click(screen.getByRole('button', { name: /collapse architect session/i }))
+    // Re-expand — must NOT fetch again
+    fireEvent.click(screen.getByRole('button', { name: /expand architect session/i }))
+
+    await waitFor(() => expect(screen.getByTestId('turn-99')).not.toBeNull())
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows empty state when session has no transcript (has_transcript false)', () => {
+    const run: ArchitectRun = { ...ARCHITECT_RUN, has_transcript: false }
+    render(<Show {...DEFAULT_PROPS} architect_runs={[run]} />)
+    fireEvent.click(screen.getByRole('button', { name: /expand architect session/i }))
+    // No fetch; no turns; empty state shown
+    expect(screen.getByText(/no transcript available/i)).not.toBeNull()
+  })
+
+  it('timeline order reflects occurred_at — a session between two iterations lands between them', () => {
+    const run: ArchitectRun = { ...ARCHITECT_RUN, occurred_at: '2026-06-01T12:00:00Z' }
+    const { container } = render(<Show {...DEFAULT_PROPS} architect_runs={[run]} />)
+    const timeline = container.querySelector('[data-testid="timeline"]')!
+    const children = Array.from(timeline.children)
+    const idxIter1 = children.findIndex((el) => el.id === 'iteration-10')
+    const idxRun = children.findIndex((el) => el.id === 'architect-run-200')
+    const idxIter2 = children.findIndex((el) => el.id === 'iteration-11')
+    // Descending: iter2 (June 2) → run (June 1 noon) → iter1 (June 1 midnight)
+    expect(idxIter2).toBeLessThan(idxRun)
+    expect(idxRun).toBeLessThan(idxIter1)
   })
 })

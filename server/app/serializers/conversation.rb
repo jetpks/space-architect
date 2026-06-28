@@ -56,6 +56,14 @@ module Space
           }
         end
 
+        def turns_for(conversation, owner:)
+          return [] unless conversation
+
+          Space::Server::Transcript::Turn.group(conversation.messages).map do |t|
+            turn_json(t, owner: owner)
+          end
+        end
+
         def turn_json(turn, owner:)
           prompt = turn.prompt
           {
