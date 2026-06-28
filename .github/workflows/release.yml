@@ -13,7 +13,7 @@ jobs:
       contents: write # create the GitHub release
       id-token: write # OIDC token for RubyGems trusted publishing
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: jdx/mise-action@v4
