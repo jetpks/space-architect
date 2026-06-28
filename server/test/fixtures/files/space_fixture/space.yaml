@@ -1,0 +1,33 @@
+---
+version: 1
+id: test-space-fixture
+title: Test Space Fixture
+status: active
+repos:
+- provider: github.com
+  organization: testorg
+  name: test-repo
+  full_name: github.com/testorg/test-repo
+  clone_url: git@github.com:testorg/test-repo.git
+architect:
+  status: active
+  iterations:
+  - name: first-iteration
+    ordinal: 1
+    file: architecture/I01-first-iteration.md
+    freeze_sha: abc123def456
+    verdict: continue
+    lanes:
+    - name: lane-a
+      repo: test-repo
+      base_sha: 111aaa
+      worktree: build/I01-first-iteration-lane-a/wt
+      harness: claude-code
+      model:
+      variant: false
+  - name: second-iteration
+    ordinal: 2
+    file: architecture/I02-second-iteration.md
+    freeze_sha: ''
+    verdict: pending
+    lanes: []

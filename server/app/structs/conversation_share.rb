@@ -24,7 +24,7 @@ module Space
         end
       end
 
-      class ConversationShare < Space::Server::DB::Struct
+      class ConversationShare < ::Space::Server::DB::Struct
         GRANTEE_KINDS = %w[user org].freeze
         ACCESS_RANK = ShareMethods::ACCESS_RANK
 
