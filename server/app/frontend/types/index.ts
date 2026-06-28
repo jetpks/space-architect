@@ -161,3 +161,47 @@ export type Share = {
   access: 'view' | 'note'
   avatar_url: string
 }
+
+export type SpaceListItem = {
+  id: number
+  slug: string
+  title: string
+  status: string
+  iterations_count: number
+  runs_count: number
+  imported_at: string
+}
+
+export type SpaceArtifact = {
+  id: number
+  kind: string
+  path: string
+  title: string
+}
+
+export type SpaceRun = {
+  id: number
+  lane: string
+  role: string
+  status: string
+  conversation_id: number
+  iteration_id?: number
+}
+
+export type SpaceIteration = {
+  id: number
+  ordinal: number
+  name: string
+  freeze_sha: string | null
+  verdict: string | null
+  artifacts: SpaceArtifact[]
+  runs: SpaceRun[]
+}
+
+export type Space = {
+  id: number
+  slug: string
+  title: string
+  status: string
+  repos: string[]
+}
