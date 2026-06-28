@@ -1,4 +1,4 @@
-# space-architect-server
+# space-server
 
 A Ruby/Hanami application for exploring and sharing AI chat transcripts. Upload
 a Claude conversation export, browse it with rich markdown and code rendering,

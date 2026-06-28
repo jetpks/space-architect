@@ -14,7 +14,7 @@ class MessagesActionTest < Minitest::Test
     @conv     = Factory[:conversation, user_id: @owner.id, published: false]
     @msg      = Factory[:message, conversation_id: @conv.id, role: "user",
                          content: [{"type" => "text", "text" => "q"}], position: 1, published: false]
-    @msg_repo = Architect::App["repos.messages_repo"]
+    @msg_repo = Space::Server::App["repos.messages_repo"]
   end
 
   def teardown

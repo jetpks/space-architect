@@ -4,7 +4,7 @@ require_relative "../test_helper"
 require_relative "../../app/contracts/create_conversation"
 
 class CreateConversationContractTest < Minitest::Test
-  def contract = Architect::Contracts::CreateConversation.new
+  def contract = Space::Server::Contracts::CreateConversation.new
 
   def test_valid_with_source_file
     r = contract.call(conversation: { source_file: "upload.jsonl" })

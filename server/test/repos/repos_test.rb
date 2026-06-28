@@ -5,7 +5,7 @@ require_relative "../test_helper"
 # G2: CRUD round-trips, finders, and association loading.
 class ReposTest < Minitest::Test
   def conn
-    @conn ||= Architect::App["db.gateway"].connection
+    @conn ||= Space::Server::App["db.gateway"].connection
   end
 
   def setup
@@ -16,11 +16,11 @@ class ReposTest < Minitest::Test
     end
   end
 
-  def users_repo        = Architect::Repos::UsersRepo.new
-  def conversations_repo = Architect::Repos::ConversationsRepo.new
-  def messages_repo     = Architect::Repos::MessagesRepo.new
-  def annotations_repo  = Architect::Repos::AnnotationsRepo.new
-  def shares_repo       = Architect::Repos::ConversationSharesRepo.new
+  def users_repo        = Space::Server::Repos::UsersRepo.new
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
+  def messages_repo     = Space::Server::Repos::MessagesRepo.new
+  def annotations_repo  = Space::Server::Repos::AnnotationsRepo.new
+  def shares_repo       = Space::Server::Repos::ConversationSharesRepo.new
 
   def make_user(overrides = {})
     Factory[:user, **overrides]

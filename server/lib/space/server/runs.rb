@@ -2,7 +2,9 @@
 
 require_relative "runs/stream_key"
 
-module Architect
-  module Runs
+module Space
+  module Server
+    module Runs
+    end
   end
 end

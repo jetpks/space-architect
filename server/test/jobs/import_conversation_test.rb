@@ -3,10 +3,10 @@
 require_relative "../test_helper"
 
 class ImportConversationJobTest < Minitest::Test
-  def conn = @conn ||= Architect::App["db.gateway"].connection
+  def conn = @conn ||= Space::Server::App["db.gateway"].connection
 
-  def conversations_repo = Architect::Repos::ConversationsRepo.new
-  def messages_repo      = Architect::Repos::MessagesRepo.new
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
+  def messages_repo      = Space::Server::Repos::MessagesRepo.new
 
   def fixture_path(name)
     File.join(__dir__, "..", "fixtures", "files", name)
@@ -19,7 +19,7 @@ class ImportConversationJobTest < Minitest::Test
   end
 
   def make_conversation(fixture_name)
-    data = Architect::SourceFileUploader.store(File.open(fixture_path(fixture_name)))
+    data = Space::Server::SourceFileUploader.store(File.open(fixture_path(fixture_name)))
     Factory[:conversation, source_file_data: data]
   end
 
@@ -27,7 +27,7 @@ class ImportConversationJobTest < Minitest::Test
 
   def test_claude_code_import_completes
     conv = make_conversation("transcript.jsonl")
-    Architect::Jobs::ImportConversation.new.call(conv.id)
+    Space::Server::Jobs::ImportConversation.new.call(conv.id)
 
     conv     = conversations_repo.by_pk(conv.id)
     messages = messages_repo.for_conversation(conv.id)
@@ -43,7 +43,7 @@ class ImportConversationJobTest < Minitest::Test
 
   def test_codex_import_completes
     conv = make_conversation("codex_rollout.jsonl")
-    Architect::Jobs::ImportConversation.new.call(conv.id)
+    Space::Server::Jobs::ImportConversation.new.call(conv.id)
 
     conv     = conversations_repo.by_pk(conv.id)
     messages = messages_repo.for_conversation(conv.id)
@@ -59,7 +59,7 @@ class ImportConversationJobTest < Minitest::Test
 
   def test_pi_tree_import_completes
     conv = make_conversation("pi_session.jsonl")
-    Architect::Jobs::ImportConversation.new.call(conv.id)
+    Space::Server::Jobs::ImportConversation.new.call(conv.id)
 
     conv     = conversations_repo.by_pk(conv.id)
     messages = messages_repo.for_conversation(conv.id)
@@ -75,7 +75,7 @@ class ImportConversationJobTest < Minitest::Test
 
   def test_pi_streaming_import_completes
     conv = make_conversation("pi_streaming_session.jsonl")
-    Architect::Jobs::ImportConversation.new.call(conv.id)
+    Space::Server::Jobs::ImportConversation.new.call(conv.id)
 
     conv     = conversations_repo.by_pk(conv.id)
     messages = messages_repo.for_conversation(conv.id)
@@ -93,11 +93,11 @@ class ImportConversationJobTest < Minitest::Test
   def test_failed_import_sets_status_and_does_not_raise
     # A pi-recognized header with no message entries → PiImportError → status:failed
     bad_content = %({"type":"session","version":1,"id":"bad-sess-1"}\n)
-    bad_data    = Architect::SourceFileUploader.store(StringIO.new(bad_content))
+    bad_data    = Space::Server::SourceFileUploader.store(StringIO.new(bad_content))
     conv        = Factory[:conversation, source_file_data: bad_data]
 
     # Must NOT raise — failure is swallowed by the rescue guard
-    Architect::Jobs::ImportConversation.new.call(conv.id)
+    Space::Server::Jobs::ImportConversation.new.call(conv.id)
 
     conv = conversations_repo.by_pk(conv.id)
     assert_equal :failed, conv.status
@@ -107,7 +107,7 @@ class ImportConversationJobTest < Minitest::Test
 
   def test_missing_source_file_returns_without_raise
     conv = Factory[:conversation]  # no source_file_data
-    Architect::Jobs::ImportConversation.new.call(conv.id)
+    Space::Server::Jobs::ImportConversation.new.call(conv.id)
     # Must not raise; status stays pending (no write occurred)
     conv = conversations_repo.by_pk(conv.id)
     assert_equal :pending, conv.status
@@ -117,6 +117,6 @@ class ImportConversationJobTest < Minitest::Test
 
   def test_nonexistent_conversation_returns_without_raise
     # Must not raise even for a completely unknown id
-    Architect::Jobs::ImportConversation.new.call(999_999_999)
+    Space::Server::Jobs::ImportConversation.new.call(999_999_999)
   end
 end

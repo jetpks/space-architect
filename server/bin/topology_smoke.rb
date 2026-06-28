@@ -60,10 +60,10 @@ log "Redis OK"
 FIXTURE = File.join(ARCHITECT_DIR, "test", "fixtures", "files", "transcript.jsonl")
 fail! "fixture missing: #{FIXTURE}" unless File.exist?(FIXTURE)
 
-data = Architect::SourceFileUploader.store(File.open(FIXTURE))
+data = Space::Server::SourceFileUploader.store(File.open(FIXTURE))
 
-users_repo = Architect::Repos::UsersRepo.new
-conversations_repo = Architect::Repos::ConversationsRepo.new
+users_repo = Space::Server::Repos::UsersRepo.new
+conversations_repo = Space::Server::Repos::ConversationsRepo.new
 
 user = users_repo.create(
   github_uid:  SecureRandom.uuid,
@@ -90,7 +90,7 @@ log "Created conversation id=#{conv_id}"
 # Enqueue before starting falcon — exercises "job waiting in queue before worker boots" path.
 # Uses the same prefix that falcon.rb's import-worker service will dequeue from.
 enqueue_prefix = "architect-import"
-enqueue_server = Architect::Jobs::ImportConversation.build_redis_processor(prefix: enqueue_prefix)
+enqueue_server = Space::Server::Jobs::ImportConversation.build_redis_processor(prefix: enqueue_prefix)
 enqueue_server.call({ "conversation_id" => conv_id })
 log "Enqueued job conversation_id=#{conv_id} prefix=#{enqueue_prefix}"
 

@@ -16,16 +16,16 @@ class InertiaChassisBootTest < Minitest::Test
 end
 
 # G1-G7: initial-render HTML structure via the real configured layout.
-# Calls Architect::App.start(:inertia) to load the provider (idempotent; noops if already started).
+# Calls Space::Server::App.start(:inertia) to load the provider (idempotent; noops if already started).
 class InertiaChassisLayoutTest < Minitest::Test
   def setup
     # config/providers/inertia.rb is loaded lazily; start it so InertiaHanami.configure runs.
-    Architect::App.start(:inertia)
+    Space::Server::App.start(:inertia)
     super
   end
 
   def vite_instance
-    Architect::App["vite"]
+    Space::Server::App["vite"]
   end
 
   # Render the configured layout with dev-mode vite: stub dev_server_running? → true

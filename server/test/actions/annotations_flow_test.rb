@@ -30,7 +30,7 @@ class AnnotationsFlowTest < Minitest::Test
     @result = Factory[:message, conversation_id: @conv.id, role: "user",
                       content: [{"type" => "tool_result", "tool_use_id" => "t1", "content" => "ok"}],
                       position: 3, published: false]
-    @ann_repo = Architect::App["repos.annotations_repo"]
+    @ann_repo = Space::Server::App["repos.annotations_repo"]
   end
 
   def teardown
@@ -96,7 +96,7 @@ class AnnotationsFlowTest < Minitest::Test
   # Unpublished conversation with one published message → stranger is a snippet viewer.
   # Annotation on the unpublished @prompt is hidden; annotation on published @assistant shows.
   def test_snippet_viewers_only_receive_annotations_on_visible_anchors
-    msg_repo = Architect::App["repos.messages_repo"]
+    msg_repo = Space::Server::App["repos.messages_repo"]
     # Publish @assistant so the conversation is accessible to snippet viewers
     # (visible_to? requires at least one published message when conv is unpublished).
     msg_repo.update(@assistant.id, published: true, updated_at: Time.now)

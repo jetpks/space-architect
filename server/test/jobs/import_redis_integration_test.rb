@@ -14,8 +14,8 @@ require "securerandom"
 class ImportRedisIntegrationTest < Minitest::Test
   REDIS_SKIP_MSG = "Redis unreachable".freeze
 
-  def conn = @conn ||= Architect::App["db.gateway"].connection
-  def conversations_repo = Architect::Repos::ConversationsRepo.new
+  def conn = @conn ||= Space::Server::App["db.gateway"].connection
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
 
   def fixture_path(name)
     File.join(__dir__, "..", "fixtures", "files", name)
@@ -45,7 +45,7 @@ class ImportRedisIntegrationTest < Minitest::Test
   end
 
   def test_redis_round_trip_imports_conversation
-    data = Architect::SourceFileUploader.store(File.open(fixture_path("transcript.jsonl")))
+    data = Space::Server::SourceFileUploader.store(File.open(fixture_path("transcript.jsonl")))
     conv = Factory[:conversation, source_file_data: data]
 
     # Unique prefix per run prevents collision with any live worker queue
@@ -56,7 +56,7 @@ class ImportRedisIntegrationTest < Minitest::Test
       # Task.current at spawn time. Since server.start is called from inside
       # server_task below, ALL server sub-tasks (dequeue loop, delayed_jobs bg,
       # processing_list bg) become children of server_task's inner fiber.
-      server = Architect::Jobs::ImportConversation.build_redis_processor(prefix: prefix)
+      server = Space::Server::Jobs::ImportConversation.build_redis_processor(prefix: prefix)
 
       # Enqueue before starting the server (pure Redis write — no tasks needed)
       server.call({ "conversation_id" => conv.id })

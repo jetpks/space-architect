@@ -1,4 +1,4 @@
-name: CI
+name: Server CI
 
 on:
   push:
@@ -32,7 +32,7 @@ jobs:
           --health-retries 5
     env:
       HANAMI_ENV: test
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/architect_test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/space_server_test
       REDIS_URL: redis://localhost:6379/0
       SESSION_SECRET: test-secret-change-in-production-must-be-at-least-64-chars-min-padding-ok
       BUNDLE_PATH: vendor/bundle
@@ -41,8 +41,8 @@ jobs:
       - uses: jdx/mise-action@v4
       - uses: actions/cache@v5
         with:
-          path: vendor/bundle
-          key: bundle-ruby-${{ hashFiles('Gemfile.lock') }}
+          path: server/vendor/bundle
+          key: bundle-ruby-${{ hashFiles('server/Gemfile.lock') }}
           restore-keys: bundle-ruby-
       - uses: actions/cache@v5
         with:
@@ -65,8 +65,11 @@ jobs:
           sudo dpkg -i /tmp/pgdg-debs/pcc.deb /tmp/pgdg-debs/libpq5.deb /tmp/pgdg-debs/pc17.deb
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
       - run: bundle install
+        working-directory: server
       - run: bundle exec hanami db prepare
+        working-directory: server
       - run: bundle exec rake test 2>&1 | tee /tmp/rake-test.log
+        working-directory: server
       - if: always()
         name: Summary
         run: |
@@ -84,8 +87,11 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
+        working-directory: server
       - run: npm test
+        working-directory: server
       - run: npm run check
+        working-directory: server
 
   gem-suites:
     runs-on: ubuntu-latest
@@ -104,13 +110,13 @@ jobs:
       - uses: jdx/mise-action@v4
       - uses: actions/cache@v5
         with:
-          path: gems/${{ matrix.gem }}/vendor/bundle
-          key: bundle-gem-${{ matrix.gem }}-${{ hashFiles(format('gems/{0}/Gemfile.lock', matrix.gem)) }}
+          path: server/gems/${{ matrix.gem }}/vendor/bundle
+          key: bundle-gem-${{ matrix.gem }}-${{ hashFiles(format('server/gems/{0}/Gemfile.lock', matrix.gem)) }}
           restore-keys: bundle-gem-${{ matrix.gem }}-
       - run: bundle install
-        working-directory: gems/${{ matrix.gem }}
+        working-directory: server/gems/${{ matrix.gem }}
       - run: bundle exec rake test 2>&1 | tee /tmp/rake-test.log
-        working-directory: gems/${{ matrix.gem }}
+        working-directory: server/gems/${{ matrix.gem }}
       - if: always()
         name: Summary
         run: |
@@ -129,12 +135,14 @@ jobs:
       - uses: jdx/mise-action@v4
       - uses: actions/cache@v5
         with:
-          path: vendor/bundle
-          key: bundle-ruby-${{ hashFiles('Gemfile.lock') }}
+          path: server/vendor/bundle
+          key: bundle-ruby-${{ hashFiles('server/Gemfile.lock') }}
           restore-keys: bundle-ruby-
       - run: bundle install
+        working-directory: server
       - run: gem install bundler-audit
       - run: bundler-audit check --update 2>&1 | tee /tmp/audit.log
+        working-directory: server
       - if: always()
         name: Summary
         run: |

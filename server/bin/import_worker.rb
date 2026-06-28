@@ -3,7 +3,7 @@
 
 # DEV-ONLY single-process import worker. Production topology is `falcon host falcon.rb`.
 #
-# Dequeues job hashes from Redis and runs Architect::Jobs::ImportConversation for each.
+# Dequeues job hashes from Redis and runs Space::Server::Jobs::ImportConversation for each.
 # Stop with Ctrl-C (SIGINT) — the Async reactor's default SIGINT handling (Interrupt rescue
 # in the reactor loop) stops the scheduler and exits cleanly without explicit signal traps.
 #
@@ -12,7 +12,7 @@
 require "hanami/boot"
 require "async"
 
-server = Architect::Jobs::ImportConversation.build_redis_processor
+server = Space::Server::Jobs::ImportConversation.build_redis_processor
 
 Console.logger.info(self, "Import worker starting (prefix=architect-import)")
 Console.logger.info(self, "Stop with Ctrl-C — production topology: falcon host falcon.rb")

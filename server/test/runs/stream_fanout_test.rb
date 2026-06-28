@@ -4,8 +4,8 @@ require_relative "../test_helper"
 require "async"
 require "async/redis"
 require "async/redis/endpoint"
-require "architect/runs/stream_fanout"
-require "architect/runs/stream_key"
+require "space/server/runs/stream_fanout"
+require "space/server/runs/stream_key"
 
 class StreamFanoutTest < Minitest::Test
   REDIS_SKIP_MSG = "Redis unreachable".freeze
@@ -34,7 +34,7 @@ class StreamFanoutTest < Minitest::Test
 
   def setup
     skip REDIS_SKIP_MSG unless redis_reachable?
-    conn = Architect::App["db.gateway"].connection
+    conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
     [:annotations, :conversation_shares, :messages, :conversations, :runs, :users].each { |t| conn[t].delete }
@@ -58,11 +58,11 @@ class StreamFanoutTest < Minitest::Test
 
   def test_subscribed_queue_receives_entries_after_xadd
     run = Factory[:run, user_id: @user.id, status: 0]
-    key = Architect::Runs::StreamKey.for(run.id)
+    key = Space::Server::Runs::StreamKey.for(run.id)
 
     with_two_redis_clients do |fanout_redis, test_redis|
       test_redis.del(key)
-      fanout = Architect::Runs::StreamFanout.for(run.id, fanout_redis)
+      fanout = Space::Server::Runs::StreamFanout.for(run.id, fanout_redis)
       queue = fanout.subscribe
 
       Async do
@@ -77,17 +77,17 @@ class StreamFanoutTest < Minitest::Test
       assert_equal "text_delta", fields[type_idx + 1]
     ensure
       fanout&.unsubscribe(queue) if queue
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 
   def test_multiple_subscribers_each_receive_same_entries
     run = Factory[:run, user_id: @user.id, status: 0]
-    key = Architect::Runs::StreamKey.for(run.id)
+    key = Space::Server::Runs::StreamKey.for(run.id)
 
     with_two_redis_clients do |fanout_redis, test_redis|
       test_redis.del(key)
-      fanout = Architect::Runs::StreamFanout.for(run.id, fanout_redis)
+      fanout = Space::Server::Runs::StreamFanout.for(run.id, fanout_redis)
       queue1 = fanout.subscribe
       queue2 = fanout.subscribe
 
@@ -105,17 +105,17 @@ class StreamFanoutTest < Minitest::Test
     ensure
       fanout&.unsubscribe(queue1) if queue1
       fanout&.unsubscribe(queue2) if queue2
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 
   def test_unsubscribe_removes_queue_and_stops_task_on_last_unsubscribe
     run = Factory[:run, user_id: @user.id, status: 0]
-    key = Architect::Runs::StreamKey.for(run.id)
+    key = Space::Server::Runs::StreamKey.for(run.id)
 
     with_two_redis_clients do |fanout_redis, test_redis|
       test_redis.del(key)
-      fanout = Architect::Runs::StreamFanout.for(run.id, fanout_redis)
+      fanout = Space::Server::Runs::StreamFanout.for(run.id, fanout_redis)
       queue1 = fanout.subscribe
       queue2 = fanout.subscribe
 
@@ -140,17 +140,17 @@ class StreamFanoutTest < Minitest::Test
 
       assert_equal 0, fanout.instance_variable_get(:@subscribers).length
     ensure
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 
   def test_run_complete_entry_stops_fanout_after_pushing_to_queues
     run = Factory[:run, user_id: @user.id, status: 0]
-    key = Architect::Runs::StreamKey.for(run.id)
+    key = Space::Server::Runs::StreamKey.for(run.id)
 
     with_two_redis_clients do |fanout_redis, test_redis|
       test_redis.del(key)
-      fanout = Architect::Runs::StreamFanout.for(run.id, fanout_redis)
+      fanout = Space::Server::Runs::StreamFanout.for(run.id, fanout_redis)
       queue = fanout.subscribe
 
       Async do
@@ -174,7 +174,7 @@ class StreamFanoutTest < Minitest::Test
       assert_nil next_item, "No entries expected after run_complete stops the fanout"
     ensure
       fanout&.unsubscribe(queue) if queue
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 
@@ -182,10 +182,10 @@ class StreamFanoutTest < Minitest::Test
   # missing element and @task&.stop is safe on nil. Already correct on base.
   def test_characterization_double_unsubscribe_does_not_raise
     run = Factory[:run, user_id: @user.id, status: 0]
-    key = Architect::Runs::StreamKey.for(run.id)
+    key = Space::Server::Runs::StreamKey.for(run.id)
 
     with_two_redis_clients do |fanout_redis, _test_redis|
-      fanout = Architect::Runs::StreamFanout.for(run.id, fanout_redis)
+      fanout = Space::Server::Runs::StreamFanout.for(run.id, fanout_redis)
       queue = fanout.subscribe
 
       fanout.unsubscribe(queue)
@@ -193,7 +193,7 @@ class StreamFanoutTest < Minitest::Test
       fanout.unsubscribe(queue)
       assert true, "double unsubscribe must not raise"
     ensure
-      Architect::Runs::StreamFanout.stop(run.id)
+      Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
 
@@ -203,11 +203,11 @@ class StreamFanoutTest < Minitest::Test
     Sync do
       client = Async::Redis::Client.new(redis_endpoint)
       begin
-        fanout1 = Architect::Runs::StreamFanout.for(run.id, client)
-        fanout2 = Architect::Runs::StreamFanout.for(run.id, client)
+        fanout1 = Space::Server::Runs::StreamFanout.for(run.id, client)
+        fanout2 = Space::Server::Runs::StreamFanout.for(run.id, client)
         assert_same fanout1, fanout2, "for() must return the same instance for the same run_id"
       ensure
-        Architect::Runs::StreamFanout.stop(run.id)
+        Space::Server::Runs::StreamFanout.stop(run.id)
         client.close
       end
     end

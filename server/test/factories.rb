@@ -4,7 +4,7 @@ require "rom/factory"
 require "faker"
 
 Factory = ROM::Factory.configure do |c|
-  c.rom = Architect::App["db.rom"]
+  c.rom = Space::Server::App["db.rom"]
 end
 
 Factory.define(:user) do |f|

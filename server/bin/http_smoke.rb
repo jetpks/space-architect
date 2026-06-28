@@ -19,9 +19,9 @@ def smoke_call(verb, path)
   env = Rack::MockRequest.env_for(path, "REQUEST_METHOD" => verb)
   if verb == "GET" && INERTIA_GET_PATHS.include?(path)
     env["HTTP_X_INERTIA"] = "true"
-    env["HTTP_X_INERTIA_VERSION"] = Architect::App["vite"].digest
+    env["HTTP_X_INERTIA_VERSION"] = Space::Server::App["vite"].digest
   end
-  Architect::App.call(env)
+  Space::Server::App.call(env)
 end
 
 failures = []

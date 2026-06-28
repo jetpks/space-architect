@@ -3,13 +3,15 @@
 
 require "dry/validation"
 
-module Architect
-  module Contracts
-    class CreateShare < Dry::Validation::Contract
-      params do
-        required(:share).hash do
-          required(:login).filled(:string)
-          optional(:access).maybe(:string)
+module Space
+  module Server
+    module Contracts
+      class CreateShare < Dry::Validation::Contract
+        params do
+          required(:share).hash do
+            required(:login).filled(:string)
+            optional(:access).maybe(:string)
+          end
         end
       end
     end
