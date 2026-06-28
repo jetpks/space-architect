@@ -186,6 +186,7 @@ export type SpaceRun = {
   status: string
   conversation_id: number
   iteration_id?: number
+  created_at?: string
 }
 
 export type SpaceIteration = {
@@ -194,8 +195,30 @@ export type SpaceIteration = {
   name: string
   freeze_sha: string | null
   verdict: string | null
+  created_at?: string
+  decisions?: { name: string; body: string }[]
   artifacts: SpaceArtifact[]
   runs: SpaceRun[]
+}
+
+export type ArchitectRun = {
+  id: number
+  role: string
+  status: string
+  session_id: string | null
+  conversation_id: number | null
+  created_at: string
+}
+
+export type SpaceRunDetail = {
+  id: number
+  lane: string
+  role: string
+  status: string
+  producer: string | null
+  session_id: string | null
+  iteration_id: number | null
+  conversation_id: number | null
 }
 
 export type Space = {
