@@ -14,7 +14,8 @@ module Space
             "repos.spaces_repo",
             "repos.iterations_repo",
             "repos.artifacts_repo",
-            "repos.runs_repo"
+            "repos.runs_repo",
+            "repos.conversations_repo"
           ]
 
           def handle(req, res)
@@ -55,7 +56,7 @@ module Space
             architect_runs  = orphan_runs
               .select { |r| r.role.to_s == "architect" }
               .sort_by(&:created_at)
-              .map { |r| architect_run_props(r) }
+              .map { |r| architect_run_props(r, user) }
             unassigned_runs = orphan_runs
               .reject { |r| r.role.to_s == "architect" }
               .map { |r| run_props(r) }
@@ -98,15 +99,21 @@ module Space
 
           def run_props(r)
             { id: r.id, lane: r.lane, role: r.role, status: r.status.to_s,
-              conversation_id: r.conversation_id, created_at: r.created_at.iso8601(6) }
+              conversation_id: r.conversation_id, created_at: r.created_at.iso8601(6),
+              harness: r.harness, model: r.model }
           end
 
-          def architect_run_props(r)
+          def architect_run_props(r, user)
+            conversation = r.conversation_id &&
+                           conversations_repo.with_messages(r.conversation_id)
+            turns = Serializers::Conversation.turns_for(conversation, owner: r.owned_by?(user))
             { id: r.id, role: r.role, status: r.status.to_s,
               session_id: r.session_id, conversation_id: r.conversation_id,
               created_at: r.created_at.iso8601(6),
               occurred_at: r.occurred_at&.iso8601(6),
-              has_transcript: !r.conversation_id.nil? }
+              has_transcript: !r.conversation_id.nil?,
+              turns: turns,
+              harness: r.harness, model: r.model }
           end
         end
       end

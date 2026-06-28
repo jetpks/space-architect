@@ -154,6 +154,20 @@ class SpaceImporterTest < Minitest::Test
     assert msg_count >= 1, "at least one message expected from the run fixture"
   end
 
+  def test_builder_run_has_harness_from_space_yaml
+    import!
+    run = conn[:runs].where(role: "builder").first
+    assert_equal "claude-code", run[:harness],
+      "builder run harness must be taken from space.yaml lane block"
+  end
+
+  def test_builder_run_has_model_from_first_assistant_message
+    import!
+    run = conn[:runs].where(role: "builder").first
+    assert_equal "claude-opus-4-8", run[:model],
+      "builder run model must be the first assistant messages.model"
+  end
+
   # ── Idempotency ──────────────────────────────────────────────────────────────
 
   def test_second_import_yields_identical_row_counts
@@ -254,6 +268,24 @@ class SpaceImporterTest < Minitest::Test
 
       assert_equal msg_count, new_msg_count,
         "message count must be identical after re-import of architect run"
+    end
+  end
+
+  def test_architect_run_has_harness
+    with_staged_session_root do |root|
+      import!(claude_projects_root: root)
+      run = conn[:runs].where(role: "architect").first
+      assert_equal "claude-code", run[:harness],
+        "architect run harness must always be claude-code"
+    end
+  end
+
+  def test_architect_run_has_model_from_first_assistant_message
+    with_staged_session_root do |root|
+      import!(claude_projects_root: root)
+      run = conn[:runs].where(role: "architect").first
+      assert_equal "claude-opus-4-8", run[:model],
+        "architect run model must be the first assistant messages.model from the session"
     end
   end
 
