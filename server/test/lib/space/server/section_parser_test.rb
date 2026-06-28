@@ -89,4 +89,73 @@ class SectionParserTest < Minitest::Test
   def test_first_heading_returns_nil_when_no_headings
     assert_nil Space::Server::SectionParser.first_heading("Just plain text.\n")
   end
+
+  # ── split_canonical ───────────────────────────────────────────────────────────
+
+  CANONICAL_NAMES = [
+    "Grounds", "Specification", "Acceptance Criteria",
+    "Builder Prompt", "Builder Report", "Verdict"
+  ].freeze
+
+  NESTED_MARKDOWN = <<~MD
+    # I01: Nested Iteration
+
+    ## Grounds
+
+    The grounds content.
+
+    ## Specification
+
+    Top-level spec intro.
+
+    ## Objective
+
+    The objective subsection.
+
+    ## Boundaries
+
+    The boundaries subsection.
+
+    ## Acceptance Criteria
+
+    - AC-1: criterion
+  MD
+
+  def test_split_canonical_nested_stays_in_body
+    sections = Space::Server::SectionParser.split_canonical(NESTED_MARKDOWN, CANONICAL_NAMES)
+    spec_body = sections["Specification"]
+    refute_nil spec_body, "Specification must be present"
+    assert_match "Top-level spec intro", spec_body
+    assert_match "## Objective",         spec_body, "nested ## Objective must be in body"
+    assert_match "The objective subsection", spec_body
+    assert_match "## Boundaries",        spec_body, "nested ## Boundaries must be in body"
+    assert_match "The boundaries subsection", spec_body
+  end
+
+  def test_split_canonical_only_canonical_headers_split
+    sections = Space::Server::SectionParser.split_canonical(NESTED_MARKDOWN, CANONICAL_NAMES)
+    refute sections.key?("Objective"),  "Objective must not be its own section"
+    refute sections.key?("Boundaries"), "Boundaries must not be its own section"
+    assert sections.key?("Grounds"),             "Grounds must be present"
+    assert sections.key?("Specification"),        "Specification must be present"
+    assert sections.key?("Acceptance Criteria"),  "Acceptance Criteria must be present"
+  end
+
+  def test_split_canonical_absent_sections_omitted
+    sections = Space::Server::SectionParser.split_canonical(NESTED_MARKDOWN, CANONICAL_NAMES)
+    refute sections.key?("Builder Prompt"),  "Builder Prompt must be absent"
+    refute sections.key?("Builder Report"),  "Builder Report must be absent"
+    refute sections.key?("Verdict"),         "Verdict must be absent"
+  end
+
+  def test_split_canonical_full_flat_doc
+    sections = Space::Server::SectionParser.split_canonical(FULL_MARKDOWN, CANONICAL_NAMES)
+    assert_equal 6, sections.size
+    assert_match "The grounds content here.", sections["Grounds"]
+    assert_match "continue",                  sections["Verdict"]
+  end
+
+  def test_split_canonical_empty_document
+    assert_equal({}, Space::Server::SectionParser.split_canonical("", CANONICAL_NAMES))
+  end
 end

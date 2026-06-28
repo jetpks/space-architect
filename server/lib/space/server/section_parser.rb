@@ -25,6 +25,25 @@ module Space
         sections
       end
 
+      # Like parse, but splits ONLY at ## headers whose name is in `canonical_names`.
+      # Non-canonical ## headers are treated as body content of the current section,
+      # preserving nested subsections in full.
+      def self.split_canonical(markdown, canonical_names)
+        canonical_set = canonical_names.to_set
+        sections = {}
+        current  = nil
+        markdown.each_line do |line|
+          m = line.match(SECTION_RE)
+          if m && canonical_set.include?(m[1].strip)
+            current = m[1].strip
+            sections[current] ||= +""
+          elsif current
+            sections[current] << line
+          end
+        end
+        sections
+      end
+
       # Returns the text of the first H1 or H2 heading, or nil if none found.
       def self.first_heading(markdown)
         markdown.each_line do |line|
