@@ -163,7 +163,8 @@ CREATE TABLE public.iterations (
     status text,
     created_at timestamp with time zone NOT NULL,
     updated_at timestamp with time zone NOT NULL,
-    occurred_at timestamp with time zone
+    occurred_at timestamp with time zone,
+    occurred_at_utc_offset integer
 );
 
 
@@ -274,7 +275,8 @@ CREATE TABLE public.spaces (
     repos jsonb DEFAULT '[]'::jsonb,
     imported_at timestamp with time zone,
     created_at timestamp with time zone NOT NULL,
-    updated_at timestamp with time zone NOT NULL
+    updated_at timestamp with time zone NOT NULL,
+    git_utc_offset integer
 );
 
 
@@ -690,4 +692,5 @@ INSERT INTO schema_migrations (filename) VALUES
 ('20260622000000_create_runs.rb'),
 ('20260623000000_add_conversation_id_to_runs.rb'),
 ('20260627120000_create_space_tables.rb'),
-('20260628000000_add_occurred_at_to_runs_and_iterations.rb');
+('20260628000000_add_occurred_at_to_runs_and_iterations.rb'),
+('20260629000000_add_utc_offset_columns.rb');

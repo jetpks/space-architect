@@ -349,6 +349,163 @@ class SpaceImporterTest < Minitest::Test
     end
   end
 
+  # ── git_commit_info helper (unit) ────────────────────────────────────────────
+
+  def test_git_commit_info_nil_for_nil_sha
+    assert_nil @importer.send(:git_commit_info, FIXTURE_DIR, nil)
+  end
+
+  def test_git_commit_info_nil_for_blank_sha
+    assert_nil @importer.send(:git_commit_info, FIXTURE_DIR, "")
+  end
+
+  def test_git_commit_info_nil_for_non_git_dir
+    Dir.mktmpdir("not_a_git_info") do |dir|
+      assert_nil @importer.send(:git_commit_info, dir, "abc123")
+    end
+  end
+
+  def test_git_commit_info_returns_time_and_offset_for_real_commit
+    Dir.mktmpdir("git_info_fixture") do |dir|
+      system("git", "-C", dir, "init", "-q",
+             "--initial-branch=main", exception: false) ||
+        system("git", "-C", dir, "init", "-q", exception: false)
+      system("git", "-C", dir, "config", "user.email", "test@test.com", exception: false)
+      system("git", "-C", dir, "config", "user.name", "Test", exception: false)
+      File.write(File.join(dir, "x"), "x")
+      system("git", "-C", dir, "add", ".", exception: false)
+      commit_env = { "GIT_COMMITTER_DATE" => "2026-01-01T12:00:00-0600",
+                     "GIT_AUTHOR_DATE"    => "2026-01-01T12:00:00-0600",
+                     "PATH"               => ENV.fetch("PATH") }
+      system(commit_env, "git", "-C", dir, "commit", "-m", "init", "--no-gpg-sign",
+             exception: false)
+      sha = `git -C #{dir} rev-parse HEAD`.strip
+      result = @importer.send(:git_commit_info, dir, sha)
+      assert_kind_of Array, result
+      assert_kind_of Time,    result.first
+      assert result.first.utc?, "time must be UTC"
+      assert_equal(-21600,    result.last, "offset must be -21600 for -0600 commit")
+    end
+  end
+
+  # ── spaces.git_utc_offset ────────────────────────────────────────────────────
+
+  def test_space_git_utc_offset_populated_from_head_commit
+    Dir.mktmpdir("git_space_offset") do |dir|
+      system("git", "-C", dir, "init", "-q",
+             "--initial-branch=main", exception: false) ||
+        system("git", "-C", dir, "init", "-q", exception: false)
+      system("git", "-C", dir, "config", "user.email", "test@test.com", exception: false)
+      system("git", "-C", dir, "config", "user.name", "Test", exception: false)
+
+      yaml = <<~YAML
+        id: git-offset-space
+        title: Git Offset Space
+        status: active
+        architect:
+          status: active
+          iterations: []
+      YAML
+      File.write(File.join(dir, "space.yaml"), yaml)
+      system("git", "-C", dir, "add", ".", exception: false)
+      commit_env = { "GIT_COMMITTER_DATE" => "2026-01-01T12:00:00-0600",
+                     "GIT_AUTHOR_DATE"    => "2026-01-01T12:00:00-0600",
+                     "PATH"               => ENV.fetch("PATH") }
+      system(commit_env, "git", "-C", dir, "commit", "-m", "init", "--no-gpg-sign",
+             exception: false)
+
+      @importer.import!(dir, user: @user)
+      space = conn[:spaces].where(slug: "git-offset-space").first
+      assert_equal(-21600, space[:git_utc_offset])
+    end
+  end
+
+  def test_space_git_utc_offset_nil_when_not_a_git_repo
+    # FIXTURE_DIR is inside the worktree repo, so we use a fresh temp dir
+    # outside any git tree to guarantee "not a git repo" semantics.
+    Dir.mktmpdir("not_git_space") do |dir|
+      yaml = <<~YAML
+        id: non-git-space
+        title: Non Git Space
+        status: active
+        architect:
+          status: active
+          iterations: []
+      YAML
+      File.write(File.join(dir, "space.yaml"), yaml)
+      @importer.import!(dir, user: @user)
+      space = conn[:spaces].where(slug: "non-git-space").first
+      assert_nil space[:git_utc_offset], "git_utc_offset must be nil for non-git source_path"
+    end
+  end
+
+  # ── iterations.occurred_at_utc_offset ────────────────────────────────────────
+
+  def test_iteration_occurred_at_utc_offset_from_freeze_sha
+    Dir.mktmpdir("git_iter_offset") do |dir|
+      system("git", "-C", dir, "init", "-q",
+             "--initial-branch=main", exception: false) ||
+        system("git", "-C", dir, "init", "-q", exception: false)
+      system("git", "-C", dir, "config", "user.email", "test@test.com", exception: false)
+      system("git", "-C", dir, "config", "user.name", "Test", exception: false)
+      File.write(File.join(dir, "x"), "x")
+      system("git", "-C", dir, "add", ".", exception: false)
+      commit_env = { "GIT_COMMITTER_DATE" => "2026-01-01T12:00:00-0600",
+                     "GIT_AUTHOR_DATE"    => "2026-01-01T12:00:00-0600",
+                     "PATH"               => ENV.fetch("PATH") }
+      system(commit_env, "git", "-C", dir, "commit", "-m", "init", "--no-gpg-sign",
+             exception: false)
+      sha = `git -C #{dir} rev-parse HEAD`.strip
+
+      yaml = <<~YAML
+        id: iter-offset-space
+        title: Iter Offset Space
+        status: active
+        architect:
+          status: active
+          iterations:
+          - name: test-iter
+            ordinal: 1
+            file: architecture/I01.md
+            freeze_sha: #{sha}
+            verdict: continue
+            lanes: []
+      YAML
+      File.write(File.join(dir, "space.yaml"), yaml)
+
+      @importer.import!(dir, user: @user)
+      iter = conn[:iterations].where(ordinal: 1).first
+      assert_equal(-21600, iter[:occurred_at_utc_offset])
+    end
+  end
+
+  def test_iteration_occurred_at_utc_offset_nil_when_sha_unresolvable
+    # Fixture freeze_sha abc123def456 cannot be resolved in any repo — offset must be nil
+    import!
+    conn[:iterations].all.each do |iter|
+      assert_nil iter[:occurred_at_utc_offset],
+        "occurred_at_utc_offset must be nil when freeze_sha cannot resolve (ordinal #{iter[:ordinal]})"
+    end
+  end
+
+  def test_iteration_occurred_at_utc_offset_nil_when_freeze_sha_blank
+    import!
+    iter2 = conn[:iterations].where(ordinal: 2).first
+    assert_nil iter2[:occurred_at_utc_offset]
+  end
+
+  # ── occurred_at sub-second precision ─────────────────────────────────────────
+
+  def test_architect_run_occurred_at_has_sub_second_precision
+    with_staged_session_root do |root|
+      import!(claude_projects_root: root)
+      run = conn[:runs].where(role: "architect").first
+      # Fixture first timestamp: 2026-06-28T00:00:01.000Z — must preserve .000 fraction
+      assert_includes run[:occurred_at].utc.iso8601(6), "00:00:01.000000",
+        "occurred_at must retain millisecond fraction, not truncate to whole seconds"
+    end
+  end
+
   private
 
   def snapshot_counts

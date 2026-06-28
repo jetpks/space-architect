@@ -38,11 +38,13 @@ module Space
         status = yaml["status"] || yaml.dig("architect", "status")
         repos  = Array(yaml["repos"]).map { |r| r.is_a?(Hash) ? r["full_name"] : r }.compact
 
+        head_info = git_commit_info(space_dir, "HEAD")
         space = @spaces_repo.upsert_by_slug(user.id, slug, {
-          title:       title,
-          status:      status,
-          source_path: space_dir,
-          repos:       repos
+          title:          title,
+          status:         status,
+          source_path:    space_dir,
+          repos:          repos,
+          git_utc_offset: head_info&.last
         })
 
         arch       = yaml.fetch("architect", nil) || {}
@@ -69,12 +71,14 @@ module Space
         arch_iters.each_with_object({}) do |iter_data, map|
           ordinal = iter_data["ordinal"]
           sha     = iter_data["freeze_sha"]
+          info    = git_commit_info(space.source_path, sha)
           iter = @iterations_repo.upsert_by_ordinal(space.id, ordinal, {
-            name:        iter_data["name"],
-            freeze_sha:  sha,
-            verdict:     iter_data["verdict"],
-            status:      iter_data["status"],
-            occurred_at: git_commit_time(space.source_path, sha)
+            name:                   iter_data["name"],
+            freeze_sha:             sha,
+            verdict:                iter_data["verdict"],
+            status:                 iter_data["status"],
+            occurred_at:            info&.first,
+            occurred_at_utc_offset: info&.last
           })
           map[ordinal] = iter
         end
@@ -299,18 +303,26 @@ module Space
         end
       end
 
-      # Returns the git committer timestamp for +sha+ in +space_dir+, or nil on any failure.
+      # Returns [utc_time, offset_seconds] for +sha+ in +space_dir+, or nil on any failure.
       # sha is passed as a positional arg to avoid shell interpolation.
-      def git_commit_time(space_dir, sha)
+      def git_commit_info(space_dir, sha)
         return nil if sha.nil? || sha.to_s.strip.empty?
 
         out, status = Open3.capture2e("git", "-C", space_dir.to_s, "show", "-s", "--format=%cI", sha.to_s)
         return nil unless status.success?
 
         ts = out.lines.first&.strip
-        parse_iso8601(ts)
+        return nil if ts.nil? || ts.empty?
+
+        t      = Time.iso8601(ts)
+        offset = t.utc_offset
+        [t.utc, offset]
       rescue StandardError
         nil
+      end
+
+      def git_commit_time(space_dir, sha)
+        git_commit_info(space_dir, sha)&.first
       end
 
       def parse_iso8601(str)

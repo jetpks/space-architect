@@ -386,4 +386,143 @@ class SpacesShowI03Test < Minitest::Test
     # Factory creates without occurred_at; must serialize as null
     assert_nil iter["occurred_at"]
   end
+
+  # ── microsecond precision (AC-3) ──────────────────────────────────────────────
+
+  def test_show_iteration_created_at_microsecond_precision
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "iter-micro-space"]
+    Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-micro"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    iter = parse_json(body)["props"]["iterations"].first
+
+    assert_match(/T\d\d:\d\d:\d\d\.\d{6}/, iter["created_at"],
+      "iteration created_at must have 6 fractional digits")
+  end
+
+  def test_show_iteration_occurred_at_microsecond_precision_when_present
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "iter-occ-micro-space"]
+    t = Time.parse("2026-06-28T15:32:12.278000Z").utc
+    Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-occ-micro",
+            occurred_at: t]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    iter = parse_json(body)["props"]["iterations"].first
+
+    assert_match(/T\d\d:\d\d:\d\d\.\d{6}/, iter["occurred_at"],
+      "iteration occurred_at must have 6 fractional digits when present")
+  end
+
+  def test_show_architect_run_created_at_microsecond_precision
+    sign_in(@owner)
+    space    = Factory[:space, user_id: @owner.id, slug: "arch-micro-space"]
+    Factory[:run, user_id: @owner.id, space_id: space.id,
+            iteration_id: nil, role: "architect", session_id: "sess-micro-1"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    r = parse_json(body)["props"]["architect_runs"].first
+
+    assert_match(/T\d\d:\d\d:\d\d\.\d{6}/, r["created_at"],
+      "architect_run created_at must have 6 fractional digits")
+  end
+
+  def test_show_architect_run_occurred_at_microsecond_precision_when_present
+    sign_in(@owner)
+    space    = Factory[:space, user_id: @owner.id, slug: "arch-occ-micro-space"]
+    t = Time.parse("2026-06-28T21:32:12.278000Z").utc
+    Factory[:run, user_id: @owner.id, space_id: space.id,
+            iteration_id: nil, role: "architect", session_id: "sess-micro-2",
+            occurred_at: t]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    r = parse_json(body)["props"]["architect_runs"].first
+
+    assert_match(/T\d\d:\d\d:\d\d\.\d{6}/, r["occurred_at"],
+      "architect_run occurred_at must have 6 fractional digits when present")
+  end
+
+  def test_show_builder_run_created_at_microsecond_precision
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "run-micro-space"]
+    iter  = Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-run-micro"]
+    Factory[:run, user_id: @owner.id, space_id: space.id,
+            iteration_id: iter.id, role: "builder", lane: "lane-a"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    r = parse_json(body)["props"]["iterations"].first["runs"].first
+
+    assert_match(/T\d\d:\d\d:\d\d\.\d{6}/, r["created_at"],
+      "builder run created_at must have 6 fractional digits")
+  end
+
+  # ── occurred_at_utc_offset on iterations (AC-3) ───────────────────────────────
+
+  def test_show_iteration_includes_occurred_at_utc_offset_key
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "iter-offset-key-space"]
+    Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-offset-key"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    iter = parse_json(body)["props"]["iterations"].first
+
+    assert iter.key?("occurred_at_utc_offset"), "iteration must include occurred_at_utc_offset key"
+  end
+
+  def test_show_iteration_occurred_at_utc_offset_nil_by_default
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "iter-offset-nil-space"]
+    Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-offset-nil"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    iter = parse_json(body)["props"]["iterations"].first
+
+    assert_nil iter["occurred_at_utc_offset"]
+  end
+
+  def test_show_iteration_occurred_at_utc_offset_integer_when_set
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "iter-offset-set-space"]
+    Factory[:iteration, space_id: space.id, ordinal: 1, name: "iter-offset-set",
+            occurred_at_utc_offset: -21600]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    iter = parse_json(body)["props"]["iterations"].first
+
+    assert_equal(-21600, iter["occurred_at_utc_offset"])
+  end
+
+  # ── git_utc_offset on space prop (AC-3) ───────────────────────────────────────
+
+  def test_show_space_prop_includes_git_utc_offset_key
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "space-offset-key-space"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    space_prop = parse_json(body)["props"]["space"]
+
+    assert space_prop.key?("git_utc_offset"), "space prop must include git_utc_offset key"
+  end
+
+  def test_show_space_prop_git_utc_offset_nil_by_default
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "space-offset-nil-space"]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    space_prop = parse_json(body)["props"]["space"]
+
+    assert_nil space_prop["git_utc_offset"]
+  end
+
+  def test_show_space_prop_git_utc_offset_integer_when_set
+    sign_in(@owner)
+    space = Factory[:space, user_id: @owner.id, slug: "space-offset-set-space",
+                    git_utc_offset: -21600]
+
+    _, _, body = inertia_get("/spaces/#{space.id}")
+    space_prop = parse_json(body)["props"]["space"]
+
+    assert_equal(-21600, space_prop["git_utc_offset"])
+  end
 end
