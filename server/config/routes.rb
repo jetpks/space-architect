@@ -46,6 +46,10 @@ module Space
       post "/runs/:id/ingest",  to: "runs.ingest"
       get  "/runs/:id/stream",  to: "runs.stream"
       get  "/runs/:id",         to: "runs.show"
+
+      # Spaces
+      get "/spaces",     to: "spaces.index"
+      get "/spaces/:id", to: "spaces.show"
     end
   end
 end

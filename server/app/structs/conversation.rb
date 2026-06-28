@@ -7,7 +7,7 @@ module Space
       # conversations_repo.with_messages_and_shares(id) or visible_to(user).
       # ROM raises loudly if those associations are accessed un-combined; that is
       # the intentional safe failure mode.
-      class Conversation < Space::Server::DB::Struct
+      class Conversation < ::Space::Server::DB::Struct
         def published?
           !!published
         end
@@ -46,7 +46,7 @@ module Space
 
         def source_file
           return nil unless source_file_data
-          Space::Server::SourceFileUploader.uploaded_file(source_file_data)
+          ::Space::Server::SourceFileUploader.uploaded_file(source_file_data)
         end
       end
     end

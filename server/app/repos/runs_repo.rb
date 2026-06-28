@@ -49,6 +49,20 @@ module Space
         def for_show(id)
           runs.by_pk(id).combine(:user).one
         end
+
+        def for_space(space_id)
+          runs.where(space_id: space_id).to_a
+        end
+
+        def count_for_space(space_id)
+          runs.dataset.where(space_id: space_id).count
+        end
+
+        # Find a builder run by its natural key within a space.
+        def find_builder_run(space_id, iteration_id, lane)
+          runs.where(space_id: space_id, iteration_id: iteration_id, lane: lane)
+              .order(Sequel.desc(:created_at)).to_a.first
+        end
       end
     end
   end

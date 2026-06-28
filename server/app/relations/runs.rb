@@ -13,6 +13,8 @@ module Space
 
           associations do
             belongs_to :user
+            belongs_to :space
+            belongs_to :iteration
           end
         end
       end
