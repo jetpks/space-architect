@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Space, SpaceArtifact, SpaceIteration, SpaceListItem, SpaceRun } from '@/types'
-import { KIND_VARIANT, STATUS_VARIANT, VERDICT_VARIANT, relativeTime } from './helpers'
+import { KIND_VARIANT, STATUS_VARIANT, VERDICT_VARIANT, formatAbsolute, relativeTime, timeLabel } from './helpers'
 
 // Fixtures matching the locked props contract exactly.
 
@@ -192,5 +192,58 @@ describe('Spaces/Show — artifacts', () => {
   it('other artifact (brief kind) maps to outline', () => {
     expect(KIND_VARIANT[OTHER_ARTIFACT_FIXTURE.kind] ?? 'outline').toBe('outline')
     expect(OTHER_ARTIFACT_FIXTURE.title).toBe('BRIEF — space-server-objects')
+  })
+})
+
+// --- formatAbsolute ---
+
+describe('formatAbsolute', () => {
+  it('shifts UTC instant to negative offset (-0600)', () => {
+    expect(formatAbsolute('2026-06-28T21:32:12.278Z', -21600)).toBe('2026-06-28T15:32:12.278-0600')
+  })
+
+  it('shifts UTC instant to positive offset (+0530)', () => {
+    expect(formatAbsolute('2026-06-28T21:32:12.278Z', 19800)).toBe('2026-06-29T03:02:12.278+0530')
+  })
+
+  it('renders UTC when offsetSeconds is null', () => {
+    expect(formatAbsolute('2026-06-28T21:32:12.278Z', null)).toBe('2026-06-28T21:32:12.278+0000')
+  })
+
+  it('renders UTC when offsetSeconds is undefined', () => {
+    expect(formatAbsolute('2026-06-28T21:32:12.278Z', undefined)).toBe('2026-06-28T21:32:12.278+0000')
+  })
+
+  it('uses colon-less offset (no colon between hours and minutes)', () => {
+    const result = formatAbsolute('2026-06-28T21:32:12.278Z', -21600)
+    expect(result).toMatch(/[+-]\d{4}$/)
+  })
+
+  it('shows 3-digit milliseconds', () => {
+    const result = formatAbsolute('2026-06-28T21:32:12.007Z', -21600)
+    expect(result).toContain('.007')
+  })
+
+  it('is host-timezone independent — does not read local zone', () => {
+    // All assertions use getUTC* internally; result is deterministic regardless of TZ env.
+    const r1 = formatAbsolute('2026-06-28T00:00:00.000Z', 0)
+    expect(r1).toBe('2026-06-28T00:00:00.000+0000')
+  })
+})
+
+// --- timeLabel ---
+
+describe('timeLabel', () => {
+  it('combines relative and absolute separated by ·', () => {
+    const past = new Date(Date.now() - 2 * 60 * 60_000).toISOString()
+    const label = timeLabel(past, 0)
+    expect(label).toMatch(/ago/)
+    expect(label).toMatch(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}[+-]\d{4}/)
+    expect(label).toContain(' · ')
+  })
+
+  it('passes null offset through to formatAbsolute (UTC fallback)', () => {
+    const label = timeLabel('2026-06-28T21:32:12.278Z', null)
+    expect(label).toContain('+0000')
   })
 })

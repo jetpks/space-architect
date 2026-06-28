@@ -25,7 +25,7 @@ vi.mock('@/components/Turn', () => ({
 
 import Show from './Show'
 
-const SPACE = { id: 1, slug: 'test-space', title: 'Test Space', status: 'active', repos: [] }
+const SPACE = { id: 1, slug: 'test-space', title: 'Test Space', status: 'active', repos: [], git_utc_offset: -21600 as number | null }
 
 const RUN: SpaceRun = {
   id: 42,
@@ -232,5 +232,25 @@ describe('ArchitectSessionSection — expand / fetch', () => {
     // Descending: iter2 (June 2) → run (June 1 noon) → iter1 (June 1 midnight)
     expect(idxIter2).toBeLessThan(idxRun)
     expect(idxRun).toBeLessThan(idxIter1)
+  })
+
+  it('architect session card shows absolute timestamp in space git_utc_offset', () => {
+    // occurred_at is UTC; space.git_utc_offset=-21600 → wall-clock should be -0600
+    const run: ArchitectRun = { ...ARCHITECT_RUN, occurred_at: '2026-06-28T21:32:12.278Z' }
+    const space = { ...SPACE, git_utc_offset: -21600 }
+    const { container } = render(<Show {...DEFAULT_PROPS} space={space} architect_runs={[run]} />)
+    const section = container.querySelector('#architect-run-200')
+    expect(section).not.toBeNull()
+    expect(section!.textContent).toContain('2026-06-28T15:32:12.278-0600')
+  })
+
+  it('iteration card shows absolute timestamp in occurred_at_utc_offset', () => {
+    const iter: SpaceIteration = {
+      ...ITERATION_1,
+      occurred_at: '2026-06-28T21:32:12.278Z',
+      occurred_at_utc_offset: -21600,
+    }
+    const { container } = render(<Show {...DEFAULT_PROPS} iterations={[iter]} />)
+    expect(container.textContent).toMatch(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}[+-]\d{4}/)
   })
 })
