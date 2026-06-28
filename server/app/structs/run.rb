@@ -3,7 +3,7 @@
 module Space
   module Server
     module Structs
-      class Run < Space::Server::DB::Struct
+      class Run < ::Space::Server::DB::Struct
         def pending?  = status == :pending
         def live?     = status == :live
         def complete? = status == :complete
