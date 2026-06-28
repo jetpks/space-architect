@@ -170,6 +170,7 @@ export type SpaceListItem = {
   iterations_count: number
   runs_count: number
   imported_at: string
+  git_utc_offset?: number | null
 }
 
 export type SpaceArtifact = {
@@ -205,6 +206,7 @@ export type SpaceIteration = {
   verdict: string | null
   created_at?: string
   occurred_at?: string | null
+  occurred_at_utc_offset?: number | null
   decisions?: { name: string; body: string }[]
   artifacts: SpaceArtifact[]
   runs: SpaceRun[]
@@ -238,4 +240,5 @@ export type Space = {
   title: string
   status: string
   repos: string[]
+  git_utc_offset?: number | null
 }

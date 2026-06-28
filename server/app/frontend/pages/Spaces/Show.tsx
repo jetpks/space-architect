@@ -22,7 +22,7 @@ import type {
   SpaceRun,
   Turn as TurnType,
 } from '@/types'
-import { KIND_VARIANT, STATUS_VARIANT, VERDICT_VARIANT, relativeTime } from './helpers'
+import { KIND_VARIANT, STATUS_VARIANT, VERDICT_VARIANT, formatAbsolute, relativeTime } from './helpers'
 import { interleaveTimeline } from './timeline'
 
 type Props = {
@@ -50,7 +50,15 @@ function ArtifactRow({ spaceId, artifact }: { spaceId: number; artifact: SpaceAr
   )
 }
 
-function RunRow({ spaceId, run }: { spaceId: number; run: SpaceRun }) {
+function RunRow({
+  spaceId,
+  run,
+  gitUtcOffset,
+}: {
+  spaceId: number
+  run: SpaceRun
+  gitUtcOffset?: number | null
+}) {
   return (
     <li className="flex items-center justify-between py-1 text-sm">
       <div className="flex items-center gap-2">
@@ -59,7 +67,11 @@ function RunRow({ spaceId, run }: { spaceId: number; run: SpaceRun }) {
         </span>
         <Badge variant={STATUS_VARIANT[run.status] ?? 'outline'}>{run.status}</Badge>
         {run.created_at && (
-          <span className="text-xs text-muted-foreground">{relativeTime(run.created_at)}</span>
+          <span className="text-xs text-muted-foreground">
+            {relativeTime(run.created_at)}
+            {' · '}
+            <span className="font-mono">{formatAbsolute(run.created_at, gitUtcOffset)}</span>
+          </span>
         )}
       </div>
       <Link
@@ -112,6 +124,8 @@ function IterationSection({
         {iteration.occurred_at && (
           <span className="ml-auto text-xs text-muted-foreground">
             {relativeTime(iteration.occurred_at)}
+            {' · '}
+            <span className="font-mono">{formatAbsolute(iteration.occurred_at, iteration.occurred_at_utc_offset)}</span>
           </span>
         )}
       </div>
@@ -147,7 +161,7 @@ function IterationSection({
           </p>
           <ul className="space-y-0.5">
             {iteration.runs.map((run) => (
-              <RunRow key={run.id} spaceId={space.id} run={run} />
+              <RunRow key={run.id} spaceId={space.id} run={run} gitUtcOffset={space.git_utc_offset} />
             ))}
           </ul>
         </div>
@@ -246,7 +260,11 @@ function ArchitectSessionSection({ space, run }: { space: Space; run: ArchitectR
         </span>
         <Badge variant={STATUS_VARIANT[run.status] ?? 'outline'}>{run.status}</Badge>
         {displayTime && (
-          <span className="ml-auto text-xs text-muted-foreground">{relativeTime(displayTime)}</span>
+          <span className="ml-auto text-xs text-muted-foreground">
+            {relativeTime(displayTime)}
+            {' · '}
+            <span className="font-mono">{formatAbsolute(displayTime, space.git_utc_offset)}</span>
+          </span>
         )}
       </div>
 
@@ -365,7 +383,7 @@ export default function Show({
           <h2 className="mb-3 text-lg font-semibold">Unassigned Runs</h2>
           <ul className="space-y-0.5 rounded-lg border border-border p-4">
             {unassigned_runs.map((run) => (
-              <RunRow key={run.id} spaceId={space.id} run={run} />
+              <RunRow key={run.id} spaceId={space.id} run={run} gitUtcOffset={space.git_utc_offset} />
             ))}
           </ul>
         </section>

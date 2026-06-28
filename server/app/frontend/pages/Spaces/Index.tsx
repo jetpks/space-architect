@@ -2,7 +2,7 @@ import { Head, Link } from '@inertiajs/react'
 import { Badge } from '@/components/ui/badge'
 import AppLayout from '@/layouts/AppLayout'
 import type { SpaceListItem } from '@/types'
-import { relativeTime, STATUS_VARIANT } from './helpers'
+import { STATUS_VARIANT, timeLabel } from './helpers'
 
 type Props = { spaces: SpaceListItem[] }
 
@@ -24,7 +24,7 @@ export default function Index({ spaces }: Props) {
               </Link>
               <span className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Badge variant={STATUS_VARIANT[s.status] ?? 'outline'}>{s.status}</Badge>
-                {s.iterations_count}i · {s.runs_count}r · {relativeTime(s.imported_at)}
+                {s.iterations_count}i · {s.runs_count}r · {timeLabel(s.imported_at, s.git_utc_offset)}
               </span>
             </li>
           ))}
