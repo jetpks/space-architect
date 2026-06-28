@@ -13,6 +13,12 @@ class NormalizerTest < Minitest::Test
                  Space::Server::Normalizer.select("sessionID" => "ses_abc")
   end
 
+  test "selects ClaudeSession for session-log record with sessionId (camelCase)" do
+    assert_equal Space::Server::Normalizer::ClaudeSession,
+                 Space::Server::Normalizer.select("sessionId" => "aabbccdd-1111-2222-3333-444455556666",
+                                                  "type" => "mode")
+  end
+
   test "selects ClaudeCode as default" do
     assert_equal Space::Server::Normalizer::ClaudeCode,
                  Space::Server::Normalizer.select("type" => "system", "session_id" => "abc")
