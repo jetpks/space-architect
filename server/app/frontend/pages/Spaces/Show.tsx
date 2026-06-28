@@ -33,6 +33,14 @@ type Props = {
   other_artifacts: SpaceArtifact[]
 }
 
+function HarnessModelBadge({ harness, model }: { harness?: string | null; model?: string | null }) {
+  const parts = [harness, model].filter(Boolean)
+  if (parts.length === 0) return null
+  return (
+    <span className="font-mono text-xs text-muted-foreground">{parts.join(' · ')}</span>
+  )
+}
+
 function ArtifactRow({ spaceId, artifact }: { spaceId: number; artifact: SpaceArtifact }) {
   return (
     <li className="flex items-start gap-2 py-1 text-sm">
@@ -66,6 +74,7 @@ function RunRow({
           {run.lane} ({run.role})
         </span>
         <Badge variant={STATUS_VARIANT[run.status] ?? 'outline'}>{run.status}</Badge>
+        <HarnessModelBadge harness={run.harness} model={run.model} />
         {run.created_at && (
           <span className="text-xs text-muted-foreground">
             {relativeTime(run.created_at)}
@@ -171,37 +180,14 @@ function IterationSection({
 }
 
 function ArchitectSessionSection({ space, run }: { space: Space; run: ArchitectRun }) {
-  const [expanded, setExpanded] = useState(false)
-  const [turns, setTurns] = useState<TurnType[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [fetchError, setFetchError] = useState(false)
+  // Turns are eagerly loaded into props — no fetch needed.
+  const [expanded, setExpanded] = useState(true)
 
-  const handleToggle = async () => {
-    const opening = !expanded
-    setExpanded(opening)
-    if (opening && turns === null) {
-      if (!run.has_transcript) {
-        setTurns([])
-      } else {
-        setLoading(true)
-        try {
-          const res = await fetch(`/spaces/${space.id}/runs/${run.id}/transcript`)
-          if (!res.ok) throw new Error('fetch failed')
-          const data = (await res.json()) as { turns: TurnType[] }
-          setTurns(data.turns)
-        } catch {
-          setFetchError(true)
-          setTurns([])
-        } finally {
-          setLoading(false)
-        }
-      }
-    }
-  }
+  const turns = run.turns ?? []
 
   const allMessages = useMemo(
     () =>
-      (turns ?? []).flatMap((t) => [
+      turns.flatMap((t) => [
         ...(t.prompt ? [t.prompt] : []),
         ...t.rounds.flatMap((r) => r.messages),
       ]),
@@ -231,7 +217,7 @@ function ArchitectSessionSection({ space, run }: { space: Space; run: ArchitectR
           }),
         }))
         .filter((round) => round.messages.length > 0)
-    return new Map((turns ?? []).map((t) => [t.anchor_id, visible(t)]))
+    return new Map(turns.map((t) => [t.anchor_id, visible(t)]))
   }, [turns, toolResults, emptyAnnotatedIds])
   const emptyAnnotations = useMemo(() => new Map<string, Annotation[]>(), [])
   const owner = useMemo(
@@ -249,7 +235,7 @@ function ArchitectSessionSection({ space, run }: { space: Space; run: ArchitectR
     >
       <div className="flex flex-wrap items-center gap-3">
         <button
-          onClick={() => void handleToggle()}
+          onClick={() => setExpanded((e) => !e)}
           aria-label={expanded ? 'Collapse architect session' : 'Expand architect session'}
           className="flex shrink-0 items-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
         >
@@ -259,6 +245,7 @@ function ArchitectSessionSection({ space, run }: { space: Space; run: ArchitectR
           architect
         </span>
         <Badge variant={STATUS_VARIANT[run.status] ?? 'outline'}>{run.status}</Badge>
+        <HarnessModelBadge harness={run.harness} model={run.model} />
         {displayTime && (
           <span className="ml-auto text-xs text-muted-foreground">
             {relativeTime(displayTime)}
@@ -270,16 +257,9 @@ function ArchitectSessionSection({ space, run }: { space: Space; run: ArchitectR
 
       {expanded && (
         <div className="mt-3">
-          {loading && (
-            <p className="text-sm text-muted-foreground">Loading transcript…</p>
-          )}
-          {fetchError && (
-            <p className="text-sm text-muted-foreground">Failed to load transcript.</p>
-          )}
-          {!loading && !fetchError && turns !== null && turns.length === 0 && (
+          {turns.length === 0 ? (
             <p className="text-sm text-muted-foreground">No transcript available.</p>
-          )}
-          {!loading && !fetchError && turns !== null && turns.length > 0 && (
+          ) : (
             <ol className="mt-2 space-y-3">
               {turns.map((turn, i) => (
                 <TurnComponent
