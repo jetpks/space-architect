@@ -78,14 +78,15 @@ const DEFAULT_PROPS = {
 }
 
 describe('Spaces/Show', () => {
-  it('renders iterations in ordinal order regardless of prop order', () => {
+  it('renders iterations in descending ordinal order (latest first)', () => {
     const { container } = render(<Show {...DEFAULT_PROPS} />)
     const text = container.textContent ?? ''
     const pos1 = text.indexOf('first-iter')
     const pos2 = text.indexOf('second-iter')
     expect(pos1).toBeGreaterThan(-1)
     expect(pos2).toBeGreaterThan(-1)
-    expect(pos1).toBeLessThan(pos2)
+    // descending: second-iter (ordinal 2) appears before first-iter (ordinal 1)
+    expect(pos2).toBeLessThan(pos1)
   })
 
   it('renders a decision section with its name and markdown body', () => {
@@ -98,9 +99,9 @@ describe('Spaces/Show', () => {
 
   it('renders a run entry linking to /spaces/:id/runs/:run_id', () => {
     render(<Show {...DEFAULT_PROPS} />)
-    const link = screen.queryByRole('link', { name: /view transcript/i })
-    expect(link).not.toBeNull()
-    expect(link!.getAttribute('href')).toBe('/spaces/1/runs/42')
+    const links = screen.queryAllByRole('link', { name: /view transcript/i })
+    const runLink = links.find((l) => l.getAttribute('href') === '/spaces/1/runs/42')
+    expect(runLink).not.toBeUndefined()
   })
 
   it('renders in-page nav anchors when more than one iteration exists', () => {
@@ -112,12 +113,11 @@ describe('Spaces/Show', () => {
     expect(anchor!.getAttribute('href')).toBe('#iteration-10')
   })
 
-  it('interleaves architect_runs on the timeline by created_at', () => {
+  it('interleaves architect_runs on the timeline by created_at (descending order)', () => {
     const { container } = render(
       <Show {...DEFAULT_PROPS} architect_runs={[ARCHITECT_RUN]} />,
     )
-    // Use DOM order within the timeline div, not textContent position —
-    // the nav section also mentions iteration names so indexOf is ambiguous.
+    // Use DOM order within the timeline div
     const timeline = container.querySelector('[data-testid="timeline"]')
     expect(timeline).not.toBeNull()
     const children = Array.from(timeline!.children)
@@ -127,13 +127,28 @@ describe('Spaces/Show', () => {
     expect(idx1).toBeGreaterThan(-1)
     expect(idxArun).toBeGreaterThan(-1)
     expect(idx2).toBeGreaterThan(-1)
-    // architect run (12:00) falls between iter1 (00:00) and iter2 (next day)
-    expect(idx1).toBeLessThan(idxArun)
-    expect(idxArun).toBeLessThan(idx2)
+    // descending: iter2 (June 2) first, architect run (June 1 noon) middle, iter1 (June 1) last
+    expect(idx2).toBeLessThan(idxArun)
+    expect(idxArun).toBeLessThan(idx1)
   })
 
   it('renders other_artifacts in a trailing section', () => {
     render(<Show {...DEFAULT_PROPS} other_artifacts={[OTHER_ARTIFACT]} />)
     expect(screen.queryByText('Other Artifacts')).not.toBeNull()
+  })
+
+  it('renders an architect marker with view transcript link when conversation_id is set', () => {
+    const linkedRun: ArchitectRun = { ...ARCHITECT_RUN, conversation_id: 55 }
+    render(<Show {...DEFAULT_PROPS} architect_runs={[linkedRun]} />)
+    const links = screen.queryAllByRole('link', { name: /view transcript/i })
+    const archLink = links.find((l) => l.getAttribute('href') === '/spaces/1/runs/200')
+    expect(archLink).not.toBeUndefined()
+  })
+
+  it('renders an artifact row linking to /spaces/:id/artifacts/:artifact_id', () => {
+    render(<Show {...DEFAULT_PROPS} other_artifacts={[OTHER_ARTIFACT]} />)
+    const link = screen.queryByRole('link', { name: /^view$/i })
+    expect(link).not.toBeNull()
+    expect(link!.getAttribute('href')).toBe('/spaces/1/artifacts/1')
   })
 })
