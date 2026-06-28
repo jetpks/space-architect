@@ -196,6 +196,8 @@ export type SpaceRun = {
   conversation_id: number
   iteration_id?: number
   created_at?: string
+  harness?: string | null
+  model?: string | null
 }
 
 export type SpaceIteration = {
@@ -221,6 +223,9 @@ export type ArchitectRun = {
   created_at: string
   occurred_at?: string | null
   has_transcript?: boolean
+  turns?: Turn[]
+  harness?: string | null
+  model?: string | null
 }
 
 export type SpaceRunDetail = {
