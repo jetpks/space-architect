@@ -179,6 +179,14 @@ export type SpaceArtifact = {
   title: string
 }
 
+export type SpaceArtifactDetail = {
+  id: number
+  kind: string
+  path: string
+  title: string
+  raw: string
+}
+
 export type SpaceRun = {
   id: number
   lane: string
