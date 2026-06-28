@@ -39,12 +39,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v4
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: server/vendor/bundle
           key: bundle-ruby-${{ hashFiles('server/Gemfile.lock') }}
           restore-keys: bundle-ruby-
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: /tmp/pgdg-debs
           key: pgdg-debs-postgresql-client-17.10
@@ -108,7 +108,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v4
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: server/gems/${{ matrix.gem }}/vendor/bundle
           key: bundle-gem-${{ matrix.gem }}-${{ hashFiles(format('server/gems/{0}/Gemfile.lock', matrix.gem)) }}
@@ -133,7 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v4
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: server/vendor/bundle
           key: bundle-ruby-${{ hashFiles('server/Gemfile.lock') }}
