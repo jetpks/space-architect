@@ -162,7 +162,8 @@ CREATE TABLE public.iterations (
     verdict text,
     status text,
     created_at timestamp with time zone NOT NULL,
-    updated_at timestamp with time zone NOT NULL
+    updated_at timestamp with time zone NOT NULL,
+    occurred_at timestamp with time zone
 );
 
 
@@ -231,7 +232,8 @@ CREATE TABLE public.runs (
     space_id bigint,
     iteration_id bigint,
     lane text,
-    role text DEFAULT 'builder'::text NOT NULL
+    role text DEFAULT 'builder'::text NOT NULL,
+    occurred_at timestamp with time zone
 );
 
 
@@ -687,4 +689,5 @@ INSERT INTO schema_migrations (filename) VALUES
 ('20260617000000_add_source_file_data_to_conversations.rb'),
 ('20260622000000_create_runs.rb'),
 ('20260623000000_add_conversation_id_to_runs.rb'),
-('20260627120000_create_space_tables.rb');
+('20260627120000_create_space_tables.rb'),
+('20260628000000_add_occurred_at_to_runs_and_iterations.rb');

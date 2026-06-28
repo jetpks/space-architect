@@ -4,7 +4,7 @@ module Space
   module Server
     module Actions
       module Spaces
-        class Run < Space::Server::Action
+        class Transcript < Space::Server::Action
           include Space::Server::Deps[
             "repos.spaces_repo",
             "repos.runs_repo",
@@ -32,32 +32,11 @@ module Space
               redirect_with_flash(res, "/", alert: alert)
             end
 
-            owner = run.owned_by?(user)
-            turns = build_turns(run, owner)
+            owner        = run.owned_by?(user)
+            conversation = run.conversation_id &&
+                           conversations_repo.with_messages(run.conversation_id)
 
-            render_inertia(req, res, "Spaces/Run", props: {
-              space: { id: space.id, slug: space.slug, title: space.title },
-              run: {
-                id:              run.id,
-                lane:            run.lane,
-                role:            run.role,
-                status:          run.status.to_s,
-                producer:        run.producer,
-                session_id:      run.session_id,
-                iteration_id:    run.iteration_id,
-                conversation_id: run.conversation_id
-              },
-              turns: turns
-            })
-          end
-
-          private
-
-          def build_turns(run, owner)
-            return [] unless run.conversation_id
-
-            conversation = conversations_repo.with_messages(run.conversation_id)
-            Serializers::Conversation.turns_for(conversation, owner: owner)
+            render_json(res, { turns: Serializers::Conversation.turns_for(conversation, owner: owner) })
           end
         end
       end
