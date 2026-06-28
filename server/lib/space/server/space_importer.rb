@@ -26,7 +26,8 @@ module Space
       end
 
       # Imports the space directory, upserting all records. Returns the Space struct.
-      def import!(space_dir, user:)
+      # claude_projects_root: base dir for architect session logs (default ~/.claude/projects).
+      def import!(space_dir, user:, claude_projects_root: File.expand_path("~/.claude/projects"))
         space_dir = space_dir.to_s
         yaml      = YAML.load_file(File.join(space_dir, "space.yaml"))
 
@@ -48,9 +49,16 @@ module Space
         iteration_map = upsert_iterations(space, arch_iters)
         import_artifacts(space_dir, space, arch_iters, iteration_map)
         import_runs(space_dir, space, arch_iters, iteration_map, user: user)
+        import_architect_runs(space, user: user, claude_projects_root: claude_projects_root)
 
         @spaces_repo.update(space.id, imported_at: Time.now)
         @spaces_repo.by_pk(space.id)
+      end
+
+      # Maps a source_path to the Claude Code project-dir name by replacing / with -.
+      # e.g. /Users/eric/spaces/foo → -Users-eric-spaces-foo
+      def mangle(source_path)
+        source_path.to_s.gsub("/", "-")
       end
 
       private
@@ -215,10 +223,64 @@ module Space
         }.compact)
       end
 
+      def import_architect_runs(space, user:, claude_projects_root:)
+        project_dir = File.join(claude_projects_root, mangle(space.source_path))
+        return unless Dir.exist?(project_dir)
+
+        Dir.glob(File.join(project_dir, "*.jsonl")).sort.each do |session_jsonl|
+          import_architect_run(session_jsonl, space: space, user: user)
+        end
+      end
+
+      def import_architect_run(session_jsonl, space:, user:)
+        session_id = File.basename(session_jsonl, ".jsonl")
+        existing   = @runs_repo.find_architect_run(space.id, session_id)
+
+        if existing&.conversation_id
+          @conversations_repo.delete(existing.conversation_id)
+          @runs_repo.update(existing.id, conversation_id: nil, updated_at: Time.now)
+        end
+
+        run = existing || @runs_repo.create(
+          user_id:      user.id,
+          space_id:     space.id,
+          iteration_id: nil,
+          lane:         nil,
+          role:         "architect",
+          status:       0,
+          published:    false,
+          created_at:   Time.now,
+          updated_at:   Time.now
+        )
+
+        persistor = Runs::Persistor.new(@conversations_repo, @messages_repo)
+        persistor.setup(run)
+
+        parser = Normalizer::ClaudeSession.new
+
+        File.open(session_jsonl) do |io|
+          io.each_line do |line|
+            line = line.strip
+            next if line.empty?
+
+            parser.process(line).each { |event| persistor.process(event) }
+          end
+        end
+
+        @runs_repo.update(run.id, {
+          status:          2,
+          producer:        "claude_session",
+          session_id:      session_id,
+          conversation_id: persistor.conversation_id,
+          updated_at:      Time.now
+        }.compact)
+      end
+
       def producer_name(normalizer_class)
         case normalizer_class.name
-        when /ClaudeCode/ then "claude_code"
-        when /Opencode/   then "opencode"
+        when /ClaudeSession/ then "claude_session"
+        when /ClaudeCode/    then "claude_code"
+        when /Opencode/      then "opencode"
         else "unknown"
         end
       end

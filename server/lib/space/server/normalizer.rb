@@ -3,6 +3,7 @@
 require_relative "normalizer/event"
 require_relative "normalizer/claude_code"
 require_relative "normalizer/opencode"
+require_relative "normalizer/claude_session"
 
 module Space
   module Server
@@ -11,9 +12,11 @@ module Space
       # Pure classification — no I/O, no instantiation.
       #
       # opencode lines have a "part" key and use "sessionID" (uppercase D).
-      # Claude Code lines use "session_id" (lowercase d) and have no "part" key.
+      # Session-log lines use "sessionId" (camelCase, no underscore).
+      # Claude Code dispatch lines use "session_id" (snake_case) and have no "part" key.
       def self.select(record)
-        return Opencode if record.key?("part") || record.key?("sessionID")
+        return Opencode      if record.key?("part") || record.key?("sessionID")
+        return ClaudeSession if record.key?("sessionId")
         ClaudeCode
       end
     end

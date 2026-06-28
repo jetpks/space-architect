@@ -1,10 +1,14 @@
 # frozen_string_literal: true
 
+require "fileutils"
+require "tmpdir"
 require_relative "../test_helper"
 require "space/server/space_importer"
 
 class SpaceImporterTest < Minitest::Test
-  FIXTURE_DIR = File.expand_path("../fixtures/files/space_fixture", __dir__)
+  FIXTURE_DIR       = File.expand_path("../fixtures/files/space_fixture", __dir__)
+  SESSION_FIXTURE   = File.expand_path("../fixtures/files/claude_session_fixture.jsonl", __dir__)
+  FIXTURE_SESSION_UUID = "aabbccdd-1111-2222-3333-444455556666"
 
   def conn
     @conn ||= Space::Server::App["db.gateway"].connection
@@ -28,8 +32,12 @@ class SpaceImporterTest < Minitest::Test
     )
   end
 
-  def import!
-    @importer.import!(FIXTURE_DIR, user: @user)
+  def import!(claude_projects_root: nil)
+    if claude_projects_root
+      @importer.import!(FIXTURE_DIR, user: @user, claude_projects_root: claude_projects_root)
+    else
+      @importer.import!(FIXTURE_DIR, user: @user)
+    end
   end
 
   # ── Space ────────────────────────────────────────────────────────────────────
@@ -169,6 +177,101 @@ class SpaceImporterTest < Minitest::Test
 
     assert_equal msg_count, new_msg_count,
       "message count must be identical after reimport"
+  end
+
+  # ── Mangle ───────────────────────────────────────────────────────────────────
+
+  def test_mangle_converts_slashes_to_dashes
+    assert_equal "-Users-eric-architect-spaces-20260627-space-server-objects",
+                 @importer.mangle("/Users/eric/architect/spaces/20260627-space-server-objects")
+  end
+
+  # ── Architect Runs ────────────────────────────────────────────────────────────
+
+  def with_staged_session_root
+    Dir.mktmpdir("space_importer_test") do |root|
+      project_dir = File.join(root, @importer.mangle(FIXTURE_DIR))
+      FileUtils.mkdir_p(project_dir)
+      FileUtils.cp(SESSION_FIXTURE, File.join(project_dir, "#{FIXTURE_SESSION_UUID}.jsonl"))
+      yield root
+    end
+  end
+
+  def test_architect_run_created_with_correct_attributes
+    with_staged_session_root do |root|
+      import!(claude_projects_root: root)
+      run = conn[:runs].where(role: "architect").first
+      refute_nil run
+      assert_equal "architect",           run[:role]
+      assert_equal 2,                     run[:status]
+      assert_equal "claude_session",      run[:producer]
+      assert_equal FIXTURE_SESSION_UUID,  run[:session_id]
+      assert_nil run[:iteration_id]
+      assert_nil run[:lane]
+    end
+  end
+
+  def test_architect_run_has_space_id
+    with_staged_session_root do |root|
+      import!(claude_projects_root: root)
+      space = conn[:spaces].first
+      run   = conn[:runs].where(role: "architect").first
+      assert_equal space[:id], run[:space_id]
+    end
+  end
+
+  def test_architect_run_has_conversation_with_messages
+    with_staged_session_root do |root|
+      import!(claude_projects_root: root)
+      run = conn[:runs].where(role: "architect").first
+      refute_nil run[:conversation_id]
+      msg_count = conn[:messages].where(conversation_id: run[:conversation_id]).count
+      assert msg_count >= 1, "expected ≥1 message in architect run conversation"
+    end
+  end
+
+  def test_architect_run_idempotency
+    with_staged_session_root do |root|
+      import!(claude_projects_root: root)
+      counts1 = snapshot_counts
+      import!(claude_projects_root: root)
+      counts2 = snapshot_counts
+      assert_equal counts1, counts2,
+        "second import must not add rows: #{counts1.inspect} vs #{counts2.inspect}"
+    end
+  end
+
+  def test_architect_run_idempotency_message_count_stable
+    with_staged_session_root do |root|
+      import!(claude_projects_root: root)
+      run_id    = conn[:runs].where(role: "architect").first[:id]
+      conv_id   = conn[:runs].where(id: run_id).first[:conversation_id]
+      msg_count = conn[:messages].where(conversation_id: conv_id).count
+
+      import!(claude_projects_root: root)
+      new_conv_id   = conn[:runs].where(id: run_id).first[:conversation_id]
+      new_msg_count = conn[:messages].where(conversation_id: new_conv_id).count
+
+      assert_equal msg_count, new_msg_count,
+        "message count must be identical after re-import of architect run"
+    end
+  end
+
+  def test_absent_claude_projects_root_succeeds_with_zero_architect_runs
+    Dir.mktmpdir("space_importer_absent") do |root|
+      # no subdir matching mangle(FIXTURE_DIR) — should succeed, 0 architect runs
+      space = import!(claude_projects_root: root)
+      refute_nil space
+      assert_equal 0, conn[:runs].where(role: "architect").count
+    end
+  end
+
+  def test_absent_project_subdir_does_not_affect_builder_runs
+    Dir.mktmpdir("space_importer_absent2") do |root|
+      import!(claude_projects_root: root)
+      runs = conn[:runs].where(role: "builder").all
+      assert_equal 1, runs.length
+    end
   end
 
   private

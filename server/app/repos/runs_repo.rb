@@ -63,6 +63,12 @@ module Space
           runs.where(space_id: space_id, iteration_id: iteration_id, lane: lane)
               .order(Sequel.desc(:created_at)).to_a.first
         end
+
+        # Find an architect session run by its natural key (space_id + session_id).
+        def find_architect_run(space_id, session_id)
+          runs.where(space_id: space_id, role: "architect", session_id: session_id)
+              .order(Sequel.desc(:created_at)).to_a.first
+        end
       end
     end
   end
