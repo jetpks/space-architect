@@ -33,7 +33,7 @@ module Space
       def messages_for(session_id)
         return [] unless available?
 
-        sid = session_id.to_s
+        sid = sql_escape(session_id.to_s)
         msg_rows  = query("SELECT id, time_created, data FROM message WHERE session_id = '#{sid}' ORDER BY time_created, id")
         part_rows = query("SELECT message_id, time_created, data FROM part WHERE session_id = '#{sid}' ORDER BY time_created, id")
 
@@ -67,6 +67,10 @@ module Space
         JSON.parse(str)
       rescue JSON::ParserError
         nil
+      end
+
+      def sql_escape(str)
+        str.gsub("'", "''")
       end
     end
   end
