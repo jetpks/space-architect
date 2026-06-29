@@ -5,6 +5,7 @@ require "erb"
 require "open3"
 require "fileutils"
 require "pathname"
+require "tempfile"
 
 module Space::Architect
   # Manages an architect-loop project inside a space: one self-contained file per
@@ -36,6 +37,9 @@ module Space::Architect
       "## Grounds", "## Specification", "## Acceptance Criteria",
       "## Builder Prompt", "## Builder Report", "## Verdict"
     ].freeze
+
+    # Hard per-gate timeout. Generous relative to the full suite (~55s).
+    DEFAULT_GATE_TIMEOUT = 900
 
     def initialize(space:)
       @space = space
@@ -337,9 +341,12 @@ module Space::Architect
       merged
     end
 
-    # Run the iteration's frozen Acceptance Criteria gate commands and stream raw
-    # stdout/stderr + exit codes. A path-resolving RUNNER ONLY — no threshold
-    # comparison, no PASS/FAIL. The verdict is the architect reading this output.
+    # Run the iteration's frozen Acceptance Criteria gate commands. Each gate is
+    # executed in the resolved cwd (per-gate `cwd` overrides the base dir), under
+    # a hard timeout, and evaluated against its `expect` block. Returns an array
+    # of result hashes with :status (:pass/:fail) and :reason in addition to the
+    # raw :stdout/:stderr/:exit_code. The mechanical verdict belongs here; the AC
+    # verdict remains the architect's.
     def run_gates(iteration, lane: nil)
       entry = slice_entry(iteration)
       freeze_sha = entry["freeze_sha"]
@@ -352,7 +359,7 @@ module Space::Architect
       raise Space::Core::Error, "no gate commands found in the frozen Acceptance Criteria of #{rel}" if gates.empty?
 
       lanes = entry["lanes"] || []
-      dir =
+      base_dir =
         if lane
           le = lanes.find { |l| l["name"] == lane }
           raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless le
@@ -362,12 +369,27 @@ module Space::Architect
           raise Space::Core::Error, "No lane/repo recorded for '#{iteration}' — cannot resolve a directory to run gates in" unless repo
           space.path.join("repos", repo)
         end
-      raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
+      raise Space::Core::Error, "directory does not exist: #{base_dir}" unless base_dir.exist?
 
       gates.map do |gate|
-        g = gate.transform_keys(&:to_s)
-        out, err, status = Open3.capture3(g["cmd"], chdir: dir.to_s)
-        { id: g["id"], ac: g["ac"].to_s, cmd: g["cmd"], expect: g["expect"], stdout: out, stderr: err, exit_code: status.exitstatus, dir: dir }
+        g   = gate.transform_keys(&:to_s)
+        dir = g["cwd"] ? space.path.join(g["cwd"]) : base_dir
+        raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
+
+        captured = capture_with_timeout(g["cmd"], dir: dir, timeout: DEFAULT_GATE_TIMEOUT)
+
+        if captured[:timed_out]
+          status = :fail
+          reason = "timed out after #{DEFAULT_GATE_TIMEOUT}s"
+        else
+          ev     = GateEvaluator.call(stdout: captured[:stdout], exit_code: captured[:exit_code], expect: g["expect"] || {})
+          status = ev.pass? ? :pass : :fail
+          reason = ev.reason
+        end
+
+        { id: g["id"], ac: g["ac"].to_s, cmd: g["cmd"], expect: g["expect"],
+          stdout: captured[:stdout], stderr: captured[:stderr], exit_code: captured[:exit_code],
+          dir: dir, status: status, reason: reason }
       end
     end
 
@@ -606,6 +628,42 @@ module Space::Architect
     private
 
     attr_reader :space
+
+    # Spawn cmd in dir with pgroup: true, writing stdout/stderr to temp files so
+    # pipe buffers can never block. Polls with WNOHANG; kills the process group on
+    # timeout. Returns { stdout:, stderr:, exit_code:, timed_out: }.
+    def capture_with_timeout(cmd, dir:, timeout:)
+      out_f = Tempfile.new(["gate-stdout", ".log"])
+      err_f = Tempfile.new(["gate-stderr", ".log"])
+      pid   = Process.spawn(cmd, pgroup: true, chdir: dir.to_s, out: out_f.path, err: err_f.path)
+
+      deadline  = Time.now + timeout
+      status    = nil
+      timed_out = false
+
+      until status
+        if Time.now > deadline
+          timed_out = true
+          Process.kill("TERM", -pid) rescue nil
+          sleep 0.5
+          Process.kill("KILL", -pid) rescue nil
+          Process.wait(pid) rescue nil
+          break
+        end
+        _, st = Process.waitpid2(pid, Process::WNOHANG)
+        if st
+          status = st
+        else
+          sleep 0.05
+        end
+      end
+
+      out_f.rewind; err_f.rewind
+      { stdout: out_f.read, stderr: err_f.read, exit_code: status&.exitstatus, timed_out: timed_out }
+    ensure
+      out_f&.close!
+      err_f&.close!
+    end
 
     def iteration_id(entry)
       "I#{format('%02d', entry['ordinal'])}-#{entry['name']}"

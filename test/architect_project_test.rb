@@ -936,8 +936,10 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # run_gates reads the frozen gates block and returns RAW output with
-  # no PASS/FAIL/INVALID verdict tokens (it is a runner, not a judge).
+  # run_gates reads the frozen gates block, executes each command, and attaches
+  # a mechanical :status/:reason from GateEvaluator. Raw :stdout/:stderr/:exit_code
+  # are preserved unchanged; verdict tokens (PASS/FAIL/INVALID) must NOT appear in
+  # the raw output fields — :status is a Ruby symbol, kept separate from text output.
   def test_run_gates_returns_raw_output_without_verdict_tokens
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
@@ -968,8 +970,42 @@ class ArchitectProjectTest < Space::ArchitectTest
     assert_match(/hello-gate/, results[0][:stdout])
     assert_equal 0, results[0][:exit_code]
 
+    # GateEvaluator attaches :status/:reason; raw text fields carry no verdict tokens
+    assert_equal :pass, results[0][:status]
+    assert_empty results[0][:reason]
     blob = results.map { |r| "#{r[:cmd]} #{r[:stdout]} #{r[:stderr]}" }.join(" ")
-    refute_match(/\b(PASS|FAIL|INVALID)\b/, blob, "gate runner output must carry no verdict tokens")
+    refute_match(/\b(PASS|FAIL|INVALID)\b/, blob, "raw output fields must carry no verdict tokens")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_run_gates_fail_on_nonzero_exit
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    gate_yaml = <<~YAML
+      - id: failing-gate
+        ac: AC1
+        cmd: sh -c 'exit 2'
+        expect:
+          exit_code: 0
+    YAML
+    text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+    File.write(slice, text)
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    results = project.run_gates("my-slice", lane: "lane-a")
+    assert_equal :fail, results[0][:status]
+    assert_match(/exit_code/, results[0][:reason])
+    assert_equal 2, results[0][:exit_code]
   ensure
     FileUtils.rm_rf(dir)
   end

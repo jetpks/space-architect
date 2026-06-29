@@ -309,7 +309,7 @@ module Space::Architect
       end
 
       class Gate < BaseCommand
-        desc "Run the frozen Acceptance Criteria gate commands and stream raw output (no PASS/FAIL)"
+        desc "Run the frozen Acceptance Criteria gate commands and report PASS/FAIL"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: false, desc: "Run in a lane worktree (default: the integration repo)"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -321,14 +321,17 @@ module Space::Architect
               project = ArchitectProject.new(space: sp)
               results = project.run_gates(iteration, lane: lane)
               results.each do |r|
+                marker = r[:status] == :pass ? "PASS" : "FAIL"
                 terminal.say ""
-                terminal.say "── #{r[:ac].empty? ? "(gate)" : r[:ac]}: #{r[:cmd]}  (exit #{r[:exit_code]})"
+                terminal.say "── #{r[:ac].empty? ? "(gate)" : r[:ac]}: #{r[:cmd]}  (exit #{r[:exit_code]})  [#{marker}]"
+                terminal.say "   reason: #{r[:reason]}" if r[:status] == :fail && !r[:reason].to_s.empty?
                 terminal.say r[:stdout].rstrip unless r[:stdout].strip.empty?
                 terminal.say r[:stderr].rstrip unless r[:stderr].strip.empty?
               end
               terminal.say ""
-              terminal.say "Raw gate output above — the PASS/FAIL/INVALID verdict is yours, read against the frozen thresholds."
-              CLI.record_outcome(Outcome.new(exit_code: 0))
+              terminal.say "Mechanical gate results above; the Acceptance-Criteria verdict — necessary, not sufficient — remains the architect's."
+              any_fail = results.any? { |r| r[:status] == :fail }
+              CLI.record_outcome(Outcome.new(exit_code: any_fail ? 1 : 0))
             end
           end
         end
