@@ -191,3 +191,34 @@ describe('Turn — flat tool rendering inside open round', () => {
     expect(screen.getByTestId('message-202')).not.toBeNull()
   })
 })
+
+describe('Turn — open-round width: right cluster hidden when open (I12)', () => {
+  function openRound() {
+    fireEvent.click(screen.getAllByRole('button', { name: /expand round/i })[0])
+  }
+
+  it('tool count text is absent when round is open (AC-3)', () => {
+    render(<Turn {...BASE_PROPS} rounds={[round]} />)
+    openRound()
+    // "4 tools" must not appear anywhere in the open round header
+    expect(screen.queryByText(/\d+ tools?/)).toBeNull()
+  })
+
+  it('round BarMenu ("Round actions") is absent when round is open (AC-3)', () => {
+    render(<Turn {...BASE_PROPS} rounds={[round]} />)
+    openRound()
+    expect(screen.queryByTestId('bar-menu-round-actions')).toBeNull()
+  })
+
+  it('collapsed round still shows tool count (AC-4 invariant)', () => {
+    render(<Turn {...BASE_PROPS} rounds={[round]} />)
+    // Before opening: count must be visible
+    expect(screen.getByText('4 tools')).not.toBeNull()
+  })
+
+  it('collapsed round still shows round BarMenu (AC-4 invariant)', () => {
+    render(<Turn {...BASE_PROPS} rounds={[round]} />)
+    // Before opening: menu must be present
+    expect(screen.getByTestId('bar-menu-round-actions')).not.toBeNull()
+  })
+})

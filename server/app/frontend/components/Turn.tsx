@@ -528,24 +528,24 @@ function Turn({
             )}
           </div>
 
-          {/* The right cluster — the round's tool count and its menu — stays put open
-              or closed, so the count never moves and the content column to its left
-              wraps at this boundary in both states (the count is the right margin the
-              prose flows to, not a thing the prose runs under). The menu is hidden
-              until hover while the round rests, but its slot is held so nothing jumps. */}
-          <div className="flex shrink-0 items-center gap-1.5">
-            {!isOpen && roundNotes.length > 0 && <NoteChip count={roundNotes.length} />}
-            {actions.length > 0 && (
-              <span className="text-xs text-muted-foreground/70">
-                {actions.length} tool{actions.length === 1 ? '' : 's'}
-              </span>
-            )}
-            <div
-              className={isOpen ? '' : 'opacity-0 transition-opacity group-hover/round:opacity-100'}
-            >
-              {menu}
+          {/* The right cluster — the round's tool count and its menu — is present only
+              while the round is collapsed. When open, the content column extends to
+              the full container width so the inline tool rows aren't permanently
+              narrowed by a reserved right gutter. Hover-reveal slot is held while
+              collapsed so nothing jumps on expand. */}
+          {!isOpen && (
+            <div className="flex shrink-0 items-center gap-1.5">
+              {roundNotes.length > 0 && <NoteChip count={roundNotes.length} />}
+              {actions.length > 0 && (
+                <span className="text-xs text-muted-foreground/70">
+                  {actions.length} tool{actions.length === 1 ? '' : 's'}
+                </span>
+              )}
+              <div className="opacity-0 transition-opacity group-hover/round:opacity-100">
+                {menu}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     )
