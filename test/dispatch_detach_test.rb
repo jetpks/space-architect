@@ -45,15 +45,15 @@ class DispatchDetachTest < Space::ArchitectTest
     File.chmod(0o755, fake_bin)
 
     space   = Space::Core::Space.load(space_dir)
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("demo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
 
-    [space_dir, mission, fake_bin]
+    [space_dir, project, fake_bin]
   end
 
-  def setup_lane(space_dir, mission, fake_bin, lane_name)
-    mission.worktree_add("my-repo", "demo", lane_name)
+  def setup_lane(space_dir, project, fake_bin, lane_name)
+    project.worktree_add("my-repo", "demo", lane_name)
     build_dir = File.join(space_dir, "build", "I01-demo-#{lane_name}")
     FileUtils.mkdir_p(build_dir)
     File.write(File.join(build_dir, "prompt.md"), "DETACH-PROMPT-#{lane_name}\n")
@@ -63,11 +63,11 @@ class DispatchDetachTest < Space::ArchitectTest
   # (a) run_detached returns a PID without blocking for the builder's full lifetime
   def test_run_detached_returns_immediately_without_blocking
     root = Dir.mktmpdir("detach-test")
-    space_dir, mission, fake_bin = setup_detach_space(root)
-    setup_lane(space_dir, mission, fake_bin, "A")
+    space_dir, project, fake_bin = setup_detach_space(root)
+    setup_lane(space_dir, project, fake_bin, "A")
 
     t0 = Time.now
-    res = mission.dispatch("demo", "A", claude_bin: fake_bin, detach: true)
+    res = project.dispatch("demo", "A", claude_bin: fake_bin, detach: true)
     elapsed = Time.now - t0
     pid = res[:pid]
 
@@ -84,10 +84,10 @@ class DispatchDetachTest < Space::ArchitectTest
   # (b) child is its own process-group leader
   def test_run_detached_child_is_own_pgroup_leader
     root = Dir.mktmpdir("detach-test")
-    space_dir, mission, fake_bin = setup_detach_space(root)
-    setup_lane(space_dir, mission, fake_bin, "B")
+    space_dir, project, fake_bin = setup_detach_space(root)
+    setup_lane(space_dir, project, fake_bin, "B")
 
-    res = mission.dispatch("demo", "B", claude_bin: fake_bin, detach: true)
+    res = project.dispatch("demo", "B", claude_bin: fake_bin, detach: true)
     pid = res[:pid]
 
     # Child is sleeping 0.3s — safe to check pgroup while it's alive
@@ -101,10 +101,10 @@ class DispatchDetachTest < Space::ArchitectTest
   # (c) detached child completes its work after run_detached has already returned
   def test_run_detached_child_completes_work_after_launcher_returns
     root = Dir.mktmpdir("detach-test")
-    space_dir, mission, fake_bin = setup_detach_space(root)
-    build_dir = setup_lane(space_dir, mission, fake_bin, "C")
+    space_dir, project, fake_bin = setup_detach_space(root)
+    build_dir = setup_lane(space_dir, project, fake_bin, "C")
 
-    res = mission.dispatch("demo", "C", claude_bin: fake_bin, detach: true)
+    res = project.dispatch("demo", "C", claude_bin: fake_bin, detach: true)
     pid = res[:pid]
     run_log = File.join(build_dir, "run.jsonl")
 
@@ -127,10 +127,10 @@ class DispatchDetachTest < Space::ArchitectTest
   # Return hash shape: detach: true → { pid:, run_log:, report:, worktree: } (no exit_code)
   def test_dispatch_detach_true_returns_pid_hash_without_exit_code
     root = Dir.mktmpdir("detach-test")
-    space_dir, mission, fake_bin = setup_detach_space(root)
-    setup_lane(space_dir, mission, fake_bin, "D")
+    space_dir, project, fake_bin = setup_detach_space(root)
+    setup_lane(space_dir, project, fake_bin, "D")
 
-    res = mission.dispatch("demo", "D", claude_bin: fake_bin, detach: true)
+    res = project.dispatch("demo", "D", claude_bin: fake_bin, detach: true)
 
     assert res.key?(:pid),       "result must include :pid"
     assert res.key?(:run_log),   "result must include :run_log"
@@ -145,14 +145,14 @@ class DispatchDetachTest < Space::ArchitectTest
   # Existing blocking path is unchanged when detach: false (default)
   def test_dispatch_detach_false_returns_exit_code_hash
     root = Dir.mktmpdir("detach-test")
-    space_dir, mission, fake_bin = setup_detach_space(root)
+    space_dir, project, fake_bin = setup_detach_space(root)
     # Use a fast-exiting stub for the blocking path
     fast_bin = File.join(root, "fast_builder")
     File.write(fast_bin, "#!/usr/bin/env ruby\n$stdout.puts 'ok'\nexit 0\n")
     File.chmod(0o755, fast_bin)
-    setup_lane(space_dir, mission, fast_bin, "E")
+    setup_lane(space_dir, project, fast_bin, "E")
 
-    res = mission.dispatch("demo", "E", claude_bin: fast_bin, detach: false)
+    res = project.dispatch("demo", "E", claude_bin: fast_bin, detach: false)
 
     assert res.key?(:exit_code), "blocking result must include :exit_code"
     assert_equal 0, res[:exit_code]
