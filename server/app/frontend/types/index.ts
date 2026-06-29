@@ -170,6 +170,7 @@ export type SpaceListItem = {
   iterations_count: number
   runs_count: number
   imported_at: string
+  git_utc_offset?: number | null
 }
 
 export type SpaceArtifact = {
@@ -179,6 +180,14 @@ export type SpaceArtifact = {
   title: string
 }
 
+export type SpaceArtifactDetail = {
+  id: number
+  kind: string
+  path: string
+  title: string
+  raw: string
+}
+
 export type SpaceRun = {
   id: number
   lane: string
@@ -186,6 +195,9 @@ export type SpaceRun = {
   status: string
   conversation_id: number
   iteration_id?: number
+  created_at?: string
+  harness?: string | null
+  model?: string | null
 }
 
 export type SpaceIteration = {
@@ -194,8 +206,37 @@ export type SpaceIteration = {
   name: string
   freeze_sha: string | null
   verdict: string | null
+  created_at?: string
+  occurred_at?: string | null
+  occurred_at_utc_offset?: number | null
+  decisions?: { name: string; body: string }[]
   artifacts: SpaceArtifact[]
   runs: SpaceRun[]
+}
+
+export type ArchitectRun = {
+  id: number
+  role: string
+  status: string
+  session_id: string | null
+  conversation_id: number | null
+  created_at: string
+  occurred_at?: string | null
+  has_transcript?: boolean
+  turns?: Turn[]
+  harness?: string | null
+  model?: string | null
+}
+
+export type SpaceRunDetail = {
+  id: number
+  lane: string
+  role: string
+  status: string
+  producer: string | null
+  session_id: string | null
+  iteration_id: number | null
+  conversation_id: number | null
 }
 
 export type Space = {
@@ -204,4 +245,5 @@ export type Space = {
   title: string
   status: string
   repos: string[]
+  git_utc_offset?: number | null
 }

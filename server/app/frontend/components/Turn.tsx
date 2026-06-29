@@ -8,7 +8,6 @@ import {
   gist,
   isActionMessage,
   isCompactSummary,
-  markerLabel,
   MARKER_STYLE,
   messageMarker,
   toolLabel,
@@ -125,10 +124,6 @@ function GapDivider({
 // the middle, keeping this many rounds of context at each end.
 const ROUND_THRESHOLD = 8
 const ROUND_CONTEXT = 3
-
-// Opening a round with at most this many tool calls reveals them already
-// expanded — their length is bounded, so there's no explosion to guard against.
-const AUTO_EXPAND_ACTIONS = 3
 
 // A laid-out rounds list: kept rounds interleaved with collapsed gaps.
 type RoundItem = { kind: 'round'; round: RoundType } | { kind: 'gap'; rounds: RoundType[] }
@@ -304,25 +299,14 @@ function Turn({
         intermediateRounds.filter((r) => r.messages.some(hasOwnNotes)).map((r) => r.anchor_id),
       ),
   )
-  const [expandedIds, setExpandedIds] = useState<Set<number>>(
-    () =>
-      new Set(
-        intermediateRounds
-          .flatMap((r) => r.messages)
-          .filter(hasOwnNotes)
-          .map((m) => m.id),
-      ),
-  )
   // The last message a jump asked this turn to reveal — see the reveal effect.
   const [lastReveal, setLastReveal] = useState<number | null>(null)
-  // Per-body-message source state, lifted here so a round or tool *bar* menu can
-  // drive the message rendered in its body — the message itself no longer carries
-  // a menu of its own (it'd sit right next to the bar's). Keyed by message id.
+  // Per-body-message source state, lifted here so a round *bar* menu can drive
+  // the message rendered in its body — the message itself no longer carries a
+  // menu of its own. Keyed by message id.
   const [sourceIds, setSourceIds] = useState<Set<number>>(new Set())
-  // Open annotation forms for round- and tool-targeted notes, keyed by the
-  // round's anchor id / the tool message's id.
+  // Open annotation forms for round-targeted notes, keyed by the round's anchor id.
   const [roundAnnotate, setRoundAnnotate] = useState<Set<number>>(new Set())
-  const [toolAnnotate, setToolAnnotate] = useState<Set<number>>(new Set())
 
   const toggle = (set: Set<number>, id: number) => {
     const next = new Set(set)
@@ -335,26 +319,15 @@ function Turn({
     return next
   }
   const toggleGap = (id: number) => setShownGaps((prev) => toggle(prev, id))
-  const toggleId = (id: number) => setExpandedIds((prev) => toggle(prev, id))
   const toggleSource = (id: number) => setSourceIds((prev) => toggle(prev, id))
-  const ensureOpen = (set: Set<number>, setter: typeof setExpandedIds, id: number) => {
+  const ensureOpen = (set: Set<number>, setter: typeof setExpandedRounds, id: number) => {
     if (!set.has(id)) setter((prev) => new Set(prev).add(id))
   }
 
   const actionsOf = (messages: MessageType[]) => messages.filter(isActionMessage)
 
-  // Open or close a round; opening a small one (bounded tool calls) also reveals
-  // its action rows so you don't click again to see what little it did.
   const openRound = (round: RoundType) => {
-    const id = round.anchor_id
-    const opening = !expandedRounds.has(id)
-    setExpandedRounds((prev) => toggle(prev, id))
-    if (opening) {
-      const actions = actionsOf(round.messages)
-      if (actions.length <= AUTO_EXPAND_ACTIONS) {
-        setExpandedIds((prev) => new Set([...prev, ...actions.map((m) => m.id)]))
-      }
-    }
+    setExpandedRounds((prev) => toggle(prev, round.anchor_id))
   }
 
   const renderMessage = (
@@ -399,125 +372,34 @@ function Turn({
     />
   )
 
-  // An action row — a flat, full-width toggle with a leading disclosure chevron.
-  // Open, its detail hangs from a left rail directly beneath (no surrounding box),
-  // so the cursor stays put and the content runs flush to the turn frame; click the
-  // row again to collapse. Significant beats are marked: decisions (a question, a
-  // plan approved) emerald, memory writes orange — each tinted with a glyph +
-  // trailing seam rule. They are NOT turn boundaries (see memory
-  // chat-share-decisions-not-boundaries). Expanding a decision shows its folded-in
-  // answer (Block couples the result inline). The detail renders `bare` so it brings
-  // no card chrome of its own — only its content's surfaces (code, output) remain.
+  // An action (tool call) rendered inline inside its open round — no fold, no
+  // chevron, no per-tool bar. The anchor id preserves deep-link targets and the
+  // margin's note alignment; marked tools get their marker-prefixed id so TOC
+  // jumps still land. Tool body renders via bodyMessage (bare, menu-less) and
+  // existing tool-targeted notes display below it. New notes are created by
+  // text selection (SelectionAnnotator) rather than a per-tool button.
   const renderActionRow = (message: MessageType) => {
-    const isOpen = expandedIds.has(message.id)
     const marker = messageMarker(message, projectRoot)
-    const style = marker ? MARKER_STYLE[marker] : null
-    const Chevron = isOpen ? ChevronDown : ChevronRight
-    // Anchor every row (not just marked ones) so its bar menu can offer a permalink;
-    // marked rows keep their `${marker}-${id}` anchor the TOC already jumps to.
     const anchor = marker ? `${marker}-${message.id}` : `tool-${message.id}`
     const toolUseId = (
       message.blocks.find((b) => b.type === 'tool_use') as ToolUseBlock | undefined
     )?.id
     const toolNotes = annotationsFor(annotations, 'tool', message.id)
 
-    const menu = (
-      <BarMenu
-        label="Tool actions"
-        anchor={anchor}
-        fold={{
-          expanded: isOpen,
-          onExpand: () => toggleId(message.id),
-          onCollapse: () => toggleId(message.id),
-          noun: 'tool',
-        }}
-        all={{ onExpand: expandAllTools, onCollapse: collapseAllTools, noun: 'tools' }}
-        source={{
-          shown: sourceIds.has(message.id),
-          // Source lives in the (open) body, so opening it implies opening the row.
-          onToggle: () => {
-            ensureOpen(expandedIds, setExpandedIds, message.id)
-            toggleSource(message.id)
-          },
-        }}
-        copySource={() => JSON.stringify(message.blocks, null, 2)}
-        annotate={() => {
-          ensureOpen(expandedIds, setExpandedIds, message.id)
-          if (onCompose) {
-            onCompose({
+    return (
+      <div key={message.id} id={anchor} className="scroll-mt-20">
+        {bodyMessage(message)}
+        {!onCompose && (
+          <AnnotationSection
+            annotations={toolNotes}
+            conversationId={conversationId}
+            target={{
               target_kind: 'tool',
               anchor_message_id: message.id,
               tool_use_id: toolUseId,
-            })
-          } else {
-            setToolAnnotate((prev) => toggle(prev, message.id))
-          }
-        }}
-      />
-    )
-
-    return (
-      <div
-        key={message.id}
-        id={anchor}
-        className={`scroll-mt-20 ${FOLD_FRAME} ${style ? style.rule : FOLD_BORDER}`}
-      >
-        {!isOpen ? (
-          // Collapsed: chevron + the tool's shortened label (its gist / → ToolName).
-          <div className="flex items-stretch">
-            <button
-              onClick={() => toggleId(message.id)}
-              aria-label="Expand"
-              className={`${rowClass(style ? `${style.text} ${style.textHover}` : null)} min-w-0 flex-1`}
-            >
-              <Chevron className="size-3.5 shrink-0 opacity-70" />
-              {style ? (
-                <>
-                  <span className="min-w-0 truncate text-xs font-medium uppercase tracking-wide">
-                    {style.glyph} {markerLabel(message, marker!, projectRoot)}
-                  </span>
-                  <span className={`h-px flex-1 ${style.seam}`} />
-                </>
-              ) : (
-                <span className="min-w-0 flex-1 truncate text-sm">{rowLabel(message)}</span>
-              )}
-            </button>
-            {toolNotes.length > 0 && <NoteChip count={toolNotes.length} />}
-            <div className="self-center pr-1">{menu}</div>
-          </div>
-        ) : (
-          // Open: the shortened label is gone — the chevron handle keeps the collapse
-          // affordance and the full tool call (its own → ToolName header + body) sits
-          // beside it, so there's no gist duplicated next to the full thing. The
-          // tool-targeted notes hang at the bottom of the open body.
-          <div className="flex items-start gap-2">
-            <button
-              onClick={() => toggleId(message.id)}
-              aria-label="Collapse"
-              className="flex shrink-0 items-center rounded px-1 py-1 text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
-            >
-              <Chevron className="size-3.5 shrink-0 opacity-70" />
-            </button>
-            <div className="min-w-0 flex-1 py-1">
-              {bodyMessage(message)}
-              {!onCompose && (
-                <AnnotationSection
-                  annotations={toolNotes}
-                  conversationId={conversationId}
-                  target={{
-                    target_kind: 'tool',
-                    anchor_message_id: message.id,
-                    tool_use_id: toolUseId,
-                  }}
-                  open={toolAnnotate.has(message.id)}
-                  onOpenChange={(open) =>
-                    setToolAnnotate((prev) => setFlag(prev, message.id, open))
-                  }
-                />
-              )}
-            </div>
-            <div className="self-start pr-1">{menu}</div>
-          </div>
+            }}
+            open={false}
+          />
         )}
       </div>
     )
@@ -646,24 +528,24 @@ function Turn({
             )}
           </div>
 
-          {/* The right cluster — the round's tool count and its menu — stays put open
-              or closed, so the count never moves and the content column to its left
-              wraps at this boundary in both states (the count is the right margin the
-              prose flows to, not a thing the prose runs under). The menu is hidden
-              until hover while the round rests, but its slot is held so nothing jumps. */}
-          <div className="flex shrink-0 items-center gap-1.5">
-            {!isOpen && roundNotes.length > 0 && <NoteChip count={roundNotes.length} />}
-            {actions.length > 0 && (
-              <span className="text-xs text-muted-foreground/70">
-                {actions.length} tool{actions.length === 1 ? '' : 's'}
-              </span>
-            )}
-            <div
-              className={isOpen ? '' : 'opacity-0 transition-opacity group-hover/round:opacity-100'}
-            >
-              {menu}
+          {/* The right cluster — the round's tool count and its menu — is present only
+              while the round is collapsed. When open, the content column extends to
+              the full container width so the inline tool rows aren't permanently
+              narrowed by a reserved right gutter. Hover-reveal slot is held while
+              collapsed so nothing jumps on expand. */}
+          {!isOpen && (
+            <div className="flex shrink-0 items-center gap-1.5">
+              {roundNotes.length > 0 && <NoteChip count={roundNotes.length} />}
+              {actions.length > 0 && (
+                <span className="text-xs text-muted-foreground/70">
+                  {actions.length} tool{actions.length === 1 ? '' : 's'}
+                </span>
+              )}
+              <div className="opacity-0 transition-opacity group-hover/round:opacity-100">
+                {menu}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     )
@@ -689,40 +571,21 @@ function Turn({
   const gapKeys = () =>
     roundItems.flatMap((it) => (it.kind === 'gap' ? [it.rounds[0].anchor_id] : []))
 
-  // Whole-turn fold controls, shared by the thoughts header and every round/tool
-  // bar menu. "Rounds" reveals every round but only auto-opens the small ones' tools
-  // (the thoughts header's long-standing behavior); "tools" goes all the way, opening
-  // every round and every tool detail. Collapsing a scope clears just its own layer.
+  // Whole-turn fold controls, shared by the round/turn bar menus. Opening all
+  // rounds reveals their tools inline; collapsing clears round state only.
   const expandAllRounds = () => {
     setShownGaps(new Set(gapKeys()))
     setExpandedRounds(new Set(intermediateRounds.map((r) => r.anchor_id)))
-    setExpandedIds(
-      (prev) =>
-        new Set([
-          ...prev,
-          ...intermediateRounds
-            .filter((r) => actionsOf(r.messages).length <= AUTO_EXPAND_ACTIONS)
-            .flatMap((r) => actionsOf(r.messages).map((m) => m.id)),
-        ]),
-    )
   }
   const collapseAllRounds = () => {
     setShownGaps(new Set())
     setExpandedRounds(new Set())
-    setExpandedIds(new Set())
   }
-  const expandAllTools = () => {
-    setShownGaps(new Set(gapKeys()))
-    setExpandedRounds(new Set(intermediateRounds.map((r) => r.anchor_id)))
-    setExpandedIds(new Set(intermediate.filter(isActionMessage).map((m) => m.id)))
-  }
-  const collapseAllTools = () => setExpandedIds(new Set())
 
   // A TOC jump or deep link into a collapsed round asks us to reveal its target:
-  // open the round that holds it (seeding small-round actions, like a manual
-  // open), and when the target is itself a tool call, open that row too — a deep
-  // link to a tool in a big round must show the tool, not just its round. Marker
-  // and reveal rounds are force-kept by planRounds, so the round is never elided.
+  // open the round that holds it — tool calls display inline once the round is
+  // open, so no second step is needed. Marker and reveal rounds are force-kept
+  // by planRounds, so the round is never elided behind a "show more" gap.
   useEffect(() => {
     if (reveal == null) return
     // Keep the reveal sticky: Show clears revealId once the scroll lands, and
@@ -734,11 +597,6 @@ function Turn({
     setExpandedRounds((prev) =>
       prev.has(round.anchor_id) ? prev : new Set(prev).add(round.anchor_id),
     )
-    const acts = actionsOf(round.messages)
-    const target = round.messages.find((m) => m.id === reveal)
-    const open =
-      acts.length <= AUTO_EXPAND_ACTIONS ? acts : target && isActionMessage(target) ? [target] : []
-    if (open.length > 0) setExpandedIds((prev) => new Set([...prev, ...open.map((m) => m.id)]))
     // intermediateRounds is derived from stable props; intentionally keyed only on
     // reveal so a manual collapse isn't undone on the next unrelated render.
     // eslint-disable-next-line react-hooks/exhaustive-deps

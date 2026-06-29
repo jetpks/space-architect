@@ -23,7 +23,8 @@ module Space
                 status:           space.status.to_s,
                 iterations_count: iterations_repo.count_for_space(space.id),
                 runs_count:       runs_repo.count_for_space(space.id),
-                imported_at:      space.imported_at&.iso8601
+                imported_at:      space.imported_at&.iso8601(6),
+                git_utc_offset:   space.git_utc_offset
               }
             end
 

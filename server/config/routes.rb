@@ -48,8 +48,11 @@ module Space
       get  "/runs/:id",         to: "runs.show"
 
       # Spaces
-      get "/spaces",     to: "spaces.index"
-      get "/spaces/:id", to: "spaces.show"
+      get "/spaces",                    to: "spaces.index"
+      get "/spaces/:id",                to: "spaces.show"
+      get "/spaces/:id/runs/:run_id",                        to: "spaces.run"
+      get "/spaces/:id/runs/:run_id/transcript",             to: "spaces.transcript"
+      get "/spaces/:id/artifacts/:artifact_id",              to: "spaces.artifact"
     end
   end
 end

@@ -2,7 +2,11 @@
 
 require "yaml"
 require "json"
+require "open3"
+require "time"
 require_relative "normalizer"
+require_relative "normalizer/opencode_session"
+require_relative "opencode_store"
 require_relative "runs/persistor"
 require_relative "section_parser"
 
@@ -27,7 +31,10 @@ module Space
 
       # Imports the space directory, upserting all records. Returns the Space struct.
       # claude_projects_root: base dir for architect session logs (default ~/.claude/projects).
-      def import!(space_dir, user:, claude_projects_root: File.expand_path("~/.claude/projects"))
+      # opencode_db_path: path to the opencode SQLite DB (default ~/.local/share/opencode/opencode.db).
+      def import!(space_dir, user:,
+                  claude_projects_root: File.expand_path("~/.claude/projects"),
+                  opencode_db_path:    File.expand_path("~/.local/share/opencode/opencode.db"))
         space_dir = space_dir.to_s
         yaml      = YAML.load_file(File.join(space_dir, "space.yaml"))
 
@@ -36,11 +43,13 @@ module Space
         status = yaml["status"] || yaml.dig("architect", "status")
         repos  = Array(yaml["repos"]).map { |r| r.is_a?(Hash) ? r["full_name"] : r }.compact
 
+        head_info = git_commit_info(space_dir, "HEAD")
         space = @spaces_repo.upsert_by_slug(user.id, slug, {
-          title:       title,
-          status:      status,
-          source_path: space_dir,
-          repos:       repos
+          title:          title,
+          status:         status,
+          source_path:    space_dir,
+          repos:          repos,
+          git_utc_offset: head_info&.last
         })
 
         arch       = yaml.fetch("architect", nil) || {}
@@ -50,6 +59,7 @@ module Space
         import_artifacts(space_dir, space, arch_iters, iteration_map)
         import_runs(space_dir, space, arch_iters, iteration_map, user: user)
         import_architect_runs(space, user: user, claude_projects_root: claude_projects_root)
+        import_opencode_runs(space, user: user, opencode_db_path: opencode_db_path)
 
         @spaces_repo.update(space.id, imported_at: Time.now)
         @spaces_repo.by_pk(space.id)
@@ -66,11 +76,15 @@ module Space
       def upsert_iterations(space, arch_iters)
         arch_iters.each_with_object({}) do |iter_data, map|
           ordinal = iter_data["ordinal"]
+          sha     = iter_data["freeze_sha"]
+          info    = git_commit_info(space.source_path, sha)
           iter = @iterations_repo.upsert_by_ordinal(space.id, ordinal, {
-            name:       iter_data["name"],
-            freeze_sha: iter_data["freeze_sha"],
-            verdict:    iter_data["verdict"],
-            status:     iter_data["status"]
+            name:                   iter_data["name"],
+            freeze_sha:             sha,
+            verdict:                iter_data["verdict"],
+            status:                 iter_data["status"],
+            occurred_at:            info&.first,
+            occurred_at_utc_offset: info&.last
           })
           map[ordinal] = iter
         end
@@ -148,7 +162,7 @@ module Space
             worktree = lane_data["worktree"]
             next unless worktree
             build_rel = File.dirname(worktree)
-            map[build_rel] = { iteration: iter, lane: lane_data["name"] }
+            map[build_rel] = { iteration: iter, lane: lane_data["name"], harness: lane_data["harness"] }
           end
         end
       end
@@ -157,13 +171,13 @@ module Space
         m = dir_name.match(/^I(\d+)-.+-([^-]+)$/)
         if m
           ordinal = m[1].to_i
-          { iteration: iteration_map[ordinal], lane: m[2] }
+          { iteration: iteration_map[ordinal], lane: m[2], harness: nil }
         else
-          { iteration: nil, lane: dir_name }
+          { iteration: nil, lane: dir_name, harness: nil }
         end
       end
 
-      def import_builder_run(run_jsonl, space:, iteration:, lane:, user:)
+      def import_builder_run(run_jsonl, space:, iteration:, lane:, harness:, user:)
         existing = @runs_repo.find_builder_run(space.id, iteration&.id, lane)
 
         if existing&.conversation_id
@@ -219,6 +233,8 @@ module Space
           producer:        producer,
           session_id:      session_id,
           conversation_id: persistor.conversation_id,
+          harness:         harness,
+          model:           persistor.first_model,
           updated_at:      Time.now
         }.compact)
       end
@@ -253,17 +269,26 @@ module Space
           updated_at:   Time.now
         )
 
-        persistor = Runs::Persistor.new(@conversations_repo, @messages_repo)
+        persistor   = Runs::Persistor.new(@conversations_repo, @messages_repo)
         persistor.setup(run)
 
-        parser = Normalizer::ClaudeSession.new
+        parser      = Normalizer::ClaudeSession.new
+        occurred_at = nil
 
         File.open(session_jsonl) do |io|
           io.each_line do |line|
             line = line.strip
             next if line.empty?
 
-            parser.process(line).each { |event| persistor.process(event) }
+            record = begin
+              JSON.parse(line)
+            rescue JSON::ParserError
+              next
+            end
+
+            occurred_at ||= parse_iso8601(record["timestamp"])
+
+            parser.process(record).each { |event| persistor.process(event) }
           end
         end
 
@@ -271,7 +296,62 @@ module Space
           status:          2,
           producer:        "claude_session",
           session_id:      session_id,
+          occurred_at:     occurred_at,
           conversation_id: persistor.conversation_id,
+          harness:         "claude-code",
+          model:           persistor.first_model,
+          updated_at:      Time.now
+        }.compact)
+      end
+
+      def import_opencode_runs(space, user:, opencode_db_path:)
+        store = OpencodeStore.new(opencode_db_path)
+        return unless store.available?
+
+        store.sessions_for(space.source_path).each do |session|
+          import_opencode_run(session, store: store, space: space, user: user)
+        end
+      end
+
+      def import_opencode_run(session, store:, space:, user:)
+        session_id = session["id"]
+        existing   = @runs_repo.find_architect_run(space.id, session_id)
+
+        if existing&.conversation_id
+          @conversations_repo.delete(existing.conversation_id)
+          @runs_repo.update(existing.id, conversation_id: nil, updated_at: Time.now)
+        end
+
+        run = existing || @runs_repo.create(
+          user_id:      user.id,
+          space_id:     space.id,
+          iteration_id: nil,
+          lane:         nil,
+          role:         "architect",
+          status:       0,
+          published:    false,
+          created_at:   Time.now,
+          updated_at:   Time.now
+        )
+
+        persistor = Runs::Persistor.new(@conversations_repo, @messages_repo)
+        persistor.setup(run)
+
+        parser = Normalizer::OpencodeSession.new(session_id: session_id, session_dir: space.source_path)
+        store.messages_for(session_id).each do |message|
+          parser.process(message).each { |event| persistor.process(event) }
+        end
+
+        occurred_at = session["time_created"] ? Time.at(session["time_created"] / 1000.0).utc : nil
+
+        @runs_repo.update(run.id, {
+          status:          2,
+          producer:        "opencode_session",
+          session_id:      session_id,
+          occurred_at:     occurred_at,
+          conversation_id: persistor.conversation_id,
+          harness:         "opencode",
+          model:           persistor.first_model,
           updated_at:      Time.now
         }.compact)
       end
@@ -283,6 +363,35 @@ module Space
         when /Opencode/      then "opencode"
         else "unknown"
         end
+      end
+
+      # Returns [utc_time, offset_seconds] for +sha+ in +space_dir+, or nil on any failure.
+      # sha is passed as a positional arg to avoid shell interpolation.
+      def git_commit_info(space_dir, sha)
+        return nil if sha.nil? || sha.to_s.strip.empty?
+
+        out, status = Open3.capture2e("git", "-C", space_dir.to_s, "show", "-s", "--format=%cI", sha.to_s)
+        return nil unless status.success?
+
+        ts = out.lines.first&.strip
+        return nil if ts.nil? || ts.empty?
+
+        t      = Time.iso8601(ts)
+        offset = t.utc_offset
+        [t.utc, offset]
+      rescue StandardError
+        nil
+      end
+
+      def git_commit_time(space_dir, sha)
+        git_commit_info(space_dir, sha)&.first
+      end
+
+      def parse_iso8601(str)
+        return nil if str.nil? || str.strip.empty?
+        Time.iso8601(str.strip).utc
+      rescue ArgumentError
+        nil
       end
     end
   end
