@@ -214,8 +214,13 @@ and write Grounds. Findings without a source URL don't enter Grounds.
 ### 4. Spec the next iteration
 
 One-PR-sized. Run `architect new <name>` to scaffold
-`architecture/I<NN>-<name>.md` (it allocates the next ordinal and records the
-iteration in `space.yaml`), then write the **Specification** section with
+`architecture/I<NN>-<name>.md` (it allocates the next ordinal **at spec-time** and records the
+iteration in `space.yaml`). The iteration index in `ARCHITECT.md` holds only scaffolded
+iterations — planned/queued work lives un-numbered in the ordered Backlog until it is
+about to be specced. Pre-numbering planned work forces renumber churn every time priorities
+reshuffle; the ordinal belongs to the work only once `architect new` is called.
+
+Then write the **Specification** section with
 `architect section <name> specification --from <file>` — the full delegation
 contract, self-contained:
 

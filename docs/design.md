@@ -69,7 +69,8 @@ Supported statuses: `active`, `paused`, `done`, `archived`.
 - A TL;DR block: project goal, last iteration status, next action.
 - A repos-in-scope table.
 - The verification gate (exact test/build commands per repo).
-- An iteration index table: ordinal, name, status, freeze SHA, integration branch, verdict, file path.
+- An iteration index table: ordinal, name, status, freeze SHA, integration branch, verdict, file path. The index records only scaffolded iterations — ordinals are assigned at spec-time by `architect new`, never pre-assigned to planned work.
+- An ordered Backlog for planned (un-numbered) work. Items get their ordinal only when about to be specced; pre-numbering forces renumber churn when priorities reshuffle.
 - Open items for the human/architect.
 - A decisions log.
 
