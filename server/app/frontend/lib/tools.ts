@@ -22,6 +22,8 @@ export function gist(message: Message, max = 128): string {
     .replace(/<command-args>([\s\S]*?)<\/command-args>/g, ' $1')
     .replace(/<command-message>[\s\S]*?<\/command-message>/g, ' ')
     .replace(/<local-command-[a-z]+>[\s\S]*?<\/local-command-[a-z]+>/g, ' ')
+    .replace(/<task-notification>[\s\S]*?<\/task-notification>/g, ' task notification ')
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ' ')
     .replace(/<turn_aborted>[\s\S]*?(?:<\/turn_aborted>|$)/g, ' interrupted ')
     .replace(/\s+/g, ' ')
     .trim()

@@ -29,9 +29,13 @@ import type {
 // mid-text — renders literally, as does content with stray angle brackets (C
 // headers like <stddef>). A real command message is the envelope and nothing
 // before it.
+// Claude Code also emits a <command-message>-led ordering where the display
+// name precedes the <command-name> tag — that variant is accepted here too.
+// A <command-message>-only block with no <command-name>/<local-command-stdout>
+// pair falls through (returns null) so it renders as ordinary text.
 function parseCommand(text: string) {
   const trimmed = text.trimStart()
-  if (!/^(?:<command-name>|<local-command-stdout>)/.test(trimmed)) return null
+  if (!/^(?:<command-name>|<local-command-stdout>|<command-message>)/.test(trimmed)) return null
   const grab = (tag: string) =>
     trimmed.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))?.[1]?.trim()
   const name = grab('command-name')
@@ -39,6 +43,57 @@ function parseCommand(text: string) {
   const stdout = grab('local-command-stdout')
   if (!name && !stdout) return null
   return { name, args, stdout }
+}
+
+// <task-notification> envelope — background task completion. Strict: must open
+// the message and be a genuine matched pair.
+type TaskNotification = {
+  summary: string
+  status: string
+  taskId?: string
+  toolUseId?: string
+  outputFile?: string
+}
+
+function parseTaskNotification(text: string): TaskNotification | null {
+  const trimmed = text.trimStart()
+  if (!trimmed.startsWith('<task-notification>')) return null
+  if (!trimmed.includes('</task-notification>')) return null
+  const grab = (tag: string) =>
+    trimmed.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))?.[1]?.trim()
+  const status = grab('status') ?? ''
+  const summary = grab('summary') ?? status
+  if (!summary) return null
+  return {
+    summary,
+    status,
+    taskId: grab('task-id'),
+    toolUseId: grab('tool-use-id'),
+    outputFile: grab('output-file'),
+  }
+}
+
+// <local-command-caveat> / <system-reminder> — harness boilerplate injected
+// into turns; never human/agent content. Strict: must open the message and be a
+// genuine matched pair.
+type Boilerplate = { label: string; body: string }
+
+function parseBoilerplate(text: string): Boilerplate | null {
+  const trimmed = text.trimStart()
+  if (
+    trimmed.startsWith('<local-command-caveat>') &&
+    trimmed.includes('</local-command-caveat>')
+  ) {
+    const body =
+      trimmed.match(/<local-command-caveat>([\s\S]*?)<\/local-command-caveat>/)?.[1]?.trim() ?? ''
+    return { label: 'caveat', body }
+  }
+  if (trimmed.startsWith('<system-reminder>') && trimmed.includes('</system-reminder>')) {
+    const body =
+      trimmed.match(/<system-reminder>([\s\S]*?)<\/system-reminder>/)?.[1]?.trim() ?? ''
+    return { label: 'system reminder', body }
+  }
+  return null
 }
 
 // Shared line-clamp state for long blocks: when `text` runs past `threshold`
@@ -121,6 +176,58 @@ function CommandBlock({ name, args, stdout }: { name?: string; args?: string; st
       )}
       {stdout && <OutputBlock text={stdout} />}
     </div>
+  )
+}
+
+// Status pill for a completed/failed/in-flight background task. The summary
+// line is clickable — it toggles the detail fields (task-id, tool-use-id,
+// output-file) collapsed by default, matching the `thinking` Collapsible pattern.
+function TaskNotificationBlock({ notification }: { notification: TaskNotification }) {
+  const glyph =
+    notification.status === 'completed'
+      ? '✓'
+      : /error|failed/.test(notification.status)
+        ? '✗'
+        : '•'
+  const fields: [string, string][] = []
+  if (notification.taskId) fields.push(['task-id', notification.taskId])
+  if (notification.toolUseId) fields.push(['tool-use-id', notification.toolUseId])
+  if (notification.outputFile) fields.push(['output-file', notification.outputFile])
+
+  return (
+    <Collapsible className="text-sm">
+      <div className="flex items-center gap-1">
+        <span className="font-mono text-muted-foreground">{glyph}</span>
+        <CollapsibleTrigger className="text-left text-muted-foreground hover:text-foreground">
+          {notification.summary}
+        </CollapsibleTrigger>
+      </div>
+      {fields.length > 0 && (
+        <CollapsibleContent>
+          <div className="mt-1 space-y-0.5 font-mono text-xs text-muted-foreground">
+            {fields.map(([key, value]) => (
+              <div key={key}>
+                <span className="opacity-60">{key}</span> {value}
+              </div>
+            ))}
+          </div>
+        </CollapsibleContent>
+      )}
+    </Collapsible>
+  )
+}
+
+// Collapsed marker for harness boilerplate (local-command-caveat /
+// system-reminder). Mirrors the `thinking` Collapsible: small italic muted
+// trigger, inner text revealed on expand.
+function BoilerplateBlock({ label, body }: Boilerplate) {
+  return (
+    <Collapsible className="text-sm italic text-muted-foreground">
+      <CollapsibleTrigger className="hover:text-foreground">{label}</CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-1 whitespace-pre-wrap">{body}</div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
@@ -460,6 +567,10 @@ export default function Block({
       }
       const command = parseCommand(text)
       if (command) return <CommandBlock {...command} stdout={command.stdout ?? commandStdout} />
+      const notification = parseTaskNotification(text)
+      if (notification) return <TaskNotificationBlock notification={notification} />
+      const boilerplate = parseBoilerplate(text)
+      if (boilerplate) return <BoilerplateBlock {...boilerplate} />
       return <CollapsibleText text={text} />
     }
 
