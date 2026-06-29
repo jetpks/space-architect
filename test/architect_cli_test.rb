@@ -999,4 +999,88 @@ class ArchitectCLITest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
+
+  # ── gate: PASS/FAIL rendering and exit-code signalling ────────────────────
+
+  def test_gate_command_reports_pass_and_exits_zero
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        # Inject a passing gate and freeze
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        gate_yaml = <<~YAML
+          - id: echo-pass
+            ac: AC1
+            cmd: echo gate-ok
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+        invoke("freeze", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "lane-a")
+
+        out, err = invoke("gate", "demo", "lane-a")
+
+        assert_empty err
+        assert_match(/PASS/, out, "passing gate must show PASS")
+        assert_match(/necessary, not sufficient/, out, "necessary-not-sufficient framing must be present")
+        refute_match(/FAIL/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_gate_command_reports_fail_and_exits_nonzero
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        gate_yaml = <<~YAML
+          - id: echo-fail
+            ac: AC1
+            cmd: sh -c 'exit 1'
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+        invoke("freeze", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "lane-a")
+
+        out_io  = StringIO.new
+        err_io  = StringIO.new
+        rc = Space::Architect::CLI.call(["gate", "demo", "lane-a"], out_io, err_io)
+        out = out_io.string
+
+        assert_equal 1, rc, "failing gate must exit non-zero"
+        assert_match(/FAIL/, out, "failing gate must show FAIL")
+        assert_match(/exit_code/, out, "reason must appear in output")
+        assert_match(/necessary, not sufficient/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
 end
