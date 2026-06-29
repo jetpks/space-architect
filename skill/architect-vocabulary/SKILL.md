@@ -2,7 +2,7 @@
 name: architect-vocabulary
 description: >
   Load the Architect system's vocabulary and a short "where you are"
-  orientation — space, mission, iteration, lane, brief, builder, architect,
+  orientation — space, project, iteration, lane, brief, builder, architect,
   gate, freeze, verdict, research, variant set — for when you're standing in a
   space-architect workspace (or working on the skill itself) and need the terms
   understood in conversation but do NOT want to run the loop. Reference only:
@@ -43,9 +43,9 @@ the loop.
   artifacts under one root. `architect` finds it by walking up from `$PWD` to the
   nearest `space.yaml`.
 - **space.yaml** — the space's identity file: id, title, status, repos, notes,
-  tags, plus the `architect:` block (mission state — iterations, freeze shas,
+  tags, plus the `architect:` block (project state — iterations, freeze shas,
   lanes).
-- **mission** — an Architect Loop instance living inside a space; spans the
+- **project** — an Architect Loop instance living inside a space; spans the
   repos under `repos/`.
 
 **The unit of work**
@@ -70,10 +70,10 @@ the loop.
 
 **Contracts and checkpoints**
 
-- **brief** (`architecture/BRIEF.md`) — the durable, §-numbered mission contract
-  that spans iterations; frozen at the mission level and cited as **BRIEF §N**.
+- **brief** (`architecture/BRIEF.md`) — the durable, §-numbered project contract
+  that spans iterations; frozen at the project level and cited as **BRIEF §N**.
 - **ARCHITECT.md** (`architecture/ARCHITECT.md`) — the cross-iteration index /
-  table of contents and mission-wide state.
+  table of contents and project-wide state.
 - **freeze** ❄️ — committing the frozen region (Grounds / Specification /
   Acceptance Criteria) *before* dispatch (`architect freeze`). Records the
   **freeze_sha** in `space.yaml`; any later change to those sections is an
@@ -115,9 +115,9 @@ the loop.
 A space's directory layout:
 
 ```text
-space.yaml        # identity + mission state (the architect: block)
+space.yaml        # identity + project state (the architect: block)
 README.md
-repos/            # the repos the mission spans
+repos/            # the repos the project spans
 notes/            # scratch, prompts, logs
 architecture/     # ARCHITECT.md index + I<NN>-<name>.md iteration files (+ BRIEF.md)
 build/            # lane worktrees + scratch: build/<id>-<lane>/
@@ -127,7 +127,7 @@ tmp/              # workspace-local temp — use instead of /tmp
 Safe **read-only** commands to orient yourself (these don't run the loop):
 
 ```sh
-architect status            # mission state: iterations, freeze shas, lanes, verdicts
+architect status            # project state: iterations, freeze shas, lanes, verdicts
 architect space show        # the space you're standing in
 architect space list        # all your spaces
 ```

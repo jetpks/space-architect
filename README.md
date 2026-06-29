@@ -18,7 +18,7 @@ The gem ships **three composable binaries** over clean library seams:
 | **`src`** 🌲 | Tend evergreen repo checkouts for copy-on-write provisioning | `Space::Src` |
 
 Each is a first-class executable. `architect` also forwards `architect space …`
-and `architect src …` to the other two, so a mission can drive everything from
+and `architect src …` to the other two, so a project can drive everything from
 one command when that's handier. 🎀
 
 ## What's a space? 🪐
@@ -116,7 +116,7 @@ comma form (`-r a,b`) works too. Space ids are date-prefixed
 same day get a counter (`…-name-of-space-2`). 📅
 
 Everything `space` does is also reachable as `architect space …` from within a
-mission.
+project.
 
 ## `src` — the evergreen engine 🌲
 
@@ -149,7 +149,7 @@ fish integration (`src shell fish install`).
 ## `architect` — the Architect Loop 🏗️
 
 The **Architect Loop** is a structured build cycle for you and headless AI
-builders. Each loop lives inside a space as a *mission*.
+builders. Each loop lives inside a space as a *project*.
 
 **Roles:**
 
@@ -165,8 +165,8 @@ builders. Each loop lives inside a space as a *mission*.
 
 ```text
 architecture/
-  ARCHITECT.md              # cross-iteration index; mission-wide state
-  BRIEF.md                  # durable §-numbered mission contract (optional)
+  ARCHITECT.md              # cross-iteration index; project-wide state
+  BRIEF.md                  # durable §-numbered project contract (optional)
   I01-<iteration>.md        # one self-contained file per iteration
 build/
   I01-<iteration>-<lane>/   # lane worktree + scratch per dispatch
@@ -197,7 +197,7 @@ file.
 
 ```sh
 architect init                              # scaffold ARCHITECT.md + the space.yaml architect: block
-architect brief new                         # scaffold the durable mission BRIEF.md
+architect brief new                         # scaffold the durable project BRIEF.md
 architect new <iteration>                   # scaffold architecture/I<NN>-<iteration>.md
 architect section <it> <section> --from <f> # write + commit a section
 architect freeze <iteration>                # freeze the Acceptance Criteria ❄️
@@ -208,7 +208,7 @@ architect evidence <it> --lane <lane>       # transcribe the builder's report ve
 architect gate <iteration>                  # run the frozen gate commands, stream raw output
 architect merge <it> <lane>                 # integrate ONE judged-passing lane (--no-ff)
 architect integrate <it> --lanes a,b        # integrate a set of passing lanes, in order
-architect status                            # mission state (read-only)
+architect status                            # project state (read-only)
 architect variant add|compare|promote …     # competing (harness, model) lanes over one frozen spec
 architect research dispatch|status|wait …   # parallel read-only research lanes (see below)
 ```
@@ -346,7 +346,7 @@ The library is split into three namespaces you can require independently:
 
 - **`Space::Core`** — the foundation: config, state, XDG, terminal, git/mise
   clients, the space store. The `space` CLI runs on this alone.
-- **`Space::Architect`** — mission state, the builder harness, dispatch, and the
+- **`Space::Architect`** — project state, the builder harness, dispatch, and the
   research supervisor.
 - **`Space::Src`** — the evergreen engine (tracking, sync, copy-on-write clone).
 

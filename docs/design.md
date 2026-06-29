@@ -66,7 +66,7 @@ Supported statuses: `active`, `paused`, `done`, `archived`.
 
 `architecture/ARCHITECT.md` is the cross-iteration table of contents scaffolded by `architect init`. It is short (~150 lines) — the next session should be able to grok it in under a minute. It carries:
 
-- A TL;DR block: mission goal, last iteration status, next action.
+- A TL;DR block: project goal, last iteration status, next action.
 - A repos-in-scope table.
 - The verification gate (exact test/build commands per repo).
 - An iteration index table: ordinal, name, status, freeze SHA, integration branch, verdict, file path.

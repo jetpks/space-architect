@@ -161,5 +161,5 @@ Commit the report. Raw findings stay in `build/research/` (gitignored).
 
 If this feeds the build loop: distill the report into the iteration's **Grounds**
 section (`architecture/I<NN>-<name>.md`) per `/architect`, or into
-`architecture/BRIEF.md` §sections when it is mission-scope, and continue there.
+`architecture/BRIEF.md` §sections when it is project-scope, and continue there.
 The builder's PHASE 0 will challenge Grounds' claims — that's a feature.

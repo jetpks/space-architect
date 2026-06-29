@@ -7,12 +7,12 @@ require "fileutils"
 require "pathname"
 
 module Space::Architect
-  # Manages an architect-loop mission inside a space: one self-contained file per
+  # Manages an architect-loop project inside a space: one self-contained file per
   # iteration at architecture/I<NN>-<iteration>.md (Grounds / Specification / Acceptance Criteria / Builder
   # Prompt / Builder Report / Verdict), grown one commit per section. The freeze
   # is the commit that establishes the Acceptance Criteria; the frozen region (everything
   # above "## Builder Prompt") is read-only afterward.
-  class ArchitectMission
+  class ArchitectProject
     # The heading that separates the frozen sections (Grounds/Specification/Acceptance Criteria)
     # from the appended-after-freeze sections (Builder Prompt/Report/Verdict).
     FROZEN_BOUNDARY = /^## Builder Prompt/
@@ -55,14 +55,14 @@ module Space::Architect
       end
 
       git_run("-C", space.path.to_s, "add", "architecture/ARCHITECT.md", Space::Core::Space::METADATA_FILE)
-      git_run("-C", space.path.to_s, "commit", "-m", "Initialize architect mission")
+      git_run("-C", space.path.to_s, "commit", "-m", "Initialize architect project")
 
       handoff_path
     end
 
     # Allocate the next ordinal and scaffold architecture/I<NN>-<iteration>.md.
     def new_iteration!(name)
-      block = space.data["architect"] || {}
+      block = space.data["project"] || {}
       iterations = block["iterations"] || []
       if iterations.any? { |s| s["name"] == name }
         raise Space::Core::Error, "iteration '#{name}' already exists in space.yaml"
@@ -95,7 +95,7 @@ module Space::Architect
     end
 
     def status
-      block = space.data["architect"] || {}
+      block = space.data["project"] || {}
       architecture_dir = space.path.join("architecture")
       iteration_files = if architecture_dir.exist?
         architecture_dir.children
@@ -153,7 +153,7 @@ module Space::Architect
       sha
     end
 
-    # Scaffold the durable, section-numbered mission brief at architecture/BRIEF.md
+    # Scaffold the durable, section-numbered project brief at architecture/BRIEF.md
     # and commit it. The brief is the stable cross-iteration address space iterations
     # cite as "BRIEF §N"; it lives outside the per-iteration freeze region.
     def brief_new!(force: false)
@@ -165,7 +165,7 @@ module Space::Architect
       FileUtils.mkdir_p(brief_path.dirname)
       brief_path.write(render_brief)
       git_run("-C", space.path.to_s, "add", "architecture/BRIEF.md")
-      git_run("-C", space.path.to_s, "commit", "-m", "Add mission brief") if staged_changes?
+      git_run("-C", space.path.to_s, "commit", "-m", "Add project brief") if staged_changes?
       brief_path
     end
 
@@ -608,7 +608,7 @@ module Space::Architect
     end
 
     def slice_entry(iteration)
-      block = space.data["architect"] || {}
+      block = space.data["project"] || {}
       entry = (block["iterations"] || []).find { |s| s["name"] == iteration }
       raise Space::Core::Error, "Iteration '#{iteration}' not recorded in space.yaml — run `architect new #{iteration}` first" unless entry
       entry
@@ -757,8 +757,8 @@ module Space::Architect
     end
 
     def update_architect_block
-      block = space.data["architect"] || { "status" => "active", "current_iteration" => nil, "iterations" => [] }
-      space.data["architect"] = yield(block)
+      block = space.data["project"] || { "status" => "active", "current_iteration" => nil, "iterations" => [] }
+      space.data["project"] = yield(block)
       space.save
     end
 

@@ -7,7 +7,7 @@ require "async/http/mock"
 require "async/http/client"
 require "protocol/http/response"
 
-class ArchitectMissionTest < Space::ArchitectTest
+class ArchitectProjectTest < Space::ArchitectTest
   def create_real_space(dir)
     FileUtils.mkdir_p(File.join(dir, "architecture"))
     FileUtils.mkdir_p(File.join(dir, "repos"))
@@ -46,20 +46,20 @@ class ArchitectMissionTest < Space::ArchitectTest
   # G3: worktree_add records I-prefixed iteration_id worktree path and creates
   #     an I-prefixed branch (e.g. wt/I01-my-slice-lane-a, lane/I01-my-slice-lane-a)
   def test_worktree_add_records_ordinal_prefixed_path_and_branch
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    result = mission.worktree_add("my-repo", "my-slice", "lane-a")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    result = project.worktree_add("my-repo", "my-slice", "lane-a")
 
     assert_match %r{build/I01-my-slice-lane-a/wt\z}, result[:worktree].to_s
     assert_path_exists result[:worktree].to_s
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+    lane = yml.dig("project", "iterations", 0, "lanes", 0)
     assert_equal "build/I01-my-slice-lane-a/wt", lane["worktree"]
 
     branch_ref = File.join(dir, "repos", "my-repo", ".git", "refs", "heads", "lane", "I01-my-slice-lane-a")
@@ -71,21 +71,21 @@ class ArchitectMissionTest < Space::ArchitectTest
   # G4: verify looks for the scratch report at I-prefixed iteration_id path
   #     (build/I01-my-slice-lane-a/report.md) — bare-name path is not found
   def test_verify_finds_ordinal_prefixed_scratch_report
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.freeze!("my-slice")
-    mission.worktree_add("my-repo", "my-slice", "lane-a")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
 
     FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-a"))
     File.write(File.join(dir, "build", "I01-my-slice-lane-a", "report.md"),
       "# Report\nSTATUS: COMPLETE\n")
 
-    results = mission.verify("my-slice")
+    results = project.verify("my-slice")
     lane_result = results.find { |r| r[:lane] == "lane-a" }
     assert lane_result[:checks][:report_exists],
       "expected (c) report_exists to be true with I-prefixed report at I01-my-slice-lane-a.report.md"
@@ -96,14 +96,14 @@ class ArchitectMissionTest < Space::ArchitectTest
   # G5: worktree_remove prefers the recorded bare-name worktree path (back-compat
   #     for lanes written before the ordinal-id convention)
   def test_worktree_remove_uses_recorded_bare_name_worktree
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.freeze!("my-slice")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
 
     bare_wt_rel = "tmp/architect/wt/my-slice-lane-a"
     bare_wt_path = File.join(dir, bare_wt_rel)
@@ -113,7 +113,7 @@ class ArchitectMissionTest < Space::ArchitectTest
     assert_path_exists bare_wt_path
 
     sha, = Open3.capture3("git", "-C", repo_path, "rev-parse", "HEAD")
-    iteration_entry = space.data.dig("architect", "iterations").find { |s| s["name"] == "my-slice" }
+    iteration_entry = space.data.dig("project", "iterations").find { |s| s["name"] == "my-slice" }
     iteration_entry["lanes"] = [{
       "name" => "lane-a",
       "repo" => "my-repo",
@@ -123,7 +123,7 @@ class ArchitectMissionTest < Space::ArchitectTest
     }]
     space.save
 
-    mission.worktree_remove("my-slice", "lane-a")
+    project.worktree_remove("my-slice", "lane-a")
 
     refute_path_exists bare_wt_path, "expected bare-name worktree dir to be removed"
   ensure
@@ -132,19 +132,19 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC2: worktree_add persists harness and model on the lane entry
   def test_worktree_add_persists_harness_and_model
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.worktree_add("my-repo", "my-slice", "lane-a",
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a",
                          harness: "opencode",
                          model: "fireworks-ai/accounts/fireworks/models/glm-5p2")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+    lane = yml.dig("project", "iterations", 0, "lanes", 0)
 
     assert_equal "opencode", lane["harness"]
     assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", lane["model"]
@@ -160,23 +160,23 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC5: worktree_add raises footgun error for opencode without a valid model
   def test_worktree_add_footgun_raises_for_opencode_without_model
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
 
     # nil model raises, and error names --model
     err = assert_raises(Space::Core::Error) do
-      mission.worktree_add("my-repo", "my-slice", "lane-bad", harness: "opencode")
+      project.worktree_add("my-repo", "my-slice", "lane-bad", harness: "opencode")
     end
     assert_match(/--model/, err.message)
 
     # claude default model also raises
     assert_raises(Space::Core::Error) do
-      mission.worktree_add("my-repo", "my-slice", "lane-bad",
+      project.worktree_add("my-repo", "my-slice", "lane-bad",
                            harness: "opencode",
                            model: Space::Architect::Harness::CLAUDE_DEFAULT_MODEL)
     end
@@ -186,17 +186,17 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC7: plain worktree_add persists variant: false (backward-compat)
   def test_worktree_add_records_variant_false_by_default
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.worktree_add("my-repo", "my-slice", "lane-a")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+    lane = yml.dig("project", "iterations", 0, "lanes", 0)
 
     assert_equal false, lane["variant"]
     assert_equal "lane-a", lane["name"]
@@ -209,18 +209,18 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC2: variant_add creates v01/v02 with variant: true and correct harness/model
   def test_variant_add_creates_named_lanes_with_variant_true
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.variant_add("my-repo", "my-slice",
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.variant_add("my-repo", "my-slice",
                         [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    lanes = yml.dig("architect", "iterations", 0, "lanes")
+    lanes = yml.dig("project", "iterations", 0, "lanes")
 
     assert_equal 2, lanes.length
 
@@ -255,17 +255,17 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC3: variant_add fans out a byte-identical prompt to each variant's build dir
   def test_variant_add_fans_out_byte_identical_prompt
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
     prompt_src = File.join(dir, "prompt_src.md")
     File.binwrite(prompt_src, "# Frozen Prompt\nWith special bytes: \xC3\xA9\n")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.variant_add("my-repo", "my-slice",
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.variant_add("my-repo", "my-slice",
                         [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]],
                         prompt: prompt_src)
 
@@ -281,19 +281,19 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC4: a second variant_add call appends with continued ordinals (v03)
   def test_variant_add_appends_ordinals_across_calls
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.variant_add("my-repo", "my-slice",
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.variant_add("my-repo", "my-slice",
                         [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
-    mission.variant_add("my-repo", "my-slice", [["claude-code", nil]])
+    project.variant_add("my-repo", "my-slice", [["claude-code", nil]])
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    lanes = yml.dig("architect", "iterations", 0, "lanes")
+    lanes = yml.dig("project", "iterations", 0, "lanes")
 
     assert_equal 3, lanes.length
     names = lanes.map { |l| l["name"] }
@@ -307,21 +307,21 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC5: footgun fires for opencode+nil model; no lane or worktree left behind
   def test_variant_add_inherits_footgun_guard
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
 
     err = assert_raises(Space::Core::Error) do
-      mission.variant_add("my-repo", "my-slice", [["opencode", nil]])
+      project.variant_add("my-repo", "my-slice", [["opencode", nil]])
     end
     assert_match(/--model/, err.message)
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    lanes = yml.dig("architect", "iterations", 0, "lanes") || []
+    lanes = yml.dig("project", "iterations", 0, "lanes") || []
     assert_empty lanes, "no lane entry should be persisted after footgun raise"
 
     repo_path = File.join(dir, "repos", "my-repo")
@@ -335,12 +335,12 @@ class ArchitectMissionTest < Space::ArchitectTest
   end
 
   def test_rendered_scaffolds_name_real_commands_not_space_architect
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
 
     architect_md = File.read(File.join(dir, "architecture", "ARCHITECT.md"))
     iteration_md = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
@@ -357,23 +357,23 @@ class ArchitectMissionTest < Space::ArchitectTest
   # AC2: variant_promote records the winner on the iteration and discarded flags
   #      on each variant lane, preserving all pre-existing keys
   def test_variant_promote_records_winner_and_discarded_flags
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.variant_add("my-repo", "my-slice",
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.variant_add("my-repo", "my-slice",
                         [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
 
-    result = mission.variant_promote("my-slice", "v02")
+    result = project.variant_promote("my-slice", "v02")
 
     assert_equal "v02", result[:winner]
     assert_equal ["v01"], result[:discarded]
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    iter = yml.dig("architect", "iterations", 0)
+    iter = yml.dig("project", "iterations", 0)
 
     assert_equal "v02", iter["winner"]
     # pre-existing iteration keys preserved
@@ -406,33 +406,33 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC3: validate-before-mutate — bad winner raises and writes nothing
   def test_variant_promote_validates_before_mutate
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.variant_add("my-repo", "my-slice",
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.variant_add("my-repo", "my-slice",
                         [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
     # also add a non-variant lane to test (b)
-    mission.worktree_add("my-repo", "my-slice", "lane-a")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
 
     # (a) non-existent lane name
     err = assert_raises(Space::Core::Error) do
-      mission.variant_promote("my-slice", "v99")
+      project.variant_promote("my-slice", "v99")
     end
     assert_match(/v99/, err.message)
 
     # (b) name of a non-variant lane
     err = assert_raises(Space::Core::Error) do
-      mission.variant_promote("my-slice", "lane-a")
+      project.variant_promote("my-slice", "lane-a")
     end
     assert_match(/lane-a/, err.message)
 
     # After both raises: no winner key, no discarded keys on variant lanes
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    iter = yml.dig("architect", "iterations", 0)
+    iter = yml.dig("project", "iterations", 0)
 
     refute iter.key?("winner"), "no winner key should be written after a raise"
 
@@ -446,21 +446,21 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC4: idempotent re-promote — second call reassigns winner and recomputes flags
   def test_variant_promote_is_idempotent_repromote
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.variant_add("my-repo", "my-slice",
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.variant_add("my-repo", "my-slice",
                         [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
 
-    mission.variant_promote("my-slice", "v02")
-    mission.variant_promote("my-slice", "v01")
+    project.variant_promote("my-slice", "v02")
+    project.variant_promote("my-slice", "v01")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    iter = yml.dig("architect", "iterations", 0)
+    iter = yml.dig("project", "iterations", 0)
 
     assert_equal "v01", iter["winner"]
 
@@ -480,20 +480,20 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC5(a): effort "high" persisted on lane entry; all pre-existing keys preserved
   def test_worktree_add_persists_effort_when_set
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.worktree_add("my-repo", "my-slice", "lane-e",
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-e",
                          harness: "opencode",
                          model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
                          effort: "high")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+    lane = yml.dig("project", "iterations", 0, "lanes", 0)
 
     assert_equal "high", lane["effort"]
     # pre-existing keys preserved
@@ -511,19 +511,19 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC5(b): no effort kwarg → NO "effort" key in lane entry at all
   def test_worktree_add_no_effort_key_when_not_set
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.worktree_add("my-repo", "my-slice", "lane-f",
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-f",
                          harness: "opencode",
                          model: "fireworks-ai/accounts/fireworks/models/glm-5p2")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+    lane = yml.dig("project", "iterations", 0, "lanes", 0)
 
     refute lane.key?("effort"), "effort key must be absent when not set"
   ensure
@@ -532,16 +532,16 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC4(a): effort on a claude-code lane raises and writes nothing
   def test_worktree_add_footgun_raises_for_effort_on_claude_code
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
 
     err = assert_raises(Space::Core::Error) do
-      mission.worktree_add("my-repo", "my-slice", "lane-bad",
+      project.worktree_add("my-repo", "my-slice", "lane-bad",
                            harness: "claude-code", effort: "high")
     end
     assert_match(/opencode-only/, err.message)
@@ -549,7 +549,7 @@ class ArchitectMissionTest < Space::ArchitectTest
 
     # Nothing persisted after the raise
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    lanes = yml.dig("architect", "iterations", 0, "lanes") || []
+    lanes = yml.dig("project", "iterations", 0, "lanes") || []
     assert_empty lanes, "no lane should be written after footgun raise"
   ensure
     FileUtils.rm_rf(dir)
@@ -557,22 +557,22 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC6: promote raises on a no-variant iteration and writes nothing
   def test_variant_promote_raises_on_no_variant_iteration
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.worktree_add("my-repo", "my-slice", "lane-a")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
 
     err = assert_raises(Space::Core::Error) do
-      mission.variant_promote("my-slice", "lane-a")
+      project.variant_promote("my-slice", "lane-a")
     end
     assert_match(/no variant/, err.message)
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    iter = yml.dig("architect", "iterations", 0)
+    iter = yml.dig("project", "iterations", 0)
 
     refute iter.key?("winner"), "no winner key should be written on a no-variant iteration"
     lane = iter["lanes"].find { |l| l["name"] == "lane-a" }
@@ -586,21 +586,21 @@ class ArchitectMissionTest < Space::ArchitectTest
   # AC1: variant_compare returns a structured hash with one descriptor per
   #      variant lane (non-variant lanes excluded), status derived from winner
   def test_variant_compare_returns_structured_descriptor_with_status
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.freeze!("my-slice")
-    mission.variant_add("my-repo", "my-slice",
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.variant_add("my-repo", "my-slice",
                         [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
     # non-variant lane must be EXCLUDED from the compare result
-    mission.worktree_add("my-repo", "my-slice", "lane-a")
-    mission.variant_promote("my-slice", "v02")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    project.variant_promote("my-slice", "v02")
 
-    result = mission.variant_compare("my-slice")
+    result = project.variant_compare("my-slice")
 
     assert_equal "v02", result[:winner]
     assert_match(/\A[0-9a-f]{40}\z/, result[:freeze_sha])
@@ -630,17 +630,17 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC1: status is "pending" for every variant lane when winner is nil
   def test_variant_compare_returns_pending_when_no_winner
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.variant_add("my-repo", "my-slice",
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.variant_add("my-repo", "my-slice",
                         [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
 
-    result = mission.variant_compare("my-slice")
+    result = project.variant_compare("my-slice")
 
     assert_nil result[:winner]
     assert_equal 2, result[:variants].length
@@ -651,19 +651,19 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC1: harness defaults to "claude-code" when the record's value is nil
   def test_variant_compare_defaults_nil_harness_to_claude_code
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.variant_add("my-repo", "my-slice", [["claude-code", nil]])
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.variant_add("my-repo", "my-slice", [["claude-code", nil]])
 
     # Simulate a record with nil harness (e.g. from older code)
-    space.data.dig("architect", "iterations").find { |s| s["name"] == "my-slice" }["lanes"][0]["harness"] = nil
+    space.data.dig("project", "iterations").find { |s| s["name"] == "my-slice" }["lanes"][0]["harness"] = nil
 
-    result = mission.variant_compare("my-slice")
+    result = project.variant_compare("my-slice")
     assert_equal "claude-code", result[:variants].first[:harness]
   ensure
     FileUtils.rm_rf(dir)
@@ -671,17 +671,17 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC2: variant_compare on an iteration with no variant lanes raises and writes nothing
   def test_variant_compare_raises_on_no_variant_iteration
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.worktree_add("my-repo", "my-slice", "lane-a")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
 
     err = assert_raises(Space::Core::Error) do
-      mission.variant_compare("my-slice")
+      project.variant_compare("my-slice")
     end
     assert_match(/no variant set — nothing to compare/, err.message)
   ensure
@@ -691,28 +691,28 @@ class ArchitectMissionTest < Space::ArchitectTest
   # AC4: worktree_remove preserves the lane record (worktree → nil) and
   #      leaves winner / discarded flags and all other fields byte-identical
   def test_worktree_remove_preserves_lane_record_after_promote
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.variant_add("my-repo", "my-slice",
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.variant_add("my-repo", "my-slice",
                         [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
-    mission.variant_promote("my-slice", "v02")
+    project.variant_promote("my-slice", "v02")
 
     # Snapshot the lane record before removal
     yml_before = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    iter_before = yml_before.dig("architect", "iterations", 0)
+    iter_before = yml_before.dig("project", "iterations", 0)
     lane_before = iter_before["lanes"].find { |l| l["name"] == "v01" }
     wt_path_before = lane_before["worktree"]
     refute_nil wt_path_before
 
-    mission.worktree_remove("my-slice", "v01")
+    project.worktree_remove("my-slice", "v01")
 
     yml_after = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    iter_after = yml_after.dig("architect", "iterations", 0)
+    iter_after = yml_after.dig("project", "iterations", 0)
     lane_after = iter_after["lanes"].find { |l| l["name"] == "v01" }
 
     # (a) winner unchanged
@@ -742,14 +742,14 @@ class ArchitectMissionTest < Space::ArchitectTest
   # write_section! lands the body below the frozen boundary, preserves every other
   # section, and commits with the canonical per-section message.
   def test_write_section_replaces_body_and_commits_canonical_message
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
 
-    res = mission.write_section!("my-slice", "specification", body: "- Objective — wire the seam (BRIEF §3.1)")
+    res = project.write_section!("my-slice", "specification", body: "- Objective — wire the seam (BRIEF §3.1)")
     assert res[:committed]
     assert_match(/\A[0-9a-f]{40}\z/, res[:sha])
 
@@ -768,21 +768,21 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # write_section! refuses a frozen section once the iteration is frozen.
   def test_write_section_refuses_frozen_section_after_freeze
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.freeze!("my-slice")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
 
     err = assert_raises(Space::Core::Error) do
-      mission.write_section!("my-slice", "specification", body: "tampered")
+      project.write_section!("my-slice", "specification", body: "tampered")
     end
     assert_match(/frozen/i, err.message)
 
     # but a below-the-boundary section (verdict) is still writable after freeze
-    res = mission.write_section!("my-slice", "verdict", body: "CONTINUE — diff vs BRIEF §1 faithful")
+    res = project.write_section!("my-slice", "verdict", body: "CONTINUE — diff vs BRIEF §1 faithful")
     assert res[:committed]
   ensure
     FileUtils.rm_rf(dir)
@@ -790,15 +790,15 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # write_section! --append stacks per-lane ### subsections under Builder Prompt.
   def test_write_section_append_stacks_lane_subsections
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
 
-    mission.write_section!("my-slice", "prompt", body: "prompt for A", append: true, lane: "lane-a")
-    mission.write_section!("my-slice", "prompt", body: "prompt for B", append: true, lane: "lane-b")
+    project.write_section!("my-slice", "prompt", body: "prompt for A", append: true, lane: "lane-a")
+    project.write_section!("my-slice", "prompt", body: "prompt for B", append: true, lane: "lane-b")
 
     text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
     bp = text[/## Builder Prompt.*?(?=## Builder Report)/m]
@@ -811,18 +811,18 @@ class ArchitectMissionTest < Space::ArchitectTest
   # transcribe_evidence! copies the scratch report VERBATIM — even when it contains
   # its own "## " headings and markdown tables — and surfaces the STATUS line.
   def test_transcribe_evidence_is_verbatim_even_with_hashes_and_tables
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
 
     report = "## Results\n\n| AC | result |\n|----|--------|\n| G0 | 222/0/0 |\n\nSTATUS: COMPLETE\n"
     FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-a"))
     File.write(File.join(dir, "build", "I01-my-slice-lane-a", "report.md"), report)
 
-    res = mission.transcribe_evidence!("my-slice", lane: "lane-a")
+    res = project.transcribe_evidence!("my-slice", lane: "lane-a")
     assert_equal "STATUS: COMPLETE", res[:status_line]
 
     text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
@@ -838,12 +838,12 @@ class ArchitectMissionTest < Space::ArchitectTest
   # brief_new! scaffolds architecture/BRIEF.md with numbered §sections and commits it;
   # a second call without --force is refused.
   def test_brief_new_scaffolds_numbered_sections_and_guards
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    path = mission.brief_new!
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    path = project.brief_new!
 
     assert_path_exists path.to_s
     brief = File.read(path)
@@ -851,7 +851,7 @@ class ArchitectMissionTest < Space::ArchitectTest
     assert_match(/^## 7\. Definition of done/, brief)
     assert_match(/BRIEF §N/, brief)
 
-    err = assert_raises(Space::Core::Error) { mission.brief_new! }
+    err = assert_raises(Space::Core::Error) { project.brief_new! }
     assert_match(/already exists/, err.message)
   ensure
     FileUtils.rm_rf(dir)
@@ -860,23 +860,23 @@ class ArchitectMissionTest < Space::ArchitectTest
   # worktree_add --touch records touch_set, which makes verify's (d) in-bounds check
   # meaningful: an out-of-bounds write reports in_bounds == false.
   def test_worktree_add_touch_set_drives_in_bounds_check
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.freeze!("my-slice")
-    mission.worktree_add("my-repo", "my-slice", "lane-a", touch: ["allowed/**"])
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["allowed/**"])
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    assert_equal ["allowed/**"], yml.dig("architect", "iterations", 0, "lanes", 0, "touch_set")
+    assert_equal ["allowed/**"], yml.dig("project", "iterations", 0, "lanes", 0, "touch_set")
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
     File.write(File.join(wt, "out-of-bounds.rb"), "x = 1\n")
 
-    checks = mission.verify("my-slice").first[:checks]
+    checks = project.verify("my-slice").first[:checks]
     assert_equal false, checks[:in_bounds], "an out-of-bounds write must report in_bounds == false"
   ensure
     FileUtils.rm_rf(dir)
@@ -884,22 +884,22 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # merge_lane! refuses a lane whose worktree carries builder commits (tamper).
   def test_merge_lane_refuses_builder_commits
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.freeze!("my-slice")
-    mission.worktree_add("my-repo", "my-slice", "lane-a")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
     File.write(File.join(wt, "work.rb"), "x = 1\n")
     system("git", "-C", wt, "add", "work.rb")
     system("git", "-C", wt, "commit", "-q", "-m", "builder commit")
 
-    err = assert_raises(Space::Core::Error) { mission.merge_lane!("my-slice", "lane-a") }
+    err = assert_raises(Space::Core::Error) { project.merge_lane!("my-slice", "lane-a") }
     assert_match(/builder commits/i, err.message)
   ensure
     FileUtils.rm_rf(dir)
@@ -908,20 +908,20 @@ class ArchitectMissionTest < Space::ArchitectTest
   # merge_lane! integrates a clean lane: commits the working tree on the lane branch
   # and merges --no-ff into lane/<id>, recording the integration branch.
   def test_merge_lane_integrates_clean_lane
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
-    mission.freeze!("my-slice")
-    mission.worktree_add("my-repo", "my-slice", "lane-a")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
     File.write(File.join(wt, "feature.rb"), "def feature; end\n")
 
-    r = mission.merge_lane!("my-slice", "lane-a")
+    r = project.merge_lane!("my-slice", "lane-a")
     assert_equal "lane/I01-my-slice", r[:integration_branch]
     assert_equal false, r[:gates_run]
 
@@ -931,7 +931,7 @@ class ArchitectMissionTest < Space::ArchitectTest
     assert_match(/Merge lane\/I01-my-slice-lane-a/, log)
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    assert_equal "lane/I01-my-slice", yml.dig("architect", "iterations", 0, "lanes", 0, "integration_branch")
+    assert_equal "lane/I01-my-slice", yml.dig("project", "iterations", 0, "lanes", 0, "integration_branch")
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -939,13 +939,13 @@ class ArchitectMissionTest < Space::ArchitectTest
   # run_gates reads the frozen AC table's Command column and returns RAW output with
   # no PASS/FAIL/INVALID verdict tokens (it is a runner, not a judge).
   def test_run_gates_returns_raw_output_without_verdict_tokens
-    dir = Dir.mktmpdir("architect-mission-test")
+    dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("my-slice")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
 
     # add a real gate row to the scaffold's AC table, then freeze
     slice = File.join(dir, "architecture", "I01-my-slice.md")
@@ -953,10 +953,10 @@ class ArchitectMissionTest < Space::ArchitectTest
     text = text.sub(/(\|-----\|---------\|-----------\|---------\|\n)/,
       "\\1| G0 | `echo hello-gate` | prints hello-gate | §1 |\n")
     File.write(slice, text)
-    mission.freeze!("my-slice")
-    mission.worktree_add("my-repo", "my-slice", "lane-a")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
 
-    results = mission.run_gates("my-slice", lane: "lane-a")
+    results = project.run_gates("my-slice", lane: "lane-a")
     assert_equal 1, results.length
     assert_equal "echo hello-gate", results[0][:command]
     assert_match(/hello-gate/, results[0][:stdout])
@@ -973,14 +973,14 @@ class ArchitectMissionTest < Space::ArchitectTest
   def setup_dispatch_space(dir)
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("demo")
-    mission.worktree_add("my-repo", "demo", "A")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
     build_dir = File.join(dir, "build", "I01-demo-A")
     FileUtils.mkdir_p(build_dir)
     File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
-    [space, mission, build_dir]
+    [space, project, build_dir]
   end
 
   def fake_claude_bin(dir)
@@ -998,8 +998,8 @@ class ArchitectMissionTest < Space::ArchitectTest
   # AC4(a): push_host + push_token creates a run via the injected creator and
   # derives push_url = "<host>/runs/<id>/ingest".
   def test_dispatch_push_host_derives_push_url_from_created_run_id
-    dir = Dir.mktmpdir("architect-mission-dispatch")
-    _space, mission, _build = setup_dispatch_space(dir)
+    dir = Dir.mktmpdir("architect-project-dispatch")
+    _space, project, _build = setup_dispatch_space(dir)
     bin = fake_claude_bin(dir)
 
     fake_creator = Object.new
@@ -1017,7 +1017,7 @@ class ArchitectMissionTest < Space::ArchitectTest
 
       push_client = Async::HTTP::Client.new(mock_endpoint)
 
-      result = mission.dispatch("demo", "A",
+      result = project.dispatch("demo", "A",
                                 push_host:    "https://architect.example.com",
                                 push_token:   "my-ingest-token",
                                 run_creator:  fake_creator,
@@ -1036,11 +1036,11 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC4(b): push_host without push_token raises before the builder is spawned.
   def test_dispatch_push_host_without_token_raises_before_builder
-    dir = Dir.mktmpdir("architect-mission-dispatch")
-    _space, mission, _build = setup_dispatch_space(dir)
+    dir = Dir.mktmpdir("architect-project-dispatch")
+    _space, project, _build = setup_dispatch_space(dir)
 
     assert_raises(Space::Core::Error) do
-      mission.dispatch("demo", "A", push_host: "http://example.com")
+      project.dispatch("demo", "A", push_host: "http://example.com")
     end
   ensure
     FileUtils.rm_rf(dir)
@@ -1048,11 +1048,11 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC4(c): push_host together with push_url raises.
   def test_dispatch_push_host_and_push_url_together_raises
-    dir = Dir.mktmpdir("architect-mission-dispatch")
-    _space, mission, _build = setup_dispatch_space(dir)
+    dir = Dir.mktmpdir("architect-project-dispatch")
+    _space, project, _build = setup_dispatch_space(dir)
 
     assert_raises(Space::Core::Error) do
-      mission.dispatch("demo", "A",
+      project.dispatch("demo", "A",
                        push_host:  "http://example.com",
                        push_url:   "http://example.com/runs/1/ingest",
                        push_token: "tok")
@@ -1064,11 +1064,11 @@ class ArchitectMissionTest < Space::ArchitectTest
   # --detach is mutually exclusive with the push options (push tees the live
   # pipe in-process, which a detached builder has no one to read).
   def test_dispatch_detach_with_push_url_raises
-    dir = Dir.mktmpdir("architect-mission-dispatch")
-    _space, mission, _build = setup_dispatch_space(dir)
+    dir = Dir.mktmpdir("architect-project-dispatch")
+    _space, project, _build = setup_dispatch_space(dir)
 
     assert_raises(Space::Core::Error) do
-      mission.dispatch("demo", "A", detach: true,
+      project.dispatch("demo", "A", detach: true,
                        push_url: "http://example.com/runs/1/ingest")
     end
   ensure
@@ -1076,11 +1076,11 @@ class ArchitectMissionTest < Space::ArchitectTest
   end
 
   def test_dispatch_detach_with_push_host_raises
-    dir = Dir.mktmpdir("architect-mission-dispatch")
-    _space, mission, _build = setup_dispatch_space(dir)
+    dir = Dir.mktmpdir("architect-project-dispatch")
+    _space, project, _build = setup_dispatch_space(dir)
 
     assert_raises(Space::Core::Error) do
-      mission.dispatch("demo", "A", detach: true,
+      project.dispatch("demo", "A", detach: true,
                        push_host: "http://example.com", push_token: "tok")
     end
   ensure
@@ -1089,14 +1089,14 @@ class ArchitectMissionTest < Space::ArchitectTest
 
   # AC4(d): neither push_host nor push_url — no run created, dispatch unchanged.
   def test_dispatch_without_push_options_does_not_invoke_creator
-    dir = Dir.mktmpdir("architect-mission-dispatch")
-    _space, mission, _build = setup_dispatch_space(dir)
+    dir = Dir.mktmpdir("architect-project-dispatch")
+    _space, project, _build = setup_dispatch_space(dir)
     bin = fake_claude_bin(dir)
 
     sentinel = Object.new
     def sentinel.create = raise("run_creator must not be called when no push_host is set")
 
-    result = mission.dispatch("demo", "A", run_creator: sentinel, claude_bin: bin)
+    result = project.dispatch("demo", "A", run_creator: sentinel, claude_bin: bin)
 
     refute result[:created_run_id], "no run should be created without push_host"
     refute result[:push_url],       "no push_url should be set without push options"

@@ -62,7 +62,7 @@ class ArchitectCLITest < Space::ArchitectTest
         out, err = invoke("init")
 
         assert_empty err
-        assert_match(/Mission ready/, out)
+        assert_match(/Project ready/, out)
         assert_path_exists File.join(space_path, "architecture", "ARCHITECT.md")
         # One-file model: no gates/lanes/prd scaffolding.
         refute_path_exists File.join(space_path, "architecture", "gates")
@@ -70,8 +70,8 @@ class ArchitectCLITest < Space::ArchitectTest
         refute_path_exists File.join(space_path, "architecture", "prd")
 
         yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
-        assert_equal "active", yml.dig("architect", "status")
-        assert_equal [], yml.dig("architect", "iterations")
+        assert_equal "active", yml.dig("project", "status")
+        assert_equal [], yml.dig("project", "iterations")
       end
     end
   ensure
@@ -91,7 +91,7 @@ class ArchitectCLITest < Space::ArchitectTest
         out, err = invoke("status")
 
         assert_empty err
-        assert_match(/Mission status/, out)
+        assert_match(/Project status/, out)
         assert_match(/active/, out)
       end
     end
@@ -145,12 +145,12 @@ class ArchitectCLITest < Space::ArchitectTest
         assert_match(/^## Builder Prompt/, slice_text)
 
         yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
-        entry = yml.dig("architect", "iterations").find { |s| s["name"] == "first-slice" }
+        entry = yml.dig("project", "iterations").find { |s| s["name"] == "first-slice" }
         refute_nil entry
         assert_equal 1, entry["ordinal"]
         assert_equal "architecture/I01-first-slice.md", entry["file"]
         # `new` makes the freshly-created iteration current.
-        assert_equal "second-slice", yml.dig("architect", "current_iteration")
+        assert_equal "second-slice", yml.dig("project", "current_iteration")
       end
     end
   ensure
@@ -178,10 +178,10 @@ class ArchitectCLITest < Space::ArchitectTest
         assert_match(/[0-9a-f]{7,40}/, out)
 
         yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
-        entry = yml.dig("architect", "iterations").find { |s| s["name"] == "slice-1" }
+        entry = yml.dig("project", "iterations").find { |s| s["name"] == "slice-1" }
         freeze_sha = entry["freeze_sha"]
         assert_match(/\A[0-9a-f]{40}\z/, freeze_sha)
-        assert_equal "slice-1", yml.dig("architect", "current_iteration")
+        assert_equal "slice-1", yml.dig("project", "current_iteration")
 
         # Appending BELOW the freeze boundary (Builder Prompt) is allowed —
         # re-freeze returns the same sha, no error.
@@ -237,14 +237,14 @@ class ArchitectCLITest < Space::ArchitectTest
         invoke("init")
 
         yml_before = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
-        architect_before = yml_before["architect"]
+        architect_before = yml_before["project"]
         refute_nil architect_before
 
         invoke("space", "status", "done")
 
         yml_after = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
         assert_equal "done", yml_after["status"], "status should be updated"
-        assert_equal architect_before, yml_after["architect"], "architect: block must survive round-trip"
+        assert_equal architect_before, yml_after["project"], "architect: block must survive round-trip"
       end
     end
   ensure
@@ -680,7 +680,7 @@ class ArchitectCLITest < Space::ArchitectTest
                "--model", "fireworks-ai/accounts/fireworks/models/glm-5p2")
 
         yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
-        lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+        lane = yml.dig("project", "iterations", 0, "lanes", 0)
         refute lane.key?("effort"), "no effort key expected when --effort not passed"
       end
     end
@@ -968,7 +968,7 @@ class ArchitectCLITest < Space::ArchitectTest
   end
 
   # I09: --push-host and --push-url are mutually exclusive; the CLI forwards
-  # --push-host to mission.dispatch and the error surfaces via handle_errors.
+  # --push-host to project.dispatch and the error surfaces via handle_errors.
   def test_dispatch_cli_push_host_and_push_url_mutual_exclusion
     setup = temp_env
     env = setup.fetch(:env)

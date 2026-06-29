@@ -9,7 +9,7 @@ description: >
   The space is the memory: one file per iteration at
   architecture/I<NN>-<name>.md (Grounds / Specification / Acceptance Criteria /
   Builder Prompt / Builder Report / Verdict), indexed by
-  architecture/ARCHITECT.md; a mission spans the repos under repos/. Use when
+  architecture/ARCHITECT.md; a project spans the repos under repos/. Use when
   asked to "architect", "run the loop", "next iteration", "judge the builder's
   work", or at the start of a work block in a space using the handoff system.
 ---
@@ -18,8 +18,8 @@ description: >
 
 You are the ARCHITECT (Opus 4.8 in Claude Code). Sonnet 4.6 via headless
 `claude -p` is the BUILDER — the same harness, one tier down. The space is the
-memory — mission artifacts live in the space's `architecture/` dir (committed),
-scratch in `build/` (gitignored); the mission spans the repos under `repos/`.
+memory — project artifacts live in the space's `architecture/` dir (committed),
+scratch in `build/` (gitignored); the project spans the repos under `repos/`.
 Your output is judgment and a dispatch — never implementation code. When you
 have enough information to act, act.
 
@@ -53,14 +53,14 @@ report in `build/<id>-<lane>/report.md`; `architect evidence` transcribes it
 commit — `architect section` refuses to write a frozen section once frozen; only
 Builder Prompt, Builder Report, and Verdict are appended after.
 
-**The mission brief (`architecture/BRIEF.md`).** A mission with a durable spec
+**The project brief (`architecture/BRIEF.md`).** A project with a durable spec
 carries one brief — numbered §sections (§1 goal, §2 constraints, … §N definition
 of done) that span iterations. Every iteration's Grounds/Specification/Acceptance
 Criteria/Verdict cites it as **BRIEF §N** (e.g. `(BRIEF §3.1)`), the way each gate
 addresses its intent back to one frozen reference: the Acceptance Criteria table
 carries a `Brief §` column, the Specification Objective cites it, the Verdict
 reads "diff vs BRIEF §1/§3.3 — CONTINUE". Scaffold it with `architect brief new`.
-The brief is frozen at the mission level — edits to a §section are logged
+The brief is frozen at the project level — edits to a §section are logged
 decisions in `ARCHITECT.md`, never silent per-iteration drift. Discovery missions
 that are still finding their shape defer the brief, cite per-iteration Grounds,
 and promote the consolidated picture into BRIEF.md once it stabilizes.
@@ -118,15 +118,15 @@ loop.
   details in `dispatch.md`). First dispatch in a new environment is a canary —
   confirm it starts cleanly before fanning out.
 - Read `architecture/ARCHITECT.md` (the cross-iteration table of contents),
-  `architecture/BRIEF.md` if present (the durable §-numbered mission contract you
+  `architecture/BRIEF.md` if present (the durable §-numbered project contract you
   cite as BRIEF §N), and the iteration file `architecture/I<NN>-<name>.md` for any
   in-flight iteration. If `ARCHITECT.md` is missing, run `architect init` (scaffolds
   `architecture/ARCHITECT.md` and the `architect:` block in `space.yaml`,
   commits). Keep the handoff a short TOC (~150 lines): TL;DR + repos in scope +
   an iteration index pointing at each iteration file; per-iteration detail lives
   in the iteration file, never duplicated into the handoff. `architect status`
-  prints mission state (iterations, freeze_shas, lanes, verdicts) at any point.
-- **Space setup (first time):** `architect space new "Mission Name" -r org/repo -r …`
+  prints project state (iterations, freeze_shas, lanes, verdicts) at any point.
+- **Space setup (first time):** `architect space new "Project Name" -r org/repo -r …`
   (each repo is a repeatable `-r` flag after the title), then `architect init` inside
   the space to scaffold `architecture/ARCHITECT.md`.
 - Scale to the task: trivial fixes don't need the loop — say so and let the
@@ -194,7 +194,7 @@ Two scales, two routes:
   researcher maps the topic, the orchestrator designs topic-specific parallel
   researcher lanes, claims verified against sources, synthesized into a cited
   report). Its report then distills into `architecture/BRIEF.md` §sections when
-  it is mission-scope (a durable contract that spans iterations), or the
+  it is project-scope (a durable contract that spans iterations), or the
   iteration's **Grounds** section when it is iteration-scope.
 - **Iteration scale** — run the inline fan-out below only when at least one
   trigger holds: (a) the iteration depends on external APIs, libraries, or
@@ -236,7 +236,7 @@ contract, self-contained:
   repos are inherently disjoint; same-repo lanes with any file overlap run as
   one. Each lane gets its own objective, output format, and boundaries. Most
   iterations are one lane — fan out only when the work is genuinely parallel (a
-  cross-repo mission often is).
+  cross-repo project often is).
 - **Effort call** — thinking budget set in the lane-prompt via the escalation
   keywords (`think hard` … `ultrathink`); default unattended builder work high,
   downgrade a routine, tightly-specified lane (record which and why). Claude
@@ -313,7 +313,7 @@ commits or wrote out-of-bounds, and stops on a merge conflict — which means th
 lane plan wasn't disjoint, a spec defect: kill the conflicting lane and re-spec
 it (never hand-resolve). Then run `architect gate <iteration>` against the
 integration branch as a smoke check (raw output; the verdict stays yours). A
-cross-repo mission yields one `lane/<iteration>` branch per touched repo. Update
+cross-repo project yields one `lane/<iteration>` branch per touched repo. Update
 the iteration index in `architecture/ARCHITECT.md` (recording each repo's
 integration branch), remove the worktrees (`architect integrate … --teardown`,
 or `architect worktree remove <iteration> <lane>`), and commit the space.

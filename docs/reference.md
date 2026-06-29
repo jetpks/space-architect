@@ -27,7 +27,7 @@ These root-level commands manage the Architect Loop within a space.
 
 ### `architect init [SPACE]`
 
-Scaffold architect mission memory in the current space: creates `architecture/ARCHITECT.md` and adds the `architect:` block to `space.yaml`. Idempotent guard: refuses if `ARCHITECT.md` already exists.
+Scaffold architect project memory in the current space: creates `architecture/ARCHITECT.md` and adds the `architect:` block to `space.yaml`. Idempotent guard: refuses if `ARCHITECT.md` already exists.
 
 ```sh
 architect init
@@ -75,7 +75,7 @@ architect new dispatch-engine 20260531-name-of-space
 
 ### `architect status [SPACE]`
 
-Show the Architect Loop mission state: current iteration, the iteration index table (ordinal, freeze SHA, lanes, verdict), and iteration files. Read-only.
+Show the Architect Loop project state: current iteration, the iteration index table (ordinal, freeze SHA, lanes, verdict), and iteration files. Read-only.
 
 ```sh
 architect status
