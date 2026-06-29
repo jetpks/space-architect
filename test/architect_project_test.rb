@@ -1147,6 +1147,38 @@ class ArchitectProjectTest < Space::ArchitectTest
   end
 
   # AC2 (I04): rendered ARCHITECT.md carries the Backlog section and
+  # FNM_PATHNAME: a single * in a touch_set glob must not cross /
+  # lib/*.rb accepts lib/foo.rb but rejects lib/sub/bar.rb.
+  def test_bounds_glob_single_star_does_not_cross_slash
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["lib/*.rb"])
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+
+    # Stage lib/foo.rb — in-bounds (lib/*.rb matches lib/foo.rb with FNM_PATHNAME)
+    FileUtils.mkdir_p(File.join(wt, "lib"))
+    File.write(File.join(wt, "lib", "foo.rb"), "# ok\n")
+    system("git", "-C", wt, "add", "lib/foo.rb")
+    checks = project.verify("my-slice").first[:checks]
+    assert_equal true, checks[:in_bounds], "lib/*.rb must accept lib/foo.rb"
+
+    # Stage lib/sub/bar.rb — out-of-bounds (single * must not cross / with FNM_PATHNAME)
+    FileUtils.mkdir_p(File.join(wt, "lib", "sub"))
+    File.write(File.join(wt, "lib", "sub", "bar.rb"), "# out\n")
+    system("git", "-C", wt, "add", "lib/sub/bar.rb")
+    checks = project.verify("my-slice").first[:checks]
+    assert_equal false, checks[:in_bounds], "lib/*.rb must not accept lib/sub/bar.rb with FNM_PATHNAME"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # ordinals-at-spec-time doctrine, pinned through the real init! render path.
   def test_rendered_architect_md_contains_backlog_section_and_ordinals_at_spec_time_doctrine
     dir = Dir.mktmpdir("architect-project-test")

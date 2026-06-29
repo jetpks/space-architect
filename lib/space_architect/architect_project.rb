@@ -212,6 +212,34 @@ module Space::Architect
       { section: section, heading: spec[:heading], sha: head.strip, committed: committed, diffstat: diffstat.strip }
     end
 
+    # Write the ## Verdict prose AND record the decision to space.yaml in one commit.
+    # decision must be "continue" or "kill".
+    def record_verdict!(iteration, decision:, body:)
+      unless %w[continue kill].include?(decision)
+        raise Space::Core::Error,
+          "Invalid verdict decision '#{decision}' — must be one of: continue, kill"
+      end
+
+      entry = slice_entry(iteration)
+      rel = entry["file"]
+      path = space.path.join(rel)
+      raise Space::Core::Error, "#{rel} does not exist — run `architect new #{iteration}` first" unless path.exist?
+
+      path.write(replace_section_body(path.read, SECTIONS["verdict"][:heading], body.strip, append: false))
+
+      update_architect_block do |b|
+        (b["iterations"] || []).each { |s| s["verdict"] = decision if s["name"] == iteration }
+        b
+      end
+
+      nn = format("%02d", entry["ordinal"] || 0)
+      git_run("-C", space.path.to_s, "add", rel, Space::Core::Space::METADATA_FILE)
+      git_run("-C", space.path.to_s, "commit", "-m", "I#{nn}: verdict")
+
+      head, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
+      { decision: decision, sha: head.strip }
+    end
+
     # Transcribe a lane's scratch report (build/<id>[-<lane>]/report.md) VERBATIM into
     # the Builder Report section and commit. Byte-for-byte: no summarization, no judgment.
     def transcribe_evidence!(iteration, lane: nil)
@@ -286,6 +314,8 @@ module Space::Architect
 
       git_run("-C", wt_path.to_s, "add", "-A")
       git_run("-C", wt_path.to_s, "commit", "-m", message || "lane #{lane}: integrate")
+      integrate_sha_raw, = git_capture("-C", wt_path.to_s, "rev-parse", "HEAD")
+      integrate_sha = integrate_sha_raw.strip
 
       _o, _e, exists = git_capture("-C", repo_path.to_s, "rev-parse", "--verify", "--quiet", integration_branch)
       if exists.success?
@@ -309,7 +339,11 @@ module Space::Architect
       update_architect_block do |b|
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
-          (s["lanes"] || []).each { |l| l["integration_branch"] = integration_branch if l["name"] == lane }
+          (s["lanes"] || []).each do |l|
+            next unless l["name"] == lane
+            l["integration_branch"] = integration_branch
+            l["integrate_sha"] = integrate_sha
+          end
         end
         b
       end
@@ -704,21 +738,40 @@ module Space::Architect
       # (a) frozen sections of the iteration file untouched since freeze
       checks[:frozen_untouched] = (!frozen_region_changed?(freeze_sha, rel) if freeze_sha && rel)
 
-      # (b) no builder commits in the worktree
-      log_out, = git_capture("-C", wt_path.to_s, "log", "#{base_sha}..")
-      checks[:no_builder_commits] = log_out.strip.empty?
+      # (b) no builder commits in the worktree (the architect's integrate commit is excluded)
+      log_out, = git_capture("-C", wt_path.to_s, "log", "--format=%H", "#{base_sha}..")
+      commit_shas = log_out.strip.split("\n").map(&:strip).reject(&:empty?)
+      recorded_integrate = lane["integrate_sha"]&.strip
+      builder_shas = recorded_integrate ? commit_shas.reject { |s| s == recorded_integrate } : commit_shas
+      checks[:no_builder_commits] = builder_shas.empty?
 
       # (c) builder's scratch report exists and is non-empty
       report = space.path.join("build", "#{iteration_id(entry)}-#{lane_name}", "report.md")
       checks[:report_exists] = report.exist? && !report.read.strip.empty?
 
-      # (d) in-bounds: changed paths ⊆ touch_set (nil if no touch_set recorded)
+      # (d) in-bounds: changed paths ⊆ touch_set (:no_touch_set if none recorded)
       checks[:in_bounds] = if touch_set.empty?
-        nil
+        :no_touch_set
       else
-        status_out, = git_capture("-C", wt_path.to_s, "status", "--porcelain")
-        changed = status_out.lines.map { |l| l[3..].to_s.strip }
-        changed.all? { |f| touch_set.any? { |g| File.fnmatch(g, f) } }
+        # -z: NUL-delimited; renames emit new_path NUL old_path — include both
+        status_out, = git_capture("-C", wt_path.to_s, "status", "--porcelain", "-z")
+        changed = []
+        entries = status_out.split("\0")
+        i = 0
+        while i < entries.length
+          entry = entries[i]
+          i += 1
+          next if entry.empty? || entry.length < 3
+          code = entry[0, 2]
+          path = entry[3..]
+          changed << path if path && !path.empty?
+          next unless code[0] == "R" || code[0] == "C"
+          orig = entries[i]
+          i += 1
+          changed << orig if orig && !orig.empty?
+        end
+        fnm = File::FNM_PATHNAME | File::FNM_EXTGLOB
+        changed.all? { |f| touch_set.any? { |g| File.fnmatch(g, f, fnm) } }
       end
 
       checks
