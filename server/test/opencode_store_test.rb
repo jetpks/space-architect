@@ -102,6 +102,17 @@ class OpencodeStoreTest < Minitest::Test
     assert_equal [], store.sessions_for("' OR '1'='1")
   end
 
+  def test_messages_for_single_quote_does_not_raise_returns_empty
+    result = store.messages_for("ses_'; DROP TABLE message;--")
+    assert_equal [], result
+    # Tables must be intact: the real session's messages are still there
+    assert_equal 2, store.messages_for(SESSION_A).length
+  end
+
+  def test_messages_for_sql_injection_attempt_returns_empty
+    assert_equal [], store.messages_for("' OR '1'='1")
+  end
+
   # ── messages_for ─────────────────────────────────────────────────────────────
 
   def test_messages_for_returns_messages_for_session
