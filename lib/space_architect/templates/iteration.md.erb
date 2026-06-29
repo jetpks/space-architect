@@ -32,16 +32,27 @@ Write + commit: `architect section <%= @_name %> specification --from <file>`. -
 
 ## Acceptance Criteria
 
-<!-- PROOF. Exact gate commands + thresholds. `architect freeze <%= @_name %>`
-commits this file and records its SHA as freeze_sha. Read-only afterward — any
-change to Grounds/Specification/Acceptance Criteria = automatic iteration FAIL. -->
+<!-- PROOF. Write the prose conditions of correctness (AC1, AC2, …) that the
+architect judges against. Runnable checks live in the fenced ```gates block below
+(parsed at freeze time — absent or empty is allowed; malformed fails freeze).
+`architect freeze <%= @_name %>` commits this file and records its SHA as
+freeze_sha. Read-only afterward — any change to Grounds/Specification/Acceptance
+Criteria = automatic iteration FAIL. -->
 
 > Gate-pass is necessary, not sufficient: the architect also reads the diff against the
 > cited **BRIEF §sections** intent and the §1 cardinal invariant before the verdict.
 
-| AC# | Command | Threshold | Brief § |
-|-----|---------|-----------|---------|
-|     |         |           |         |
+**AC1.** ...
+
+```gates
+# Each gate backs one prose AC above. Remove the comment markers to activate.
+# - id: suite-green        # unique slug within the iteration (required)
+#   ac: AC1                # which prose AC this gate backs (required)
+#   cwd: repos/my-repo     # run dir, relative to space root (optional; consumed by I03)
+#   cmd: bundle exec rake test  # shell command (required, non-empty)
+#   expect:                # at least one of: exit_code, stdout_match, threshold
+#     exit_code: 0
+```
 
 ## Builder Prompt
 

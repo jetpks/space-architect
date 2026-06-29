@@ -83,7 +83,7 @@ Each iteration lives at `architecture/I<NN>-<name>.md`. The file grows section b
 |---------|---------|---------|
 | `## Grounds` | Research distilled: problem, decisions, verified facts with citations. Optional. | Yes (after freeze) |
 | `## Specification` | The full, self-contained delegation contract: objective, output format, tool guidance, boundaries, lane plan, effort. | Yes (after freeze) |
-| `## Acceptance Criteria` | Exact gate commands and thresholds — the proof of correctness. | Yes (after freeze) |
+| `## Acceptance Criteria` | Prose conditions of correctness (AC1, AC2, …) the architect judges against, plus a fenced ` ```gates ` block of runnable checks. | Yes (after freeze) |
 | `## Builder Prompt` | The exact prompt dispatched to each lane, recorded as provenance. | No (appended at dispatch) |
 | `## Builder Report` | Raw evidence only — tables, numbers, command output transcribed verbatim from `build/`. | No (appended after dispatch) |
 | `## Verdict` | Architect judgment written in a later session: disagreement rulings, AC verdicts, KILL/CONTINUE. | No (final section) |

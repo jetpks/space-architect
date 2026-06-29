@@ -54,8 +54,9 @@ the loop.
   file `architecture/I<NN>-<name>.md`, grown section by section. Its sections:
   - **Grounds** — *why*: research/brief distilled (optional).
   - **Specification** — *what/how*: the full delegation contract.
-  - **Acceptance Criteria** — *proof*: exact gate commands + thresholds; this is
-    what gets frozen.
+  - **Acceptance Criteria** — *proof*: prose conditions (AC1, AC2, …) the
+    architect judges against, plus a fenced ` ```gates ` block of runnable checks;
+    this is what gets frozen.
   - **Builder Prompt** — the exact lane-prompt(s) dispatched.
   - **Builder Report** — raw evidence, transcribed verbatim from build scratch.
   - **Verdict** — rulings + per-AC PASS/FAIL/INVALID + KILL/CONTINUE.
@@ -78,9 +79,10 @@ the loop.
   Acceptance Criteria) *before* dispatch (`architect freeze`). Records the
   **freeze_sha** in `space.yaml`; any later change to those sections is an
   automatic iteration FAIL.
-- **gate** — a frozen verification command + threshold (test/lint/typecheck/
-  build). `architect gate` runs them and streams raw output — it is a runner,
-  never a judge.
+- **gate** — a structured entry in the ` ```gates ` block: `id`, `ac`, `cmd`,
+  optional `cwd`, and an `expect` hash (exit_code / stdout_match / threshold).
+  `architect gate` runs each gate's `cmd` and streams raw output — it is a runner,
+  never a judge. `architect freeze` lints the gates block before committing.
 
 **Outcomes**
 

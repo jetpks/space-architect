@@ -33,7 +33,7 @@ change guarantees, so there are no separate `gates/`, `lanes/`, or `prd/` dirs:
 |---|---|---|
 | **Grounds** | why — research/brief distilled (optional) | `architect section <it> grounds --from <f>` |
 | **Specification** | what/how — the full delegation contract | `architect section <it> specification --from <f>` |
-| **Acceptance Criteria** | proof — exact gate commands + thresholds | `architect freeze <it>` ❄️ **= the freeze** |
+| **Acceptance Criteria** | proof — prose conditions (AC1, AC2, …) + fenced ` ```gates ` block of runnable checks | `architect freeze <it>` ❄️ **= the freeze** |
 | **Builder Prompt** | the exact lane-prompt(s) dispatched | `architect section <it> prompt --append --lane <l> --from <f>` |
 | **Builder Report** | raw evidence, transcribed verbatim from scratch | `architect evidence <it> --lane <l>` |
 | **Verdict** | rulings + per-AC PASS/FAIL/INVALID + KILL/CONTINUE | `architect section <it> verdict --from <f>` (later session) |
@@ -242,16 +242,18 @@ contract, self-contained:
   downgrade a routine, tightly-specified lane (record which and why). Claude
   Code has no per-invocation effort flag — see `dispatch.md`.
 
-Then write the **Acceptance Criteria** section — exact gate commands +
-thresholds, each row carrying a `Brief §` column that addresses it back to
-intent — and run `architect freeze <name>`. What must be frozen before dispatch
-is the Acceptance Criteria: `architect freeze` commits any pending content in the
-frozen region (Grounds/Specification/Acceptance Criteria) in one freeze commit,
-records the `freeze_sha` in `space.yaml`, and prints the frozen AC back; **that
-commit is the freeze** ❄️ and is the last thing before dispatch. You needn't
-sequence Grounds and Specification into separate commits first — the freeze
-snapshots the whole frozen region and refuses to re-freeze once a frozen section
-changed afterward.
+Then write the **Acceptance Criteria** section — prose conditions (AC1, AC2, …)
+that the architect judges against, followed by a fenced ` ```gates ` block of
+runnable checks (each gate carries `id`, `ac`, `cmd`, and `expect`; `cwd` is
+optional) — and run `architect freeze <name>`. What must be frozen before
+dispatch is the Acceptance Criteria: `architect freeze` lints the gates block
+(absent or empty gates is allowed but warns; malformed fails), commits any
+pending content in the frozen region (Grounds/Specification/Acceptance Criteria)
+in one freeze commit, records the `freeze_sha` in `space.yaml`, and prints the
+frozen AC back; **that commit is the freeze** ❄️ and is the last thing before
+dispatch. You needn't sequence Grounds and Specification into separate commits
+first — the freeze snapshots the whole frozen region and refuses to re-freeze
+once a frozen section changed afterward.
 
 ### 5. Dispatch (one fresh `claude -p` per lane, worktree-isolated)
 

@@ -110,14 +110,17 @@ module Space::Architect
     # Freeze the iteration: the iteration file must carry a "## Acceptance Criteria" section. Commits
     # any pending changes to the iteration file and records HEAD as freeze_sha. If
     # already frozen, refuses when the frozen region has changed since.
-    def freeze!(iteration)
+    def freeze!(iteration, warnings: nil)
       entry = slice_entry(iteration)
       rel = entry["file"]
       path = space.path.join(rel)
       raise Space::Core::Error, "#{rel} does not exist — run `architect new #{iteration}` first" unless path.exist?
-      unless path.read.match?(/^## Acceptance Criteria/)
+      text = path.read
+      unless text.match?(/^## Acceptance Criteria/)
         raise Space::Core::Error, "#{rel} has no '## Acceptance Criteria' section — write the Acceptance Criteria before freezing"
       end
+
+      lint_gates!(text, warnings: warnings)
 
       if entry["freeze_sha"]
         sha = entry["freeze_sha"]
@@ -345,8 +348,8 @@ module Space::Architect
 
       text, _, st = git_capture("-C", space.path.to_s, "show", "#{freeze_sha}:#{rel}")
       raise Space::Core::Error, "could not read frozen #{rel} at #{freeze_sha[0, 8]}" unless st.success?
-      commands = acceptance_criteria_commands(text)
-      raise Space::Core::Error, "no gate commands found in the frozen Acceptance Criteria of #{rel}" if commands.empty?
+      gates = parse_gates(text)
+      raise Space::Core::Error, "no gate commands found in the frozen Acceptance Criteria of #{rel}" if gates.empty?
 
       lanes = entry["lanes"] || []
       dir =
@@ -361,9 +364,10 @@ module Space::Architect
         end
       raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
 
-      commands.map do |row|
-        out, err, status = Open3.capture3(row[:command], chdir: dir.to_s)
-        { ac: row[:ac], command: row[:command], stdout: out, stderr: err, exit_code: status.exitstatus, dir: dir }
+      gates.map do |gate|
+        g = gate.transform_keys(&:to_s)
+        out, err, status = Open3.capture3(g["cmd"], chdir: dir.to_s)
+        { id: g["id"], ac: g["ac"].to_s, cmd: g["cmd"], expect: g["expect"], stdout: out, stderr: err, exit_code: status.exitstatus, dir: dir }
       end
     end
 
@@ -702,30 +706,30 @@ module Space::Architect
       lines[(start + 1)...finish].join.strip
     end
 
-    # Parse the Acceptance Criteria markdown table into [{ac:, command:}]. Reads the
-    # Command column by header name (so an added "Brief §" column doesn't shift it);
-    # strips surrounding backticks and unescapes \| inside a cell.
-    def acceptance_criteria_commands(text)
+    # Extract and parse the fenced ```gates block from the Acceptance Criteria section.
+    # Returns an array of gate hashes (string-keyed). Returns [] when the block is
+    # absent, empty, or contains only YAML comments.
+    def parse_gates(text)
       body = section_body(text, "## Acceptance Criteria")
       return [] unless body
-      rows = body.lines.map(&:strip).select { |l| l.start_with?("|") }
-      return [] if rows.length < 2
-
-      header = split_md_row(rows[0])
-      cmd_idx = header.index { |c| c.downcase == "command" } || 1
-      ac_idx = header.index { |c| c.downcase.start_with?("ac") } || 0
-
-      rows[2..].to_a.filter_map do |line|
-        cells = split_md_row(line)
-        command = cells[cmd_idx].to_s.gsub(/\A`+|`+\z/, "").strip
-        next if command.empty?
-        { ac: cells[ac_idx].to_s.strip, command: command }
-      end
+      match = body.match(/^```gates\n(.*?)^```/m)
+      return [] unless match
+      parsed = YAML.safe_load(match[1], aliases: false)
+      parsed.is_a?(Array) ? parsed : []
     end
 
-    def split_md_row(line)
-      inner = line.strip.sub(/\A\|/, "").sub(/\|\z/, "")
-      inner.split(/(?<!\\)\|/).map { |c| c.strip.gsub('\\|', "|") }
+    # Lint the gates block in the given iteration file text. Raises Space::Core::Error
+    # with aggregated messages on failure. Absent/empty gates appends a warning to
+    # the optional warnings array but does not fail.
+    def lint_gates!(text, warnings: nil)
+      gates = parse_gates(text)
+      if gates.empty?
+        warnings << "no gates — this iteration is prose-judged only" if warnings
+        return
+      end
+      result = GateLint.call(gates)
+      return if result.success?
+      raise Space::Core::Error, "ill-formed gates block:\n#{result.failure.join("\n")}"
     end
 
     def staged_changes?
