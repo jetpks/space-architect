@@ -1083,4 +1083,115 @@ class ArchitectCLITest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
+
+  # Fix (2): no touch_set recorded → (d) in-bounds shows WARN, not FAIL or N/A.
+  def test_verify_warns_when_no_touch_set_recorded
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-e")
+
+        out, err = invoke("verify", "s1")
+        assert_empty err
+        rows = out.lines.select { |l| l.include?("in-bounds") }
+        assert rows.any? { |r| r.include?("WARN") },
+          "expected (d) in-bounds to show WARN when no touch_set recorded, got:\n#{out}"
+        assert rows.none? { |r| r.include?("FAIL") },
+          "WARN must not render as FAIL, got:\n#{out}"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Fix (1): after merge_lane! commits the integrate, (b) must report PASS, not FAIL.
+  def test_verify_pass_no_false_fail_after_merge_lane
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-f")
+
+        wt_path = File.join(space_path, "build", "I01-s1-lane-f", "wt")
+        File.write(File.join(wt_path, "feature.rb"), "def feature; end\n")
+
+        FileUtils.mkdir_p(File.join(space_path, "build", "I01-s1-lane-f"))
+        File.write(File.join(space_path, "build", "I01-s1-lane-f", "report.md"),
+          "# Report\nSTATUS: COMPLETE\n")
+
+        invoke("merge", "s1", "lane-f")
+
+        out, err = invoke("verify", "s1")
+        assert_empty err
+        rows = out.lines.select { |l| l.include?("builder commits") }
+        assert rows.any? { |r| r.include?("PASS") },
+          "expected (b) to PASS after merge_lane! (integrate commit must be excluded), got:\n#{out}"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Fix (4): verdict command records decision to space.yaml; status shows awaiting-verdict
+  # before the verdict, then the decision after.
+  def test_verdict_command_records_decision_and_updates_status
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+
+        wt_path = File.join(space_path, "build", "I01-s1-lane-a", "wt")
+        File.write(File.join(wt_path, "feature.rb"), "def feature; end\n")
+        invoke("merge", "s1", "lane-a")
+
+        # After merge, before verdict: status shows awaiting-verdict
+        out, = invoke("status")
+        assert_includes out, "awaiting-verdict",
+          "expected 'awaiting-verdict' for integrated lane with pending verdict"
+
+        # Record the verdict
+        out, err = invoke("verdict", "s1", "continue", "--body", "LGTM — gates green.")
+        assert_empty err
+        assert_match(/continue/i, out, "expected confirmation output to mention the decision")
+
+        # space.yaml verdict field updated
+        yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
+        assert_equal "continue", yml.dig("project", "iterations", 0, "verdict"),
+          "expected verdict field to be 'continue' in space.yaml"
+
+        # status now shows the decision, not awaiting-verdict
+        out, = invoke("status")
+        assert_includes out, "continue"
+        refute_includes out, "awaiting-verdict"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
 end

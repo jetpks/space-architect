@@ -68,7 +68,14 @@ module Space::Architect
                   end.join(", ")
                   lanes = lane_list.any? { |l| l["variant"] } ? "variant: #{lanes_str}" : lanes_str
                   lanes = "#{lanes} → winner: #{s['winner']}" if s["winner"]
-                  [nn, s["name"], s["freeze_sha"]&.[](0, 8) || "-", lanes, s["verdict"] || "-"]
+                  verdict_str = if s["verdict"] && s["verdict"] != "pending"
+                    s["verdict"]
+                  elsif (s["lanes"] || []).any? { |l| l["integration_branch"] }
+                    "awaiting-verdict"
+                  else
+                    s["verdict"] || "-"
+                  end
+                  [nn, s["name"], s["freeze_sha"]&.[](0, 8) || "-", lanes, verdict_str]
                 end
                 terminal.say terminal.table(%w[II Iteration FreezeSHA Lanes Verdict], rows)
               end
@@ -148,9 +155,10 @@ module Space::Architect
 
         def pass_fail(val)
           case val
-          when true  then "PASS"
-          when false then "FAIL"
-          else            "N/A"
+          when true          then "PASS"
+          when false         then "FAIL"
+          when :no_touch_set then "WARN — no touch_set recorded"
+          else                    "N/A"
           end
         end
       end
@@ -238,6 +246,38 @@ module Space::Architect
           return body if body
           return $stdin.read if stdin
           raise Space::Core::Error, "provide the section body via --from <file>, --body <text>, or --stdin"
+        end
+      end
+
+      class Verdict < BaseCommand
+        desc "Record the architect's verdict decision (continue or kill) and write ## Verdict prose"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :decision,  required: true,  desc: "Decision: continue or kill"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option   :from,  default: nil,   desc: "Read the verdict body from this file"
+        option   :body,  default: nil,   desc: "Inline verdict body"
+        option   :stdin, type: :boolean, default: false, desc: "Read the verdict body from stdin"
+
+        def call(iteration:, decision:, space: nil, from: nil, body: nil, stdin: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            content = read_section_body(from: from, body: body, stdin: stdin)
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              res = project.record_verdict!(iteration, decision: decision, body: content)
+              terminal.say "Verdict '#{res[:decision]}' recorded → #{res[:sha][0, 8]}"
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+
+        private
+
+        def read_section_body(from:, body:, stdin:)
+          return File.read(from) if from
+          return body if body
+          return $stdin.read if stdin
+          raise Space::Core::Error, "provide the verdict body via --from <file>, --body <text>, or --stdin"
         end
       end
 
@@ -545,6 +585,7 @@ Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Archit
 Space::Architect::CLI::Registry.register "verify", Space::Architect::CLI::Architect::Verify
 Space::Architect::CLI::Registry.register "dispatch", Space::Architect::CLI::Architect::Dispatch
 Space::Architect::CLI::Registry.register "section",   Space::Architect::CLI::Architect::Section
+Space::Architect::CLI::Registry.register "verdict",   Space::Architect::CLI::Architect::Verdict
 Space::Architect::CLI::Registry.register "evidence",  Space::Architect::CLI::Architect::Evidence
 Space::Architect::CLI::Registry.register "merge",     Space::Architect::CLI::Architect::Merge
 Space::Architect::CLI::Registry.register "integrate", Space::Architect::CLI::Architect::Integrate
