@@ -936,7 +936,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # run_gates reads the frozen AC table's Command column and returns RAW output with
+  # run_gates reads the frozen gates block and returns RAW output with
   # no PASS/FAIL/INVALID verdict tokens (it is a runner, not a judge).
   def test_run_gates_returns_raw_output_without_verdict_tokens
     dir = Dir.mktmpdir("architect-project-test")
@@ -947,22 +947,28 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
 
-    # add a real gate row to the scaffold's AC table, then freeze
+    # Inject a real gate into the scaffold's gates block, then freeze
     slice = File.join(dir, "architecture", "I01-my-slice.md")
     text = File.read(slice)
-    text = text.sub(/(\|-----\|---------\|-----------\|---------\|\n)/,
-      "\\1| G0 | `echo hello-gate` | prints hello-gate | §1 |\n")
+    gate_yaml = <<~YAML
+      - id: hello-gate
+        ac: AC1
+        cmd: echo hello-gate
+        expect:
+          exit_code: 0
+    YAML
+    text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
     File.write(slice, text)
     project.freeze!("my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     results = project.run_gates("my-slice", lane: "lane-a")
     assert_equal 1, results.length
-    assert_equal "echo hello-gate", results[0][:command]
+    assert_equal "echo hello-gate", results[0][:cmd]
     assert_match(/hello-gate/, results[0][:stdout])
     assert_equal 0, results[0][:exit_code]
 
-    blob = results.map { |r| "#{r[:command]} #{r[:stdout]} #{r[:stderr]}" }.join(" ")
+    blob = results.map { |r| "#{r[:cmd]} #{r[:stdout]} #{r[:stderr]}" }.join(" ")
     refute_match(/\b(PASS|FAIL|INVALID)\b/, blob, "gate runner output must carry no verdict tokens")
   ensure
     FileUtils.rm_rf(dir)

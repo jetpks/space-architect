@@ -93,8 +93,10 @@ module Space::Architect
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              sha = project.freeze!(iteration)
+              warnings = []
+              sha = project.freeze!(iteration, warnings: warnings)
               terminal.say "Frozen #{iteration} at #{sha}"
+              warnings.each { |w| terminal.say "Warning: #{w}" }
               ac = project.acceptance_criteria(iteration)
               unless ac.to_s.strip.empty?
                 terminal.say ""
@@ -320,7 +322,7 @@ module Space::Architect
               results = project.run_gates(iteration, lane: lane)
               results.each do |r|
                 terminal.say ""
-                terminal.say "── #{r[:ac].empty? ? "(gate)" : r[:ac]}: #{r[:command]}  (exit #{r[:exit_code]})"
+                terminal.say "── #{r[:ac].empty? ? "(gate)" : r[:ac]}: #{r[:cmd]}  (exit #{r[:exit_code]})"
                 terminal.say r[:stdout].rstrip unless r[:stdout].strip.empty?
                 terminal.say r[:stderr].rstrip unless r[:stderr].strip.empty?
               end
