@@ -1109,4 +1109,21 @@ class ArchitectProjectTest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  # AC2 (I04): rendered ARCHITECT.md carries the Backlog section and
+  # ordinals-at-spec-time doctrine, pinned through the real init! render path.
+  def test_rendered_architect_md_contains_backlog_section_and_ordinals_at_spec_time_doctrine
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    architect_md = File.read(File.join(dir, "architecture", "ARCHITECT.md"))
+
+    assert_match(/Backlog/, architect_md)
+    assert_match(/spec.time/i, architect_md)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end
