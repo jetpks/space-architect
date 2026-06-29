@@ -2,13 +2,20 @@
 
 require "fileutils"
 require "tmpdir"
+require "open3"
+require "json"
 require_relative "../test_helper"
 require "space/server/space_importer"
 
 class SpaceImporterTest < Minitest::Test
-  FIXTURE_DIR       = File.expand_path("../fixtures/files/space_fixture", __dir__)
-  SESSION_FIXTURE   = File.expand_path("../fixtures/files/claude_session_fixture.jsonl", __dir__)
+  FIXTURE_DIR          = File.expand_path("../fixtures/files/space_fixture", __dir__)
+  SESSION_FIXTURE      = File.expand_path("../fixtures/files/claude_session_fixture.jsonl", __dir__)
   FIXTURE_SESSION_UUID = "aabbccdd-1111-2222-3333-444455556666"
+  # Nonexistent path so OpencodeStore#available? short-circuits in tests that don't need it.
+  ABSENT_OPENCODE_DB   = "/nonexistent/opencode_test.db"
+  # Opencode session and model used in the fixture DB
+  OC_SESSION_ID        = "ses_importer_test_oc01"
+  OC_MODEL             = "opencode-test-model"
 
   def conn
     @conn ||= Space::Server::App["db.gateway"].connection
@@ -32,12 +39,10 @@ class SpaceImporterTest < Minitest::Test
     )
   end
 
-  def import!(claude_projects_root: nil)
-    if claude_projects_root
-      @importer.import!(FIXTURE_DIR, user: @user, claude_projects_root: claude_projects_root)
-    else
-      @importer.import!(FIXTURE_DIR, user: @user)
-    end
+  def import!(claude_projects_root: nil, opencode_db_path: ABSENT_OPENCODE_DB)
+    opts = { user: @user, opencode_db_path: opencode_db_path }
+    opts[:claude_projects_root] = claude_projects_root if claude_projects_root
+    @importer.import!(FIXTURE_DIR, **opts)
   end
 
   # ── Space ────────────────────────────────────────────────────────────────────
@@ -524,6 +529,139 @@ class SpaceImporterTest < Minitest::Test
     import!
     iter2 = conn[:iterations].where(ordinal: 2).first
     assert_nil iter2[:occurred_at_utc_offset]
+  end
+
+  # ── Opencode Runs ─────────────────────────────────────────────────────────────
+
+  # Builds a temp SQLite opencode DB with one session in FIXTURE_DIR and one in another dir.
+  # The session has a user message (text part) and an assistant message (step-start, text, step-finish).
+  def with_opencode_db
+    Dir.mktmpdir("space_importer_oc_test") do |dir|
+      db_path = File.join(dir, "opencode.db")
+      model_json = { "id" => OC_MODEL, "providerID" => "anthropic", "variant" => "default" }.to_json
+      escaped_dir = FIXTURE_DIR.gsub("'", "''")
+
+      sql = <<~SQL
+        CREATE TABLE session (id TEXT, directory TEXT, agent TEXT, model TEXT, title TEXT, parent_id TEXT, time_created INTEGER, time_updated INTEGER);
+        CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+        CREATE TABLE part    (id TEXT, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+
+        INSERT INTO session VALUES ('#{OC_SESSION_ID}', '#{escaped_dir}', 'build', '#{model_json.gsub("'", "''")}', 'OC Session', NULL, 1750000000000, 1750000010000);
+        INSERT INTO session VALUES ('ses_other_dir_01',  '/other/dir',     'build', '{}',                             'Other',       NULL, 1750000001000, 1750000002000);
+
+        INSERT INTO message VALUES ('msg_oc_u1', '#{OC_SESSION_ID}', 1750000000100, '{"role":"user","time":{"created":1750000000100}}');
+        INSERT INTO message VALUES ('msg_oc_a1', '#{OC_SESSION_ID}', 1750000000200, '{"role":"assistant","modelID":"#{OC_MODEL}","providerID":"anthropic","tokens":{"total":100,"input":90,"output":10},"path":{"cwd":"#{escaped_dir}","root":"#{escaped_dir}"}}');
+
+        INSERT INTO part VALUES ('prt_u1p1', 'msg_oc_u1', '#{OC_SESSION_ID}', 1750000000110, '{"type":"text","text":"hello from opencode"}');
+        INSERT INTO part VALUES ('prt_a1p1', 'msg_oc_a1', '#{OC_SESSION_ID}', 1750000000210, '{"type":"step-start"}');
+        INSERT INTO part VALUES ('prt_a1p2', 'msg_oc_a1', '#{OC_SESSION_ID}', 1750000000220, '{"type":"text","text":"I am the opencode response"}');
+        INSERT INTO part VALUES ('prt_a1p3', 'msg_oc_a1', '#{OC_SESSION_ID}', 1750000000230, '{"type":"reasoning","text":"thinking hard","time":{}}');
+        INSERT INTO part VALUES ('prt_a1p4', 'msg_oc_a1', '#{OC_SESSION_ID}', 1750000000240, '{"type":"tool","tool":"Read","callID":"call_oc_x1","state":{"status":"completed","input":{"path":"/foo.rb"},"output":"file content here"}}');
+        INSERT INTO part VALUES ('prt_a1p5', 'msg_oc_a1', '#{OC_SESSION_ID}', 1750000000250, '{"type":"step-finish","reason":"tool_use","tokens":{"total":100}}');
+      SQL
+
+      _out, err, status = Open3.capture3("sqlite3", db_path, stdin_data: sql)
+      raise "Failed to build opencode fixture DB: #{err}" unless status.success?
+      yield db_path
+    end
+  end
+
+  def test_opencode_run_created_with_correct_role_and_harness
+    with_opencode_db do |db|
+      import!(opencode_db_path: db)
+      run = conn[:runs].where(role: "architect", harness: "opencode").first
+      refute_nil run
+      assert_equal "architect",        run[:role]
+      assert_equal "opencode",         run[:harness]
+      assert_equal 2,                  run[:status]
+      assert_equal "opencode_session", run[:producer]
+      assert_equal OC_SESSION_ID,      run[:session_id]
+      assert_nil run[:iteration_id]
+      assert_nil run[:lane]
+    end
+  end
+
+  def test_opencode_run_model_from_first_assistant_message
+    with_opencode_db do |db|
+      import!(opencode_db_path: db)
+      run = conn[:runs].where(role: "architect", harness: "opencode").first
+      assert_equal OC_MODEL, run[:model],
+        "opencode run model must be the first assistant modelID"
+    end
+  end
+
+  def test_opencode_run_occurred_at_from_session_time_created
+    with_opencode_db do |db|
+      import!(opencode_db_path: db)
+      run = conn[:runs].where(role: "architect", harness: "opencode").first
+      refute_nil run[:occurred_at]
+      expected = Time.at(1750000000000 / 1000.0).utc
+      assert_equal expected, run[:occurred_at].utc
+    end
+  end
+
+  def test_opencode_run_has_conversation_with_messages
+    with_opencode_db do |db|
+      import!(opencode_db_path: db)
+      run = conn[:runs].where(role: "architect", harness: "opencode").first
+      refute_nil run[:conversation_id]
+      msg_count = conn[:messages].where(conversation_id: run[:conversation_id]).count
+      assert msg_count >= 1, "expected ≥1 message in opencode run conversation"
+    end
+  end
+
+  def test_opencode_run_conversation_has_representative_content
+    with_opencode_db do |db|
+      import!(opencode_db_path: db)
+      run  = conn[:runs].where(role: "architect", harness: "opencode").first
+      msgs = conn[:messages].where(conversation_id: run[:conversation_id]).all
+      refute_empty msgs
+
+      all_content = msgs.flat_map { |m| Array(m[:content]) }
+      has_text = all_content.any? { |b| b.is_a?(Hash) && b["type"] == "text" }
+      assert has_text, "expected at least one text block in conversation"
+    end
+  end
+
+  def test_opencode_run_idempotency
+    with_opencode_db do |db|
+      import!(opencode_db_path: db)
+      counts1 = snapshot_counts
+      import!(opencode_db_path: db)
+      counts2 = snapshot_counts
+      assert_equal counts1, counts2,
+        "second import must not add rows: #{counts1.inspect} vs #{counts2.inspect}"
+    end
+  end
+
+  def test_opencode_run_idempotency_one_run_per_session
+    with_opencode_db do |db|
+      import!(opencode_db_path: db)
+      import!(opencode_db_path: db)
+      oc_runs = conn[:runs].where(role: "architect", harness: "opencode").all
+      assert_equal 1, oc_runs.length, "must have exactly one opencode run per session after two imports"
+    end
+  end
+
+  def test_absent_opencode_db_succeeds_with_zero_opencode_runs
+    import!(opencode_db_path: ABSENT_OPENCODE_DB)
+    oc_runs = conn[:runs].where(harness: "opencode").all
+    assert_equal 0, oc_runs.length
+  end
+
+  def test_absent_opencode_db_does_not_affect_builder_runs
+    import!(opencode_db_path: ABSENT_OPENCODE_DB)
+    assert_equal 1, conn[:runs].where(role: "builder").count
+  end
+
+  def test_opencode_absent_does_not_affect_claude_architect_runs
+    with_staged_session_root do |root|
+      import!(claude_projects_root: root, opencode_db_path: ABSENT_OPENCODE_DB)
+      run = conn[:runs].where(role: "architect", harness: "claude-code").first
+      refute_nil run
+      assert_equal "claude-code",  run[:harness]
+      assert_equal "claude_session", run[:producer]
+    end
   end
 
   # ── occurred_at sub-second precision ─────────────────────────────────────────
