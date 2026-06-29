@@ -722,7 +722,11 @@ module Space::Architect
     # with aggregated messages on failure. Absent/empty gates appends a warning to
     # the optional warnings array but does not fail.
     def lint_gates!(text, warnings: nil)
-      gates = parse_gates(text)
+      gates = begin
+        parse_gates(text)
+      rescue Psych::SyntaxError => e
+        raise Space::Core::Error, "ill-formed gates block: #{e.message}"
+      end
       if gates.empty?
         warnings << "no gates — this iteration is prose-judged only" if warnings
         return

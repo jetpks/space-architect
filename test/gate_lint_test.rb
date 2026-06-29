@@ -322,4 +322,25 @@ class GateLintTest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  def test_freeze_raises_on_yaml_syntax_error
+    dir = Dir.mktmpdir("gate-lint-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    # syntactically invalid YAML (unclosed bracket)
+    bad_yaml = "- id: broken\n  cmd: [\n"
+    text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{bad_yaml}```")
+    File.write(slice, text)
+
+    err = assert_raises(Space::Core::Error) { project.freeze!("my-slice") }
+    assert_match(/ill-formed gates/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end
