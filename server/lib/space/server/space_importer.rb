@@ -5,6 +5,8 @@ require "json"
 require "open3"
 require "time"
 require_relative "normalizer"
+require_relative "normalizer/opencode_session"
+require_relative "opencode_store"
 require_relative "runs/persistor"
 require_relative "section_parser"
 
@@ -29,7 +31,10 @@ module Space
 
       # Imports the space directory, upserting all records. Returns the Space struct.
       # claude_projects_root: base dir for architect session logs (default ~/.claude/projects).
-      def import!(space_dir, user:, claude_projects_root: File.expand_path("~/.claude/projects"))
+      # opencode_db_path: path to the opencode SQLite DB (default ~/.local/share/opencode/opencode.db).
+      def import!(space_dir, user:,
+                  claude_projects_root: File.expand_path("~/.claude/projects"),
+                  opencode_db_path:    File.expand_path("~/.local/share/opencode/opencode.db"))
         space_dir = space_dir.to_s
         yaml      = YAML.load_file(File.join(space_dir, "space.yaml"))
 
@@ -54,6 +59,7 @@ module Space
         import_artifacts(space_dir, space, arch_iters, iteration_map)
         import_runs(space_dir, space, arch_iters, iteration_map, user: user)
         import_architect_runs(space, user: user, claude_projects_root: claude_projects_root)
+        import_opencode_runs(space, user: user, opencode_db_path: opencode_db_path)
 
         @spaces_repo.update(space.id, imported_at: Time.now)
         @spaces_repo.by_pk(space.id)
@@ -293,6 +299,58 @@ module Space
           occurred_at:     occurred_at,
           conversation_id: persistor.conversation_id,
           harness:         "claude-code",
+          model:           persistor.first_model,
+          updated_at:      Time.now
+        }.compact)
+      end
+
+      def import_opencode_runs(space, user:, opencode_db_path:)
+        store = OpencodeStore.new(opencode_db_path)
+        return unless store.available?
+
+        store.sessions_for(space.source_path).each do |session|
+          import_opencode_run(session, store: store, space: space, user: user)
+        end
+      end
+
+      def import_opencode_run(session, store:, space:, user:)
+        session_id = session["id"]
+        existing   = @runs_repo.find_architect_run(space.id, session_id)
+
+        if existing&.conversation_id
+          @conversations_repo.delete(existing.conversation_id)
+          @runs_repo.update(existing.id, conversation_id: nil, updated_at: Time.now)
+        end
+
+        run = existing || @runs_repo.create(
+          user_id:      user.id,
+          space_id:     space.id,
+          iteration_id: nil,
+          lane:         nil,
+          role:         "architect",
+          status:       0,
+          published:    false,
+          created_at:   Time.now,
+          updated_at:   Time.now
+        )
+
+        persistor = Runs::Persistor.new(@conversations_repo, @messages_repo)
+        persistor.setup(run)
+
+        parser = Normalizer::OpencodeSession.new(session_id: session_id, session_dir: space.source_path)
+        store.messages_for(session_id).each do |message|
+          parser.process(message).each { |event| persistor.process(event) }
+        end
+
+        occurred_at = session["time_created"] ? Time.at(session["time_created"] / 1000.0).utc : nil
+
+        @runs_repo.update(run.id, {
+          status:          2,
+          producer:        "opencode_session",
+          session_id:      session_id,
+          occurred_at:     occurred_at,
+          conversation_id: persistor.conversation_id,
+          harness:         "opencode",
           model:           persistor.first_model,
           updated_at:      Time.now
         }.compact)
