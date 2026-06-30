@@ -128,7 +128,7 @@ architect worktree remove dry-cli-port lane-a
 
 | Command | Description |
 |---------|-------------|
-| `worktree add REPO ITERATION LANE [--base REF]` | Create a worktree at `build/<id>-<lane>/wt` off the repo's base commit (default: `HEAD`). |
+| `worktree add REPO ITERATION LANE [--base REF]` | Create a worktree at `build/<id>-<lane>/wt` off the repo's base commit (default: `HEAD`). `--base` accepts any git ref, including the `project/<slug>` integration branch — see `### Parallel + fast-follow` in `dispatch.md`. |
 | `worktree list` | List active architect worktree directories. |
 | `worktree remove ITERATION LANE` | Remove the lane worktree. |
 
@@ -192,7 +192,7 @@ architect merge my-feature lane-a --message "lane lane-a: integrate"
 
 ### `architect integrate ITERATION [SPACE]`
 
-Integrate the architect-supplied set of passing lanes in order, running `merge` for each and stopping on the first conflict. The target is the stable `project/<slug>` branch (slug derived from `space.title`) shared across all iterations — `main` is never touched per-iteration. Pass `--teardown` to remove lane worktrees and delete per-lane `lane/<id>-<lane>` branches after merging; it never deletes the `project/<slug>` branch.
+Integrate the architect-supplied set of passing lanes in order, running `merge` for each and stopping on the first conflict. The target is the stable `project/<slug>` branch (slug derived from `space.title`) shared across all iterations — `main` is never touched per-iteration. Calling `integrate` again with a new `--lanes` set appends to the same `project/<slug>` branch (used by the parallel + fast-follow pattern to stack a fast-follow lane onto the integrated tip). Pass `--teardown` to remove lane worktrees and delete per-lane `lane/<id>-<lane>` branches after merging; it never deletes the `project/<slug>` branch.
 
 ```sh
 architect integrate my-feature --lanes lane-a,lane-b
