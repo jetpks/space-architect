@@ -1,0 +1,20 @@
+# Space git metadata
+.git
+
+# Build scratch: worktrees, harness output, builder artefacts
+build/
+
+# Temp workspace
+tmp/
+notes/tmp/
+
+# Secrets — NEVER bake credentials in image layers
+.env
+**/.env
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_ecdsa
+id_ed25519
