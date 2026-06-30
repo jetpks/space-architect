@@ -22,6 +22,7 @@ module Space::Architect
         required(:ac).filled(:string)
         required(:cmd).filled(:string)
         optional(:cwd).maybe(:string)
+        optional(:timeout)
         required(:expect).hash do
           optional(:exit_code)
           optional(:stdout_match).filled(:string)
@@ -67,6 +68,11 @@ module Space::Architect
       rule("expect.threshold.value") do
         val = values.dig(:expect, :threshold, :value)
         key.failure("must be a Number") if !val.nil? && !val.is_a?(Numeric)
+      end
+
+      rule(:timeout) do
+        val = values[:timeout]
+        key.failure("must be a positive number of seconds") if !val.nil? && (!val.is_a?(Numeric) || val <= 0)
       end
     end
 

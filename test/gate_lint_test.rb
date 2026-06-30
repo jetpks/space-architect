@@ -243,6 +243,35 @@ class GateLintTest < Space::ArchitectTest
     assert result.failure.any? { |e| e.include?("value") && e.include?("Number") }
   end
 
+  # ── timeout field ────────────────────────────────────────────────────────
+
+  def test_timeout_valid_positive_number_is_success
+    gates = [well_formed_gate("timeout" => 5)]
+    result = lint(gates)
+    assert result.success?, "positive integer timeout must succeed: #{result.failure rescue nil}"
+  end
+
+  def test_timeout_zero_is_failure
+    gates = [well_formed_gate("timeout" => 0)]
+    result = lint(gates)
+    refute result.success?
+    assert result.failure.any? { |e| e.include?("timeout") && e.include?("positive") }
+  end
+
+  def test_timeout_negative_is_failure
+    gates = [well_formed_gate("timeout" => -1)]
+    result = lint(gates)
+    refute result.success?
+    assert result.failure.any? { |e| e.include?("timeout") && e.include?("positive") }
+  end
+
+  def test_timeout_string_is_failure
+    gates = [well_formed_gate("timeout" => "soon")]
+    result = lint(gates)
+    refute result.success?
+    assert result.failure.any? { |e| e.include?("timeout") && e.include?("positive") }
+  end
+
   # ── non-list YAML is failure ──────────────────────────────────────────────
 
   def test_non_list_yaml_is_failure
