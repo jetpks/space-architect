@@ -906,7 +906,7 @@ class ArchitectProjectTest < Space::ArchitectTest
   end
 
   # merge_lane! integrates a clean lane: commits the working tree on the lane branch
-  # and merges --no-ff into lane/<id>, recording the integration branch.
+  # and merges --no-ff into project/<slug>, recording the integration branch.
   def test_merge_lane_integrates_clean_lane
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
@@ -922,16 +922,83 @@ class ArchitectProjectTest < Space::ArchitectTest
     File.write(File.join(wt, "feature.rb"), "def feature; end\n")
 
     r = project.merge_lane!("my-slice", "lane-a")
-    assert_equal "lane/I01-my-slice", r[:integration_branch]
+    assert_match(/\Aproject\//, r[:integration_branch], "integration branch must be project/<slug>")
     assert_equal false, r[:gates_run]
 
     repo = File.join(dir, "repos", "my-repo")
-    assert_path_exists File.join(repo, ".git", "refs", "heads", "lane", "I01-my-slice")
-    log, = Open3.capture3("git", "-C", repo, "log", "lane/I01-my-slice", "--format=%s")
+    branch_parts = r[:integration_branch].split("/")
+    assert_path_exists File.join(repo, ".git", "refs", "heads", *branch_parts)
+    log, = Open3.capture3("git", "-C", repo, "log", r[:integration_branch], "--format=%s")
     assert_match(/Merge lane\/I01-my-slice-lane-a/, log)
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    assert_equal "lane/I01-my-slice", yml.dig("project", "iterations", 0, "lanes", 0, "integration_branch")
+    assert_equal r[:integration_branch], yml.dig("project", "iterations", 0, "lanes", 0, "integration_branch")
+    assert_equal r[:integration_branch], yml.dig("project", "integration_branch")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # merge_lane! accumulates all iterations on one stable project/<slug> branch.
+  # Two consecutive merge_lane! calls must land on the identical branch.
+  def test_merge_lane_project_integration_accumulates
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    project.new_iteration!("s1")
+    project.freeze!("s1")
+    project.worktree_add("my-repo", "s1", "lane-a")
+    File.write(File.join(dir, "build", "I01-s1-lane-a", "wt", "feature1.rb"), "def f1; end\n")
+    r1 = project.merge_lane!("s1", "lane-a")
+
+    project.new_iteration!("s2")
+    project.freeze!("s2")
+    project.worktree_add("my-repo", "s2", "lane-b")
+    File.write(File.join(dir, "build", "I02-s2-lane-b", "wt", "feature2.rb"), "def f2; end\n")
+    r2 = project.merge_lane!("s2", "lane-b")
+
+    assert_match(/\Aproject\//, r1[:integration_branch])
+    assert_equal r1[:integration_branch], r2[:integration_branch], "both iterations must accumulate on the same branch"
+
+    repo = File.join(dir, "repos", "my-repo")
+    log, = Open3.capture3("git", "-C", repo, "log", r1[:integration_branch], "--format=%s")
+    assert_match(/Merge lane\/I01-s1-lane-a/, log)
+    assert_match(/Merge lane\/I02-s2-lane-b/, log)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # land generates PR body and command for each integrated repo; raises if nothing integrated.
+  def test_land_generates_pr_command
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    err = assert_raises(Space::Core::Error) { project.land }
+    assert_match(/nothing integrated yet/, err.message)
+
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "wt", "feature.rb"), "def feature; end\n")
+    project.merge_lane!("my-slice", "lane-a")
+
+    results = project.land
+    assert_equal 1, results.size
+    r = results.first
+    assert_equal "my-repo", r[:repo]
+    assert_match(/\Aproject\//, r[:integration_branch])
+    assert_match(/gh pr create --base main/, r[:command])
+    assert_match(/--head project\//, r[:command])
+    assert_path_exists r[:body_file]
+    body = File.read(r[:body_file])
+    assert_match(/my-slice/, body)
   ensure
     FileUtils.rm_rf(dir)
   end
