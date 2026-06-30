@@ -121,6 +121,10 @@ The Architect Loop separates dispatch from judgment by design. The dispatching s
 
 Passing lanes are integrated into one stable `project/<slug>` branch (slug derived from the space title) that accumulates every iteration — `main` is never touched per-iteration. At project end, `architect land` prints the single `gh pr create --base main --head project/<slug>` command per touched repo; no push or `gh` call is made by the CLI.
 
+### Spike (probe) type
+
+A *spike* (probe) is an investigate-only iteration: its deliverable is a recommendation, not merged behavior. Use it to de-risk an open question before committing to a build that depends on an unknown the repo cannot already answer and routine API-verification won't resolve. The builder reads and experiments against live sources, writing a structured recommendation to its scratch report; experiments live in throwaway scratch, never the worktree, so there is usually nothing to integrate. Acceptance Criteria are read-bound — gates are minimal (at most suite-green confirming the probe broke nothing), because the proof is the architect reading the recommendation against the question the spike was set, not a runnable check. The verdict uses **ADOPT / REVISE / REJECT** rather than KILL/CONTINUE: the architect transcribes the findings into Builder Report, records the disposition, and (if adopted) names the follow-up build iteration it spawns. A spike's CONTINUE means "recommendation accepted + disposition recorded." This is distinct from discovery-scale research (`/architect-research`, which surveys a whole topic): a spike is one iteration-sized, decision-oriented probe run through the normal builder/lane machinery.
+
 ## Space identity and resolution 🧭
 
 Space ids are date-prefixed slugs: `20260531-name-of-space`. Duplicate names on the same day get a counter: `20260531-name-of-space-2`.

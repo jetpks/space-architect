@@ -251,6 +251,24 @@ contract, self-contained:
   downgrade a routine, tightly-specified lane (record which and why). Claude
   Code has no per-invocation effort flag — see `dispatch.md`.
 
+**Spike (probe) iterations.** When the open question is too uncertain for a
+build — the repo can't answer it and routine API-verification won't resolve it
+— spec a *spike* (probe) instead of a build iteration. A spike is
+investigate-only: its deliverable is a **recommendation**, not merged behavior.
+Its lane reads, experiments in throwaway scratch (never the worktree), and
+writes a structured recommendation to its scratch report; there is usually
+nothing to integrate. Acceptance Criteria are **read-bound** — gates are
+minimal (at most suite-green confirming the probe broke nothing), because the
+proof is the architect reading the recommendation against the question the spike
+was set, not a runnable check; the AC names that question. The spike verdict
+uses **ADOPT / REVISE / REJECT** (not KILL/CONTINUE): the architect transcribes
+the recommendation into Builder Report, then the Verdict records the
+disposition and, if adopted, names the follow-up build iteration it spawns. A
+spike's CONTINUE means "recommendation accepted + disposition recorded." This
+is distinct from discovery-scale research (`/architect-research`, which surveys
+a whole topic): a spike is one iteration-sized, decision-oriented probe run
+through the normal builder/lane machinery.
+
 Then write the **Acceptance Criteria** section — prose conditions (AC1, AC2, …)
 that the architect judges against, followed by a fenced ` ```gates ` block of
 runnable checks (each gate carries `id`, `ac`, `cmd`, and `expect`; `cwd` is
