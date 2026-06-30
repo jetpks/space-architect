@@ -10,7 +10,7 @@ class OciPackerTest < Space::ArchitectTest
       assert result.success?, "expected Success, got: #{result.inspect}"
       assert_path_exists File.join(out_dir, "Dockerfile")
       assert_path_exists File.join(out_dir, "entrypoint.sh")
-      assert_path_exists File.join(out_dir, ".dockerignore")
+      assert_path_exists File.join(out_dir, "Dockerfile.dockerignore")
     end
   end
 
@@ -126,7 +126,7 @@ class OciPackerTest < Space::ArchitectTest
   def test_dockerignore_excludes_git_and_secrets
     with_space do |space, out_dir|
       Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
-      dockerignore = File.read(File.join(out_dir, ".dockerignore"))
+      dockerignore = File.read(File.join(out_dir, "Dockerfile.dockerignore"))
 
       assert_match(/^\.git$/, dockerignore)
       assert_match(/\.env/, dockerignore)
@@ -138,7 +138,7 @@ class OciPackerTest < Space::ArchitectTest
   def test_dockerignore_excludes_build_scratch
     with_space do |space, out_dir|
       Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
-      dockerignore = File.read(File.join(out_dir, ".dockerignore"))
+      dockerignore = File.read(File.join(out_dir, "Dockerfile.dockerignore"))
 
       assert_match(/^build\//, dockerignore)
       assert_match(/^tmp\//, dockerignore)
@@ -153,7 +153,7 @@ class OciPackerTest < Space::ArchitectTest
       Space::Core::OciPacker.new(space: space, output_dir: out1).generate
       Space::Core::OciPacker.new(space: space, output_dir: out2).generate
 
-      %w[Dockerfile entrypoint.sh .dockerignore].each do |filename|
+      %w[Dockerfile entrypoint.sh Dockerfile.dockerignore].each do |filename|
         content1 = File.read(File.join(out1, filename))
         content2 = File.read(File.join(out2, filename))
         assert_equal content1, content2,
@@ -166,7 +166,7 @@ class OciPackerTest < Space::ArchitectTest
     with_space do |space, out_dir|
       Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
 
-      %w[Dockerfile entrypoint.sh .dockerignore].each do |filename|
+      %w[Dockerfile entrypoint.sh Dockerfile.dockerignore].each do |filename|
         content = File.read(File.join(out_dir, filename))
         refute_match(%r{/Users/}, content, "#{filename} must not leak host paths")
         refute_match(%r{/home/}, content,  "#{filename} must not leak host paths")
