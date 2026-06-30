@@ -20,7 +20,7 @@ module Space::Core
       FileUtils.mkdir_p(@output_dir)
       write("Dockerfile",    render_template("dockerfile.erb"))
       write("entrypoint.sh", entrypoint_content, mode: 0o755)
-      write(".dockerignore", render_template("dockerignore.erb"))
+      write("Dockerfile.dockerignore", render_template("dockerignore.erb"))
       Success(@output_dir)
     rescue StandardError => e
       Failure(e)

@@ -24,7 +24,7 @@ RUN apt-get update -qq \
 # Claude Code CLI (https://claude.ai/install.sh)
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# Copy the space tree into the image (filtered by .dockerignore alongside this Dockerfile)
+# Copy the space tree into the image (filtered by Dockerfile.dockerignore alongside this Dockerfile)
 COPY . /space
 
 # Install space-architect gem: prefer in-space checkout for a pinned version, fall back to RubyGems

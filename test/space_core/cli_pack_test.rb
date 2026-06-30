@@ -35,7 +35,7 @@ class CLIPackTest < Space::ArchitectTest
         assert_match(/Generated OCI context/, out)
         assert_path_exists File.join(space_path, "build", "oci", "Dockerfile")
         assert_path_exists File.join(space_path, "build", "oci", "entrypoint.sh")
-        assert_path_exists File.join(space_path, "build", "oci", ".dockerignore")
+        assert_path_exists File.join(space_path, "build", "oci", "Dockerfile.dockerignore")
       end
     end
   ensure
@@ -60,7 +60,7 @@ class CLIPackTest < Space::ArchitectTest
         assert_match(custom_out, out)
         assert_path_exists File.join(custom_out, "Dockerfile")
         assert_path_exists File.join(custom_out, "entrypoint.sh")
-        assert_path_exists File.join(custom_out, ".dockerignore")
+        assert_path_exists File.join(custom_out, "Dockerfile.dockerignore")
 
         refute_path_exists File.join(space_path, "build", "oci"),
                            "default output dir must not be created when --output is given"
@@ -110,7 +110,7 @@ class CLIPackTest < Space::ArchitectTest
         assert_empty err
         # Only generated context files are created — no OCI image layers or build cache
         oci_dir = File.join(space_path, "build", "oci")
-        assert_equal %w[.dockerignore Dockerfile entrypoint.sh].sort,
+        assert_equal %w[Dockerfile.dockerignore Dockerfile entrypoint.sh].sort,
                      Dir.children(oci_dir).sort,
                      "only the three generated files should exist in the output dir"
       end
