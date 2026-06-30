@@ -18,6 +18,8 @@ module Space::Core
 
     def generate
       FileUtils.mkdir_p(@output_dir)
+      validated = validate_provision_scripts(space.provision_scripts)
+      return validated if validated.failure?
       write("Dockerfile",    render_template("dockerfile.erb"))
       write("entrypoint.sh", entrypoint_content, mode: 0o755)
       write("Dockerfile.dockerignore", render_template("dockerignore.erb"))
@@ -36,6 +38,27 @@ module Space::Core
 
     def repos
       @space.repos
+    end
+
+    def provision_scripts
+      @space.provision_scripts
+    end
+
+    def validate_provision_scripts(scripts)
+      scripts.each do |rel_path|
+        if Pathname.new(rel_path).absolute?
+          return Failure("provision script '#{rel_path}' must not be an absolute path")
+        end
+
+        resolved = space.path.join(rel_path).cleanpath
+        space_root = space.path.cleanpath
+        unless resolved.to_s.start_with?("#{space_root}/") || resolved == space_root
+          return Failure("provision script '#{rel_path}' escapes the space root")
+        end
+
+        return Failure("provision script '#{rel_path}' does not exist under the space root") unless resolved.exist?
+      end
+      Success(scripts)
     end
 
     def entrypoint_content

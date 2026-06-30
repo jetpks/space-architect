@@ -48,6 +48,10 @@ module Space::Core
       end
     end
 
+    def provision_scripts
+      Array(data.dig("pack", "provision")).map(&:to_s)
+    end
+
     def architect
       data["architect"]
     end
