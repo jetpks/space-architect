@@ -1674,4 +1674,153 @@ class ArchitectProjectTest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  # ── I14: Fix B — frozen cwd re-rooting onto the lane worktree ────────────
+
+  # A gate with cwd: repos/<repo> runs in the lane worktree, not the repo
+  # checkout — proved by a marker file written only in the worktree.
+  def test_run_gates_reroots_cwd_into_lane_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    gate_yaml = <<~YAML
+      - id: worktree-marker-gate
+        ac: AC1
+        cmd: cat worktree-marker.txt
+        cwd: repos/my-repo
+        expect:
+          exit_code: 0
+          stdout_match: "worktree-only"
+    YAML
+    text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+    File.write(slice, text)
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    # Write marker ONLY in the worktree — not present in repos/my-repo
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "worktree-marker.txt"), "worktree-only\n")
+
+    results = project.run_gates("my-slice", lane: "lane-a")
+    assert_equal 1, results.length
+    assert_equal :pass, results[0][:status], results[0][:reason]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # A gate with cwd: repos/<repo>/subdir re-roots to <worktree>/subdir.
+  def test_run_gates_reroots_cwd_subdir_into_lane_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    gate_yaml = <<~YAML
+      - id: subdir-gate
+        ac: AC1
+        cmd: cat sub-marker.txt
+        cwd: repos/my-repo/subdir
+        expect:
+          exit_code: 0
+          stdout_match: "sub-only"
+    YAML
+    text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+    File.write(slice, text)
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    # Create subdir ONLY in the worktree and write marker there
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(File.join(wt, "subdir"))
+    File.write(File.join(wt, "subdir", "sub-marker.txt"), "sub-only\n")
+
+    results = project.run_gates("my-slice", lane: "lane-a")
+    assert_equal 1, results.length
+    assert_equal :pass, results[0][:status], results[0][:reason]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # A gate with cwd outside the lane's repo is honored literally.
+  def test_run_gates_honors_cwd_outside_repo
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    gate_yaml = <<~YAML
+      - id: outside-cwd-gate
+        ac: AC1
+        cmd: cat outside-canary.txt
+        cwd: architecture
+        expect:
+          exit_code: 0
+          stdout_match: "outside-canary"
+    YAML
+    text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+    File.write(slice, text)
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    # Write canary in architecture/ (outside repos/my-repo)
+    File.write(File.join(dir, "architecture", "outside-canary.txt"), "outside-canary\n")
+
+    results = project.run_gates("my-slice", lane: "lane-a")
+    assert_equal 1, results.length
+    assert_equal :pass, results[0][:status], results[0][:reason]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # A gate with no cwd still uses the worktree base_dir when a lane is given.
+  def test_run_gates_no_cwd_uses_worktree_when_lane_given
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    gate_yaml = <<~YAML
+      - id: base-dir-gate
+        ac: AC1
+        cmd: cat wt-base.txt
+        expect:
+          exit_code: 0
+          stdout_match: "wt-base"
+    YAML
+    text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+    File.write(slice, text)
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "wt-base.txt"), "wt-base\n")
+
+    results = project.run_gates("my-slice", lane: "lane-a")
+    assert_equal 1, results.length
+    assert_equal :pass, results[0][:status], results[0][:reason]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end

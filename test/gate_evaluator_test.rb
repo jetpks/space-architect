@@ -131,4 +131,23 @@ class GateEvaluatorTest < Space::ArchitectTest
     r = ev(stdout: "", exit_code: 0, expect: { exit_code: 0 })
     assert r.pass?
   end
+
+  # ── threshold — last-occurrence matching (Fix A) ───────────────────────────
+
+  def test_threshold_matches_last_occurrence_not_first
+    # minitest-style: throughput line appears BEFORE the summary line.
+    # "(\d+) runs" first matches "4183" inside "13.4183 runs/s"; the summary
+    # line "870 runs" appears later.  The gate must capture 870, not 4183.
+    stdout = "Finished in 64.8s, 13.4183 runs/s, 52.0 assertions/s.\n" \
+             "870 runs, 3372 assertions, 0 failures, 0 errors, 0 skips\n"
+    r = ev(stdout: stdout, exit_code: 0,
+           expect: { "threshold" => { "match" => '(\d+) runs', "op" => ">=", "value" => 800 } })
+    assert r.pass?, "expected pass capturing 870 from summary line, got: #{r.reason}"
+  end
+
+  def test_threshold_single_match_unchanged
+    r = ev(stdout: "870 runs, 0 failures\n", exit_code: 0,
+           expect: { "threshold" => { "match" => '(\d+) runs', "op" => ">=", "value" => 800 } })
+    assert r.pass?
+  end
 end
