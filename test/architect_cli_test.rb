@@ -64,6 +64,8 @@ class ArchitectCLITest < Space::ArchitectTest
         assert_empty err
         assert_match(/Project ready/, out)
         assert_path_exists File.join(space_path, "architecture", "ARCHITECT.md")
+        assert_path_exists File.join(space_path, ".claude", "settings.json"),
+          "init must scaffold .claude/settings.json with the SessionStart hook"
         # One-file model: no gates/lanes/prd scaffolding.
         refute_path_exists File.join(space_path, "architecture", "gates")
         refute_path_exists File.join(space_path, "architecture", "lanes")
@@ -99,6 +101,8 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # init is idempotent: second call does not raise, does not error, leaves
+  # ARCHITECT.md and settings.json untouched (new behavior since I10).
   def test_architect_init_is_idempotent_warns_on_second_call
     setup = temp_env
     env = setup.fetch(:env)
@@ -109,8 +113,66 @@ class ArchitectCLITest < Space::ArchitectTest
 
       Dir.chdir(space_path) do
         invoke("init")
-        _out, err = invoke("init")
-        assert_match(/already exists/, err)
+        out, err = invoke("init")
+
+        assert_empty err, "second init must not error"
+        assert_match(/Project ready/, out, "second init must still confirm readiness")
+        assert_path_exists File.join(space_path, "architecture", "ARCHITECT.md"),
+          "ARCHITECT.md must still be present after second init"
+        assert_path_exists File.join(space_path, ".claude", "settings.json"),
+          "settings.json must still be present after second init"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # ── ground: emits grounding reads to stdout ────────────────────────────────────
+
+  def test_architect_ground_emits_grounding_reads
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("brief", "new")
+        invoke("new", "my-iter")
+
+        out, err = invoke("ground")
+
+        assert_empty err
+        assert_match(/=== architecture\/ARCHITECT\.md ===/, out)
+        assert_match(/=== architecture\/BRIEF\.md ===/, out)
+        assert_match(/=== architecture\/I01-my-iter\.md ===/, out)
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # ground with no iteration files yet: emits ARCHITECT.md only (no error).
+  def test_architect_ground_with_no_iteration_emits_architect_md_only
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+
+        out, err = invoke("ground")
+
+        assert_empty err
+        assert_match(/=== architecture\/ARCHITECT\.md ===/, out)
+        refute_match(/=== architecture\/BRIEF\.md ===/, out)
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
       end
     end
   ensure

@@ -3,6 +3,7 @@
 require_relative "test_helper"
 require "open3"
 require "yaml"
+require "json"
 require "async/http/mock"
 require "async/http/client"
 require "protocol/http/response"
@@ -1258,6 +1259,217 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     assert_match(/Backlog/, architect_md)
     assert_match(/spec.time/i, architect_md)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── I10: init! idempotency + settings.json scaffolding ──────────────────────
+
+  # init! writes .claude/settings.json on first call alongside ARCHITECT.md.
+  def test_init_writes_settings_json_on_first_call
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    settings_path = File.join(dir, ".claude", "settings.json")
+    assert_path_exists settings_path
+    parsed = JSON.parse(File.read(settings_path))
+    matchers = parsed.dig("hooks", "SessionStart").map { |e| e["matcher"] }
+    assert_includes matchers, "startup"
+    assert_includes matchers, "clear"
+    assert_includes matchers, "resume"
+    parsed.dig("hooks", "SessionStart").each do |entry|
+      hook = entry["hooks"].first
+      assert_equal "command", hook["type"]
+      assert_equal "architect", hook["command"]
+      assert_equal ["ground"], hook["args"]
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # init! is idempotent: second call does not raise, does not overwrite ARCHITECT.md,
+  # and leaves a pre-existing settings.json untouched.
+  def test_init_idempotent_no_raise_settings_json_unmodified_on_second_call
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    architect_before = File.read(File.join(dir, "architecture", "ARCHITECT.md"))
+    settings_before  = File.read(File.join(dir, ".claude", "settings.json"))
+
+    space2 = Space::Core::Space.load(dir)
+    project2 = Space::Architect::ArchitectProject.new(space: space2)
+    result = project2.init!
+
+    assert_equal File.join(dir, "architecture", "ARCHITECT.md"), result.to_s
+    assert_equal architect_before, File.read(File.join(dir, "architecture", "ARCHITECT.md")),
+      "ARCHITECT.md must not be overwritten on second call"
+    assert_equal settings_before, File.read(File.join(dir, ".claude", "settings.json")),
+      "settings.json must not be overwritten on second call"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # init! writes settings.json even when ARCHITECT.md already exists (upgrade path
+  # for spaces initialized before the settings.json feature was added).
+  def test_init_writes_settings_json_when_architect_md_exists_but_settings_absent
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    original_architect = File.read(File.join(dir, "architecture", "ARCHITECT.md"))
+
+    # Simulate older space: remove settings.json and commit the removal
+    settings_path = File.join(dir, ".claude", "settings.json")
+    File.delete(settings_path)
+    system("git", "-C", dir, "rm", "-q", ".claude/settings.json")
+    system("git", "-C", dir, "commit", "-q", "-m", "remove settings for upgrade-path test")
+
+    space2 = Space::Core::Space.load(dir)
+    project2 = Space::Architect::ArchitectProject.new(space: space2)
+    project2.init!
+
+    assert_path_exists settings_path, "settings.json must be written when absent"
+    assert_equal original_architect, File.read(File.join(dir, "architecture", "ARCHITECT.md")),
+      "ARCHITECT.md must not be overwritten during settings-only init"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── I10: architect ground ────────────────────────────────────────────────────
+
+  # ground emits ARCHITECT.md, BRIEF.md, and the in-flight iteration under delimiters.
+  # CLAUDE.md is never re-emitted (Claude Code auto-loads it).
+  def test_ground_emits_architect_brief_and_inflight_iteration
+    dir = Dir.mktmpdir("architect-ground-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.brief_new!
+    project.new_iteration!("my-slice")
+
+    result = project.ground(session_cwd: dir)
+
+    assert_match(/=== architecture\/ARCHITECT\.md ===/, result)
+    assert_match(/=== architecture\/BRIEF\.md ===/, result)
+    assert_match(/=== architecture\/I01-my-slice\.md ===/, result)
+    refute_match(/=== .*CLAUDE\.md ===/, result, "CLAUDE.md delimiter must not appear")
+    # Delimiter order: ARCHITECT.md before BRIEF.md before iteration
+    architect_idx = result.index("ARCHITECT.md")
+    brief_idx     = result.index("BRIEF.md")
+    iter_idx      = result.index("I01-my-slice.md")
+    assert architect_idx < brief_idx,  "ARCHITECT.md must precede BRIEF.md"
+    assert brief_idx < iter_idx,       "BRIEF.md must precede the iteration file"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ground: BRIEF.md omitted when absent (discovery spaces may lack it).
+  def test_ground_omits_brief_when_absent
+    dir = Dir.mktmpdir("architect-ground-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    result = project.ground(session_cwd: dir)
+
+    assert_match(/=== architecture\/ARCHITECT\.md ===/, result)
+    refute_match(/=== architecture\/BRIEF\.md ===/, result, "BRIEF.md delimiter must not appear when file does not exist")
+    assert_match(/=== architecture\/I01-my-slice\.md ===/, result)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ground: highest-ordinal fallback when current_iteration is cleared.
+  # Deterministic rule pinned by this test.
+  def test_ground_resolves_inflight_by_highest_ordinal_when_current_iteration_absent
+    dir = Dir.mktmpdir("architect-ground-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("first-slice")
+    project.new_iteration!("second-slice")
+
+    # Clear current_iteration in memory to exercise the highest-ordinal fallback
+    space.data["project"]["current_iteration"] = nil
+
+    result = project.ground(session_cwd: dir)
+
+    assert_match(/I02-second-slice/, result, "highest-ordinal iteration must be selected")
+    refute_match(/I01-first-slice/, result, "lower-ordinal iteration must not appear")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # WORKTREE GUARD: session cwd is the builder wt dir itself → empty output, exit 0.
+  def test_ground_returns_empty_when_session_cwd_is_builder_worktree
+    dir = Dir.mktmpdir("architect-ground-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    wt_cwd = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    result = project.ground(session_cwd: wt_cwd)
+
+    assert_equal "", result, "ground must emit nothing when session cwd is inside a builder worktree"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # WORKTREE GUARD: session cwd is a subdirectory inside the wt → still guarded.
+  def test_ground_returns_empty_when_session_cwd_is_inside_builder_worktree
+    dir = Dir.mktmpdir("architect-ground-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    wt_sub = File.join(dir, "build", "I01-my-slice-lane-a", "wt", "lib", "sub")
+    result = project.ground(session_cwd: wt_sub)
+
+    assert_equal "", result, "ground must emit nothing when session cwd is deep inside a builder worktree"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # WORKTREE GUARD: session cwd is the space root → not guarded, emits content.
+  def test_ground_not_guarded_when_session_cwd_is_space_root
+    dir = Dir.mktmpdir("architect-ground-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    result = project.ground(session_cwd: dir)
+
+    assert_match(/=== architecture\/ARCHITECT\.md ===/, result)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # WORKTREE GUARD: cwd under build/ but NOT at the wt level → not guarded.
+  def test_ground_not_guarded_when_session_cwd_is_build_dir_not_wt
+    dir = Dir.mktmpdir("architect-ground-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    build_sub = File.join(dir, "build", "I01-my-slice-lane-a")  # no /wt
+    result = project.ground(session_cwd: build_sub)
+
+    assert_match(/=== architecture\/ARCHITECT\.md ===/, result)
   ensure
     FileUtils.rm_rf(dir)
   end

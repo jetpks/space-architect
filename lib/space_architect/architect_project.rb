@@ -41,25 +41,61 @@ module Space::Architect
     # Hard per-gate timeout. Generous relative to the full suite (~55s).
     DEFAULT_GATE_TIMEOUT = 900
 
+    # Inlined settings.json template for `architect init`. Registers a SessionStart
+    # hook on the three explicit session-start events (startup/clear/resume) so every
+    # space gets auto-regrounding. compact is intentionally omitted — reground on
+    # explicit session events, not every compaction cycle.
+    SETTINGS_JSON_TEMPLATE = <<~JSON
+      {
+        "hooks": {
+          "SessionStart": [
+            {
+              "matcher": "startup",
+              "hooks": [{"type": "command", "command": "architect", "args": ["ground"]}]
+            },
+            {
+              "matcher": "clear",
+              "hooks": [{"type": "command", "command": "architect", "args": ["ground"]}]
+            },
+            {
+              "matcher": "resume",
+              "hooks": [{"type": "command", "command": "architect", "args": ["ground"]}]
+            }
+          ]
+        }
+      }
+    JSON
+
     def initialize(space:)
       @space = space
     end
 
     def init!
       handoff_path = space.path.join("architecture", "ARCHITECT.md")
-      if handoff_path.exist?
-        raise Space::Core::Error, "architecture/ARCHITECT.md already exists — remove it first or edit it directly (idempotent guard)"
+      settings_path = space.path.join(".claude", "settings.json")
+      to_add = []
+
+      unless handoff_path.exist?
+        FileUtils.mkdir_p(handoff_path.dirname)
+        handoff_path.write(render_handoff)
+        update_architect_block do |b|
+          b.merge("status" => "active", "current_iteration" => nil, "iterations" => [])
+        end
+        to_add << "architecture/ARCHITECT.md"
+        to_add << Space::Core::Space::METADATA_FILE
       end
 
-      FileUtils.mkdir_p(handoff_path.dirname)
-      handoff_path.write(render_handoff)
-
-      update_architect_block do |b|
-        b.merge("status" => "active", "current_iteration" => nil, "iterations" => [])
+      unless settings_path.exist?
+        FileUtils.mkdir_p(settings_path.dirname)
+        settings_path.write(SETTINGS_JSON_TEMPLATE)
+        to_add << ".claude/settings.json"
       end
 
-      git_run("-C", space.path.to_s, "add", "architecture/ARCHITECT.md", Space::Core::Space::METADATA_FILE)
-      git_run("-C", space.path.to_s, "commit", "-m", "Initialize architect project")
+      if to_add.any?
+        git_run("-C", space.path.to_s, "add", *to_add)
+        msg = to_add.include?("architecture/ARCHITECT.md") ? "Initialize architect project" : "Add architect settings"
+        git_run("-C", space.path.to_s, "commit", "-m", msg)
+      end
 
       handoff_path
     end
@@ -465,6 +501,46 @@ module Space::Architect
       end
     end
 
+    # Emit grounding reads for the architect's SessionStart hook.
+    #
+    # Prints to stdout (via the caller), in order:
+    #   1. architecture/ARCHITECT.md — always, if present
+    #   2. architecture/BRIEF.md    — if present
+    #   3. In-flight iteration file — resolved as:
+    #        a) space.data["project"]["current_iteration"] entry's file, if it exists on disk
+    #        b) highest-ordinal architecture/I<NN>-*.md otherwise
+    #        c) nothing if neither
+    #
+    # WORKTREE GUARD (load-bearing, §1): when session_cwd is inside a builder
+    # worktree (<space>/build/<id>/wt/**), returns "" and the caller emits nothing.
+    # Builders never receive architect grounding.
+    #
+    # session_cwd defaults to Dir.pwd; callers may inject a path for testing or
+    # to pass the value received from the hook's stdin JSON {"cwd": "..."}.
+    def ground(session_cwd: nil)
+      cwd = File.expand_path(session_cwd || Dir.pwd)
+      build_root = space.path.join("build").to_s
+      if cwd.start_with?("#{build_root}/") && cwd.match?(%r{/build/[^/]+/wt(/|\z)})
+        return ""
+      end
+
+      parts = []
+
+      architect_path = space.path.join("architecture", "ARCHITECT.md")
+      parts << "=== architecture/ARCHITECT.md ===\n\n#{architect_path.read}" if architect_path.exist?
+
+      brief_path = space.path.join("architecture", "BRIEF.md")
+      parts << "=== architecture/BRIEF.md ===\n\n#{brief_path.read}" if brief_path.exist?
+
+      iter_path = resolve_inflight_iteration
+      if iter_path
+        rel = iter_path.relative_path_from(space.path).to_s
+        parts << "=== #{rel} ===\n\n#{iter_path.read}"
+      end
+
+      parts.join("\n")
+    end
+
     def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false, effort: nil, touch: nil)
       if harness.to_s == "opencode" && (model.nil? || model == Harness::CLAUDE_DEFAULT_MODEL)
         raise Space::Core::Error,
@@ -700,6 +776,29 @@ module Space::Architect
     private
 
     attr_reader :space
+
+    # Resolve the in-flight iteration file for ground output.
+    # Rule: (a) current_iteration from project block → entry's file if it exists on disk,
+    #        (b) else highest-ordinal architecture/I<NN>-*.md,
+    #        (c) else nil.
+    def resolve_inflight_iteration
+      block = space.data["project"] || {}
+      arch_dir = space.path.join("architecture")
+      return nil unless arch_dir.exist?
+
+      current = block["current_iteration"]
+      if current
+        entry = (block["iterations"] || []).find { |s| s["name"] == current }
+        if entry && entry["file"]
+          path = space.path.join(entry["file"])
+          return path if path.exist?
+        end
+      end
+
+      candidates = arch_dir.children.select { |f| f.basename.to_s.match?(/\AI\d+-.+\.md\z/) }
+      return nil if candidates.empty?
+      candidates.max_by { |f| f.basename.to_s[/\AI(\d+)/, 1].to_i }
+    end
 
     # Spawn cmd in dir with pgroup: true, writing stdout/stderr to temp files so
     # pipe buffers can never block. Polls with WNOHANG; kills the process group on

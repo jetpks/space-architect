@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "json"
+
 module Space::Architect
   module CLI
     module Architect
@@ -17,6 +19,38 @@ module Space::Architect
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
           end
+        end
+      end
+
+      class Ground < BaseCommand
+        desc "Print grounding reads (ARCHITECT.md, BRIEF.md, in-flight iteration) to stdout"
+        argument :space, required: false, desc: "Space identifier (default: $PWD)"
+
+        def call(space: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            session_cwd = parse_session_cwd_from_stdin
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              content = project.ground(session_cwd: session_cwd)
+              terminal.say content unless content.empty?
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+
+        private
+
+        # Read the session's working directory from the Claude Code hook JSON on stdin,
+        # falling back to Dir.pwd when stdin is a tty or returns nothing (e.g. direct
+        # terminal invocation, CI with /dev/null stdin, or in-process test invocation).
+        def parse_session_cwd_from_stdin
+          return Dir.pwd if $stdin.tty?
+          line = $stdin.gets
+          return Dir.pwd unless line
+          JSON.parse(line.strip)["cwd"] || Dir.pwd
+        rescue JSON::ParserError, TypeError
+          Dir.pwd
         end
       end
 
@@ -600,6 +634,7 @@ module Space::Architect
 end
 
 Space::Architect::CLI::Registry.register "init",   Space::Architect::CLI::Architect::Init
+Space::Architect::CLI::Registry.register "ground", Space::Architect::CLI::Architect::Ground
 Space::Architect::CLI::Registry.register "new",    Space::Architect::CLI::Architect::New
 Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Architect::Status
 Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
