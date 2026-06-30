@@ -117,7 +117,9 @@ The builder never edits the iteration file — the architect writes every sectio
 
 ### Verdict
 
-After all lanes complete, the architect reads the raw evidence in `## Builder Report`, runs `architect verify ITERATION` (mechanical checks only — no judgment), and then writes `## Verdict` with per-AC results and a KILL or CONTINUE decision. The verdict is written in a separate session from the dispatch, ensuring the Acceptance Criteria are evaluated cold.
+The Architect Loop separates dispatch from judgment by design. The dispatching session babysits lane liveness and stops when builders finish — it does not run gates, transcribe evidence, or evaluate results. A fresh judging session opens cold: it runs the MECHANICAL POST-FLIGHT CHECKS (`architect verify`), transcribes each lane's report verbatim into `## Builder Report` (`architect evidence`), runs the frozen gate commands (`architect gate`), and then writes `## Verdict` with per-AC results and a KILL or CONTINUE decision. Fresh-context, cold, all-at-once evaluation is the point — the judging session did not dispatch, so the fresh-session-judgment rule holds.
+
+Passing lanes are integrated into one stable `project/<slug>` branch (slug derived from the space title) that accumulates every iteration — `main` is never touched per-iteration. At project end, `architect land` prints the single `gh pr create --base main --head project/<slug>` command per touched repo; no push or `gh` call is made by the CLI.
 
 ## Space identity and resolution 🧭
 
