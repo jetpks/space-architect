@@ -185,12 +185,111 @@ class OciPackerTest < Space::ArchitectTest
     end
   end
 
+  def test_no_provision_dockerfile_contains_no_run_space_provision_line
+    with_space do |space, out_dir|
+      Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+      dockerfile = File.read(File.join(out_dir, "Dockerfile"))
+
+      refute_match(%r{^RUN /space/}, dockerfile)
+    end
+  end
+
+  def test_provision_scripts_emitted_in_declared_order_after_copy_before_workdir
+    with_provisioned_space(provision: ["scripts/a.sh", "scripts/b.sh"]) do |space, out_dir|
+      Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+      dockerfile = File.read(File.join(out_dir, "Dockerfile"))
+
+      assert_match(/^RUN \/space\/scripts\/a\.sh$/, dockerfile)
+      assert_match(/^RUN \/space\/scripts\/b\.sh$/, dockerfile)
+
+      copy_pos   = dockerfile.index("COPY . /space")
+      run_a_pos  = dockerfile.index("RUN /space/scripts/a.sh")
+      run_b_pos  = dockerfile.index("RUN /space/scripts/b.sh")
+      workdir_pos = dockerfile.rindex("WORKDIR /space")
+
+      assert copy_pos   < run_a_pos,  "RUN /space/a must come after COPY . /space"
+      assert run_a_pos  < run_b_pos,  "RUN /space/a must come before RUN /space/b"
+      assert run_b_pos  < workdir_pos, "RUN /space/b must come before WORKDIR /space"
+    end
+  end
+
+  def test_missing_provision_script_returns_failure_and_writes_no_dockerfile
+    with_provisioned_space(provision: ["scripts/missing.sh"], create_scripts: false) do |space, out_dir|
+      result = Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+
+      assert result.failure?
+      assert_match(/scripts\/missing\.sh/, result.failure.to_s)
+      refute_path_exists File.join(out_dir, "Dockerfile")
+    end
+  end
+
+  def test_absolute_provision_path_returns_failure_and_writes_no_dockerfile
+    with_space do |space, out_dir|
+      space.data["pack"] = { "provision" => ["/etc/passwd"] }
+
+      result = Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+
+      assert result.failure?
+      assert_match(%r{/etc/passwd}, result.failure.to_s)
+      refute_path_exists File.join(out_dir, "Dockerfile")
+    end
+  end
+
+  def test_dotdot_escaping_provision_path_returns_failure_and_writes_no_dockerfile
+    with_space do |space, out_dir|
+      space.data["pack"] = { "provision" => ["../outside.sh"] }
+
+      result = Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+
+      assert result.failure?
+      assert_match(%r{\.\./outside\.sh}, result.failure.to_s)
+      refute_path_exists File.join(out_dir, "Dockerfile")
+    end
+  end
+
+  def test_generate_with_provision_is_deterministic
+    with_provisioned_space(provision: ["scripts/setup.sh"]) do |space, tmp|
+      out1 = File.join(tmp, "run1")
+      out2 = File.join(tmp, "run2")
+
+      Space::Core::OciPacker.new(space: space, output_dir: out1).generate
+      Space::Core::OciPacker.new(space: space, output_dir: out2).generate
+
+      %w[Dockerfile entrypoint.sh Dockerfile.dockerignore].each do |filename|
+        content1 = File.read(File.join(out1, filename))
+        content2 = File.read(File.join(out2, filename))
+        assert_equal content1, content2,
+                     "#{filename} must be byte-identical across two runs with provision"
+      end
+    end
+  end
+
   private
 
   def with_space
     setup = temp_env
     store = build_store(env: setup.fetch(:env))
     space = store.create("Pack Test Space", git: false).value!
+    out_dir = Dir.mktmpdir("oci-packer-test")
+    yield space, out_dir
+  ensure
+    FileUtils.rm_rf(out_dir) if out_dir && File.directory?(out_dir)
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def with_provisioned_space(provision:, create_scripts: true)
+    setup = temp_env
+    store = build_store(env: setup.fetch(:env))
+    space = store.create("Provision Test Space", git: false).value!
+    if create_scripts
+      provision.each do |rel_path|
+        script_path = space.path.join(rel_path)
+        FileUtils.mkdir_p(script_path.dirname)
+        File.write(script_path, "#!/bin/bash\necho provisioned\n")
+        File.chmod(0o755, script_path)
+      end
+    end
+    space.data["pack"] = { "provision" => provision }
     out_dir = Dir.mktmpdir("oci-packer-test")
     yield space, out_dir
   ensure

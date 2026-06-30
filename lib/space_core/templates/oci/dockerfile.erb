@@ -39,6 +39,13 @@ RUN if [ -d /space/repos/space-architect ]; then \
 # Write entrypoint: sets git safe.directory, execs requested command or a login shell
 RUN echo '<%= entrypoint_b64 %>' | base64 -d > /entrypoint.sh \
  && chmod +x /entrypoint.sh
+<% if provision_scripts.any? -%>
+
+# Space-declared build-time provisioning (pack.provision)
+<% provision_scripts.each do |script| -%>
+RUN /space/<%= script %>
+<% end -%>
+<% end -%>
 
 WORKDIR /space
 
