@@ -41,7 +41,9 @@ module Space::Architect
     private
 
     def check_threshold(stdout, thresh)
-      m = Regexp.new(thresh["match"]).match(stdout)
+      re = Regexp.new(thresh["match"])
+      m  = nil
+      stdout.scan(re) { m = Regexp.last_match }
       return Result.new(pass: false, reason: "metric not found") unless m
 
       captured = m.captures.first

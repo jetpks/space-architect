@@ -470,10 +470,12 @@ module Space::Architect
       raise Space::Core::Error, "no gate commands found in the frozen Acceptance Criteria of #{rel}" if gates.empty?
 
       lanes = entry["lanes"] || []
+      repo_root = nil
       base_dir =
         if lane
           le = lanes.find { |l| l["name"] == lane }
           raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless le
+          repo_root = le["repo"] ? space.path.join("repos", le["repo"]) : nil
           space.path.join(le["worktree"] || "build/#{iteration_id(entry)}-#{lane}/wt")
         else
           repo = lanes.first&.dig("repo")
@@ -484,7 +486,17 @@ module Space::Architect
 
       gates.map do |gate|
         g   = gate.transform_keys(&:to_s)
-        dir = g["cwd"] ? space.path.join(g["cwd"]) : base_dir
+        dir =
+          if (cwd = g["cwd"])
+            gate_cwd = space.path.join(cwd)
+            if lane && repo_root && (gate_cwd == repo_root || gate_cwd.to_s.start_with?("#{repo_root}/"))
+              base_dir.join(gate_cwd.relative_path_from(repo_root)).cleanpath
+            else
+              gate_cwd
+            end
+          else
+            base_dir
+          end
         raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
 
         effective = g["timeout"] || DEFAULT_GATE_TIMEOUT
