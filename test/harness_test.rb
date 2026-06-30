@@ -745,6 +745,83 @@ class HarnessTest < Space::ArchitectTest
     FileUtils.rm_rf(root)
   end
 
+  # ── I13: wall-clock timeout group-kill (AC2) ──────────────────────────────
+
+  FAKE_SLEEP_SCRIPT = <<~RUBY
+    #!/usr/bin/env ruby
+    trap("TERM") { exit 143 }
+    sleep 300
+  RUBY
+
+  # AC2: timeout fires fast (1s), kills the process GROUP, returns 124, leaves no orphan.
+  def test_claude_code_harness_run_timeout_kills_process_group
+    root = Dir.mktmpdir("harness-timeout-test")
+    fake_bin = File.join(root, "fake_sleep_builder")
+    File.write(fake_bin, FAKE_SLEEP_SCRIPT)
+    File.chmod(0o755, fake_bin)
+
+    wt_dir       = File.join(root, "wt")
+    prompt_path  = File.join(root, "prompt.md")
+    run_log_path = File.join(root, "run.jsonl")
+    FileUtils.mkdir_p(wt_dir)
+    File.write(prompt_path, "go\n")
+
+    harness = Space::Architect::Harness::ClaudeCodeHarness.new(
+      model: "claude-sonnet-4-6", max_turns: 10, bin: fake_bin
+    )
+
+    child_pid = nil
+    # Capture the child pid before the timeout fires via a shared variable.
+    # We'll poll for the pid from the run.jsonl (nothing is written by sleep builder),
+    # so instead we track it by inspecting the process group right after launch.
+    t0 = Time.now
+
+    exit_code = harness.run(
+      prompt_path:  prompt_path,
+      run_log_path: run_log_path,
+      chdir:        wt_dir,
+      timeout:      1
+    )
+
+    elapsed = Time.now - t0
+
+    assert_equal Space::Architect::Harness::ClaudeCodeHarness::TIMEOUT_EXIT_CODE, exit_code,
+      "timeout must return #{Space::Architect::Harness::ClaudeCodeHarness::TIMEOUT_EXIT_CODE}, got #{exit_code}"
+    assert elapsed < 5, "timeout-kill must fire fast (got #{elapsed.round(2)}s, expected < 5s)"
+
+    # No orphaned builder process: pgrep for our fake binary returns nothing.
+    orphan_check = system("pgrep", "-f", "fake_sleep_builder", out: File::NULL, err: File::NULL)
+    refute orphan_check, "fake_sleep_builder process must not survive after timeout kill"
+  ensure
+    # Belt-and-suspenders: kill any stray process just in case the test failed mid-run
+    system("pkill", "-KILL", "-f", "fake_sleep_builder", out: File::NULL, err: File::NULL)
+    FileUtils.rm_rf(root)
+  end
+
+  # nil timeout preserves today's behavior (no timeout, returns child exit status).
+  def test_claude_code_harness_run_nil_timeout_no_regression
+    root = Dir.mktmpdir("harness-nil-timeout")
+    _space_dir, project, fake_claude, _fake_oc, build_dir = setup_space(root)
+
+    res = project.dispatch("demo", "A", claude_bin: fake_claude, timeout: nil)
+    assert_equal 0, res[:exit_code]
+    refute res[:timed_out], "nil timeout must not set timed_out"
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  # zero timeout preserves today's behavior (disabled).
+  def test_claude_code_harness_run_zero_timeout_no_regression
+    root = Dir.mktmpdir("harness-zero-timeout")
+    _space_dir, project, fake_claude, _fake_oc, build_dir = setup_space(root)
+
+    res = project.dispatch("demo", "A", claude_bin: fake_claude, timeout: 0)
+    assert_equal 0, res[:exit_code]
+    refute res[:timed_out], "zero timeout must not set timed_out"
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
   # I13 R7 (AC-B5): real claude binary's --help must list --include-partial-messages.
   def test_claude_binary_supports_include_partial_messages_flag
     bin = ENV.fetch("ARCHITECT_CLAUDE_BIN", "claude")

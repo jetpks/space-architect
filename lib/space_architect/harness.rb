@@ -54,7 +54,9 @@ module Space::Architect
         @disallowed_tools = disallowed_tools
       end
 
-      def run(prompt_path:, run_log_path:, chdir:, push_url: nil, push_token: nil, push_client: nil)
+      TIMEOUT_EXIT_CODE = 124
+
+      def run(prompt_path:, run_log_path:, chdir:, push_url: nil, push_token: nil, push_client: nil, timeout: nil)
         prompt_path  = Pathname.new(prompt_path)
         run_log_path = Pathname.new(run_log_path)
 
@@ -65,9 +67,28 @@ module Space::Architect
               child = Async::Process::Child.new(*argv, chdir: chdir.to_s, in: prompt_io, out: w, err: log)
               w.close
               tasks = start_tee(r, log, push_url: push_url, push_token: push_token, push_client: push_client)
+              timed_out    = false
+              timeout_task = nil
+
+              # Async::Task#with_timeout cannot do TERM→grace→KILL because
+              # Async::Process::Child#wait_thread's ensure goes straight to KILL.
+              # Instead: a concurrent fiber fires after the deadline and escalates.
+              # transient: true so the reactor doesn't wait for it when main work finishes.
+              if timeout && timeout > 0
+                timeout_task = Async(transient: true) do
+                  sleep timeout
+                  timed_out = true
+                  Process.kill("TERM", -child.pid) rescue nil
+                  sleep 0.5
+                  Process.kill("KILL", -child.pid) rescue nil
+                end
+              end
+
               status = child.wait
+              timeout_task&.stop
+
               tasks.each(&:wait)
-              status.exitstatus
+              timed_out ? TIMEOUT_EXIT_CODE : status.exitstatus
             end
           end
         end
@@ -193,7 +214,7 @@ module Space::Architect
         cfg
       end
 
-      def run(prompt_path:, run_log_path:, chdir:)
+      def run(prompt_path:, run_log_path:, chdir:, timeout: nil) # timeout: deferred — opencode kill path is out of scope
         prompt_path  = Pathname.new(prompt_path)
         run_log_path = Pathname.new(run_log_path)
         config_path  = write_config
