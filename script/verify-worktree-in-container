@@ -1,0 +1,102 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "open3"
+require "tmpdir"
+require "fileutils"
+require "securerandom"
+
+def fail_step(step, msg)
+  warn "WORKTREE-FAIL: #{step}: #{msg}"
+  exit 1
+end
+
+tmpdir     = nil
+tmp_wt     = nil
+branch     = nil
+repo_path  = nil
+owned_repo = nil
+
+begin
+  if ARGV[0]
+    repo_path = ARGV[0]
+  else
+    detected = Dir.glob("/space/repos/*/").find { |d| File.exist?(File.join(d, ".git")) }
+    if detected
+      repo_path = detected.chomp("/")
+    else
+      owned_repo = Dir.mktmpdir("verify-wt-repo")
+      repo_path  = owned_repo
+      _, err, status = Open3.capture3("git", "init", repo_path)
+      fail_step("git-init", err.strip) unless status.success?
+    end
+  end
+
+  warn "repo: #{repo_path}"
+
+  if owned_repo
+    [["user.name", "verify-worktree"], ["user.email", "verify-worktree@local"]].each do |key, val|
+      _, err, status = Open3.capture3("git", "-C", repo_path, "config", key, val)
+      fail_step("git-config", err.strip) unless status.success?
+    end
+    File.write(File.join(repo_path, "seed.txt"), "seed")
+    _, err, status = Open3.capture3("git", "-C", repo_path, "add", "seed.txt")
+    fail_step("git-add-seed", err.strip) unless status.success?
+    _, err, status = Open3.capture3("git", "-C", repo_path, "commit", "-m", "seed")
+    fail_step("git-commit-seed", err.strip) unless status.success?
+  end
+
+  # Step 1: resolve base sha
+  base_sha, err, status = Open3.capture3("git", "-C", repo_path, "rev-parse", "HEAD")
+  fail_step("rev-parse", err.strip) unless status.success?
+  base_sha = base_sha.strip
+
+  tmpdir = Dir.mktmpdir("verify-wt")
+  tmp_wt = File.join(tmpdir, "wt")
+  branch = "verify-wt-#{SecureRandom.hex(6)}"
+
+  # Step 2: worktree add
+  _, err, status = Open3.capture3("git", "-C", repo_path, "worktree", "add", tmp_wt, "-b", branch, base_sha)
+  fail_step("worktree-add", err.strip) unless status.success?
+
+  # Step 3: write + add + commit in worktree; assert sha advanced and file present
+  probe = File.join(tmp_wt, "worktree-probe.txt")
+  File.write(probe, "probe")
+  _, err, status = Open3.capture3("git", "-C", tmp_wt, "add", "worktree-probe.txt")
+  fail_step("worktree-git-add", err.strip) unless status.success?
+  _, err, status = Open3.capture3("git", "-C", tmp_wt, "commit", "-m", "probe")
+  fail_step("worktree-git-commit", err.strip) unless status.success?
+
+  new_sha, err, status = Open3.capture3("git", "-C", tmp_wt, "rev-parse", "HEAD")
+  fail_step("worktree-rev-parse", err.strip) unless status.success?
+  new_sha = new_sha.strip
+  fail_step("sha-check", "HEAD did not advance beyond #{base_sha}") if new_sha == base_sha
+  fail_step("file-check", "probe file missing from worktree") unless File.exist?(probe)
+
+  # Step 4: worktree list includes tmp_wt
+  list_out, err, status = Open3.capture3("git", "-C", repo_path, "worktree", "list")
+  fail_step("worktree-list", err.strip) unless status.success?
+  fail_step("list-check", "#{tmp_wt} not in worktree list") unless list_out.include?(tmp_wt)
+
+  # Step 5: remove + prune; assert gone from disk and list
+  _, err, status = Open3.capture3("git", "-C", repo_path, "worktree", "remove", "--force", tmp_wt)
+  fail_step("worktree-remove", err.strip) unless status.success?
+  _, err, status = Open3.capture3("git", "-C", repo_path, "worktree", "prune")
+  fail_step("worktree-prune", err.strip) unless status.success?
+  fail_step("remove-disk-check", "#{tmp_wt} still on disk after remove") if File.exist?(tmp_wt)
+  list2, err, status = Open3.capture3("git", "-C", repo_path, "worktree", "list")
+  fail_step("list-after-remove", err.strip) unless status.success?
+  fail_step("list-after-remove-check", "#{tmp_wt} still listed after remove+prune") if list2.include?(tmp_wt)
+
+  puts "WORKTREE-OK #{repo_path} #{base_sha}"
+
+ensure
+  if tmp_wt && File.exist?(tmp_wt) && repo_path && File.directory?(repo_path)
+    Open3.capture3("git", "-C", repo_path, "worktree", "remove", "--force", tmp_wt)
+  end
+  if branch && repo_path && File.directory?(repo_path) && !owned_repo
+    Open3.capture3("git", "-C", repo_path, "branch", "-D", branch)
+  end
+  FileUtils.rm_rf(tmpdir) if tmpdir
+  FileUtils.rm_rf(owned_repo) if owned_repo
+end
