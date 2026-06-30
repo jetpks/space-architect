@@ -207,24 +207,26 @@ module Space::Architect
         option   :harness,   default: nil,    desc: "Harness override (claude-code, opencode)"
         option   :effort,    default: nil,    desc: "Reasoning effort override (opencode only; sets reasoningEffort in the model config)"
         option   :detach,    type: :boolean, default: false, desc: "Detach the builder process (returns immediately with PID; poll report for completion)"
+        option   :timeout,   default: "14400", desc: "Wall-clock timeout in seconds (0 disables; default 4h); foreground only"
         option   :push_url,   default: nil,   desc: "HTTP endpoint for streaming push (POST body to this URL)"
         option   :push_token, default: nil,   desc: "Bearer token for push endpoint authorization"
         option   :push_host,  default: nil,   desc: "Base URL of the ingest server; the CLI creates a run via POST <host>/runs and streams to /runs/<id>/ingest (requires --push-token)"
 
         def call(iteration:, lane:, space: nil, model: nil,
                  max_turns: "200", harness: nil, effort: nil, detach: false,
-                 push_url: nil, push_token: nil, push_host: nil, **opts)
+                 timeout: "14400", push_url: nil, push_token: nil, push_host: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
               kwargs = { max_turns: max_turns.to_i, detach: detach }
-              kwargs[:model]      = model      if model
-              kwargs[:harness]    = harness    if harness
-              kwargs[:effort]     = effort     if effort
-              kwargs[:push_url]   = push_url   if push_url
-              kwargs[:push_token] = push_token if push_token
-              kwargs[:push_host]  = push_host  if push_host
+              kwargs[:model]      = model           if model
+              kwargs[:harness]    = harness         if harness
+              kwargs[:effort]     = effort          if effort
+              kwargs[:timeout]    = timeout.to_i    unless detach
+              kwargs[:push_url]   = push_url        if push_url
+              kwargs[:push_token] = push_token      if push_token
+              kwargs[:push_host]  = push_host       if push_host
               res = project.dispatch(iteration, lane, **kwargs)
               if detach
                 terminal.say "PID:     #{res[:pid]}"
@@ -232,6 +234,11 @@ module Space::Architect
                 terminal.say "Report:  #{terminal.path(res[:report])}"
                 terminal.say "Dispatched detached — poll #{terminal.path(res[:report])} for completion"
                 CLI.record_outcome(Outcome.new(exit_code: 0))
+              elsif res[:timed_out]
+                terminal.say "Run log: #{terminal.path(res[:run_log])}"
+                terminal.say "Report:  #{terminal.path(res[:report])}"
+                terminal.say "Builder TIMED OUT after #{timeout}s — process group killed. Re-dispatch (lanes are cheap)."
+                CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
               else
                 terminal.say "Run log: #{terminal.path(res[:run_log])}"
                 terminal.say "Report:  #{terminal.path(res[:report])}"

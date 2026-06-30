@@ -41,6 +41,9 @@ module Space::Architect
     # Hard per-gate timeout. Generous relative to the full suite (~55s).
     DEFAULT_GATE_TIMEOUT = 900
 
+    # Sentinel written to prompt.md by worktree_add. dispatch refuses to launch on this content.
+    PROMPT_STUB = "<!-- ARCHITECT: write this lane's builder prompt here, then dispatch. -->"
+
     # Inlined settings.json template for `architect init`. Registers a SessionStart
     # hook on the three explicit session-start events (startup/clear/resume) so every
     # space gets auto-regrounding. compact is intentionally omitted — reground on
@@ -560,7 +563,8 @@ module Space::Architect
       raise Space::Core::Error, "repos/#{repo} does not exist" unless repo_path.exist?
 
       id = iteration_id(entry)
-      wt_path = space.path.join("build", "#{id}-#{lane}", "wt")
+      wt_path   = space.path.join("build", "#{id}-#{lane}", "wt")
+      build_dir = space.path.join("build", "#{id}-#{lane}")
       FileUtils.mkdir_p(wt_path.dirname)
 
       base_ref = base || "HEAD"
@@ -569,26 +573,48 @@ module Space::Architect
       base_sha = base_sha.strip
 
       branch = "lane/#{id}-#{lane}"
-      git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
+
+      # Guard: an existing directory that is not a registered worktree is ambiguous — refuse.
+      if wt_path.exist? && !worktree_registered?(repo_path, wt_path)
+        raise Space::Core::Error,
+          "#{wt_path} exists but is not a registered git worktree of #{repo} — " \
+          "resolve manually before re-running worktree_add"
+      end
+
+      # Skip git worktree add when the branch and worktree already exist (idempotent re-run).
+      unless branch_exists?(repo_path, branch) && worktree_registered?(repo_path, wt_path)
+        git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
+      end
+
+      # Seed prompt.md with a placeholder stub so the architect has a place to write the prompt.
+      # Never overwrite an existing file (real prompt or stub from a prior run).
+      prompt_path = build_dir.join("prompt.md")
+      prompt_path.write("#{PROMPT_STUB}\n") unless prompt_path.exist?
+
+      new_fields = {
+        "name" => lane,
+        "repo" => repo,
+        "base_sha" => base_sha,
+        "worktree" => "build/#{id}-#{lane}/wt",
+        "integration_branch" => nil,
+        "harness" => harness.to_s,
+        "model" => model,
+        "variant" => variant
+      }
+      new_fields["effort"]    = effort         if effort
+      new_fields["touch_set"] = Array(touch)   if touch && !Array(touch).empty?
 
       update_architect_block do |b|
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
           lanes = s["lanes"] || []
-          lane_entry = {
-            "name" => lane,
-            "repo" => repo,
-            "base_sha" => base_sha,
-            "worktree" => "build/#{id}-#{lane}/wt",
-            "integration_branch" => nil,
-            "harness" => harness.to_s,
-            "model" => model,
-            "variant" => variant
-          }
-          lane_entry["effort"] = effort if effort
-          lane_entry["touch_set"] = Array(touch) if touch && !Array(touch).empty?
-          lanes << lane_entry
-          s["lanes"] = lanes
+          existing = lanes.find { |l| l["name"] == lane }
+          if existing
+            existing.merge!(new_fields)
+          else
+            lanes << new_fields
+            s["lanes"] = lanes
+          end
         end
         b
       end
@@ -713,7 +739,7 @@ module Space::Architect
     def dispatch(iteration, lane, model: nil, max_turns: 200,
                  claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, detach: false,
                  push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
-                 push_client: nil)
+                 push_client: nil, timeout: nil)
       raise Space::Core::Error, "Specify --push-host or --push-url, not both" if push_host && push_url
       raise Space::Core::Error, "--push-host requires --push-token"           if push_host && !push_token
       raise Space::Core::Error, "--detach cannot be combined with --push-url or --push-host" \
@@ -740,6 +766,10 @@ module Space::Architect
       report_path  = build_dir.join("report.md")
       raise Space::Core::Error, "prompt.md not found: #{prompt_path}" unless prompt_path.exist?
 
+      prompt_content = prompt_path.read.strip
+      raise Space::Core::Error, "Write this lane's prompt to #{prompt_path} before dispatching." \
+        if prompt_content.empty? || prompt_content == PROMPT_STUB.strip
+
       bin = resolved_harness == "claude-code" ? claude_bin : opencode_bin
       harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
                                                   bin: bin, config_dir: build_dir, effort: resolved_effort)
@@ -760,6 +790,7 @@ module Space::Architect
         end
 
         run_kwargs = { prompt_path: prompt_path, run_log_path: run_log_path, chdir: wt_path }
+        run_kwargs[:timeout] = timeout if timeout
         if resolved_harness == "claude-code"
           run_kwargs[:push_url]    = push_url    if push_url
           run_kwargs[:push_token]  = push_token  if push_token
@@ -768,6 +799,7 @@ module Space::Architect
         exit_code = harness_obj.run(**run_kwargs)
 
         result = { exit_code: exit_code, run_log: run_log_path, report: report_path, worktree: wt_path }
+        result[:timed_out]      = true           if exit_code == Harness::ClaudeCodeHarness::TIMEOUT_EXIT_CODE
         result[:created_run_id] = created_run_id if created_run_id
         result[:push_url]       = push_url       if push_url
         result
@@ -1035,6 +1067,17 @@ module Space::Architect
 
     def git_capture(*args)
       Open3.capture3("git", *args)
+    end
+
+    def branch_exists?(repo_path, branch)
+      _, _, st = git_capture("-C", repo_path.to_s, "rev-parse", "--verify", branch)
+      st.success?
+    end
+
+    def worktree_registered?(repo_path, wt_path)
+      out, _, _ = git_capture("-C", repo_path.to_s, "worktree", "list", "--porcelain")
+      real = File.exist?(wt_path.to_s) ? File.realpath(wt_path.to_s) : wt_path.to_s
+      out.lines.any? { |l| l.start_with?("worktree ") && l.chomp.delete_prefix("worktree ") == real }
     end
   end
 end

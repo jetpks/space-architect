@@ -1288,4 +1288,14 @@ class ArchitectCLITest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
+
+  # ── I13: dispatch --timeout option wiring ────────────────────────────────
+
+  # dry-cli calls exit(0) for --help, so we must test via subprocess.
+  def test_dispatch_help_shows_timeout_option
+    out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    assert_includes out, "--timeout", "dispatch --help must list the --timeout option"
+    assert_includes out, "14400",     "dispatch --help must show the default 4h (14400s) value"
+  end
 end

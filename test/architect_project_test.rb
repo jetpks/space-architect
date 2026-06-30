@@ -1510,4 +1510,168 @@ class ArchitectProjectTest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  # ── I13: worktree_add idempotency + prompt seeding (AC3, AC4) ─────────────
+
+  # AC3: second worktree_add call for the same lane yields exactly one entry.
+  def test_worktree_add_is_idempotent_for_same_lane
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    project.worktree_add("my-repo", "my-slice", "lane-a")  # second call — must not append
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lanes = yml.dig("project", "iterations", 0, "lanes") || []
+    assert_equal 1, lanes.length, "exactly one lane entry after two identical worktree_add calls"
+    assert_equal "lane-a", lanes.first["name"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: re-run updates recorded fields (e.g. model) in place.
+  def test_worktree_add_re_add_updates_entry_in_place
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    project.worktree_add("my-repo", "my-slice", "lane-a", model: "first-model")
+    project.worktree_add("my-repo", "my-slice", "lane-a", model: "second-model")
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lanes = yml.dig("project", "iterations", 0, "lanes") || []
+    assert_equal 1,              lanes.length
+    assert_equal "second-model", lanes.first["model"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: directory exists but is NOT a registered worktree → clear error.
+  def test_worktree_add_raises_when_directory_not_a_registered_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    # Pre-create the worktree path as a plain directory (not via git).
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+
+    err = assert_raises(Space::Core::Error) do
+      project.worktree_add("my-repo", "my-slice", "lane-a")
+    end
+    assert_match(/exists but is not a registered git worktree/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: worktree_add seeds prompt.md with the stub on first add.
+  def test_worktree_add_seeds_prompt_stub_on_first_add
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    prompt_path = File.join(dir, "build", "I01-my-slice-lane-a", "prompt.md")
+    assert File.exist?(prompt_path), "prompt.md must be seeded by worktree_add"
+    content = File.read(prompt_path).strip
+    assert_equal Space::Architect::ArchitectProject::PROMPT_STUB, content,
+      "seeded prompt.md must contain the stub sentinel"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: re-running worktree_add does NOT clobber an existing real prompt.
+  def test_worktree_add_does_not_clobber_real_prompt_on_re_add
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    prompt_path = File.join(dir, "build", "I01-my-slice-lane-a", "prompt.md")
+    File.write(prompt_path, "## Real prompt written by architect\n")
+
+    project.worktree_add("my-repo", "my-slice", "lane-a")  # re-run
+
+    assert_equal "## Real prompt written by architect\n", File.read(prompt_path),
+      "real prompt must not be overwritten on re-add"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: dispatch refuses when prompt.md is missing.
+  def test_dispatch_refuses_missing_prompt
+    dir = Dir.mktmpdir("architect-dispatch-guard")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.delete(File.join(dir, "build", "I01-demo-A", "prompt.md"))
+
+    err = assert_raises(Space::Core::Error) { project.dispatch("demo", "A") }
+    assert_match(/prompt\.md not found/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: dispatch refuses when prompt.md is empty.
+  def test_dispatch_refuses_empty_prompt
+    dir = Dir.mktmpdir("architect-dispatch-guard")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "   \n")
+
+    err = assert_raises(Space::Core::Error) { project.dispatch("demo", "A") }
+    assert_match(/Write this lane's prompt/, err.message)
+    assert_includes err.message, "prompt.md"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: dispatch refuses when prompt.md contains the unedited stub.
+  def test_dispatch_refuses_stub_prompt
+    dir = Dir.mktmpdir("architect-dispatch-guard")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    # prompt.md was seeded with the stub — do not overwrite it
+
+    err = assert_raises(Space::Core::Error) { project.dispatch("demo", "A") }
+    assert_match(/Write this lane's prompt/, err.message)
+    assert_includes err.message, "prompt.md"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end
