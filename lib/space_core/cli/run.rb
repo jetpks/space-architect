@@ -14,12 +14,13 @@ class Run < BaseCommand
     setup_terminal(**opts.slice(:color, :colors))
     handle_errors do
       result = store.current.bind do |space|
-        runner = OciRunner.new(space: space, interactive: tty.nil? ? CLI.tty?(out) : tty)
+        runner = Space::Core::OciRunner.new(space: space, interactive: tty.nil? ? CLI.tty?(out) : tty)
         runner.command(command).fmap { |argv| { argv: argv, runner: runner } }
       end
       render(result) do |r|
         r[:runner].host_dirs.each { |d| FileUtils.mkdir_p(d) }
         terminal.say "Running: #{r[:argv].join(' ')}"
+        out.flush # Kernel.exec replaces the process without flushing buffered IO
         Kernel.exec(*r[:argv])
       end
     end
