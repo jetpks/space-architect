@@ -140,6 +140,101 @@ git -C repos/<repo> branch -d lane/<iteration>-<lane>
 architect land                   # prints gh pr create --base main --head project/<slug>
 ```
 
+### Parallel + fast-follow
+
+Use when an iteration is near-disjoint — all but a thin shared seam (a
+registration line, an index entry, a shared require). Route the seam into a
+dedicated fast-follow lane; the parallel lanes stay genuinely disjoint and
+integrate without conflict.
+
+**Recipe:**
+
+1. **Spec the seam out of the parallel lanes.** Assign the seam file(s) to the
+   fast-follow lane's `--touch` set and exclude them from every parallel lane's
+   touch-set — so the parallel set is disjoint by construction.
+
+2. **Create worktrees and dispatch the parallel lanes** (off the repo base):
+   ```bash
+   architect worktree add <repo> <iteration> lane-a
+   architect worktree add <repo> <iteration> lane-b
+   architect dispatch <iteration> lane-a   # own background Bash call each
+   architect dispatch <iteration> lane-b
+   ```
+
+3. **Judging session — integrate the parallel set.** `project/<slug>` advances
+   to their merged tip:
+   ```bash
+   architect integrate <iteration> --lanes lane-a,lane-b
+   architect gate <iteration>
+   ```
+
+4. **Create the fast-follow lane off the integrated tip.** `--base` accepts any
+   git ref — passing `project/<slug>` roots the new worktree at the merged tip
+   (the keystone move):
+   ```bash
+   architect worktree add <repo> <iteration> ff --base project/<slug>
+   architect dispatch <iteration> ff
+   ```
+
+5. **Judging session — integrate the fast-follow lane.** Because it descends
+   directly from `project/<slug>`, the `--no-ff` merge appends cleanly with no
+   conflicts:
+   ```bash
+   architect integrate <iteration> --lanes ff
+   architect gate <iteration>
+   ```
+
+**Invariant:** the parallel lanes must stay disjoint — a conflict among them is
+still a disjointness defect (kill and re-spec; never hand-resolve). The
+fast-follow lane is the sanctioned home for the seam and never conflicts because
+it is a descendant of the integrated tip.
+
+### Serial deferred judgment
+
+Use when several iterations (or serial same-file lanes within one iteration)
+should run to gates-green without a judging session between each — batching cold
+AC judgment into one later session.
+
+**Recipe:**
+
+Per iteration, freeze and dispatch as normal. In a fresh judging session, run
+post-flight, integrate, and gate — but **withhold `architect verdict`**:
+
+```bash
+# judging session (per iteration) — stop before verdict:
+architect integrate <iteration> --lanes <passing-set>
+architect gate <iteration>
+# do NOT run: architect verdict <iteration> continue|kill
+```
+
+Each integrated-but-unjudged iteration surfaces as `awaiting-verdict` in
+`architect status`:
+
+```bash
+architect status
+# II   Iteration          …  Verdict
+# 03   some-feature       …  awaiting-verdict
+# 04   another-feature    …  awaiting-verdict
+```
+
+One later batch judging session evaluates all `awaiting-verdict` iterations,
+oldest-first. For each: read its own frozen AC from its freeze commit, run its
+gates cold, and record the verdict:
+
+```bash
+architect gate <iteration>               # run the frozen gates cold
+architect verdict <iteration> continue   # or: kill
+```
+
+**§1 preserved:** each verdict is cold and fresh-session — the batch judging
+session did not dispatch any of these iterations, so the §1
+fresh-session-judgment rule holds for every verdict in the batch.
+
+**Deliberate risk:** iteration N+1 integrated on top of N's not-yet-judged work
+rests on a foundation that a later KILL at N would revert. Accept this coupling
+only consciously, and always judge oldest-first so a KILL stops you before you
+compound it.
+
 ## Operating guidance
 
 - Background each lane as its own harness task and let the **per-lane

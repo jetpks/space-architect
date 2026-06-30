@@ -241,11 +241,12 @@ contract, self-contained:
   repos are inherently disjoint; same-repo lanes with any file overlap run as
   one. Each lane gets its own objective, output format, and boundaries. Most
   iterations are one lane — fan out only when the work is genuinely parallel (a
-  cross-repo project often is). Two first-class patterns: **parallel +
-  fast-follow** (fan out near-disjoint lanes in parallel; a small fast-follow
-  integration lane reconciles any thin seam afterward) and **serial deferred
-  judgment** (run lanes serially to gates-green, deferring cold AC judgment to
-  one later batch judging session).
+  cross-repo project often is). Two first-class patterns — runnable recipes in `dispatch.md`: **parallel +
+  fast-follow** (disjoint lanes integrate first; a fast-follow lane off
+  `project/<slug>` carries the seam — see `### Parallel + fast-follow`) and
+  **serial deferred judgment** (iterations run to gates-green with `architect
+  verdict` withheld; one later batch session judges each against its own frozen
+  AC — see `### Serial deferred judgment`).
 - **Effort call** — thinking budget set in the lane-prompt via the escalation
   keywords (`think hard` … `ultrathink`); default unattended builder work high,
   downgrade a routine, tightly-specified lane (record which and why). Claude
