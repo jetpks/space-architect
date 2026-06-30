@@ -307,7 +307,7 @@ module Space::Architect
       raise Space::Core::Error, "Worktree directory does not exist: #{wt_path}" unless wt_path.exist?
       base_sha = lane_entry["base_sha"]
       lane_branch = "lane/#{id}-#{lane}"
-      integration_branch = "lane/#{id}"
+      integration_branch = project_integration_branch
 
       status_out, = git_capture("-C", wt_path.to_s, "status", "--porcelain")
       raise Space::Core::Error, "Lane '#{lane}' worktree has no changes to integrate." if status_out.strip.empty?
@@ -337,6 +337,7 @@ module Space::Architect
       diffstat, = git_capture("-C", repo_path.to_s, "diff", "--stat", "#{base_sha}..HEAD")
 
       update_architect_block do |b|
+        b["integration_branch"] = integration_branch
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
           (s["lanes"] || []).each do |l|
@@ -373,6 +374,43 @@ module Space::Architect
         end
       end
       merged
+    end
+
+    # Generate the end-of-project PR command(s) for each integrated repo.
+    # Writes a PR body to build/land/<repo>-pr-body.md and returns, per repo:
+    # { repo:, integration_branch:, body_file:, command:, context: }.
+    # Raises Space::Core::Error if nothing has been integrated yet.
+    # Side-effect-free: no git write, no push, no gh.
+    def land
+      b = space.data["project"] || {}
+      integration_branch = project_integration_branch
+
+      integrated_lanes = (b["iterations"] || []).flat_map do |s|
+        (s["lanes"] || []).filter_map { |l| { iteration: s, lane: l } if l["integration_branch"] }
+      end
+
+      raise Space::Core::Error, "nothing integrated yet — integrate a lane before landing" if integrated_lanes.empty?
+
+      repos = integrated_lanes.map { |e| e[:lane]["repo"] }.uniq
+
+      repos.map do |repo|
+        body_dir = space.path.join("build", "land")
+        FileUtils.mkdir_p(body_dir)
+        body_path = body_dir.join("#{repo}-pr-body.md")
+
+        iterations = b["iterations"] || []
+        body = +"# #{space.title}\n\nMerges `#{integration_branch}` → `main`.\n\n## Iterations\n\n"
+        iterations.each do |s|
+          nn = format("%02d", s["ordinal"])
+          verdict = s["verdict"] || "—"
+          body << "- I#{nn} #{s["name"]} — #{verdict}\n"
+        end
+        body_path.write(body)
+
+        cmd = %(gh pr create --base main --head #{integration_branch} --title "#{space.title}" --body-file #{body_path})
+        context = "# Run from repos/#{repo} on branch #{integration_branch} (gh pushes it)"
+        { repo: repo, integration_branch: integration_branch, body_file: body_path.to_s, command: cmd, context: context }
+      end
     end
 
     # Run the iteration's frozen Acceptance Criteria gate commands. Each gate is
@@ -701,6 +739,13 @@ module Space::Architect
 
     def iteration_id(entry)
       "I#{format('%02d', entry['ordinal'])}-#{entry['name']}"
+    end
+
+    def project_integration_branch
+      b = space.data["project"] || {}
+      return b["integration_branch"] if b["integration_branch"]
+      slug = space.title.downcase.gsub(/[^a-z0-9]+/, "-").gsub(/\A-|-\z/, "")
+      "project/#{slug}"
     end
 
     def slice_entry(iteration)
