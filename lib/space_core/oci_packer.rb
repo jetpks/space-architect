@@ -20,6 +20,8 @@ module Space::Core
       FileUtils.mkdir_p(@output_dir)
       validated = validate_provision_scripts(space.provision_scripts)
       return validated if validated.failure?
+      validated = validate_persist_paths(space.persist_paths)
+      return validated if validated.failure?
       write("Dockerfile",    render_template("dockerfile.erb"))
       write("entrypoint.sh", entrypoint_content, mode: 0o755)
       write("Dockerfile.dockerignore", render_template("dockerignore.erb"))
@@ -44,6 +46,10 @@ module Space::Core
       @space.provision_scripts
     end
 
+    def persist_paths
+      @space.persist_paths
+    end
+
     def validate_provision_scripts(scripts)
       scripts.each do |rel_path|
         if Pathname.new(rel_path).absolute?
@@ -59,6 +65,15 @@ module Space::Core
         return Failure("provision script '#{rel_path}' does not exist under the space root") unless resolved.exist?
       end
       Success(scripts)
+    end
+
+    def validate_persist_paths(paths)
+      paths.each do |path|
+        unless Pathname.new(path).absolute?
+          return Failure("persist path '#{path}' must be an absolute path")
+        end
+      end
+      Success(paths)
     end
 
     def entrypoint_content

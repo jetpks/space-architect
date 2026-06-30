@@ -52,6 +52,10 @@ module Space::Core
       Array(data.dig("pack", "provision")).map(&:to_s)
     end
 
+    def persist_paths
+      Array(data.dig("pack", "persist")).map(&:to_s)
+    end
+
     def architect
       data["architect"]
     end
