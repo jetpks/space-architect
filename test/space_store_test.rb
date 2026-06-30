@@ -307,6 +307,27 @@ class SpaceStoreTest < Space::ArchitectTest
     assert_equal [], space.provision_scripts
   end
 
+  def test_persist_paths_returns_list_when_pack_persist_present
+    space = Space::Core::Space.new(
+      Dir.mktmpdir,
+      { "pack" => { "persist" => ["/root/.hermes", "/root/.config"] } }
+    )
+
+    assert_equal ["/root/.hermes", "/root/.config"], space.persist_paths
+  end
+
+  def test_persist_paths_returns_empty_array_when_pack_key_absent
+    space = Space::Core::Space.new(Dir.mktmpdir, { "id" => "x", "title" => "x" })
+
+    assert_equal [], space.persist_paths
+  end
+
+  def test_persist_paths_returns_empty_array_when_persist_is_empty_list
+    space = Space::Core::Space.new(Dir.mktmpdir, { "pack" => { "persist" => [] } })
+
+    assert_equal [], space.persist_paths
+  end
+
   def test_current_returns_failure_on_corrupt_metadata
     setup = temp_env
     store = build_store(env: setup.fetch(:env))
