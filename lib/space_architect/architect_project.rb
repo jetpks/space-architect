@@ -484,11 +484,12 @@ module Space::Architect
         dir = g["cwd"] ? space.path.join(g["cwd"]) : base_dir
         raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
 
-        captured = capture_with_timeout(g["cmd"], dir: dir, timeout: DEFAULT_GATE_TIMEOUT)
+        effective = g["timeout"] || DEFAULT_GATE_TIMEOUT
+        captured = capture_with_timeout(g["cmd"], dir: dir, timeout: effective)
 
         if captured[:timed_out]
           status = :fail
-          reason = "timed out after #{DEFAULT_GATE_TIMEOUT}s"
+          reason = "timed out after #{effective}s"
         else
           ev     = GateEvaluator.call(stdout: captured[:stdout], exit_code: captured[:exit_code], expect: g["expect"] || {})
           status = ev.pass? ? :pass : :fail

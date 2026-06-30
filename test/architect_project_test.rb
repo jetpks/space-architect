@@ -1078,6 +1078,43 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  def test_run_gates_timeout_kills_long_running_command
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    gate_yaml = <<~YAML
+      - id: timeout-gate
+        ac: AC3
+        cmd: sleep 30
+        timeout: 1
+        expect:
+          exit_code: 0
+    YAML
+    text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+    File.write(slice, text)
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    t0 = Time.now
+    results = project.run_gates("my-slice", lane: "lane-a")
+    elapsed = Time.now - t0
+
+    assert_equal 1, results.length
+    assert_equal :fail, results[0][:status]
+    assert_match(/timed out/, results[0][:reason])
+    assert_nil results[0][:exit_code]
+    assert elapsed < 10, "timeout-kill test took #{elapsed.round(1)}s — expected ~1s"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # ── dispatch: push_host guards and URL derivation ──────────────────────────
 
   def setup_dispatch_space(dir)
