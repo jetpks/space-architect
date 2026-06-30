@@ -137,6 +137,7 @@ require_relative "cli/status"
 require_relative "cli/config"
 require_relative "cli/repo"
 require_relative "cli/shell"
+require_relative "cli/pack"
 
 Space::Core::CLI::Registry.register "init",    Space::Core::CLI::Init
 Space::Core::CLI::Registry.register "new",     Space::Core::CLI::New
@@ -169,3 +170,4 @@ Space::Core::CLI::Registry.register "shell" do |s|
   s.register "fish",     Space::Core::CLI::Shell::Fish
   s.register "complete", Space::Core::CLI::Shell::Complete
 end
+Space::Core::CLI::Registry.register "pack", Space::Core::CLI::Pack
