@@ -100,34 +100,44 @@ over the allow list (deny always takes precedence) as the runtime first line
 against commits. Redirect stderr (`2>&1`) into the run-log so a dispatch error
 lands somewhere instead of vanishing.
 
-### Integration (architect-only, after per-lane post-flight passes)
+### Integration (judging session — after per-lane post-flight passes)
 
-You decide which lanes pass; the CLI does the git mechanics. Canonical path:
+This block runs in the judging session, not the dispatch session — the dispatch
+session's job ends when builders finish (see SKILL.md §5–6). You decide which
+lanes pass; the CLI does the git mechanics. Canonical path:
 
 ```bash
 architect integrate <iteration> --lanes <passing-set>   # e.g. --lanes lane-a,lane-b
 architect gate <iteration>                              # integration smoke (raw output; verdict stays yours)
 architect integrate <iteration> --lanes <passing-set> --teardown   # or remove worktrees + lane branches after
+architect land                                          # end of project: prints gh pr create --base main --head project/<slug>
 ```
 
 `architect integrate` commits each named lane on its branch and merges it
-`--no-ff` into the repo's `lane/<iteration>` integration branch, in order. It
-**refuses** a lane that left builder commits or wrote out-of-bounds (the
-mechanical post-flight checks), and aborts on a merge conflict. A merge conflict
-= the lane plan wasn't disjoint = a spec defect: kill the conflicting lane and
-re-spec; don't hand-resolve builder conflicts. It runs **no gates and makes no
-verdict** — `architect gate` streams the raw gate output for you to judge.
+`--no-ff` into the repo's stable `project/<slug>` branch (slug of `space.title`,
+persistent across all iterations), in order. It **refuses** a lane that left
+builder commits or wrote out-of-bounds (the mechanical post-flight checks), and
+aborts on a merge conflict. A merge conflict = the lane plan wasn't disjoint = a
+spec defect: kill the conflicting lane and re-spec; don't hand-resolve builder
+conflicts. It runs **no gates and makes no verdict** — `architect gate` streams
+the raw gate output for you to judge. `--teardown` deletes only the per-lane
+`lane/<iteration>-<lane>` branches and worktrees; it never deletes the
+`project/<slug>` branch.
 
 Under the hood / manual fallback (one lane shown):
 
 ```bash
-git -C repos/<repo> checkout -b lane/<iteration> <repo-base>
+# check out or create the project integration branch:
+git -C repos/<repo> checkout project/<slug> 2>/dev/null || \
+  git -C repos/<repo> checkout -b project/<slug> <repo-base>
 git -C build/<id>-<lane>/wt add -A
 git -C build/<id>-<lane>/wt commit -m "lane <lane>: <what>"
 git -C repos/<repo> merge --no-ff lane/<iteration>-<lane>
 <run the gate commands>          # integration smoke after every merge
 architect worktree remove <iteration> <lane>
 git -C repos/<repo> branch -d lane/<iteration>-<lane>
+# at project end:
+architect land                   # prints gh pr create --base main --head project/<slug>
 ```
 
 ## Operating guidance

@@ -241,7 +241,11 @@ contract, self-contained:
   repos are inherently disjoint; same-repo lanes with any file overlap run as
   one. Each lane gets its own objective, output format, and boundaries. Most
   iterations are one lane — fan out only when the work is genuinely parallel (a
-  cross-repo project often is).
+  cross-repo project often is). Two first-class patterns: **parallel +
+  fast-follow** (fan out near-disjoint lanes in parallel; a small fast-follow
+  integration lane reconciles any thin seam afterward) and **serial deferred
+  judgment** (run lanes serially to gates-green, deferring cold AC judgment to
+  one later batch judging session).
 - **Effort call** — thinking budget set in the lane-prompt via the escalation
   keywords (`think hard` … `ultrathink`); default unattended builder work high,
   downgrade a routine, tightly-specified lane (record which and why). Claude
@@ -293,7 +297,16 @@ check liveness: the lane's `run.jsonl` must still be growing. If it has been
 silent 15+ minutes on one in-flight command, follow "Stall detection and
 rescue" in `dispatch.md` — kill the stuck child process, not the run.
 
-### 6. Post-flight and integrate (when the runs complete)
+When all lanes complete, **the dispatch session's job is done** — babysit
+liveness per `dispatch.md` but do not run gates, transcribe evidence, integrate
+lanes, or write the Verdict. Hand off to a fresh judging session (§6).
+
+### 6. Post-flight, judge, and integrate (judging session)
+
+A fresh judging session — not the session that dispatched (see §1 and §5) —
+opens with the **MECHANICAL POST-FLIGHT CHECKS** and owns everything through the
+Verdict and integration. Because this session did not dispatch, §1's
+fresh-session-judgment is intact: it is the correct session to evaluate results.
 
 `architect verify <iteration>` REPORTS (it never judges) per lane: frozen
 sections untouched, no builder commits, scratch report present, in-bounds.
@@ -314,20 +327,30 @@ commits it, and echoes the builder's STATUS line. The builder never wrote into
 
 **Then integrate** — you decide which lanes pass, the CLI does the git
 mechanics. `architect integrate <iteration> --lanes <passing-set>` commits each
-named lane on its branch and merges it `--no-ff` into the repo's integration
-branch `lane/<iteration>`, in order; it **refuses** a lane that left builder
+named lane on its branch and merges it `--no-ff` into the stable
+`project/<slug>` branch (slug derived from `space.title`; persistent and shared
+across all iterations), in order; it **refuses** a lane that left builder
 commits or wrote out-of-bounds, and stops on a merge conflict — which means the
 lane plan wasn't disjoint, a spec defect: kill the conflicting lane and re-spec
-it (never hand-resolve). Then run `architect gate <iteration>` against the
-integration branch as a smoke check (raw output; the verdict stays yours). A
-cross-repo project yields one `lane/<iteration>` branch per touched repo. Update
-the iteration index in `architecture/ARCHITECT.md` (recording each repo's
-integration branch), remove the worktrees (`architect integrate … --teardown`,
-or `architect worktree remove <iteration> <lane>`), and commit the space.
+it (never hand-resolve). A cross-repo project yields one `project/<slug>` branch
+per touched repo. `main` is never touched per-iteration — `--teardown` deletes
+only the per-lane `lane/<iteration>-<lane>` branches and worktrees, never the
+project branch. Update the iteration index in `architecture/ARCHITECT.md`
+(recording the `project/<slug>` branch), remove the worktrees (`architect
+integrate … --teardown`, or `architect worktree remove <iteration> <lane>`), and
+commit the space.
 
-**Do not judge now** — the Verdict on the integration branch belongs to the
-next architect session; merge to each repo's main only on a CONTINUE verdict
-there.
+**Run the frozen gates cold** — `architect gate <iteration>` runs the frozen
+gate commands against the integration tree and streams raw output (a runner, not
+a judge). Read the output, check the diff against the Specification and the
+cited BRIEF §sections (per §2), then write the **Verdict** (`architect verdict
+<iteration> continue|kill --from <file>`): disagreement rulings, per-AC
+PASS/FAIL/INVALID, the KILL/CONTINUE call.
+
+At project end, `architect land` prints the single `gh pr create --base main
+--head project/<slug>` command per touched repo and writes a PR body to
+`build/land/` — no push, no `gh` call; the human runs it from the repo when
+the project is ready to ship.
 
 ## Maintenance
 

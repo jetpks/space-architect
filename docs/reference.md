@@ -132,6 +132,126 @@ architect worktree remove dry-cli-port lane-a
 | `worktree list` | List active architect worktree directories. |
 | `worktree remove ITERATION LANE` | Remove the lane worktree. |
 
+### `architect section ITERATION SECTION [SPACE]`
+
+Write a section of the current iteration file and commit it in one step. `SECTION` must be one of: `grounds`, `specification`, `prompt`, `verdict`. Provide the body via `--from <file>` (recommended for multi-line content), `--body <text>` (inline), or `--stdin`. Pass `--append --lane <name>` to stack a `### <lane>` subsection instead of replacing the section body — used to record per-lane Builder Prompts. Refuses to write a frozen section (Grounds/Specification) once the iteration is frozen.
+
+```sh
+architect section my-feature specification --from spec.md
+architect section my-feature grounds --from grounds.md
+architect section my-feature prompt --append --lane lane-a --from build/I01-my-feature-lane-a/prompt.md
+architect section my-feature verdict --from verdict.md
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--from=FILE` | — | Read the section body from a file. |
+| `--body=TEXT` | — | Inline section body (one-liners). |
+| `--stdin` | `false` | Read the section body from stdin. |
+| `--append` | `false` | Append a `### <lane>` subsection instead of replacing. |
+| `--lane=NAME` | — | Lane name for an appended subsection. |
+
+### `architect brief new [SPACE]`
+
+Scaffold the durable project brief at `architecture/BRIEF.md` and commit it. The brief holds numbered §sections (§1 goal, §2 constraints, … §N definition of done) that span all iterations; each iteration's Specification and Verdict cites it as **BRIEF §N**. Idempotent guard: refuses if `BRIEF.md` already exists unless `--force` is passed.
+
+```sh
+architect brief new
+architect brief new --force   # overwrite an existing BRIEF.md
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--force` | `false` | Overwrite an existing `BRIEF.md`. |
+
+### `architect evidence ITERATION [SPACE]`
+
+Transcribe a lane's scratch report at `build/<id>-<lane>/report.md` **verbatim** (byte-for-byte, no interpretation) into the `## Builder Report` section of the iteration file and commit. Echoes the builder's STATUS line on completion. Pass `--lane` for a per-lane subsection; omit for a single-lane iteration.
+
+```sh
+architect evidence my-feature
+architect evidence my-feature --lane lane-a
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--lane=NAME` | — | Lane name (appends a `### <lane>` subsection; omit for single-lane iterations). |
+
+### `architect merge ITERATION LANE [SPACE]`
+
+Integrate a single architect-judged-passing lane: commits the builder's working-tree changes on the per-lane `lane/<id>-<lane>` branch, then merges `--no-ff` into the repo's stable `project/<slug>` branch. Runs no gates and makes no verdict — those are the architect's. Refuses a lane that left builder commits or wrote outside its declared touch set. Aborts cleanly on a merge conflict (a lane-plan disjointness defect — kill the conflicting lane and re-spec; do not hand-resolve).
+
+```sh
+architect merge my-feature lane-a
+architect merge my-feature lane-a --message "lane lane-a: integrate"
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--message=TEXT` | `"lane <lane>: integrate"` | Commit message for the lane's working-tree changes. |
+
+### `architect integrate ITERATION [SPACE]`
+
+Integrate the architect-supplied set of passing lanes in order, running `merge` for each and stopping on the first conflict. The target is the stable `project/<slug>` branch (slug derived from `space.title`) shared across all iterations — `main` is never touched per-iteration. Pass `--teardown` to remove lane worktrees and delete per-lane `lane/<id>-<lane>` branches after merging; it never deletes the `project/<slug>` branch.
+
+```sh
+architect integrate my-feature --lanes lane-a,lane-b
+architect integrate my-feature --lanes lane-a,lane-b --teardown
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--lanes=NAMES` | (required) | Comma-separated list of passing lane names (the architect decides the set). |
+| `--teardown` | `false` | Remove worktrees and delete per-lane branches after merge. |
+
+### `architect gate ITERATION [LANE] [SPACE]`
+
+Run the iteration's frozen Acceptance Criteria gate commands and stream raw output per gate, reporting PASS or FAIL for each. Gate commands are always read from the freeze commit — never the working copy — so the criteria stay immutable. Without a lane argument, runs in `repos/<repo>` against the currently-checked-out branch (typically `project/<slug>` after `architect integrate`). With a lane name, runs in that lane's worktree. The mechanical results are runner output; the AC verdict is always the architect's.
+
+```sh
+architect gate my-feature
+architect gate my-feature lane-a   # run in the lane worktree
+```
+
+### `architect verdict ITERATION DECISION [SPACE]`
+
+Record the architect's verdict for an iteration: writes the `## Verdict` prose to the iteration file and records the decision (`continue` or `kill`) in `space.yaml`, committed in one step. The verdict covers disagreement rulings (ACCEPT/REJECT/MODIFY + one line each), per-AC PASS/FAIL/INVALID results, and the KILL/CONTINUE call with the single decisive reason. Provide the body via `--from <file>`, `--body <text>`, or `--stdin`.
+
+```sh
+architect verdict my-feature continue --from verdict.md
+architect verdict my-feature kill --body "AC2 gate failed: 0 tests found"
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--from=FILE` | — | Read the verdict body from a file. |
+| `--body=TEXT` | — | Inline verdict body. |
+| `--stdin` | `false` | Read the verdict body from stdin. |
+
+### `architect land [SPACE]`
+
+Generate the end-of-project PR command for each integrated repo. Writes a PR body to `build/land/<repo>-pr-body.md` summarising all iterations and their verdicts, then prints the `gh pr create --base main --head project/<slug>` command to run from `repos/<repo>`. Side-effect-free: no git write, no push, no `gh` call. Run the printed command when the project is ready to ship.
+
+```sh
+architect land
+```
+
+### `architect variant [SUBCOMMAND]`
+
+Manage competing-lane variant sets — multiple `(harness, model)` lanes over one byte-identical frozen spec, used to compare builder strategies or model tiers head-to-head. Judge every variant against the same frozen AC before promoting a winner.
+
+```sh
+architect variant add my-app my-feature --pairs "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2"
+architect variant compare my-feature
+architect variant promote my-feature v02
+```
+
+| Command | Description |
+|---------|-------------|
+| `variant add REPO ITERATION --pairs PAIRS [--base REF] [--prompt FILE]` | Create a variant set: one worktree per `harness[:model]` pair. |
+| `variant compare ITERATION` | Side-by-side view of all variants (winner, harness, model, integration branch, status). |
+| `variant promote ITERATION WINNER` | Promote one variant as the winner; marks others discarded. |
+
 ## Space management: `architect space …` 🗂️
 
 Manage project spaces. These commands are also accessible via the `space` shim (e.g., `space new "Title"` → `architect space new "Title"`).
