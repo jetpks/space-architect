@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 git config --global --add safe.directory '*'
+git config --global --get user.name >/dev/null 2>&1 || git config --global user.name 'space-architect'
+git config --global --get user.email >/dev/null 2>&1 || git config --global user.email 'architect@localhost'
 if [ "$#" -eq 0 ]; then
   exec bash --login
 else

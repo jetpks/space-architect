@@ -114,6 +114,18 @@ class OciPackerTest < Space::ArchitectTest
     end
   end
 
+  def test_entrypoint_seeds_a_default_git_identity_when_unset
+    with_space do |space, out_dir|
+      Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+      entrypoint = File.read(File.join(out_dir, "entrypoint.sh"))
+
+      # Only when unset (so a mounted/-e identity wins), so the in-guest architect
+      # loop's commits — and the worktree harness — don't die on "Author identity unknown".
+      assert_match(/git config --global --get user\.name .* \|\| git config --global user\.name /, entrypoint)
+      assert_match(/git config --global --get user\.email .* \|\| git config --global user\.email /, entrypoint)
+    end
+  end
+
   def test_entrypoint_is_executable
     with_space do |space, out_dir|
       Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
