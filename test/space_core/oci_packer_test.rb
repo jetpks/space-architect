@@ -264,6 +264,48 @@ class OciPackerTest < Space::ArchitectTest
     end
   end
 
+  def test_dockerfile_contains_profile_d_path_fix
+    with_space do |space, out_dir|
+      Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+      dockerfile = File.read(File.join(out_dir, "Dockerfile"))
+
+      assert_match(%r{/etc/profile\.d/space-architect\.sh}, dockerfile)
+      assert_match(%r{/usr/local/bundle/bin}, dockerfile)
+      assert_match(%r{/root/\.local/bin}, dockerfile)
+    end
+  end
+
+  def test_persist_paths_rendered_as_volume_flags_in_doc_comment
+    with_space do |space, out_dir|
+      space.data["pack"] = { "persist" => ["/root/.hermes"] }
+      Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+      dockerfile = File.read(File.join(out_dir, "Dockerfile"))
+
+      assert_match(%r{-v [^:]+:/root/\.hermes}, dockerfile)
+    end
+  end
+
+  def test_no_persist_paths_dockerfile_contains_no_volume_flags
+    with_space do |space, out_dir|
+      Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+      dockerfile = File.read(File.join(out_dir, "Dockerfile"))
+
+      refute_match(/-v [^:]+:/, dockerfile)
+    end
+  end
+
+  def test_relative_persist_path_returns_failure_and_writes_no_dockerfile
+    with_space do |space, out_dir|
+      space.data["pack"] = { "persist" => ["relative/path"] }
+
+      result = Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+
+      assert result.failure?
+      assert_match(/relative\/path/, result.failure.to_s)
+      refute_path_exists File.join(out_dir, "Dockerfile")
+    end
+  end
+
   private
 
   def with_space
