@@ -2,7 +2,7 @@
 
 Read this only when a research trigger fires (see SKILL.md step 3). The fan-out
 uses `architect research dispatch` to launch parallel read-only `claude -p`
-researchers (Sonnet 4.6, no Edit/Write/Bash) and `architect research wait` to
+researchers (a cheaper model, read-only — no Edit/Write/Bash) and `architect research wait` to
 collect their results. The architect keeps all judgment: it verifies
 load-bearing claims and writes the iteration's **Grounds** section itself.
 

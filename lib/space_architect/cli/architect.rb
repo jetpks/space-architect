@@ -6,7 +6,7 @@ module Space::Architect
   module CLI
     module Architect
       class Init < BaseCommand
-        desc "Scaffold architect project memory in the current space"
+        desc "Scaffold (or top up) the architect project: ARCHITECT.md, space.yaml project block, SessionStart hook"
         argument :space, required: false, desc: "Space identifier (default: $PWD)"
 
         def call(space: nil, **opts)
@@ -125,7 +125,7 @@ module Space::Architect
       end
 
       class Freeze < BaseCommand
-        desc "Freeze gates for an iteration"
+        desc "Freeze the iteration's frozen region (Grounds/Specification/Acceptance Criteria) and record the freeze SHA"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
 
@@ -151,7 +151,7 @@ module Space::Architect
       end
 
       class Verify < BaseCommand
-        desc "Post-flight mechanical checks for an iteration (reports only, no judgment)"
+        desc "Post-flight mechanical lane checks — frozen-untouched, no builder commits, report exists, in-bounds (reports only, no judgment)"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
 
@@ -202,7 +202,7 @@ module Space::Architect
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-        option   :model,     default: nil,    desc: "Model to use (default: lane entry or claude-sonnet-4-6)"
+        option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's model, else the reference default claude-sonnet-4-6). Any provider/tier; pin a full id, not a floating alias"
         option   :max_turns, default: "200",  desc: "Max turns for the builder"
         option   :harness,   default: nil,    desc: "Harness override (claude-code, opencode)"
         option   :effort,    default: nil,    desc: "Reasoning effort override (opencode only; sets reasoningEffort in the model config)"

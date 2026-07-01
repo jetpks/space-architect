@@ -30,11 +30,12 @@ the loop.
 
 **Roles**
 
-- **architect** — the judgment role (a human, or Claude Opus 4.8 in judgment
-  mode): arbitrates disagreements, writes and freezes iteration files, calls
-  kill/continue, merges builder output. Never writes implementation code.
-- **builder** — the implementation role: Claude Sonnet 4.6 run headless via
-  `architect dispatch` (`claude -p`), one per lane in its own worktree. Reports
+- **architect** — the judgment role (a strong reasoning model, or a human, in
+  judgment mode): arbitrates disagreements, writes and freezes iteration files,
+  calls kill/continue, merges builder output. Never writes implementation code.
+- **builder** — the implementation role: a cheaper model run headless via
+  `architect dispatch` (reference harness: `claude -p`), one per lane in its own
+  worktree. Reports
   raw evidence; never grades its own work; never edits `architecture/`.
 
 **The workspace**
@@ -43,7 +44,7 @@ the loop.
   artifacts under one root. `architect` finds it by walking up from `$PWD` to the
   nearest `space.yaml`.
 - **space.yaml** — the space's identity file: id, title, status, repos, notes,
-  tags, plus the `architect:` block (project state — iterations, freeze shas,
+  tags, plus the `project:` block (project state — iterations, freeze shas,
   lanes).
 - **project** — an Architect Loop instance living inside a space; spans the
   repos under `repos/`.
@@ -108,16 +109,16 @@ the loop.
 **Repos**
 
 - **evergreen** / copy-on-write / **`src` engine** — repo provisioning: when an
-  up-to-date local copy exists under `evergreen_dir`, `architect` copies it into
+  up-to-date local copy exists under `src_dir`, `architect` copies it into
   the space (copy-on-write on APFS) instead of cloning over the network. The
-  vendored `src` engine keeps those evergreen checkouts tended.
+  `src` engine (`space-src`) keeps those evergreen checkouts tended.
 
 ## Where you are
 
 A space's directory layout:
 
 ```text
-space.yaml        # identity + project state (the architect: block)
+space.yaml        # identity + project state (the project: block)
 README.md
 repos/            # the repos the project spans
 notes/            # scratch, prompts, logs

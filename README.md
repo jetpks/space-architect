@@ -2,7 +2,7 @@
 
 [![Gem Version](https://badge.fury.io/rb/space-architect.svg)](https://badge.fury.io/rb/space-architect)
 
-> **Task-scoped workspaces that double as Architect Loop missions — for humans and their agents!** ✨🛰️
+> **Task-scoped workspaces that double as Architect Loop projects — for humans and their agents!** ✨🛰️
 
 `space-architect` is a Ruby toolkit for **spaces** — task-scoped project
 workspaces that hold repos, notes, and artifacts under one obvious filesystem
@@ -153,13 +153,20 @@ builders. Each loop lives inside a space as a *project*.
 
 **Roles:**
 
-- **Architect** — you (or Claude Opus 4.8 in judgment mode): arbitrates
-  disagreements, writes and freezes iteration files, calls kill/continue, merges
-  builder output. Never writes implementation code.
-- **Builder** — Claude Sonnet 4.6 run headless via `architect dispatch`, one per
-  lane in its own git worktree: reads the iteration's Builder Prompt, does the
-  work, writes raw evidence to `build/<id>-<lane>/report.md`. Never grades its
-  own work; never edits `architecture/`.
+- **Architect** — the judgment role: a strong reasoning model (or you), run
+  interactively. Arbitrates disagreements, writes and freezes iteration files,
+  calls kill/continue, merges builder output. Never writes implementation code.
+- **Builder** — the execution role: a cheaper model run headless via `architect
+  dispatch`, one per lane in its own git worktree. Reads the iteration's Builder
+  Prompt, does the work, writes raw evidence to `build/<id>-<lane>/report.md`.
+  Never grades its own work; never edits `architecture/`.
+
+The loop is **model-agnostic** — which models fill the two roles is your choice
+(e.g. a strong Claude model judging a cheaper one on the same plan, or a
+cross-vendor pairing for more independent review). Set it per dispatch with
+`architect dispatch --model …`, or run several pairings head-to-head as a
+**variant set** (`architect variant add`). See
+[docs/DESIGN.md](docs/DESIGN.md) §1–§2 for the reasoning.
 
 **Filesystem layout:**
 
@@ -193,10 +200,16 @@ prints the frozen Acceptance Criteria back. Any change to those sections
 afterward is an automatic iteration FAIL. The builder never edits the iteration
 file.
 
+**Re-grounding 🧭** — `architect init` also scaffolds a `SessionStart` hook that
+runs `architect ground` (emitting `ARCHITECT.md`, `BRIEF.md`, and the in-flight
+iteration) so every fresh session starts oriented — the loop leans on
+fresh-session judgment, and this is what makes picking up cold cheap. Builders
+inside a lane worktree are never grounded.
+
 **Command surface:**
 
 ```sh
-architect init                              # scaffold ARCHITECT.md + the space.yaml architect: block
+architect init                              # scaffold ARCHITECT.md + the space.yaml project: block + SessionStart hook
 architect brief new                         # scaffold the durable project BRIEF.md
 architect new <iteration>                   # scaffold architecture/I<NN>-<iteration>.md
 architect section <it> <section> --from <f> # write + commit a section
@@ -362,7 +375,7 @@ require "space_src"        # just the evergreen engine
 ## Documentation 📖
 
 - **[Command Reference](docs/reference.md)** — every command, flag, and behavior
-- **[Design](docs/design.md)** — why spaces and the Architect Loop exist, and how they're shaped
+- **[Design](docs/DESIGN.md)** — the source-backed rationale: the twelve invariant rules (R1–R12), the failure-mode → mitigation table, and why the loop is shaped this way
 - **[Changelog](CHANGELOG.md)** — release history
 
 ## Development 🛠️

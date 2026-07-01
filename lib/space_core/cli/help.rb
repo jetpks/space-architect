@@ -16,7 +16,14 @@ module Space::Core::CLI
   # output stay plain. The `src` binary never loads space_core, so its own plain
   # Usage is untouched.
   module Help
-    TAGLINE = "date-prefixed workspaces; repos provisioned on fibers at copy-on-write speed"
+    # One tagline per binary — the root header is served for both `space` and
+    # `architect` from here, so we pick by $PROGRAM_NAME. The default covers the
+    # test runner and any other invocation where the binary can't be identified.
+    TAGLINES = {
+      "space"     => "date-prefixed workspaces; repos provisioned on fibers at copy-on-write speed",
+      "architect" => "the Architect Loop: structured judgment plus a fleet of headless AI builders"
+    }.freeze
+    DEFAULT_TAGLINE = TAGLINES.fetch("space")
 
     module_function
 
@@ -39,7 +46,13 @@ module Space::Core::CLI
       return unless result.names.empty?
 
       "#{pastel.bold.cyan("space-architect")} #{pastel.dim(Space::Core::VERSION)} " \
-        "#{pastel.dim("— #{TAGLINE}")}\n"
+        "#{pastel.dim("— #{tagline}")}\n"
+    end
+
+    # The tagline for the binary in hand: `space` and `architect` each get their
+    # own, keyed off $PROGRAM_NAME (the same signal program_prefix reads).
+    def tagline
+      TAGLINES.fetch(File.basename($PROGRAM_NAME), DEFAULT_TAGLINE)
     end
 
     def footer(result, pastel)
