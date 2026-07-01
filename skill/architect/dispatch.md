@@ -1,12 +1,13 @@
 # Builder dispatch reference
 
-Verified against the `claude` CLI (Claude Code) headless mode, June 2026. The
-builder is `claude -p` (`--print`, the non-interactive headless mode) pinned to
-`claude-sonnet-4-6` — the *same binary the architect runs, one tier down*. Key
-facts the skill encodes: lane-prompts go in on **stdin** (Claude Code has no
-`@file`, and a big quoted lane-prompt as a shell argument gets mangled); the
-model is pinned with `--model claude-sonnet-4-6` (the `sonnet` alias floats to
-the latest Sonnet — pin the full id); there is **no `-C`/working-dir flag**, so
+Verified against the `claude` CLI (Claude Code) headless mode — the reference
+harness — June 2026. The builder is `claude -p` (`--print`, the non-interactive
+headless mode) pinned to the configured builder model (`<builder-model>`) — a
+cheaper model run headless via the same harness the architect uses. Key facts the
+skill encodes: lane-prompts go in on **stdin** (Claude Code has no `@file`, and a
+big quoted lane-prompt as a shell argument gets mangled); the model is pinned with
+`--model <builder-model>` (a floating alias drifts to whatever ships next — pin
+the full id); there is **no `-C`/working-dir flag**, so
 per-lane dispatch `cd`s into the worktree; permissions are the **tool
 allow/deny lists** (`--allowedTools`/`--disallowedTools`) plus
 `--permission-mode`, not a sandbox; web access is the built-in
@@ -27,21 +28,22 @@ If a lane committed, treat the worktree as tampered: reset and re-dispatch.
 
 **Preflight (once per environment):** run `claude --version`, and confirm the
 builder model resolves with a one-shot canary
-(`echo ok | claude -p --model claude-sonnet-4-6 --max-turns 1`). No API key —
+(`echo ok | claude -p --model <builder-model> --max-turns 1`). No API key —
 the builder runs on your Claude plan — but note headless `claude -p` draws on
 the Agent SDK credit pool (separate from interactive usage since June 15 2026;
-see `DESIGN.md` §4). On the first real dispatch in a new environment, launch
+see `docs/DESIGN.md` §4). On the first real dispatch in a new environment, launch
 ONE canary lane and confirm it starts cleanly before fanning anything out.
 
 ## Canonical dispatch — `architect dispatch <iteration> <lane>`
 
 The canonical path is `architect dispatch <iteration> <lane>`. The tool
-assembles the canonical `claude -p` argv, pins the model to `claude-sonnet-4-6`,
+assembles the canonical `claude -p` argv, pins the builder model (the lane's
+configured model or the CLI's reference default; see `docs/DESIGN.md` §4),
 reads the lane prompt from `build/<id>-<lane>/prompt.md` on stdin, and streams
 `--output-format stream-json --verbose` output to
 `build/<id>-<lane>/run.jsonl`. Run each lane as its own **background Bash tool
-call** (`run_in_background`) so your turn doesn't block for the full multi-hour
-run.
+call** (`run_in_background`) so your turn doesn't block for the full run (30–60
+minutes is typical).
 
 Write the lane's prompt to `build/<id>-<lane>/prompt.md` first (never pass a
 big prompt as a shell argument — shells mangle quotes), then:
@@ -72,7 +74,7 @@ reaps those now-orphaned `claude` processes, and every lane dies at once with no
 `result` — partial diffs, no reports (this exact failure has happened: three
 lanes killed at the same second, zero output). One blocking dispatch per
 background Bash tool keeps each lane attached to a harness-tracked task that
-survives the full multi-hour run and reports completion per lane.
+survives the full run and reports completion per lane.
 
 ### What the tool runs under the hood
 
@@ -82,7 +84,7 @@ and as the manual fallback:
 ```bash
 # write prompt to build/<id>-<lane>/prompt.md first, then:
 ( cd build/<id>-<lane>/wt && \
-  claude -p --model claude-sonnet-4-6 \
+  claude -p --model <builder-model> \
     --permission-mode acceptEdits \
     --allowedTools 'Read,Edit,Write,Grep,Glob,Bash,WebSearch,WebFetch' \
     --disallowedTools 'Bash(git commit:*),Bash(git push:*),Bash(git reset:*),Bash(git merge:*),Bash(git rebase:*),Bash(git checkout:*),Bash(git branch:*)' \
@@ -238,15 +240,15 @@ compound it.
 ## Operating guidance
 
 - Background each lane as its own harness task and let the **per-lane
-  completion notification** bring you back (multi-hour runs are normal); read
+  completion notification** bring you back (long runs — 30–60 minutes — are normal); read
   `build/<id>-<lane>/run.jsonl` and the repo state afterwards. Do not write a
   blocking `while pgrep …; sleep` wait loop as a Bash command — that is itself
   a launcher that ties up a turn. When you return to a lane, check liveness via
   run-log growth (the stall rules below still apply unchanged).
 - Pin the model explicitly. The tool does this automatically (`--model
-  claude-sonnet-4-6`). The `sonnet` alias floats to the latest Sonnet — fine
-  interactively, but automations pin the full id so a model bump can't silently
-  change builder behavior mid-project.
+  <builder-model>`). A floating alias (a bare "latest"/tier tag) drifts to
+  whatever ships next — fine interactively, but automations pin the full id so a
+  model bump can't silently change builder behavior mid-project.
 - Effort = thinking budget. Claude Code has no per-invocation effort flag the
   way Codex exposed `model_reasoning_effort`; the builder sets thinking depth
   **in the block** via the escalation keywords (`think` < `think hard` <
@@ -271,16 +273,17 @@ compound it.
   `claude -p --continue …`, never a `&` loop (a `&` launcher orphans the
   resumed lanes exactly as it does fresh ones). Never resume across iterations —
   every iteration gets a fresh context.
-- Cross-model review gate (high-stakes iterations): the architect is Opus 4.8
-  and the builder is Sonnet 4.6 — both Claude Code, so this is a
-  cross-*tier* read inside one lab, not cross-vendor (see `DESIGN.md` R3). The
-  architect (Opus) reading the diff is already the stronger-model fresh-context
-  pass. For an extra adversarial pass, pipe the instruction + diff to a fresh
-  read-only reviewer:
+- Capability-gap review gate (high-stakes iterations): the architect outranks the
+  builder, so the architect reading the diff is already a stronger-model,
+  fresh-context pass over it. How independent that read is depends on the pairing
+  — a same-lab architect/builder shares the builder's blind spots (the frozen
+  gates stay the independent check), a cross-vendor pairing is more independent
+  (see `docs/DESIGN.md` §1/R3). For an extra adversarial pass, pipe the
+  instruction + diff to a fresh read-only reviewer:
   ```bash
   { echo "Review this diff against the spec. Flag ONLY correctness/requirement/invariant gaps with file:line evidence. No style."; \
     git -C <repo-root> diff <base>...HEAD; } \
-  | claude -p --model claude-sonnet-4-6 --allowedTools 'Read,Grep,Glob'
+  | claude -p --model <builder-model> --allowedTools 'Read,Grep,Glob'
   ```
 - `build/` is already gitignored by the space, so no extra `.gitignore` entry
   is needed. Scratch never reaches the space repo; only `architecture/` is
@@ -392,11 +395,11 @@ against them, do not edit or work around) ===
 
 ## Builder-side standing setup (one time per machine/repo)
 
-- The builder is the same `claude` binary as the architect, one tier down —
-  nothing extra to install. `architect dispatch` pins the model per dispatch
-  (`--model claude-sonnet-4-6`); a `~/.claude/settings.json` `"model"` default
-  is fine interactively, but automations pin it explicitly so a default can't
-  silently swap the builder.
+- The builder is the same `claude` binary as the architect (reference harness),
+  running a cheaper model — nothing extra to install. `architect dispatch` pins
+  the model per dispatch (`--model <builder-model>`); a `~/.claude/settings.json`
+  `"model"` default is fine interactively, but automations pin it explicitly so a
+  default can't silently swap the builder.
 - Repo `CLAUDE.md` is the builder's standing context — Claude Code loads it
   root-down automatically. Put exact build/test commands and repo gotchas there;
   the loop's PHASE rules stay in the dispatch block so they version with the

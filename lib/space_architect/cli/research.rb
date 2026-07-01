@@ -8,7 +8,7 @@ module Space::Architect
           desc "Dispatch detached read-only research lanes (one per prompt file)"
           argument :prompts, required: true,
                              desc: "Prompt file(s) to dispatch (space-separated paths)"
-          option :model,     default: nil, desc: "Model override (default: claude-sonnet-4-6)"
+          option :model,     default: nil, desc: "Researcher model override (default: the reference default claude-sonnet-4-6)"
           option :max_turns, default: "40", desc: "Max turns per researcher"
 
           def call(prompts:, model: nil, max_turns: "40", **opts)

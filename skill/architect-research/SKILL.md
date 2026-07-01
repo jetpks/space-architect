@@ -74,7 +74,7 @@ toolset (`Read,Grep,Glob`) plus the web tools (`WebSearch,WebFetch`); the
 report is the redirected stdout:
 
 ```bash
-claude -p --model claude-sonnet-4-6 \
+claude -p --model <researcher-model> \
   --allowedTools 'Read,Grep,Glob,WebSearch,WebFetch' \
   --max-turns 40 \
   < build/research/<NN>-<lane>.prompt.md \
