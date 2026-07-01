@@ -42,8 +42,8 @@ configured model or the CLI's reference default; see `docs/DESIGN.md` §4),
 reads the lane prompt from `build/<id>-<lane>/prompt.md` on stdin, and streams
 `--output-format stream-json --verbose` output to
 `build/<id>-<lane>/run.jsonl`. Run each lane as its own **background Bash tool
-call** (`run_in_background`) so your turn doesn't block for the full multi-hour
-run.
+call** (`run_in_background`) so your turn doesn't block for the full run (30–60
+minutes is typical).
 
 Write the lane's prompt to `build/<id>-<lane>/prompt.md` first (never pass a
 big prompt as a shell argument — shells mangle quotes), then:
@@ -74,7 +74,7 @@ reaps those now-orphaned `claude` processes, and every lane dies at once with no
 `result` — partial diffs, no reports (this exact failure has happened: three
 lanes killed at the same second, zero output). One blocking dispatch per
 background Bash tool keeps each lane attached to a harness-tracked task that
-survives the full multi-hour run and reports completion per lane.
+survives the full run and reports completion per lane.
 
 ### What the tool runs under the hood
 
@@ -240,7 +240,7 @@ compound it.
 ## Operating guidance
 
 - Background each lane as its own harness task and let the **per-lane
-  completion notification** bring you back (multi-hour runs are normal); read
+  completion notification** bring you back (long runs — 30–60 minutes — are normal); read
   `build/<id>-<lane>/run.jsonl` and the repo state afterwards. Do not write a
   blocking `while pgrep …; sleep` wait loop as a Bash command — that is itself
   a launcher that ties up a turn. When you return to a lane, check liveness via

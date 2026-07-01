@@ -316,7 +316,7 @@ files and writes raw results to `build/<id>-<lane>/report.md` — it never
 touches `architecture/`, so lanes never collide and the Acceptance Criteria
 stay untouchable.
 
-Do not block — end the turn or do other judgment work; multi-hour runs are
+Do not block — end the turn or do other judgment work; long runs (30–60 minutes) are
 normal. Print the lane-prompts too, so the human can run any lane in an
 interactive `claude` session instead. Whenever you return to a running lane,
 check liveness: the lane's `run.jsonl` must still be growing. If it has been

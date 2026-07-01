@@ -80,10 +80,19 @@ property of the design:
   verification (R3) are what the loop actually trusts.** The model split
   hardens the review; it does not carry it.
 
-The economics are the other reason for the split: judgment minutes on the strong
-model, typing hours on the cheaper one. An orchestrator/worker split keeps the
-expensive model off the hot path where most of the tokens are spent — and lets
-you run a fleet of cheap builders in parallel.
+Economics are the other reason for the split — but be honest about them. In early
+practice this loop spent tokens on the strong model and the builder at roughly
+**10:1**, and the ceremony that sustains it (freezing, transcribing, cold judging)
+is not free. For a problem one strong model can hold in one or two self-managed
+context windows, driving it end-to-end is usually the *more* token-efficient
+choice — don't run the loop (R11). The loop earns its overhead when you are
+building **a lot**: a single self-driving context silently loses decisions that
+were never written down, and quality decays as the window fills (context rot,
+above). There the payoff is **coherence at scale**, not raw token thrift — a
+central, committed plan guides every change, so the codebase stays well-factored
+and coherent across dozens of iterations. Keeping the expensive model off the hot
+path and running a fleet of cheap builders in parallel is a real saving too, but
+it is secondary to the coherence.
 
 ---
 
@@ -92,7 +101,7 @@ you run a fleet of cheap builders in parallel.
 | Role | Who | Effort | Owns |
 |---|---|---|---|
 | **Architect** | a strong reasoning model (or a human), run interactively | minutes per work block | arbitration, judging raw evidence against frozen gates, next-iteration specs, kill/continue calls |
-| **Builder** | a cheaper/faster model run headless, one per lane (high thinking budget default; architect may dial per lane) | hours per iteration | implementation, lane agents, raw-results reporting |
+| **Builder** | a cheaper/faster model run headless, one per lane (high thinking budget default; architect may dial per lane) | ~30–60 min per lane | implementation, lane agents, raw-results reporting |
 | **Memory** | the space: per-iteration `architecture/I<NN>-<name>.md` files (indexed by `architecture/ARCHITECT.md`) + space git history | permanent | everything; not in the committed architecture = didn't happen |
 | **Human** | you | final | scope, irreversible calls, taste |
 
@@ -100,18 +109,24 @@ The architect runs with full reasoning; judgment over a small handoff file is no
 effort-sensitive, so there is no effort knob to pin — the skill carries no
 `effort:` frontmatter (that was a field of one early harness).
 
-Why a high thinking budget for the builder: it runs unattended for hours, where
-the metric to buy is review-survival, not first-token latency — so default to a
-high budget and let the architect downgrade routine, tightly-specified lanes.
-When the builder CLI has no per-invocation effort flag, thinking depth is set in
-the dispatch block via escalation keywords or floored with an env var (see §4).
-This is a per-lane judgment call the spec records explicitly.
+Why a high thinking budget for the builder: it runs unattended for a stretch
+(30–60 minutes in practice), where the metric to buy is review-survival, not
+first-token latency — so default to a high budget and let the architect downgrade
+routine, tightly-specified lanes. How thinking depth is set is harness-specific —
+a reasoning-effort flag on some CLIs, escalation keywords or an env var on others
+(see §4). This is a per-lane judgment call the spec records explicitly.
 
 The concrete model/CLI pairing is an operator choice — the same repo can run an
 all-one-vendor pairing, a cross-vendor pairing for stronger review independence,
-or several pairings head-to-head as a **variant set** (`architect variant add`,
+or several pairings head-to-head as a **variant set** (`architect variant add`:
 multiple `(harness, model)` lanes over one frozen spec, judged against the same
-Acceptance Criteria). The README documents the reference pairings.
+Acceptance Criteria). Variant sets are a space-architect addition beyond the
+original loop, and they buy more than a model bake-off: you get several
+**independent implementations** of the same spec, and independent implementations
+catch each other's bugs — a defect one variant trips over, another often avoids —
+and give you multiple *perspectives* on a hard problem. On a genuinely tricky
+iteration it can be worth running variants for that alone; the redundancy is the
+point, not just picking a winner. The README documents the reference pairings.
 
 ### The space as substrate
 
@@ -236,8 +251,13 @@ This skill respects that: the architect's context holds judgment only; every
 iteration is built by a **fresh headless builder process** per lane. A headless
 "continue"/"resume" (from the lane's worktree) is used only for follow-ups within
 the same iteration (answering the builder's PHASE 0 questions), never to stretch
-one builder context across iterations. "Code is cheap": when a long run leaves
-the repo broken, `git reset` and re-dispatch beats rescue prompting.
+one builder context across iterations. "Code is cheap": when a run goes badly
+wrong — a broken worktree, a poisoned context — `git reset` and re-dispatch beats
+a long rescue-prompt. But discard is not the only recovery, and often not the
+cheapest: many failures are better handled by a same-iteration continue (feed the
+builder the rulings and let it fix its own work with full context) or a narrow
+**fast-follow** lane that patches the seam. Reach for a full re-dispatch when the
+context is genuinely poisoned; otherwise don't let perfect be the enemy of good.
 
 ### R8. Parallelism is architect-orchestrated: one worktree + one fresh builder per lane, capped at 4
 Merge conflicts between parallel agents are the top reported multi-agent failure;
@@ -256,11 +276,15 @@ boundary checks (`architect verify`: `git status` must show only declared files;
 block commits), then `architect integrate` merges each passing lane `--no-ff`
 into the stable `project/<slug>` branch with gate smoke-runs. Keeping fan-out in
 the architect rather than delegating it to a builder-internal subagent feature
-makes a merge conflict a **detectable spec defect** (the lane plan wasn't
-disjoint — kill and re-spec, never hand-resolve) instead of a silent hazard, and
-isolates per-lane failure (discard one lane, not the iteration). When an
-iteration is near-disjoint but for a thin seam, the **parallel + fast-follow**
-pattern routes the seam into a dedicated follow-up lane off the integrated tip.
+makes a merge conflict a **detectable** event at integration time rather than a
+silent hazard, and isolates per-lane failure (discard one lane, not the
+iteration). Touch sets need not be *perfectly* disjoint: a large, tangled overlap
+means the lane plan was wrong (kill and re-spec), but a small, contained conflict
+is usually cheaper to hand-resolve at integration than to avoid by re-running two
+whole iterations — reserve "never hand-resolve" for conflicts that signal a real
+disjointness defect, not every collision. When an iteration is near-disjoint but
+for a thin seam, the **parallel + fast-follow** pattern routes the seam into a
+dedicated follow-up lane off the integrated tip.
 
 ### R9. Supervise asynchronously; never block on the builder
 Anthropic's agent guidance for orchestrators is explicit: "prefer async
@@ -269,7 +293,8 @@ parallel subagents. Each builder runs in the background as its own
 harness-tracked task (one background Bash tool call per lane — *not* a shell `&`
 loop, which orphans the lanes and gets them reaped together; see `dispatch.md`);
 the architect ends its turn or does other judgment work, then runs the
-post-flight checks when each run completes. Multi-hour builder runs are normal;
+post-flight checks when each run completes. Long unattended runs (30–60 minutes,
+sometimes more) are normal;
 a headless builder draws on its plan's background/credit pool rather than a
 per-window interactive quota that could die mid-run (the reference specifics are
 in §4). `architect dispatch --detach` and a wall-clock `--timeout` make a lane
@@ -323,18 +348,27 @@ encodes:
   an automation must not let a model bump silently change the builder mid-project.
   `architect dispatch --model …` overrides per dispatch, and a lane records its
   own model at `worktree add`.
-- **Headless mode has no automatic filesystem sandbox** (the OS sandbox is opt-in
-  via settings, off by default): permissions are the **tool allow/deny lists**
+- **Filesystem isolation is layered, not automatic.** By default the reference
+  CLI has no OS sandbox (it's opt-in via settings, off by default), so the
+  first-line controls are the **tool allow/deny lists**
   (`--allowedTools`/`--disallowedTools`) plus `--permission-mode` — `acceptEdits`
-  for builders to auto-approve writes without prompting, while researchers get a
+  lets builders auto-approve writes without prompting, while researchers get a
   read-only allow list and nothing else (a tool not on the list is denied, not
-  prompted, in `-p` mode). This is the one load-bearing difference from
-  sandbox-based harnesses — see R8 and the commit-guarantee note below.
-- **Thinking budget** is set in the prompt, not by a flag: escalation keywords
-  (`think` < `think hard` < `think harder` < `ultrathink`) raise it and
-  `MAX_THINKING_TOKENS` floors it. Builders default high; researchers stay
-  modest. (Harnesses that *do* expose a reasoning-effort flag are driven through
-  `architect dispatch --effort`.)
+  prompted, in `-p` mode). That is the soft default. For real hardware isolation,
+  the `space` toolkit can pack the space — builders and all — into an **OCI
+  container** (`space pack` → `space build` → `space run`, with auth injected at
+  runtime rather than baked into the image), so the whole run executes in a
+  sandbox it can't escape to the host filesystem or network. Use the tool
+  allow/deny lists for the common case; reach for the container when you want the
+  run genuinely fenced. (Neither makes `.git` read-only — "builders never commit"
+  stays enforced by the layers in the commit-guarantee note below and checked in
+  R8.)
+- **Thinking budget** is set per harness — there is no one mechanism. Some CLIs
+  take a reasoning-effort flag, driven through `architect dispatch --effort`; the
+  reference `claude-code` harness has no such flag, so depth is raised with
+  in-prompt escalation keywords (`think` < `think hard` < `think harder` <
+  `ultrathink`) or the `MAX_THINKING_TOKENS` env var. Builders default high;
+  researchers stay modest.
 - **Prompt input is stdin** — the lane-prompt is written to
   `build/<id>-<lane>/prompt.md` and fed on stdin, sidestepping shells that mangle
   quotes in big prompts. The reference CLI has no `@file` and no `-C`/working-dir
@@ -472,7 +506,7 @@ Design decisions behind it:
   citations (R1); raw researcher output stays in gitignored scratch. The builder's
   PHASE 0 challenges Grounds like any other spec input.
 
-### Two skills: `/architect` and `/architect-research`
+### Three skills: `/architect`, `/architect-research`, and `/architect-vocabulary`
 
 Discovery-scale research (brainstorming, technology selection, SOTA surveys) is a
 **separate skill**, not a mode of the loop. Three reasons: different invocation
@@ -489,6 +523,11 @@ production deep-research systems use adaptive planner-driven decomposition, and
 dynamic beats static decomposition on GAIA
 ([OAgents](https://arxiv.org/abs/2506.15741): 47.88 static → 51.52 dynamic).
 
+A third skill, **`/architect-vocabulary`**, is reference-only: it loads the
+system's terms and a short "where you are" orientation for when you're standing in
+a space (or working on the skills themselves) and need the vocabulary understood
+without running the loop — it dispatches nothing, freezes nothing, judges nothing.
+
 ---
 
 ## 6. Failure modes → mechanical mitigations
@@ -500,9 +539,9 @@ dynamic beats static decomposition on GAIA
 | Goalpost moving | Verbatim gate quoting; gates never edited after results; a missing gate is a spec defect, frozen for the next iteration only (R2, R4) |
 | Scope creep | Explicit out-of-scope list per iteration; silent scope additions = builder failure; architect flags creep by name (R5, R6) |
 | Context rot | Architect context holds judgment only; fresh builder process per iteration; the space's `architecture/` is the memory; SessionStart re-grounding (R1, R7) |
-| Merge conflicts between lanes | Disjoint `touch_set` lanes, ≤4, worktrees; conflict = detectable disjointness defect; parallel + fast-follow for the seam (R8) |
+| Merge conflicts between lanes | Overlap-checked `touch_set` lanes, ≤4, worktrees; a large tangled conflict = disjointness defect (kill/re-spec), a small contained one is hand-resolved at integration; parallel + fast-follow for the seam (R8) |
 | Placeholder implementations | Gate commands are end-to-end and executable; "search before implementing; no placeholder code" in the lane-prompt (R4) |
-| Broken repo after a long run | One iteration per loop; `git reset` + re-dispatch over rescue prompting; lanes are cheap (R7) |
+| Broken repo after a long run | One iteration per loop; recover with a same-iteration continue or a narrow fast-follow, or `git reset` + re-dispatch when the context is poisoned; lanes are cheap (R7) |
 | Fabricated status reports | Every status claim audited against a tool result, both sides; one `STATUS:` line (R10) |
 | Gate-passing but unmergeable work | Judge reads the diff against spec intent and cited BRIEF §sections, not gate output alone — METR: 38% test-pass, ~0 mergeable as-is; capability-gap review for high-stakes (R3, R4) |
 | Builder gaming visible gates | Gates frozen + read-only; architect-run verification; no builder iterate-against-gate loops (ImpossibleBench: visible-test loops raised cheating 33%→38%) (R2, R3) |
@@ -526,12 +565,6 @@ dynamic beats static decomposition on GAIA
   against a stopping condition within one run. This design adds the separations a
   bare loop lacks: a separate stronger-model judge, frozen external gates,
   arbitration, and repo-resident memory across runs.
-
-### Deferred intentionally
-
-- Ticket-system (Jira/etc.) API integration.
-- SQLite or background indexing — the filesystem + git are the database.
-- Notes subcommands beyond establishing the `notes/` directory.
 
 ---
 
