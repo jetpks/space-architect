@@ -43,23 +43,23 @@ class DispatcherTest < Space::ArchitectTest
     File.chmod(0o755, fake)
 
     space   = Space::Core::Space.load(space_dir)
-    mission = Space::Architect::ArchitectMission.new(space: space)
-    mission.init!
-    mission.new_iteration!("demo")
-    mission.worktree_add("my-repo", "demo", "A")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
 
     build_dir = File.join(space_dir, "build", "I01-demo-A")
     FileUtils.mkdir_p(build_dir)
     File.write(File.join(build_dir, "prompt.md"), "PROMPT-MARKER-42\nrest\n")
 
-    [space_dir, mission, fake, build_dir]
+    [space_dir, project, fake, build_dir]
   end
 
   def test_dispatch_writes_run_jsonl_with_policy_flags
     root = Dir.mktmpdir("dispatcher-test")
-    _space_dir, mission, fake, build_dir = setup_space_with_worktree(root)
+    _space_dir, project, fake, build_dir = setup_space_with_worktree(root)
 
-    res = mission.dispatch("demo", "A", claude_bin: fake)
+    res = project.dispatch("demo", "A", claude_bin: fake)
     log = File.read(File.join(build_dir, "run.jsonl"))
 
     assert File.exist?(File.join(build_dir, "run.jsonl")), "run.jsonl must exist"
@@ -78,10 +78,10 @@ class DispatcherTest < Space::ArchitectTest
 
   def test_dispatch_reflects_nonzero_exit_code
     root = Dir.mktmpdir("dispatcher-test")
-    _space_dir, mission, fake, build_dir = setup_space_with_worktree(root)
+    _space_dir, project, fake, build_dir = setup_space_with_worktree(root)
 
     with_env("FAKE_EXIT" => "7") do
-      res = mission.dispatch("demo", "A", claude_bin: fake)
+      res = project.dispatch("demo", "A", claude_bin: fake)
       assert_equal 7, res[:exit_code]
     end
   ensure
@@ -90,11 +90,11 @@ class DispatcherTest < Space::ArchitectTest
 
   def test_dispatch_raises_error_when_prompt_missing
     root = Dir.mktmpdir("dispatcher-test")
-    _space_dir, mission, fake, build_dir = setup_space_with_worktree(root)
+    _space_dir, project, fake, build_dir = setup_space_with_worktree(root)
     File.delete(File.join(build_dir, "prompt.md"))
 
     assert_raises(Space::Core::Error) do
-      mission.dispatch("demo", "A", claude_bin: fake)
+      project.dispatch("demo", "A", claude_bin: fake)
     end
   ensure
     FileUtils.rm_rf(root)

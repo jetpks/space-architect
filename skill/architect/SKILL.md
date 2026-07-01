@@ -1,25 +1,28 @@
 ---
 name: architect
 description: >
-  Run the Architect Loop: Opus 4.8 in Claude Code is the ARCHITECT — judgment
-  only: arbitration, judging raw evidence against frozen Acceptance Criteria,
-  splitting iterations into disjoint lanes, kill/continue calls. The BUILDERS
-  are 1-4 parallel Sonnet 4.6 agents run headless via `claude -p`, each in its
-  own git worktree; the architect reviews, merges, and integrates their work.
+  Run the Architect Loop: a strong reasoning model (or a human) is the ARCHITECT
+  — judgment only: arbitration, judging raw evidence against frozen Acceptance
+  Criteria, splitting iterations into disjoint lanes, kill/continue calls. The
+  BUILDERS are 1-4 parallel cheaper agents run headless (reference harness:
+  `claude -p`), each in its own git worktree; the architect reviews, merges, and
+  integrates their work.
   The space is the memory: one file per iteration at
   architecture/I<NN>-<name>.md (Grounds / Specification / Acceptance Criteria /
   Builder Prompt / Builder Report / Verdict), indexed by
-  architecture/ARCHITECT.md; a mission spans the repos under repos/. Use when
+  architecture/ARCHITECT.md; a project spans the repos under repos/. Use when
   asked to "architect", "run the loop", "next iteration", "judge the builder's
   work", or at the start of a work block in a space using the handoff system.
 ---
 
 # Architect
 
-You are the ARCHITECT (Opus 4.8 in Claude Code). Sonnet 4.6 via headless
-`claude -p` is the BUILDER — the same harness, one tier down. The space is the
-memory — mission artifacts live in the space's `architecture/` dir (committed),
-scratch in `build/` (gitignored); the mission spans the repos under `repos/`.
+You are the ARCHITECT — the judgment role: a strong reasoning model (or a human),
+run interactively. The BUILDER is a cheaper model run headless (reference
+harness: `claude -p`), one or more per iteration — the models filling both roles
+are an operator choice (see `docs/DESIGN.md` §1–§2), not fixed. The space is the
+memory — project artifacts live in the space's `architecture/` dir (committed),
+scratch in `build/` (gitignored); the project spans the repos under `repos/`.
 Your output is judgment and a dispatch — never implementation code. When you
 have enough information to act, act.
 
@@ -33,7 +36,7 @@ change guarantees, so there are no separate `gates/`, `lanes/`, or `prd/` dirs:
 |---|---|---|
 | **Grounds** | why — research/brief distilled (optional) | `architect section <it> grounds --from <f>` |
 | **Specification** | what/how — the full delegation contract | `architect section <it> specification --from <f>` |
-| **Acceptance Criteria** | proof — exact gate commands + thresholds | `architect freeze <it>` ❄️ **= the freeze** |
+| **Acceptance Criteria** | proof — prose conditions (AC1, AC2, …) + fenced ` ```gates ` block of runnable checks | `architect freeze <it>` ❄️ **= the freeze** |
 | **Builder Prompt** | the exact lane-prompt(s) dispatched | `architect section <it> prompt --append --lane <l> --from <f>` |
 | **Builder Report** | raw evidence, transcribed verbatim from scratch | `architect evidence <it> --lane <l>` |
 | **Verdict** | rulings + per-AC PASS/FAIL/INVALID + KILL/CONTINUE | `architect section <it> verdict --from <f>` (later session) |
@@ -53,19 +56,21 @@ report in `build/<id>-<lane>/report.md`; `architect evidence` transcribes it
 commit — `architect section` refuses to write a frozen section once frozen; only
 Builder Prompt, Builder Report, and Verdict are appended after.
 
-**The mission brief (`architecture/BRIEF.md`).** A mission with a durable spec
+**The project brief (`architecture/BRIEF.md`).** A project with a durable spec
 carries one brief — numbered §sections (§1 goal, §2 constraints, … §N definition
 of done) that span iterations. Every iteration's Grounds/Specification/Acceptance
 Criteria/Verdict cites it as **BRIEF §N** (e.g. `(BRIEF §3.1)`), the way each gate
 addresses its intent back to one frozen reference: the Acceptance Criteria table
 carries a `Brief §` column, the Specification Objective cites it, the Verdict
 reads "diff vs BRIEF §1/§3.3 — CONTINUE". Scaffold it with `architect brief new`.
-The brief is frozen at the mission level — edits to a §section are logged
-decisions in `ARCHITECT.md`, never silent per-iteration drift. Discovery missions
+The brief is frozen at the project level — edits to a §section are logged
+decisions in `ARCHITECT.md`, never silent per-iteration drift. Discovery projects
 that are still finding their shape defer the brief, cite per-iteration Grounds,
 and promote the consolidated picture into BRIEF.md once it stabilizes.
 
-Full rationale and citations: `DESIGN.md` in this skill's repo. Exact dispatch
+Full rationale and citations: `docs/DESIGN.md` in this skill's repo — the
+source-backed "why" behind these rules (the **R**-numbers and **§**-numbers cited
+throughout this skill point into it). Exact dispatch
 commands and the lane-prompt template: `dispatch.md` next to this file. To load
 this system's vocabulary without running the loop (e.g. when working *on* the
 skill), invoke the `/architect-vocabulary` skill — it is the glossary, not the
@@ -114,19 +119,19 @@ loop.
   `AGENTS.md` → `README.md` → architecture docs. Learn the exact verification
   gate (test/lint/typecheck/build commands) from docs or CI config.
 - Once per environment: `claude --version` and confirm the builder model
-  resolves (`echo ok | claude -p --model claude-sonnet-4-6 --max-turns 1`;
+  resolves (`echo ok | claude -p --model <builder-model> --max-turns 1`;
   details in `dispatch.md`). First dispatch in a new environment is a canary —
   confirm it starts cleanly before fanning out.
 - Read `architecture/ARCHITECT.md` (the cross-iteration table of contents),
-  `architecture/BRIEF.md` if present (the durable §-numbered mission contract you
+  `architecture/BRIEF.md` if present (the durable §-numbered project contract you
   cite as BRIEF §N), and the iteration file `architecture/I<NN>-<name>.md` for any
   in-flight iteration. If `ARCHITECT.md` is missing, run `architect init` (scaffolds
-  `architecture/ARCHITECT.md` and the `architect:` block in `space.yaml`,
+  `architecture/ARCHITECT.md` and the `project:` block in `space.yaml`,
   commits). Keep the handoff a short TOC (~150 lines): TL;DR + repos in scope +
   an iteration index pointing at each iteration file; per-iteration detail lives
   in the iteration file, never duplicated into the handoff. `architect status`
-  prints mission state (iterations, freeze_shas, lanes, verdicts) at any point.
-- **Space setup (first time):** `architect space new "Mission Name" -r org/repo -r …`
+  prints project state (iterations, freeze_shas, lanes, verdicts) at any point.
+- **Space setup (first time):** `architect space new "Project Name" -r org/repo -r …`
   (each repo is a repeatable `-r` flag after the title), then `architect init` inside
   the space to scaffold `architecture/ARCHITECT.md`.
 - Scale to the task: trivial fixes don't need the loop — say so and let the
@@ -166,11 +171,13 @@ re-derivation — the simplification that re-sees the shape is often the
 architect's or human's to name.) Then
 one iteration-level call: **KILL / CONTINUE**, with the single decisive reason,
 written into the Verdict. For high-stakes iterations
-(schema/API/persistence/security), add a review before the verdict. You
-(Opus 4.8) reading the diff is already a stronger-model, fresh-context pass
-over the Sonnet builder's work — a cross-tier read, though not cross-vendor
-(both are Claude Code). For an extra adversarial pass, pipe the diff to a fresh
-read-only `claude -p` reviewer (command in `dispatch.md`) or a
+(schema/API/persistence/security), add a review before the verdict. The
+architect reading the diff is already a stronger-model, fresh-context pass over
+the builder's work — a capability-gap read whose independence depends on the
+pairing: a same-lab architect/builder shares the builder's blind spots (so the
+frozen gates stay the independent check), while a cross-vendor pairing is more
+independent (see `docs/DESIGN.md` §1/R3). For an extra adversarial pass, pipe the
+diff to a fresh read-only `claude -p` reviewer (command in `dispatch.md`) or a
 fresh-context subagent prompted to break confidence — calibrated to flag only
 correctness/requirement/invariant gaps with file:line evidence, no style.
 
@@ -194,7 +201,7 @@ Two scales, two routes:
   researcher maps the topic, the orchestrator designs topic-specific parallel
   researcher lanes, claims verified against sources, synthesized into a cited
   report). Its report then distills into `architecture/BRIEF.md` §sections when
-  it is mission-scope (a durable contract that spans iterations), or the
+  it is project-scope (a durable contract that spans iterations), or the
   iteration's **Grounds** section when it is iteration-scope.
 - **Iteration scale** — run the inline fan-out below only when at least one
   trigger holds: (a) the iteration depends on external APIs, libraries, or
@@ -214,8 +221,13 @@ and write Grounds. Findings without a source URL don't enter Grounds.
 ### 4. Spec the next iteration
 
 One-PR-sized. Run `architect new <name>` to scaffold
-`architecture/I<NN>-<name>.md` (it allocates the next ordinal and records the
-iteration in `space.yaml`), then write the **Specification** section with
+`architecture/I<NN>-<name>.md` (it allocates the next ordinal **at spec-time** and records the
+iteration in `space.yaml`). The iteration index in `ARCHITECT.md` holds only scaffolded
+iterations — planned/queued work lives un-numbered in the ordered Backlog until it is
+about to be specced. Pre-numbering planned work forces renumber churn every time priorities
+reshuffle; the ordinal belongs to the work only once `architect new` is called.
+
+Then write the **Specification** section with
 `architect section <name> specification --from <file>` — the full delegation
 contract, self-contained:
 
@@ -236,22 +248,47 @@ contract, self-contained:
   repos are inherently disjoint; same-repo lanes with any file overlap run as
   one. Each lane gets its own objective, output format, and boundaries. Most
   iterations are one lane — fan out only when the work is genuinely parallel (a
-  cross-repo mission often is).
+  cross-repo project often is). Two first-class patterns — runnable recipes in `dispatch.md`: **parallel +
+  fast-follow** (disjoint lanes integrate first; a fast-follow lane off
+  `project/<slug>` carries the seam — see `### Parallel + fast-follow`) and
+  **serial deferred judgment** (iterations run to gates-green with `architect
+  verdict` withheld; one later batch session judges each against its own frozen
+  AC — see `### Serial deferred judgment`).
 - **Effort call** — thinking budget set in the lane-prompt via the escalation
   keywords (`think hard` … `ultrathink`); default unattended builder work high,
   downgrade a routine, tightly-specified lane (record which and why). Claude
   Code has no per-invocation effort flag — see `dispatch.md`.
 
-Then write the **Acceptance Criteria** section — exact gate commands +
-thresholds, each row carrying a `Brief §` column that addresses it back to
-intent — and run `architect freeze <name>`. What must be frozen before dispatch
-is the Acceptance Criteria: `architect freeze` commits any pending content in the
-frozen region (Grounds/Specification/Acceptance Criteria) in one freeze commit,
-records the `freeze_sha` in `space.yaml`, and prints the frozen AC back; **that
-commit is the freeze** ❄️ and is the last thing before dispatch. You needn't
-sequence Grounds and Specification into separate commits first — the freeze
-snapshots the whole frozen region and refuses to re-freeze once a frozen section
-changed afterward.
+**Spike (probe) iterations.** When the open question is too uncertain for a
+build — the repo can't answer it and routine API-verification won't resolve it
+— spec a *spike* (probe) instead of a build iteration. A spike is
+investigate-only: its deliverable is a **recommendation**, not merged behavior.
+Its lane reads, experiments in throwaway scratch (never the worktree), and
+writes a structured recommendation to its scratch report; there is usually
+nothing to integrate. Acceptance Criteria are **read-bound** — gates are
+minimal (at most suite-green confirming the probe broke nothing), because the
+proof is the architect reading the recommendation against the question the spike
+was set, not a runnable check; the AC names that question. The spike verdict
+uses **ADOPT / REVISE / REJECT** (not KILL/CONTINUE): the architect transcribes
+the recommendation into Builder Report, then the Verdict records the
+disposition and, if adopted, names the follow-up build iteration it spawns. A
+spike's CONTINUE means "recommendation accepted + disposition recorded." This
+is distinct from discovery-scale research (`/architect-research`, which surveys
+a whole topic): a spike is one iteration-sized, decision-oriented probe run
+through the normal builder/lane machinery.
+
+Then write the **Acceptance Criteria** section — prose conditions (AC1, AC2, …)
+that the architect judges against, followed by a fenced ` ```gates ` block of
+runnable checks (each gate carries `id`, `ac`, `cmd`, and `expect`; `cwd` is
+optional) — and run `architect freeze <name>`. What must be frozen before
+dispatch is the Acceptance Criteria: `architect freeze` lints the gates block
+(absent or empty gates is allowed but warns; malformed fails), commits any
+pending content in the frozen region (Grounds/Specification/Acceptance Criteria)
+in one freeze commit, records the `freeze_sha` in `space.yaml`, and prints the
+frozen AC back; **that commit is the freeze** ❄️ and is the last thing before
+dispatch. You needn't sequence Grounds and Specification into separate commits
+first — the freeze snapshots the whole frozen region and refuses to re-freeze
+once a frozen section changed afterward.
 
 ### 5. Dispatch (one fresh `claude -p` per lane, worktree-isolated)
 
@@ -279,14 +316,23 @@ files and writes raw results to `build/<id>-<lane>/report.md` — it never
 touches `architecture/`, so lanes never collide and the Acceptance Criteria
 stay untouchable.
 
-Do not block — end the turn or do other judgment work; multi-hour runs are
+Do not block — end the turn or do other judgment work; long runs (30–60 minutes) are
 normal. Print the lane-prompts too, so the human can run any lane in an
 interactive `claude` session instead. Whenever you return to a running lane,
 check liveness: the lane's `run.jsonl` must still be growing. If it has been
 silent 15+ minutes on one in-flight command, follow "Stall detection and
 rescue" in `dispatch.md` — kill the stuck child process, not the run.
 
-### 6. Post-flight and integrate (when the runs complete)
+When all lanes complete, **the dispatch session's job is done** — babysit
+liveness per `dispatch.md` but do not run gates, transcribe evidence, integrate
+lanes, or write the Verdict. Hand off to a fresh judging session (§6).
+
+### 6. Post-flight, judge, and integrate (judging session)
+
+A fresh judging session — not the session that dispatched (see §1 and §5) —
+opens with the **MECHANICAL POST-FLIGHT CHECKS** and owns everything through the
+Verdict and integration. Because this session did not dispatch, §1's
+fresh-session-judgment is intact: it is the correct session to evaluate results.
 
 `architect verify <iteration>` REPORTS (it never judges) per lane: frozen
 sections untouched, no builder commits, scratch report present, in-bounds.
@@ -307,20 +353,30 @@ commits it, and echoes the builder's STATUS line. The builder never wrote into
 
 **Then integrate** — you decide which lanes pass, the CLI does the git
 mechanics. `architect integrate <iteration> --lanes <passing-set>` commits each
-named lane on its branch and merges it `--no-ff` into the repo's integration
-branch `lane/<iteration>`, in order; it **refuses** a lane that left builder
+named lane on its branch and merges it `--no-ff` into the stable
+`project/<slug>` branch (slug derived from `space.title`; persistent and shared
+across all iterations), in order; it **refuses** a lane that left builder
 commits or wrote out-of-bounds, and stops on a merge conflict — which means the
 lane plan wasn't disjoint, a spec defect: kill the conflicting lane and re-spec
-it (never hand-resolve). Then run `architect gate <iteration>` against the
-integration branch as a smoke check (raw output; the verdict stays yours). A
-cross-repo mission yields one `lane/<iteration>` branch per touched repo. Update
-the iteration index in `architecture/ARCHITECT.md` (recording each repo's
-integration branch), remove the worktrees (`architect integrate … --teardown`,
-or `architect worktree remove <iteration> <lane>`), and commit the space.
+it (never hand-resolve). A cross-repo project yields one `project/<slug>` branch
+per touched repo. `main` is never touched per-iteration — `--teardown` deletes
+only the per-lane `lane/<iteration>-<lane>` branches and worktrees, never the
+project branch. Update the iteration index in `architecture/ARCHITECT.md`
+(recording the `project/<slug>` branch), remove the worktrees (`architect
+integrate … --teardown`, or `architect worktree remove <iteration> <lane>`), and
+commit the space.
 
-**Do not judge now** — the Verdict on the integration branch belongs to the
-next architect session; merge to each repo's main only on a CONTINUE verdict
-there.
+**Run the frozen gates cold** — `architect gate <iteration>` runs the frozen
+gate commands against the integration tree and streams raw output (a runner, not
+a judge). Read the output, check the diff against the Specification and the
+cited BRIEF §sections (per §2), then write the **Verdict** (`architect verdict
+<iteration> continue|kill --from <file>`): disagreement rulings, per-AC
+PASS/FAIL/INVALID, the KILL/CONTINUE call.
+
+At project end, `architect land` prints the single `gh pr create --base main
+--head project/<slug>` command per touched repo and writes a PR body to
+`build/land/` — no push, no `gh` call; the human runs it from the repo when
+the project is ready to ship.
 
 ## Maintenance
 

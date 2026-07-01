@@ -1,6 +1,6 @@
 # Command Reference 📖
 
-Every Space Architect (`space-architect`) command, flag, and behavior. The primary executable is `architect`; `space` is a forwarding shim — `space foo` routes to `architect space foo`. 🚀
+Every Space Architect (`space-architect`) command, flag, and behavior. The gem installs three first-class binaries — `architect`, `space`, and `src` — over clean `Space::Architect` / `Space::Core` / `Space::Src` seams. `architect` also forwards `architect space …` and `architect src …` to the other two, so a project can drive everything from one command; this reference documents commands under those forwarded prefixes, but each works identically as a bare `space …` / `src …` invocation. 🚀
 
 ## Global options 🎨
 
@@ -27,11 +27,19 @@ These root-level commands manage the Architect Loop within a space.
 
 ### `architect init [SPACE]`
 
-Scaffold architect mission memory in the current space: creates `architecture/ARCHITECT.md` and adds the `architect:` block to `space.yaml`. Idempotent guard: refuses if `ARCHITECT.md` already exists.
+Scaffold (or top up) the architect project in the current space: creates `architecture/ARCHITECT.md`, adds the `project:` block to `space.yaml`, and writes a `.claude/settings.json` `SessionStart` hook that re-grounds fresh sessions (see `architect ground`). Idempotent — it writes only the pieces that are missing and never overwrites existing files, so it is safe to re-run (e.g. to add the hook to a project created before it existed).
 
 ```sh
 architect init
 architect init 20260531-name-of-space
+```
+
+### `architect ground [SPACE]`
+
+Print the grounding reads for a fresh session to stdout — `architecture/ARCHITECT.md`, `architecture/BRIEF.md` (if present), and the in-flight iteration file — under per-file delimiters. This is what the `SessionStart` hook scaffolded by `architect init` runs, so a resumed or newly-cleared session starts oriented without re-reading by hand. Emits nothing (exit 0) when invoked from inside a lane worktree under `build/`, so builders are never grounded. `CLAUDE.md` is never re-emitted.
+
+```sh
+architect ground
 ```
 
 ### `architect install-skills [--provider=PROVIDER] [--project] [--force]`
@@ -75,7 +83,7 @@ architect new dispatch-engine 20260531-name-of-space
 
 ### `architect status [SPACE]`
 
-Show the Architect Loop mission state: current iteration, the iteration index table (ordinal, freeze SHA, lanes, verdict), and iteration files. Read-only.
+Show the Architect Loop project state: current iteration, the iteration index table (ordinal, freeze SHA, lanes, verdict), and iteration files. Read-only.
 
 ```sh
 architect status
@@ -102,18 +110,26 @@ architect verify dry-cli-port 20260531-name-of-space
 
 ### `architect dispatch ITERATION LANE [SPACE]`
 
-Dispatch a builder for a lane: runs `claude -p` headless and streams the full conversation to `build/<id>-<lane>/run.jsonl`.
+Dispatch a builder for a lane: runs the harness (`claude -p` by default) headless in the lane's worktree, reads the lane's `build/<id>-<lane>/prompt.md`, and streams the full conversation to `build/<id>-<lane>/run.jsonl`, with the builder's report at `build/<id>-<lane>/report.md`. Refuses to dispatch a missing, empty, or still-stubbed prompt.
 
 ```sh
 architect dispatch dry-cli-port lane-a
 architect dispatch dispatch-engine lane-b 20260531-name-of-space --model claude-opus-4-8
 architect dispatch dry-cli-port lane-a --max-turns 100
+architect dispatch dry-cli-port lane-a --detach          # returns a PID; poll report.md
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model=VALUE` | `claude-sonnet-4-6` | Model for the builder. |
+| `--model=VALUE` | lane entry, else the reference default `claude-sonnet-4-6` | Builder model to pin — any provider/tier; pin a full id, not a floating alias. |
 | `--max-turns=VALUE` | `200` | Max conversation turns. |
+| `--harness=VALUE` | lane entry, else `claude-code` | Harness override (`claude-code`, `opencode`). |
+| `--effort=VALUE` | — | Reasoning effort (opencode only; sets `reasoningEffort` in the model config). |
+| `--detach` | `false` | Detach the builder process — returns immediately with a PID; poll `report.md` for completion. Cannot combine with `--push-url`/`--push-host`. |
+| `--timeout=SECONDS` | `14400` (4h) | Wall-clock timeout; the wedged builder's process group is killed. `0` disables. Foreground only. |
+| `--push-url=URL` | — | Stream the builder's stream-json to an already-created run's ingest URL (requires `--push-token`). |
+| `--push-host=URL` | — | Create a run via `POST <host>/runs` and stream to the derived ingest URL (requires `--push-token`; mutually exclusive with `--push-url`). |
+| `--push-token=TOKEN` | — | Bearer token for the ingest endpoint. |
 
 ### `architect worktree [SUBCOMMAND]`
 
@@ -128,9 +144,171 @@ architect worktree remove dry-cli-port lane-a
 
 | Command | Description |
 |---------|-------------|
-| `worktree add REPO ITERATION LANE [--base REF]` | Create a worktree at `build/<id>-<lane>/wt` off the repo's base commit (default: `HEAD`). |
+| `worktree add REPO ITERATION LANE` | Create a worktree at `build/<id>-<lane>/wt` and record the lane in `space.yaml`. Idempotent — re-adding a lane reuses the existing worktree/branch and merges the new options in place. |
 | `worktree list` | List active architect worktree directories. |
 | `worktree remove ITERATION LANE` | Remove the lane worktree. |
+
+`worktree add` options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--base=REF` | repo `HEAD` | Base ref for the worktree. Accepts any git ref, including the `project/<slug>` integration branch — see `### Parallel + fast-follow` in `dispatch.md`. |
+| `--harness=VALUE` | `claude-code` | Harness for the lane (`claude-code`, `opencode`). |
+| `--model=VALUE` | — | Model for the lane (required for `opencode`). |
+| `--effort=VALUE` | — | Reasoning effort (opencode only; sets `reasoningEffort` in the model config). |
+| `--touch=GLOBS` | — | Comma-separated file globs the lane may touch. Recorded as the lane's `touch_set` and enforced by the in-bounds check (`architect verify`) and by `merge`. |
+
+### `architect section ITERATION SECTION [SPACE]`
+
+Write a section of the current iteration file and commit it in one step. `SECTION` must be one of: `grounds`, `specification`, `prompt`, `verdict`. Provide the body via `--from <file>` (recommended for multi-line content), `--body <text>` (inline), or `--stdin`. Pass `--append --lane <name>` to stack a `### <lane>` subsection instead of replacing the section body — used to record per-lane Builder Prompts. Refuses to write a frozen section (Grounds/Specification) once the iteration is frozen.
+
+```sh
+architect section my-feature specification --from spec.md
+architect section my-feature grounds --from grounds.md
+architect section my-feature prompt --append --lane lane-a --from build/I01-my-feature-lane-a/prompt.md
+architect section my-feature verdict --from verdict.md
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--from=FILE` | — | Read the section body from a file. |
+| `--body=TEXT` | — | Inline section body (one-liners). |
+| `--stdin` | `false` | Read the section body from stdin. |
+| `--append` | `false` | Append a `### <lane>` subsection instead of replacing. |
+| `--lane=NAME` | — | Lane name for an appended subsection. |
+
+### `architect brief new [SPACE]`
+
+Scaffold the durable project brief at `architecture/BRIEF.md` and commit it. The brief holds numbered §sections (§1 goal, §2 constraints, … §N definition of done) that span all iterations; each iteration's Specification and Verdict cites it as **BRIEF §N**. Idempotent guard: refuses if `BRIEF.md` already exists unless `--force` is passed.
+
+```sh
+architect brief new
+architect brief new --force   # overwrite an existing BRIEF.md
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--force` | `false` | Overwrite an existing `BRIEF.md`. |
+
+### `architect evidence ITERATION [SPACE]`
+
+Transcribe a lane's scratch report at `build/<id>-<lane>/report.md` **verbatim** (byte-for-byte, no interpretation) into the `## Builder Report` section of the iteration file and commit. Echoes the builder's STATUS line on completion. Pass `--lane` for a per-lane subsection; omit for a single-lane iteration.
+
+```sh
+architect evidence my-feature
+architect evidence my-feature --lane lane-a
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--lane=NAME` | — | Lane name (appends a `### <lane>` subsection; omit for single-lane iterations). |
+
+### `architect merge ITERATION LANE [SPACE]`
+
+Integrate a single architect-judged-passing lane: commits the builder's working-tree changes on the per-lane `lane/<id>-<lane>` branch, then merges `--no-ff` into the repo's stable `project/<slug>` branch. Runs no gates and makes no verdict — those are the architect's. Refuses a lane that left builder commits or wrote outside its declared touch set. Aborts cleanly on a merge conflict (a lane-plan disjointness defect — kill the conflicting lane and re-spec; do not hand-resolve).
+
+```sh
+architect merge my-feature lane-a
+architect merge my-feature lane-a --message "lane lane-a: integrate"
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--message=TEXT` | `"lane <lane>: integrate"` | Commit message for the lane's working-tree changes. |
+
+### `architect integrate ITERATION [SPACE]`
+
+Integrate the architect-supplied set of passing lanes in order, running `merge` for each and stopping on the first conflict. The target is the stable `project/<slug>` branch (slug derived from `space.title`) shared across all iterations — `main` is never touched per-iteration. Calling `integrate` again with a new `--lanes` set appends to the same `project/<slug>` branch (used by the parallel + fast-follow pattern to stack a fast-follow lane onto the integrated tip). Pass `--teardown` to remove lane worktrees and delete per-lane `lane/<id>-<lane>` branches after merging; it never deletes the `project/<slug>` branch.
+
+```sh
+architect integrate my-feature --lanes lane-a,lane-b
+architect integrate my-feature --lanes lane-a,lane-b --teardown
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--lanes=NAMES` | (required) | Comma-separated list of passing lane names (the architect decides the set). |
+| `--teardown` | `false` | Remove worktrees and delete per-lane branches after merge. |
+
+### `architect gate ITERATION [LANE] [SPACE]`
+
+Run the iteration's frozen Acceptance Criteria gate commands and stream raw output per gate, reporting PASS or FAIL for each. Gate commands are always read from the freeze commit — never the working copy — so the criteria stay immutable. Without a lane argument, runs in `repos/<repo>` against the currently-checked-out branch (typically `project/<slug>` after `architect integrate`). With a lane name, runs in that lane's worktree. The mechanical results are runner output; the AC verdict is always the architect's.
+
+```sh
+architect gate my-feature
+architect gate my-feature lane-a   # run in the lane worktree
+```
+
+### `architect verdict ITERATION DECISION [SPACE]`
+
+Record the architect's verdict for an iteration: writes the `## Verdict` prose to the iteration file and records the decision (`continue` or `kill`) in `space.yaml`, committed in one step. The verdict covers disagreement rulings (ACCEPT/REJECT/MODIFY + one line each), per-AC PASS/FAIL/INVALID results, and the KILL/CONTINUE call with the single decisive reason. Provide the body via `--from <file>`, `--body <text>`, or `--stdin`.
+
+```sh
+architect verdict my-feature continue --from verdict.md
+architect verdict my-feature kill --body "AC2 gate failed: 0 tests found"
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--from=FILE` | — | Read the verdict body from a file. |
+| `--body=TEXT` | — | Inline verdict body. |
+| `--stdin` | `false` | Read the verdict body from stdin. |
+
+### `architect land [SPACE]`
+
+Generate the end-of-project PR command for each integrated repo. Writes a PR body to `build/land/<repo>-pr-body.md` summarising all iterations and their verdicts, then prints the `gh pr create --base main --head project/<slug>` command to run from `repos/<repo>`. Side-effect-free: no git write, no push, no `gh` call. Run the printed command when the project is ready to ship.
+
+```sh
+architect land
+```
+
+### `architect variant [SUBCOMMAND]`
+
+Manage competing-lane variant sets — multiple `(harness, model)` lanes over one byte-identical frozen spec, used to compare builder strategies or model tiers head-to-head. Judge every variant against the same frozen AC before promoting a winner.
+
+```sh
+architect variant add my-app my-feature --pairs "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2"
+architect variant compare my-feature
+architect variant promote my-feature v02
+```
+
+| Command | Description |
+|---------|-------------|
+| `variant add REPO ITERATION --pairs PAIRS [--base REF] [--prompt FILE]` | Create a variant set: one worktree per `harness[:model]` pair. |
+| `variant compare ITERATION` | Side-by-side view of all variants (winner, harness, model, integration branch, status). |
+| `variant promote ITERATION WINNER` | Promote one variant as the winner; marks others discarded. |
+
+### `architect research [SUBCOMMAND]`
+
+Fan out parallel, **read-only** research lanes — detached `claude -p` researchers with no Edit/Write/Bash — when an iteration needs facts the repo doesn't already have. A socketry/async fiber mux tails each lane's `run.jsonl`; the architect verifies the load-bearing claims against sources and writes the iteration's `## Grounds`.
+
+```sh
+architect research dispatch 01-official-api.prompt.md 02-changelog.prompt.md
+architect research wait          # tails every lane until all complete
+architect research status        # snapshot of dispatched runs
+```
+
+| Command | Description |
+|---------|-------------|
+| `research dispatch PROMPTS...` | Dispatch one detached researcher per prompt file (space-separated paths). |
+| `research status [SPACE]` | Show the state of dispatched research runs (id, pid, state, model, last line). |
+| `research wait [SPACE]` | Wait for all dispatched runs to complete, streaming their output. |
+
+`research dispatch` options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--model=VALUE` | reference default `claude-sonnet-4-6` | Researcher model override (any provider/tier). |
+| `--max-turns=VALUE` | `40` | Max turns per researcher. |
+
+`research wait` options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--level=N` | `1` | Verbosity: `1`=lifecycle, `2`=+text, `3`=+tools, `4`=+io. |
+| `--quiet` | `false` | Suppress all output; exit status only (L0). |
+| `--thinking` | `false` | Show assistant thinking blocks. |
+| `--jsonl` | `false` | Emit raw lane-tagged JSONL (mutually exclusive with `--level`/`--quiet`). |
 
 ## Space management: `architect space …` 🗂️
 
@@ -144,18 +322,19 @@ Create the default XDG config and state files.
 architect space init
 ```
 
-### `architect space new TITLE [REPOS]`
+### `architect space new TITLE [-r REPO]...`
 
-Create a new space. The id is date-prefixed and slugged from the title (`"Name of Space"` → `20260531-name-of-space`); duplicate names on the same day get a counter (`...-name-of-space-2`). Optionally clone repos into the new space immediately.
+Create a new space. The id is date-prefixed and slugged from the title (`"Name of Space"` → `20260531-name-of-space`); duplicate names on the same day get a counter (`...-name-of-space-2`). Repos are passed with a repeatable `-r` flag (the comma form `-r a,b` works too) and are cloned into the new space immediately.
 
 ```sh
 architect space new "Name of Space"
-architect space new "Name of Space" example-tools/alpha example-tools/beta
+architect space new "Name of Space" -r example-tools/alpha -r example-tools/beta
 architect space new "Name of Space" --no-git   # skip git init
 ```
 
 | Option | Description |
 |--------|-------------|
+| `-r, --repo=REPO` | Repo ref to clone; repeat once per repo (comma form also accepted). |
 | `--[no-]git` | Initialize the space as a Git repository (default: `--git`). |
 
 ### `architect space list` (alias `architect space ls`)
@@ -220,19 +399,20 @@ architect space config path
 architect space config set default_provider github.com
 architect space config set default_organization example-org
 architect space config set git_clone_protocol https
-architect space config set evergreen_dir ""              # disable evergreen copies
+architect space config set src_dir ""                    # disable evergreen copy-on-write (always clone)
 ```
 
 Config lives at `~/.config/space-architect/config.yml` (XDG-aware):
 
 ```yaml
 version: 1
-spaces_dir: ~/src/spaces
-evergreen_dir: ~/src/evergreen
+base_dir: ~/architect            # spaces_dir + src_dir hang off this by default
 default_provider: github.com
 default_organization:
-git_clone_protocol: ssh
+git_clone_protocol: ssh          # ssh | https
 ```
+
+`spaces_dir` defaults to `<base_dir>/spaces` and `src_dir` (the evergreen checkout root) to `<base_dir>/src`; set either explicitly to override. Editable keys: `base_dir`, `spaces_dir`, `src_dir`, `default_provider`, `default_organization`, `git_clone_protocol`.
 
 ### `architect space repo [SUBCOMMAND]` (alias `architect space repos`)
 
@@ -246,7 +426,7 @@ architect space repo list            # alias: ls
 architect space repo resolve example-app example-tools/async
 ```
 
-- **add** — clone (or copy-on-write from `evergreen_dir`) repos into `repos/`, concurrently up to five at a time.
+- **add** — add repos into `repos/` (copy-on-write from an evergreen checkout under `src_dir` when available, else clone), concurrently up to five at a time.
 - **list** / **ls** — list repos tracked in the current space.
 - **resolve** — print the resolved full name and clone URL without cloning.
 

@@ -3,7 +3,7 @@
 module Space::Core::CLI
 module Repo
   class Add < BaseCommand
-    desc "Clone repos into the current space"
+    desc "Add repos to the current space (copy-on-write from an evergreen checkout when available, else clone)"
     argument :repos, type: :array, required: false, desc: "REPO [REPO...]"
 
     def call(repos: [], **opts)

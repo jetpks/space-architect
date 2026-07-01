@@ -62,16 +62,18 @@ class ArchitectCLITest < Space::ArchitectTest
         out, err = invoke("init")
 
         assert_empty err
-        assert_match(/Mission ready/, out)
+        assert_match(/Project ready/, out)
         assert_path_exists File.join(space_path, "architecture", "ARCHITECT.md")
+        assert_path_exists File.join(space_path, ".claude", "settings.json"),
+          "init must scaffold .claude/settings.json with the SessionStart hook"
         # One-file model: no gates/lanes/prd scaffolding.
         refute_path_exists File.join(space_path, "architecture", "gates")
         refute_path_exists File.join(space_path, "architecture", "lanes")
         refute_path_exists File.join(space_path, "architecture", "prd")
 
         yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
-        assert_equal "active", yml.dig("architect", "status")
-        assert_equal [], yml.dig("architect", "iterations")
+        assert_equal "active", yml.dig("project", "status")
+        assert_equal [], yml.dig("project", "iterations")
       end
     end
   ensure
@@ -91,7 +93,7 @@ class ArchitectCLITest < Space::ArchitectTest
         out, err = invoke("status")
 
         assert_empty err
-        assert_match(/Mission status/, out)
+        assert_match(/Project status/, out)
         assert_match(/active/, out)
       end
     end
@@ -99,6 +101,8 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # init is idempotent: second call does not raise, does not error, leaves
+  # ARCHITECT.md and settings.json untouched (new behavior since I10).
   def test_architect_init_is_idempotent_warns_on_second_call
     setup = temp_env
     env = setup.fetch(:env)
@@ -109,8 +113,66 @@ class ArchitectCLITest < Space::ArchitectTest
 
       Dir.chdir(space_path) do
         invoke("init")
-        _out, err = invoke("init")
-        assert_match(/already exists/, err)
+        out, err = invoke("init")
+
+        assert_empty err, "second init must not error"
+        assert_match(/Project ready/, out, "second init must still confirm readiness")
+        assert_path_exists File.join(space_path, "architecture", "ARCHITECT.md"),
+          "ARCHITECT.md must still be present after second init"
+        assert_path_exists File.join(space_path, ".claude", "settings.json"),
+          "settings.json must still be present after second init"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # ── ground: emits grounding reads to stdout ────────────────────────────────────
+
+  def test_architect_ground_emits_grounding_reads
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("brief", "new")
+        invoke("new", "my-iter")
+
+        out, err = invoke("ground")
+
+        assert_empty err
+        assert_match(/=== architecture\/ARCHITECT\.md ===/, out)
+        assert_match(/=== architecture\/BRIEF\.md ===/, out)
+        assert_match(/=== architecture\/I01-my-iter\.md ===/, out)
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # ground with no iteration files yet: emits ARCHITECT.md only (no error).
+  def test_architect_ground_with_no_iteration_emits_architect_md_only
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+
+        out, err = invoke("ground")
+
+        assert_empty err
+        assert_match(/=== architecture\/ARCHITECT\.md ===/, out)
+        refute_match(/=== architecture\/BRIEF\.md ===/, out)
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
       end
     end
   ensure
@@ -145,12 +207,12 @@ class ArchitectCLITest < Space::ArchitectTest
         assert_match(/^## Builder Prompt/, slice_text)
 
         yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
-        entry = yml.dig("architect", "iterations").find { |s| s["name"] == "first-slice" }
+        entry = yml.dig("project", "iterations").find { |s| s["name"] == "first-slice" }
         refute_nil entry
         assert_equal 1, entry["ordinal"]
         assert_equal "architecture/I01-first-slice.md", entry["file"]
         # `new` makes the freshly-created iteration current.
-        assert_equal "second-slice", yml.dig("architect", "current_iteration")
+        assert_equal "second-slice", yml.dig("project", "current_iteration")
       end
     end
   ensure
@@ -178,10 +240,10 @@ class ArchitectCLITest < Space::ArchitectTest
         assert_match(/[0-9a-f]{7,40}/, out)
 
         yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
-        entry = yml.dig("architect", "iterations").find { |s| s["name"] == "slice-1" }
+        entry = yml.dig("project", "iterations").find { |s| s["name"] == "slice-1" }
         freeze_sha = entry["freeze_sha"]
         assert_match(/\A[0-9a-f]{40}\z/, freeze_sha)
-        assert_equal "slice-1", yml.dig("architect", "current_iteration")
+        assert_equal "slice-1", yml.dig("project", "current_iteration")
 
         # Appending BELOW the freeze boundary (Builder Prompt) is allowed —
         # re-freeze returns the same sha, no error.
@@ -237,14 +299,14 @@ class ArchitectCLITest < Space::ArchitectTest
         invoke("init")
 
         yml_before = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
-        architect_before = yml_before["architect"]
+        architect_before = yml_before["project"]
         refute_nil architect_before
 
         invoke("space", "status", "done")
 
         yml_after = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
         assert_equal "done", yml_after["status"], "status should be updated"
-        assert_equal architect_before, yml_after["architect"], "architect: block must survive round-trip"
+        assert_equal architect_before, yml_after["project"], "architect: block must survive round-trip"
       end
     end
   ensure
@@ -680,7 +742,7 @@ class ArchitectCLITest < Space::ArchitectTest
                "--model", "fireworks-ai/accounts/fireworks/models/glm-5p2")
 
         yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
-        lane = yml.dig("architect", "iterations", 0, "lanes", 0)
+        lane = yml.dig("project", "iterations", 0, "lanes", 0)
         refute lane.key?("effort"), "no effort key expected when --effort not passed"
       end
     end
@@ -881,7 +943,39 @@ class ArchitectCLITest < Space::ArchitectTest
 
         out, err = invoke("integrate", "s1", "--lanes", "lane-a")
         assert_empty err
-        assert_match(%r{Merged lane-a → lane/I01-s1}, out)
+        assert_match(%r{Merged lane-a → project/test-space}, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # land prints gh pr create command for integrated repos; raises clear error when nothing integrated.
+  def test_land_cli_generates_pr_command
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+
+        wt = File.join(space_path, "build", "I01-s1-lane-a", "wt")
+        File.write(File.join(wt, "feature.rb"), "def feature; end\n")
+        invoke("integrate", "s1", "--lanes", "lane-a")
+
+        out, err = invoke("land")
+        assert_empty err
+        assert_match(/gh pr create --base main/, out)
+        assert_match(/project\/test-space/, out)
+        body_file = File.join(space_path, "build", "land", "my-repo-pr-body.md")
+        assert_path_exists body_file
       end
     end
   ensure
@@ -968,7 +1062,7 @@ class ArchitectCLITest < Space::ArchitectTest
   end
 
   # I09: --push-host and --push-url are mutually exclusive; the CLI forwards
-  # --push-host to mission.dispatch and the error surfaces via handle_errors.
+  # --push-host to project.dispatch and the error surfaces via handle_errors.
   def test_dispatch_cli_push_host_and_push_url_mutual_exclusion
     setup = temp_env
     env = setup.fetch(:env)
@@ -998,5 +1092,210 @@ class ArchitectCLITest < Space::ArchitectTest
     end
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # ── gate: PASS/FAIL rendering and exit-code signalling ────────────────────
+
+  def test_gate_command_reports_pass_and_exits_zero
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        # Inject a passing gate and freeze
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        gate_yaml = <<~YAML
+          - id: echo-pass
+            ac: AC1
+            cmd: echo gate-ok
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+        invoke("freeze", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "lane-a")
+
+        out, err = invoke("gate", "demo", "lane-a")
+
+        assert_empty err
+        assert_match(/PASS/, out, "passing gate must show PASS")
+        assert_match(/necessary, not sufficient/, out, "necessary-not-sufficient framing must be present")
+        refute_match(/FAIL/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_gate_command_reports_fail_and_exits_nonzero
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        gate_yaml = <<~YAML
+          - id: echo-fail
+            ac: AC1
+            cmd: sh -c 'exit 1'
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+        invoke("freeze", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "lane-a")
+
+        out_io  = StringIO.new
+        err_io  = StringIO.new
+        rc = Space::Architect::CLI.call(["gate", "demo", "lane-a"], out_io, err_io)
+        out = out_io.string
+
+        assert_equal 1, rc, "failing gate must exit non-zero"
+        assert_match(/FAIL/, out, "failing gate must show FAIL")
+        assert_match(/exit_code/, out, "reason must appear in output")
+        assert_match(/necessary, not sufficient/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Fix (2): no touch_set recorded → (d) in-bounds shows WARN, not FAIL or N/A.
+  def test_verify_warns_when_no_touch_set_recorded
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-e")
+
+        out, err = invoke("verify", "s1")
+        assert_empty err
+        rows = out.lines.select { |l| l.include?("in-bounds") }
+        assert rows.any? { |r| r.include?("WARN") },
+          "expected (d) in-bounds to show WARN when no touch_set recorded, got:\n#{out}"
+        assert rows.none? { |r| r.include?("FAIL") },
+          "WARN must not render as FAIL, got:\n#{out}"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Fix (1): after merge_lane! commits the integrate, (b) must report PASS, not FAIL.
+  def test_verify_pass_no_false_fail_after_merge_lane
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-f")
+
+        wt_path = File.join(space_path, "build", "I01-s1-lane-f", "wt")
+        File.write(File.join(wt_path, "feature.rb"), "def feature; end\n")
+
+        FileUtils.mkdir_p(File.join(space_path, "build", "I01-s1-lane-f"))
+        File.write(File.join(space_path, "build", "I01-s1-lane-f", "report.md"),
+          "# Report\nSTATUS: COMPLETE\n")
+
+        invoke("merge", "s1", "lane-f")
+
+        out, err = invoke("verify", "s1")
+        assert_empty err
+        rows = out.lines.select { |l| l.include?("builder commits") }
+        assert rows.any? { |r| r.include?("PASS") },
+          "expected (b) to PASS after merge_lane! (integrate commit must be excluded), got:\n#{out}"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Fix (4): verdict command records decision to space.yaml; status shows awaiting-verdict
+  # before the verdict, then the decision after.
+  def test_verdict_command_records_decision_and_updates_status
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+
+        wt_path = File.join(space_path, "build", "I01-s1-lane-a", "wt")
+        File.write(File.join(wt_path, "feature.rb"), "def feature; end\n")
+        invoke("merge", "s1", "lane-a")
+
+        # After merge, before verdict: status shows awaiting-verdict
+        out, = invoke("status")
+        assert_includes out, "awaiting-verdict",
+          "expected 'awaiting-verdict' for integrated lane with pending verdict"
+
+        # Record the verdict
+        out, err = invoke("verdict", "s1", "continue", "--body", "LGTM — gates green.")
+        assert_empty err
+        assert_match(/continue/i, out, "expected confirmation output to mention the decision")
+
+        # space.yaml verdict field updated
+        yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
+        assert_equal "continue", yml.dig("project", "iterations", 0, "verdict"),
+          "expected verdict field to be 'continue' in space.yaml"
+
+        # status now shows the decision, not awaiting-verdict
+        out, = invoke("status")
+        assert_includes out, "continue"
+        refute_includes out, "awaiting-verdict"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # ── I13: dispatch --timeout option wiring ────────────────────────────────
+
+  # dry-cli calls exit(0) for --help, so we must test via subprocess.
+  def test_dispatch_help_shows_timeout_option
+    out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    assert_includes out, "--timeout", "dispatch --help must list the --timeout option"
+    assert_includes out, "14400",     "dispatch --help must show the default 4h (14400s) value"
   end
 end

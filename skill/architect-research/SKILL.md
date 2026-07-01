@@ -74,7 +74,7 @@ toolset (`Read,Grep,Glob`) plus the web tools (`WebSearch,WebFetch`); the
 report is the redirected stdout:
 
 ```bash
-claude -p --model claude-sonnet-4-6 \
+claude -p --model <researcher-model> \
   --allowedTools 'Read,Grep,Glob,WebSearch,WebFetch' \
   --max-turns 40 \
   < build/research/<NN>-<lane>.prompt.md \
@@ -161,5 +161,5 @@ Commit the report. Raw findings stay in `build/research/` (gitignored).
 
 If this feeds the build loop: distill the report into the iteration's **Grounds**
 section (`architecture/I<NN>-<name>.md`) per `/architect`, or into
-`architecture/BRIEF.md` §sections when it is mission-scope, and continue there.
+`architecture/BRIEF.md` §sections when it is project-scope, and continue there.
 The builder's PHASE 0 will challenge Grounds' claims — that's a feature.

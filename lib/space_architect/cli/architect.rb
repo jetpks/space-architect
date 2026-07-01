@@ -1,22 +1,56 @@
 # frozen_string_literal: true
 
+require "json"
+
 module Space::Architect
   module CLI
     module Architect
       class Init < BaseCommand
-        desc "Scaffold architect mission memory in the current space"
+        desc "Scaffold (or top up) the architect project: ARCHITECT.md, space.yaml project block, SessionStart hook"
         argument :space, required: false, desc: "Space identifier (default: $PWD)"
 
         def call(space: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
-              mission = ArchitectMission.new(space: sp)
-              path = mission.init!
-              terminal.say "Mission ready: #{terminal.path(path)}"
+              project = ArchitectProject.new(space: sp)
+              path = project.init!
+              terminal.say "Project ready: #{terminal.path(path)}"
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
           end
+        end
+      end
+
+      class Ground < BaseCommand
+        desc "Print grounding reads (ARCHITECT.md, BRIEF.md, in-flight iteration) to stdout"
+        argument :space, required: false, desc: "Space identifier (default: $PWD)"
+
+        def call(space: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            session_cwd = parse_session_cwd_from_stdin
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              content = project.ground(session_cwd: session_cwd)
+              terminal.say content unless content.empty?
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+
+        private
+
+        # Read the session's working directory from the Claude Code hook JSON on stdin,
+        # falling back to Dir.pwd when stdin is a tty or returns nothing (e.g. direct
+        # terminal invocation, CI with /dev/null stdin, or in-process test invocation).
+        def parse_session_cwd_from_stdin
+          return Dir.pwd if $stdin.tty?
+          line = $stdin.gets
+          return Dir.pwd unless line
+          JSON.parse(line.strip)["cwd"] || Dir.pwd
+        rescue JSON::ParserError, TypeError
+          Dir.pwd
         end
       end
 
@@ -29,8 +63,8 @@ module Space::Architect
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
-              mission = ArchitectMission.new(space: sp)
-              path = mission.new_iteration!(iteration)
+              project = ArchitectProject.new(space: sp)
+              path = project.new_iteration!(iteration)
               terminal.say "Iteration scaffolded: #{terminal.path(path)}"
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
@@ -39,18 +73,18 @@ module Space::Architect
       end
 
       class Status < BaseCommand
-        desc "Show architect mission state (read-only)"
+        desc "Show architect project state (read-only)"
         argument :space, required: false, desc: "Space identifier (default: $PWD)"
 
         def call(space: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
-              mission = ArchitectMission.new(space: sp)
-              info = mission.status
+              project = ArchitectProject.new(space: sp)
+              info = project.status
               block = info[:block]
 
-              terminal.say "Mission status:     #{block['status'] || '(none)'}"
+              terminal.say "Project status:     #{block['status'] || '(none)'}"
               terminal.say "Current iteration:  #{block['current_iteration'] || '(none)'}"
 
               iterations = block["iterations"] || []
@@ -68,7 +102,14 @@ module Space::Architect
                   end.join(", ")
                   lanes = lane_list.any? { |l| l["variant"] } ? "variant: #{lanes_str}" : lanes_str
                   lanes = "#{lanes} → winner: #{s['winner']}" if s["winner"]
-                  [nn, s["name"], s["freeze_sha"]&.[](0, 8) || "-", lanes, s["verdict"] || "-"]
+                  verdict_str = if s["verdict"] && s["verdict"] != "pending"
+                    s["verdict"]
+                  elsif (s["lanes"] || []).any? { |l| l["integration_branch"] }
+                    "awaiting-verdict"
+                  else
+                    s["verdict"] || "-"
+                  end
+                  [nn, s["name"], s["freeze_sha"]&.[](0, 8) || "-", lanes, verdict_str]
                 end
                 terminal.say terminal.table(%w[II Iteration FreezeSHA Lanes Verdict], rows)
               end
@@ -84,7 +125,7 @@ module Space::Architect
       end
 
       class Freeze < BaseCommand
-        desc "Freeze gates for an iteration"
+        desc "Freeze the iteration's frozen region (Grounds/Specification/Acceptance Criteria) and record the freeze SHA"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
 
@@ -92,10 +133,12 @@ module Space::Architect
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
-              mission = ArchitectMission.new(space: sp)
-              sha = mission.freeze!(iteration)
+              project = ArchitectProject.new(space: sp)
+              warnings = []
+              sha = project.freeze!(iteration, warnings: warnings)
               terminal.say "Frozen #{iteration} at #{sha}"
-              ac = mission.acceptance_criteria(iteration)
+              warnings.each { |w| terminal.say "Warning: #{w}" }
+              ac = project.acceptance_criteria(iteration)
               unless ac.to_s.strip.empty?
                 terminal.say ""
                 terminal.say "Frozen Acceptance Criteria (quote these verbatim when judging):"
@@ -108,7 +151,7 @@ module Space::Architect
       end
 
       class Verify < BaseCommand
-        desc "Post-flight mechanical checks for an iteration (reports only, no judgment)"
+        desc "Post-flight mechanical lane checks — frozen-untouched, no builder commits, report exists, in-bounds (reports only, no judgment)"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
 
@@ -116,8 +159,8 @@ module Space::Architect
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
-              mission = ArchitectMission.new(space: sp)
-              results = mission.verify(iteration)
+              project = ArchitectProject.new(space: sp)
+              results = project.verify(iteration)
 
               if results.empty?
                 terminal.say "No lanes recorded for iteration '#{iteration}'"
@@ -146,9 +189,10 @@ module Space::Architect
 
         def pass_fail(val)
           case val
-          when true  then "PASS"
-          when false then "FAIL"
-          else            "N/A"
+          when true          then "PASS"
+          when false         then "FAIL"
+          when :no_touch_set then "WARN — no touch_set recorded"
+          else                    "N/A"
           end
         end
       end
@@ -158,36 +202,43 @@ module Space::Architect
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-        option   :model,     default: nil,    desc: "Model to use (default: lane entry or claude-sonnet-4-6)"
+        option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's model, else the reference default claude-sonnet-4-6). Any provider/tier; pin a full id, not a floating alias"
         option   :max_turns, default: "200",  desc: "Max turns for the builder"
         option   :harness,   default: nil,    desc: "Harness override (claude-code, opencode)"
         option   :effort,    default: nil,    desc: "Reasoning effort override (opencode only; sets reasoningEffort in the model config)"
         option   :detach,    type: :boolean, default: false, desc: "Detach the builder process (returns immediately with PID; poll report for completion)"
+        option   :timeout,   default: "14400", desc: "Wall-clock timeout in seconds (0 disables; default 4h); foreground only"
         option   :push_url,   default: nil,   desc: "HTTP endpoint for streaming push (POST body to this URL)"
         option   :push_token, default: nil,   desc: "Bearer token for push endpoint authorization"
         option   :push_host,  default: nil,   desc: "Base URL of the ingest server; the CLI creates a run via POST <host>/runs and streams to /runs/<id>/ingest (requires --push-token)"
 
         def call(iteration:, lane:, space: nil, model: nil,
                  max_turns: "200", harness: nil, effort: nil, detach: false,
-                 push_url: nil, push_token: nil, push_host: nil, **opts)
+                 timeout: "14400", push_url: nil, push_token: nil, push_host: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
-              mission = ArchitectMission.new(space: sp)
+              project = ArchitectProject.new(space: sp)
               kwargs = { max_turns: max_turns.to_i, detach: detach }
-              kwargs[:model]      = model      if model
-              kwargs[:harness]    = harness    if harness
-              kwargs[:effort]     = effort     if effort
-              kwargs[:push_url]   = push_url   if push_url
-              kwargs[:push_token] = push_token if push_token
-              kwargs[:push_host]  = push_host  if push_host
-              res = mission.dispatch(iteration, lane, **kwargs)
+              kwargs[:model]      = model           if model
+              kwargs[:harness]    = harness         if harness
+              kwargs[:effort]     = effort          if effort
+              kwargs[:timeout]    = timeout.to_i    unless detach
+              kwargs[:push_url]   = push_url        if push_url
+              kwargs[:push_token] = push_token      if push_token
+              kwargs[:push_host]  = push_host       if push_host
+              res = project.dispatch(iteration, lane, **kwargs)
               if detach
                 terminal.say "PID:     #{res[:pid]}"
                 terminal.say "Run log: #{terminal.path(res[:run_log])}"
                 terminal.say "Report:  #{terminal.path(res[:report])}"
                 terminal.say "Dispatched detached — poll #{terminal.path(res[:report])} for completion"
                 CLI.record_outcome(Outcome.new(exit_code: 0))
+              elsif res[:timed_out]
+                terminal.say "Run log: #{terminal.path(res[:run_log])}"
+                terminal.say "Report:  #{terminal.path(res[:report])}"
+                terminal.say "Builder TIMED OUT after #{timeout}s — process group killed. Re-dispatch (lanes are cheap)."
+                CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
               else
                 terminal.say "Run log: #{terminal.path(res[:run_log])}"
                 terminal.say "Report:  #{terminal.path(res[:report])}"
@@ -216,8 +267,8 @@ module Space::Architect
           handle_errors do
             content = read_section_body(from: from, body: body, stdin: stdin)
             render(store.find(space)) do |sp|
-              mission = ArchitectMission.new(space: sp)
-              res = mission.write_section!(iteration, section, body: content, append: append, lane: lane)
+              project = ArchitectProject.new(space: sp)
+              res = project.write_section!(iteration, section, body: content, append: append, lane: lane)
               if res[:committed]
                 terminal.say "Committed #{res[:heading]} → #{res[:sha][0, 8]}"
                 terminal.say res[:diffstat] unless res[:diffstat].empty?
@@ -239,6 +290,38 @@ module Space::Architect
         end
       end
 
+      class Verdict < BaseCommand
+        desc "Record the architect's verdict decision (continue or kill) and write ## Verdict prose"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :decision,  required: true,  desc: "Decision: continue or kill"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option   :from,  default: nil,   desc: "Read the verdict body from this file"
+        option   :body,  default: nil,   desc: "Inline verdict body"
+        option   :stdin, type: :boolean, default: false, desc: "Read the verdict body from stdin"
+
+        def call(iteration:, decision:, space: nil, from: nil, body: nil, stdin: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            content = read_section_body(from: from, body: body, stdin: stdin)
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              res = project.record_verdict!(iteration, decision: decision, body: content)
+              terminal.say "Verdict '#{res[:decision]}' recorded → #{res[:sha][0, 8]}"
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+
+        private
+
+        def read_section_body(from:, body:, stdin:)
+          return File.read(from) if from
+          return body if body
+          return $stdin.read if stdin
+          raise Space::Core::Error, "provide the verdict body via --from <file>, --body <text>, or --stdin"
+        end
+      end
+
       class Evidence < BaseCommand
         desc "Transcribe a lane's scratch report VERBATIM into Builder Report and commit"
         argument :iteration, required: true,  desc: "Iteration name"
@@ -249,8 +332,8 @@ module Space::Architect
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
-              mission = ArchitectMission.new(space: sp)
-              res = mission.transcribe_evidence!(iteration, lane: lane)
+              project = ArchitectProject.new(space: sp)
+              res = project.transcribe_evidence!(iteration, lane: lane)
               terminal.say "Transcribed #{res[:lines]} lines → #{res[:sha][0, 8]}"
               terminal.say "Builder STATUS: #{res[:status_line]}" if res[:status_line]
               terminal.say "Now rule on the builder's PHASE 0 disagreements in the Verdict (a later session)."
@@ -271,8 +354,8 @@ module Space::Architect
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
-              mission = ArchitectMission.new(space: sp)
-              r = mission.merge_lane!(iteration, lane, message: message)
+              project = ArchitectProject.new(space: sp)
+              r = project.merge_lane!(iteration, lane, message: message)
               terminal.say "Merged #{lane} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
               terminal.say r[:diffstat] unless r[:diffstat].empty?
               terminal.say "Gates NOT run — run `architect gate #{iteration}` against the integration branch."
@@ -293,9 +376,9 @@ module Space::Architect
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
-              mission = ArchitectMission.new(space: sp)
+              project = ArchitectProject.new(space: sp)
               lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
-              results = mission.integrate!(iteration, lanes: lane_names, teardown: teardown)
+              results = project.integrate!(iteration, lanes: lane_names, teardown: teardown)
               results.each do |r|
                 terminal.say "Merged #{r[:lane]} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
               end
@@ -306,8 +389,29 @@ module Space::Architect
         end
       end
 
+      class Land < BaseCommand
+        desc "Generate the end-of-project PR command (no push, no gh — prints gh pr create)"
+        argument :space, required: false, desc: "Space identifier (default: $PWD)"
+
+        def call(space: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              results = project.land
+              results.each do |r|
+                terminal.say r[:context]
+                terminal.say r[:command]
+                terminal.say "Body: #{terminal.path(r[:body_file])}"
+              end
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+      end
+
       class Gate < BaseCommand
-        desc "Run the frozen Acceptance Criteria gate commands and stream raw output (no PASS/FAIL)"
+        desc "Run the frozen Acceptance Criteria gate commands and report PASS/FAIL"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: false, desc: "Run in a lane worktree (default: the integration repo)"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -316,17 +420,20 @@ module Space::Architect
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
-              mission = ArchitectMission.new(space: sp)
-              results = mission.run_gates(iteration, lane: lane)
+              project = ArchitectProject.new(space: sp)
+              results = project.run_gates(iteration, lane: lane)
               results.each do |r|
+                marker = r[:status] == :pass ? "PASS" : "FAIL"
                 terminal.say ""
-                terminal.say "── #{r[:ac].empty? ? "(gate)" : r[:ac]}: #{r[:command]}  (exit #{r[:exit_code]})"
+                terminal.say "── #{r[:ac].empty? ? "(gate)" : r[:ac]}: #{r[:cmd]}  (exit #{r[:exit_code]})  [#{marker}]"
+                terminal.say "   reason: #{r[:reason]}" if r[:status] == :fail && !r[:reason].to_s.empty?
                 terminal.say r[:stdout].rstrip unless r[:stdout].strip.empty?
                 terminal.say r[:stderr].rstrip unless r[:stderr].strip.empty?
               end
               terminal.say ""
-              terminal.say "Raw gate output above — the PASS/FAIL/INVALID verdict is yours, read against the frozen thresholds."
-              CLI.record_outcome(Outcome.new(exit_code: 0))
+              terminal.say "Mechanical gate results above; the Acceptance-Criteria verdict — necessary, not sufficient — remains the architect's."
+              any_fail = results.any? { |r| r[:status] == :fail }
+              CLI.record_outcome(Outcome.new(exit_code: any_fail ? 1 : 0))
             end
           end
         end
@@ -370,9 +477,9 @@ module Space::Architect
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find) do |sp|
-                mission = ArchitectMission.new(space: sp)
+                project = ArchitectProject.new(space: sp)
                 touch_set = touch ? touch.split(",").map(&:strip).reject(&:empty?) : nil
-                result = mission.worktree_add(repo, iteration, lane, base: base,
+                result = project.worktree_add(repo, iteration, lane, base: base,
                                              harness: harness, model: model, effort: effort, touch: touch_set)
                 terminal.say "Worktree: #{terminal.path(result[:worktree])}"
                 terminal.say "Base SHA: #{result[:base_sha]}"
@@ -391,8 +498,8 @@ module Space::Architect
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find) do |sp|
-                mission = ArchitectMission.new(space: sp)
-                mission.worktree_remove(iteration, lane)
+                project = ArchitectProject.new(space: sp)
+                project.worktree_remove(iteration, lane)
                 terminal.say "Removed worktree for #{iteration}/#{lane}"
                 CLI.record_outcome(Outcome.new(exit_code: 0))
               end
@@ -407,8 +514,8 @@ module Space::Architect
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find) do |sp|
-                mission = ArchitectMission.new(space: sp)
-                worktrees = mission.worktree_list
+                project = ArchitectProject.new(space: sp)
+                worktrees = project.worktree_list
                 if worktrees.empty?
                   terminal.say "No active architect worktrees"
                 else
@@ -441,8 +548,8 @@ module Space::Architect
                   [harness, model]
                 end
 
-                mission = ArchitectMission.new(space: sp)
-                variants = mission.variant_add(repo, iteration, parsed_pairs, base: base, prompt: prompt)
+                project = ArchitectProject.new(space: sp)
+                variants = project.variant_add(repo, iteration, parsed_pairs, base: base, prompt: prompt)
                 variants.each do |v|
                   terminal.say "#{v[:name]} · #{v[:harness]} · #{v[:model] || "(default)"} · #{terminal.path(v[:worktree])}"
                 end
@@ -462,8 +569,8 @@ module Space::Architect
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find(space)) do |sp|
-                mission = ArchitectMission.new(space: sp)
-                result = mission.variant_promote(iteration, winner)
+                project = ArchitectProject.new(space: sp)
+                result = project.variant_promote(iteration, winner)
                 if result[:discarded].any?
                   terminal.say "Promoted #{result[:winner]} (discarded: #{result[:discarded].join(', ')})"
                 else
@@ -484,8 +591,8 @@ module Space::Architect
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find(space)) do |sp|
-                mission = ArchitectMission.new(space: sp)
-                info = mission.variant_compare(iteration)
+                project = ArchitectProject.new(space: sp)
+                info = project.variant_compare(iteration)
 
                 terminal.say "Variant comparison: #{iteration} (freeze #{info[:freeze_sha]&.[](0, 8) || "-"})"
                 terminal.say "Winner: #{info[:winner] || '(none)'}"
@@ -512,7 +619,7 @@ module Space::Architect
 
       module Brief
         class New < BaseCommand
-          desc "Scaffold the durable mission brief (architecture/BRIEF.md)"
+          desc "Scaffold the durable project brief (architecture/BRIEF.md)"
           argument :space, required: false, desc: "Space identifier (default: $PWD)"
           option   :force, type: :boolean, default: false, desc: "Overwrite an existing BRIEF.md"
 
@@ -520,8 +627,8 @@ module Space::Architect
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find(space)) do |sp|
-                mission = ArchitectMission.new(space: sp)
-                path = mission.brief_new!(force: force)
+                project = ArchitectProject.new(space: sp)
+                path = project.brief_new!(force: force)
                 terminal.say "Brief ready: #{terminal.path(path)}"
                 CLI.record_outcome(Outcome.new(exit_code: 0))
               end
@@ -534,15 +641,18 @@ module Space::Architect
 end
 
 Space::Architect::CLI::Registry.register "init",   Space::Architect::CLI::Architect::Init
+Space::Architect::CLI::Registry.register "ground", Space::Architect::CLI::Architect::Ground
 Space::Architect::CLI::Registry.register "new",    Space::Architect::CLI::Architect::New
 Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Architect::Status
 Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
 Space::Architect::CLI::Registry.register "verify", Space::Architect::CLI::Architect::Verify
 Space::Architect::CLI::Registry.register "dispatch", Space::Architect::CLI::Architect::Dispatch
 Space::Architect::CLI::Registry.register "section",   Space::Architect::CLI::Architect::Section
+Space::Architect::CLI::Registry.register "verdict",   Space::Architect::CLI::Architect::Verdict
 Space::Architect::CLI::Registry.register "evidence",  Space::Architect::CLI::Architect::Evidence
 Space::Architect::CLI::Registry.register "merge",     Space::Architect::CLI::Architect::Merge
 Space::Architect::CLI::Registry.register "integrate", Space::Architect::CLI::Architect::Integrate
+Space::Architect::CLI::Registry.register "land",      Space::Architect::CLI::Architect::Land
 Space::Architect::CLI::Registry.register "gate",      Space::Architect::CLI::Architect::Gate
 Space::Architect::CLI::Registry.register "install-skills", Space::Architect::CLI::Architect::InstallSkills
 Space::Architect::CLI::Registry.register "brief" do |b|

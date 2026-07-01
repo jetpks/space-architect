@@ -2,7 +2,7 @@
 
 [![Gem Version](https://badge.fury.io/rb/space-architect.svg)](https://badge.fury.io/rb/space-architect)
 
-> **Task-scoped workspaces that double as Architect Loop missions — for humans and their agents!** ✨🛰️
+> **Task-scoped workspaces that double as Architect Loop projects — for humans and their agents!** ✨🛰️
 
 `space-architect` is a Ruby toolkit for **spaces** — task-scoped project
 workspaces that hold repos, notes, and artifacts under one obvious filesystem
@@ -18,7 +18,7 @@ The gem ships **three composable binaries** over clean library seams:
 | **`src`** 🌲 | Tend evergreen repo checkouts for copy-on-write provisioning | `Space::Src` |
 
 Each is a first-class executable. `architect` also forwards `architect space …`
-and `architect src …` to the other two, so a mission can drive everything from
+and `architect src …` to the other two, so a project can drive everything from
 one command when that's handier. 🎀
 
 ## What's a space? 🪐
@@ -116,7 +116,7 @@ comma form (`-r a,b`) works too. Space ids are date-prefixed
 same day get a counter (`…-name-of-space-2`). 📅
 
 Everything `space` does is also reachable as `architect space …` from within a
-mission.
+project.
 
 ## `src` — the evergreen engine 🌲
 
@@ -149,24 +149,31 @@ fish integration (`src shell fish install`).
 ## `architect` — the Architect Loop 🏗️
 
 The **Architect Loop** is a structured build cycle for you and headless AI
-builders. Each loop lives inside a space as a *mission*.
+builders. Each loop lives inside a space as a *project*.
 
 **Roles:**
 
-- **Architect** — you (or Claude Opus 4.8 in judgment mode): arbitrates
-  disagreements, writes and freezes iteration files, calls kill/continue, merges
-  builder output. Never writes implementation code.
-- **Builder** — Claude Sonnet 4.6 run headless via `architect dispatch`, one per
-  lane in its own git worktree: reads the iteration's Builder Prompt, does the
-  work, writes raw evidence to `build/<id>-<lane>/report.md`. Never grades its
-  own work; never edits `architecture/`.
+- **Architect** — the judgment role: a strong reasoning model (or you), run
+  interactively. Arbitrates disagreements, writes and freezes iteration files,
+  calls kill/continue, merges builder output. Never writes implementation code.
+- **Builder** — the execution role: a cheaper model run headless via `architect
+  dispatch`, one per lane in its own git worktree. Reads the iteration's Builder
+  Prompt, does the work, writes raw evidence to `build/<id>-<lane>/report.md`.
+  Never grades its own work; never edits `architecture/`.
+
+The loop is **model-agnostic** — which models fill the two roles is your choice
+(e.g. a strong Claude model judging a cheaper one on the same plan, or a
+cross-vendor pairing for more independent review). Set it per dispatch with
+`architect dispatch --model …`, or run several pairings head-to-head as a
+**variant set** (`architect variant add`). See
+[docs/DESIGN.md](docs/DESIGN.md) §1–§2 for the reasoning.
 
 **Filesystem layout:**
 
 ```text
 architecture/
-  ARCHITECT.md              # cross-iteration index; mission-wide state
-  BRIEF.md                  # durable §-numbered mission contract (optional)
+  ARCHITECT.md              # cross-iteration index; project-wide state
+  BRIEF.md                  # durable §-numbered project contract (optional)
   I01-<iteration>.md        # one self-contained file per iteration
 build/
   I01-<iteration>-<lane>/   # lane worktree + scratch per dispatch
@@ -193,11 +200,17 @@ prints the frozen Acceptance Criteria back. Any change to those sections
 afterward is an automatic iteration FAIL. The builder never edits the iteration
 file.
 
+**Re-grounding 🧭** — `architect init` also scaffolds a `SessionStart` hook that
+runs `architect ground` (emitting `ARCHITECT.md`, `BRIEF.md`, and the in-flight
+iteration) so every fresh session starts oriented — the loop leans on
+fresh-session judgment, and this is what makes picking up cold cheap. Builders
+inside a lane worktree are never grounded.
+
 **Command surface:**
 
 ```sh
-architect init                              # scaffold ARCHITECT.md + the space.yaml architect: block
-architect brief new                         # scaffold the durable mission BRIEF.md
+architect init                              # scaffold ARCHITECT.md + the space.yaml project: block + SessionStart hook
+architect brief new                         # scaffold the durable project BRIEF.md
 architect new <iteration>                   # scaffold architecture/I<NN>-<iteration>.md
 architect section <it> <section> --from <f> # write + commit a section
 architect freeze <iteration>                # freeze the Acceptance Criteria ❄️
@@ -208,7 +221,8 @@ architect evidence <it> --lane <lane>       # transcribe the builder's report ve
 architect gate <iteration>                  # run the frozen gate commands, stream raw output
 architect merge <it> <lane>                 # integrate ONE judged-passing lane (--no-ff)
 architect integrate <it> --lanes a,b        # integrate a set of passing lanes, in order
-architect status                            # mission state (read-only)
+architect land                              # end-of-project PR command (no push, no gh)
+architect status                            # project state (read-only)
 architect variant add|compare|promote …     # competing (harness, model) lanes over one frozen spec
 architect research dispatch|status|wait …   # parallel read-only research lanes (see below)
 ```
@@ -225,6 +239,8 @@ architect verify my-feature                      # mechanical post-flight checks
 architect evidence my-feature --lane lane-a      # transcribe raw evidence
 architect gate my-feature                        # run the frozen gates yourself
 # … read the diff against the spec, then write the Verdict …
+architect integrate my-feature --lanes lane-a    # merge passing lanes → project/<slug>
+architect land                                   # print gh pr create at project end
 ```
 
 ### Streaming builder output 📡
@@ -346,7 +362,7 @@ The library is split into three namespaces you can require independently:
 
 - **`Space::Core`** — the foundation: config, state, XDG, terminal, git/mise
   clients, the space store. The `space` CLI runs on this alone.
-- **`Space::Architect`** — mission state, the builder harness, dispatch, and the
+- **`Space::Architect`** — project state, the builder harness, dispatch, and the
   research supervisor.
 - **`Space::Src`** — the evergreen engine (tracking, sync, copy-on-write clone).
 
@@ -359,7 +375,7 @@ require "space_src"        # just the evergreen engine
 ## Documentation 📖
 
 - **[Command Reference](docs/reference.md)** — every command, flag, and behavior
-- **[Design](docs/design.md)** — why spaces and the Architect Loop exist, and how they're shaped
+- **[Design](docs/DESIGN.md)** — the source-backed rationale: the twelve invariant rules (R1–R12), the failure-mode → mitigation table, and why the loop is shaped this way
 - **[Changelog](CHANGELOG.md)** — release history
 
 ## Development 🛠️

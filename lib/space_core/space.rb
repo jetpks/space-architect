@@ -57,11 +57,11 @@ module Space::Core
     end
 
     def architect
-      data["architect"]
+      data["project"]
     end
 
     def architect=(val)
-      data["architect"] = val
+      data["project"] = val
     end
 
     def metadata_path

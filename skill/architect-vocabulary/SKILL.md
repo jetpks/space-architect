@@ -2,7 +2,7 @@
 name: architect-vocabulary
 description: >
   Load the Architect system's vocabulary and a short "where you are"
-  orientation — space, mission, iteration, lane, brief, builder, architect,
+  orientation — space, project, iteration, lane, brief, builder, architect,
   gate, freeze, verdict, research, variant set — for when you're standing in a
   space-architect workspace (or working on the skill itself) and need the terms
   understood in conversation but do NOT want to run the loop. Reference only:
@@ -30,11 +30,12 @@ the loop.
 
 **Roles**
 
-- **architect** — the judgment role (a human, or Claude Opus 4.8 in judgment
-  mode): arbitrates disagreements, writes and freezes iteration files, calls
-  kill/continue, merges builder output. Never writes implementation code.
-- **builder** — the implementation role: Claude Sonnet 4.6 run headless via
-  `architect dispatch` (`claude -p`), one per lane in its own worktree. Reports
+- **architect** — the judgment role (a strong reasoning model, or a human, in
+  judgment mode): arbitrates disagreements, writes and freezes iteration files,
+  calls kill/continue, merges builder output. Never writes implementation code.
+- **builder** — the implementation role: a cheaper model run headless via
+  `architect dispatch` (reference harness: `claude -p`), one per lane in its own
+  worktree. Reports
   raw evidence; never grades its own work; never edits `architecture/`.
 
 **The workspace**
@@ -43,9 +44,9 @@ the loop.
   artifacts under one root. `architect` finds it by walking up from `$PWD` to the
   nearest `space.yaml`.
 - **space.yaml** — the space's identity file: id, title, status, repos, notes,
-  tags, plus the `architect:` block (mission state — iterations, freeze shas,
+  tags, plus the `project:` block (project state — iterations, freeze shas,
   lanes).
-- **mission** — an Architect Loop instance living inside a space; spans the
+- **project** — an Architect Loop instance living inside a space; spans the
   repos under `repos/`.
 
 **The unit of work**
@@ -54,8 +55,9 @@ the loop.
   file `architecture/I<NN>-<name>.md`, grown section by section. Its sections:
   - **Grounds** — *why*: research/brief distilled (optional).
   - **Specification** — *what/how*: the full delegation contract.
-  - **Acceptance Criteria** — *proof*: exact gate commands + thresholds; this is
-    what gets frozen.
+  - **Acceptance Criteria** — *proof*: prose conditions (AC1, AC2, …) the
+    architect judges against, plus a fenced ` ```gates ` block of runnable checks;
+    this is what gets frozen.
   - **Builder Prompt** — the exact lane-prompt(s) dispatched.
   - **Builder Report** — raw evidence, transcribed verbatim from build scratch.
   - **Verdict** — rulings + per-AC PASS/FAIL/INVALID + KILL/CONTINUE.
@@ -70,17 +72,18 @@ the loop.
 
 **Contracts and checkpoints**
 
-- **brief** (`architecture/BRIEF.md`) — the durable, §-numbered mission contract
-  that spans iterations; frozen at the mission level and cited as **BRIEF §N**.
+- **brief** (`architecture/BRIEF.md`) — the durable, §-numbered project contract
+  that spans iterations; frozen at the project level and cited as **BRIEF §N**.
 - **ARCHITECT.md** (`architecture/ARCHITECT.md`) — the cross-iteration index /
-  table of contents and mission-wide state.
+  table of contents and project-wide state.
 - **freeze** ❄️ — committing the frozen region (Grounds / Specification /
   Acceptance Criteria) *before* dispatch (`architect freeze`). Records the
   **freeze_sha** in `space.yaml`; any later change to those sections is an
   automatic iteration FAIL.
-- **gate** — a frozen verification command + threshold (test/lint/typecheck/
-  build). `architect gate` runs them and streams raw output — it is a runner,
-  never a judge.
+- **gate** — a structured entry in the ` ```gates ` block: `id`, `ac`, `cmd`,
+  optional `cwd`, and an `expect` hash (exit_code / stdout_match / threshold).
+  `architect gate` runs each gate's `cmd` and streams raw output — it is a runner,
+  never a judge. `architect freeze` lints the gates block before committing.
 
 **Outcomes**
 
@@ -106,18 +109,18 @@ the loop.
 **Repos**
 
 - **evergreen** / copy-on-write / **`src` engine** — repo provisioning: when an
-  up-to-date local copy exists under `evergreen_dir`, `architect` copies it into
+  up-to-date local copy exists under `src_dir`, `architect` copies it into
   the space (copy-on-write on APFS) instead of cloning over the network. The
-  vendored `src` engine keeps those evergreen checkouts tended.
+  `src` engine (`space-src`) keeps those evergreen checkouts tended.
 
 ## Where you are
 
 A space's directory layout:
 
 ```text
-space.yaml        # identity + mission state (the architect: block)
+space.yaml        # identity + project state (the project: block)
 README.md
-repos/            # the repos the mission spans
+repos/            # the repos the project spans
 notes/            # scratch, prompts, logs
 architecture/     # ARCHITECT.md index + I<NN>-<name>.md iteration files (+ BRIEF.md)
 build/            # lane worktrees + scratch: build/<id>-<lane>/
@@ -127,7 +130,7 @@ tmp/              # workspace-local temp — use instead of /tmp
 Safe **read-only** commands to orient yourself (these don't run the loop):
 
 ```sh
-architect status            # mission state: iterations, freeze shas, lanes, verdicts
+architect status            # project state: iterations, freeze shas, lanes, verdicts
 architect space show        # the space you're standing in
 architect space list        # all your spaces
 ```

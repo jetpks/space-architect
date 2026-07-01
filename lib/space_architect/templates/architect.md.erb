@@ -2,11 +2,11 @@
 
 > Cross-iteration table of contents for the Architect Loop. Per-iteration detail lives in
 > architecture/I<NN>-<iteration>.md — this file only indexes the iterations and carries
-> mission-wide state. Keep it short (~150 lines): the next session must grok it
+> project-wide state. Keep it short (~150 lines): the next session must grok it
 > in under a minute. Not in the committed architecture = didn't happen.
 >
-> Durable mission contract: `architecture/BRIEF.md` (numbered §sections, cited as BRIEF §N).
-> Create it with `architect brief new`. Edits to a §section are mission-scope decisions —
+> Durable project contract: `architecture/BRIEF.md` (numbered §sections, cited as BRIEF §N).
+> Create it with `architect brief new`. Edits to a §section are project-scope decisions —
 > log them in the Decisions log below, never as silent per-iteration drift.
 
 ## TL;DR (keep current)
@@ -34,12 +34,23 @@
 
 ## Iteration index
 
-<!-- Add a row per iteration. Create iterations with `architect new <name>`. -->
+<!-- Rows are added here only for SCAFFOLDED iterations. `architect new <name>` allocates
+     the ordinal at spec-time and scaffolds architecture/I<NN>-<name>.md. Do NOT
+     pre-number planned work — un-numbered planned items live in the Backlog below. -->
 
 | I# | Iteration | Status | freeze_sha | Integration branch | Verdict | File |
 |----|-----------|--------|-----------|--------------------|---------|------|
 
 Status values: speccing → frozen → dispatched → in-flight → awaiting-verdict → done.
+
+## Backlog (ordered; no ordinal until `architect new`)
+
+<!-- Next-up first. Each item gets its ordinal only when it is about to be specced:
+     run `architect new <name>` at that point to allocate the ordinal at spec-time and
+     scaffold the iteration file. Pre-numbering planned work forces renumber churn every
+     time priorities reshuffle. -->
+
+- _[next planned item]_
 
 ## Open items for the human / architect
 

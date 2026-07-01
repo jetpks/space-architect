@@ -5,14 +5,15 @@ require "erb"
 require "open3"
 require "fileutils"
 require "pathname"
+require "tempfile"
 
 module Space::Architect
-  # Manages an architect-loop mission inside a space: one self-contained file per
+  # Manages an architect-loop project inside a space: one self-contained file per
   # iteration at architecture/I<NN>-<iteration>.md (Grounds / Specification / Acceptance Criteria / Builder
   # Prompt / Builder Report / Verdict), grown one commit per section. The freeze
   # is the commit that establishes the Acceptance Criteria; the frozen region (everything
   # above "## Builder Prompt") is read-only afterward.
-  class ArchitectMission
+  class ArchitectProject
     # The heading that separates the frozen sections (Grounds/Specification/Acceptance Criteria)
     # from the appended-after-freeze sections (Builder Prompt/Report/Verdict).
     FROZEN_BOUNDARY = /^## Builder Prompt/
@@ -37,32 +38,74 @@ module Space::Architect
       "## Builder Prompt", "## Builder Report", "## Verdict"
     ].freeze
 
+    # Hard per-gate timeout. Generous relative to the full suite (~55s).
+    DEFAULT_GATE_TIMEOUT = 900
+
+    # Sentinel written to prompt.md by worktree_add. dispatch refuses to launch on this content.
+    PROMPT_STUB = "<!-- ARCHITECT: write this lane's builder prompt here, then dispatch. -->"
+
+    # Inlined settings.json template for `architect init`. Registers a SessionStart
+    # hook on the three explicit session-start events (startup/clear/resume) so every
+    # space gets auto-regrounding. compact is intentionally omitted — reground on
+    # explicit session events, not every compaction cycle.
+    SETTINGS_JSON_TEMPLATE = <<~JSON
+      {
+        "hooks": {
+          "SessionStart": [
+            {
+              "matcher": "startup",
+              "hooks": [{"type": "command", "command": "architect", "args": ["ground"]}]
+            },
+            {
+              "matcher": "clear",
+              "hooks": [{"type": "command", "command": "architect", "args": ["ground"]}]
+            },
+            {
+              "matcher": "resume",
+              "hooks": [{"type": "command", "command": "architect", "args": ["ground"]}]
+            }
+          ]
+        }
+      }
+    JSON
+
     def initialize(space:)
       @space = space
     end
 
     def init!
       handoff_path = space.path.join("architecture", "ARCHITECT.md")
-      if handoff_path.exist?
-        raise Space::Core::Error, "architecture/ARCHITECT.md already exists — remove it first or edit it directly (idempotent guard)"
+      settings_path = space.path.join(".claude", "settings.json")
+      to_add = []
+
+      unless handoff_path.exist?
+        FileUtils.mkdir_p(handoff_path.dirname)
+        handoff_path.write(render_handoff)
+        update_architect_block do |b|
+          b.merge("status" => "active", "current_iteration" => nil, "iterations" => [])
+        end
+        to_add << "architecture/ARCHITECT.md"
+        to_add << Space::Core::Space::METADATA_FILE
       end
 
-      FileUtils.mkdir_p(handoff_path.dirname)
-      handoff_path.write(render_handoff)
-
-      update_architect_block do |b|
-        b.merge("status" => "active", "current_iteration" => nil, "iterations" => [])
+      unless settings_path.exist?
+        FileUtils.mkdir_p(settings_path.dirname)
+        settings_path.write(SETTINGS_JSON_TEMPLATE)
+        to_add << ".claude/settings.json"
       end
 
-      git_run("-C", space.path.to_s, "add", "architecture/ARCHITECT.md", Space::Core::Space::METADATA_FILE)
-      git_run("-C", space.path.to_s, "commit", "-m", "Initialize architect mission")
+      if to_add.any?
+        git_run("-C", space.path.to_s, "add", *to_add)
+        msg = to_add.include?("architecture/ARCHITECT.md") ? "Initialize architect project" : "Add architect settings"
+        git_run("-C", space.path.to_s, "commit", "-m", msg)
+      end
 
       handoff_path
     end
 
     # Allocate the next ordinal and scaffold architecture/I<NN>-<iteration>.md.
     def new_iteration!(name)
-      block = space.data["architect"] || {}
+      block = space.data["project"] || {}
       iterations = block["iterations"] || []
       if iterations.any? { |s| s["name"] == name }
         raise Space::Core::Error, "iteration '#{name}' already exists in space.yaml"
@@ -95,7 +138,7 @@ module Space::Architect
     end
 
     def status
-      block = space.data["architect"] || {}
+      block = space.data["project"] || {}
       architecture_dir = space.path.join("architecture")
       iteration_files = if architecture_dir.exist?
         architecture_dir.children
@@ -110,14 +153,17 @@ module Space::Architect
     # Freeze the iteration: the iteration file must carry a "## Acceptance Criteria" section. Commits
     # any pending changes to the iteration file and records HEAD as freeze_sha. If
     # already frozen, refuses when the frozen region has changed since.
-    def freeze!(iteration)
+    def freeze!(iteration, warnings: nil)
       entry = slice_entry(iteration)
       rel = entry["file"]
       path = space.path.join(rel)
       raise Space::Core::Error, "#{rel} does not exist — run `architect new #{iteration}` first" unless path.exist?
-      unless path.read.match?(/^## Acceptance Criteria/)
+      text = path.read
+      unless text.match?(/^## Acceptance Criteria/)
         raise Space::Core::Error, "#{rel} has no '## Acceptance Criteria' section — write the Acceptance Criteria before freezing"
       end
+
+      lint_gates!(text, warnings: warnings)
 
       if entry["freeze_sha"]
         sha = entry["freeze_sha"]
@@ -153,7 +199,7 @@ module Space::Architect
       sha
     end
 
-    # Scaffold the durable, section-numbered mission brief at architecture/BRIEF.md
+    # Scaffold the durable, section-numbered project brief at architecture/BRIEF.md
     # and commit it. The brief is the stable cross-iteration address space iterations
     # cite as "BRIEF §N"; it lives outside the per-iteration freeze region.
     def brief_new!(force: false)
@@ -165,7 +211,7 @@ module Space::Architect
       FileUtils.mkdir_p(brief_path.dirname)
       brief_path.write(render_brief)
       git_run("-C", space.path.to_s, "add", "architecture/BRIEF.md")
-      git_run("-C", space.path.to_s, "commit", "-m", "Add mission brief") if staged_changes?
+      git_run("-C", space.path.to_s, "commit", "-m", "Add project brief") if staged_changes?
       brief_path
     end
 
@@ -203,6 +249,34 @@ module Space::Architect
       head, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
       diffstat, = committed ? git_capture("-C", space.path.to_s, "show", "--stat", "--format=", "HEAD") : [""]
       { section: section, heading: spec[:heading], sha: head.strip, committed: committed, diffstat: diffstat.strip }
+    end
+
+    # Write the ## Verdict prose AND record the decision to space.yaml in one commit.
+    # decision must be "continue" or "kill".
+    def record_verdict!(iteration, decision:, body:)
+      unless %w[continue kill].include?(decision)
+        raise Space::Core::Error,
+          "Invalid verdict decision '#{decision}' — must be one of: continue, kill"
+      end
+
+      entry = slice_entry(iteration)
+      rel = entry["file"]
+      path = space.path.join(rel)
+      raise Space::Core::Error, "#{rel} does not exist — run `architect new #{iteration}` first" unless path.exist?
+
+      path.write(replace_section_body(path.read, SECTIONS["verdict"][:heading], body.strip, append: false))
+
+      update_architect_block do |b|
+        (b["iterations"] || []).each { |s| s["verdict"] = decision if s["name"] == iteration }
+        b
+      end
+
+      nn = format("%02d", entry["ordinal"] || 0)
+      git_run("-C", space.path.to_s, "add", rel, Space::Core::Space::METADATA_FILE)
+      git_run("-C", space.path.to_s, "commit", "-m", "I#{nn}: verdict")
+
+      head, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
+      { decision: decision, sha: head.strip }
     end
 
     # Transcribe a lane's scratch report (build/<id>[-<lane>]/report.md) VERBATIM into
@@ -272,13 +346,15 @@ module Space::Architect
       raise Space::Core::Error, "Worktree directory does not exist: #{wt_path}" unless wt_path.exist?
       base_sha = lane_entry["base_sha"]
       lane_branch = "lane/#{id}-#{lane}"
-      integration_branch = "lane/#{id}"
+      integration_branch = project_integration_branch
 
       status_out, = git_capture("-C", wt_path.to_s, "status", "--porcelain")
       raise Space::Core::Error, "Lane '#{lane}' worktree has no changes to integrate." if status_out.strip.empty?
 
       git_run("-C", wt_path.to_s, "add", "-A")
       git_run("-C", wt_path.to_s, "commit", "-m", message || "lane #{lane}: integrate")
+      integrate_sha_raw, = git_capture("-C", wt_path.to_s, "rev-parse", "HEAD")
+      integrate_sha = integrate_sha_raw.strip
 
       _o, _e, exists = git_capture("-C", repo_path.to_s, "rev-parse", "--verify", "--quiet", integration_branch)
       if exists.success?
@@ -300,9 +376,14 @@ module Space::Architect
       diffstat, = git_capture("-C", repo_path.to_s, "diff", "--stat", "#{base_sha}..HEAD")
 
       update_architect_block do |b|
+        b["integration_branch"] = integration_branch
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
-          (s["lanes"] || []).each { |l| l["integration_branch"] = integration_branch if l["name"] == lane }
+          (s["lanes"] || []).each do |l|
+            next unless l["name"] == lane
+            l["integration_branch"] = integration_branch
+            l["integrate_sha"] = integrate_sha
+          end
         end
         b
       end
@@ -334,9 +415,49 @@ module Space::Architect
       merged
     end
 
-    # Run the iteration's frozen Acceptance Criteria gate commands and stream raw
-    # stdout/stderr + exit codes. A path-resolving RUNNER ONLY — no threshold
-    # comparison, no PASS/FAIL. The verdict is the architect reading this output.
+    # Generate the end-of-project PR command(s) for each integrated repo.
+    # Writes a PR body to build/land/<repo>-pr-body.md and returns, per repo:
+    # { repo:, integration_branch:, body_file:, command:, context: }.
+    # Raises Space::Core::Error if nothing has been integrated yet.
+    # Side-effect-free: no git write, no push, no gh.
+    def land
+      b = space.data["project"] || {}
+      integration_branch = project_integration_branch
+
+      integrated_lanes = (b["iterations"] || []).flat_map do |s|
+        (s["lanes"] || []).filter_map { |l| { iteration: s, lane: l } if l["integration_branch"] }
+      end
+
+      raise Space::Core::Error, "nothing integrated yet — integrate a lane before landing" if integrated_lanes.empty?
+
+      repos = integrated_lanes.map { |e| e[:lane]["repo"] }.uniq
+
+      repos.map do |repo|
+        body_dir = space.path.join("build", "land")
+        FileUtils.mkdir_p(body_dir)
+        body_path = body_dir.join("#{repo}-pr-body.md")
+
+        iterations = b["iterations"] || []
+        body = +"# #{space.title}\n\nMerges `#{integration_branch}` → `main`.\n\n## Iterations\n\n"
+        iterations.each do |s|
+          nn = format("%02d", s["ordinal"])
+          verdict = s["verdict"] || "—"
+          body << "- I#{nn} #{s["name"]} — #{verdict}\n"
+        end
+        body_path.write(body)
+
+        cmd = %(gh pr create --base main --head #{integration_branch} --title "#{space.title}" --body-file #{body_path})
+        context = "# Run from repos/#{repo} on branch #{integration_branch} (gh pushes it)"
+        { repo: repo, integration_branch: integration_branch, body_file: body_path.to_s, command: cmd, context: context }
+      end
+    end
+
+    # Run the iteration's frozen Acceptance Criteria gate commands. Each gate is
+    # executed in the resolved cwd (per-gate `cwd` overrides the base dir), under
+    # a hard timeout, and evaluated against its `expect` block. Returns an array
+    # of result hashes with :status (:pass/:fail) and :reason in addition to the
+    # raw :stdout/:stderr/:exit_code. The mechanical verdict belongs here; the AC
+    # verdict remains the architect's.
     def run_gates(iteration, lane: nil)
       entry = slice_entry(iteration)
       freeze_sha = entry["freeze_sha"]
@@ -345,26 +466,95 @@ module Space::Architect
 
       text, _, st = git_capture("-C", space.path.to_s, "show", "#{freeze_sha}:#{rel}")
       raise Space::Core::Error, "could not read frozen #{rel} at #{freeze_sha[0, 8]}" unless st.success?
-      commands = acceptance_criteria_commands(text)
-      raise Space::Core::Error, "no gate commands found in the frozen Acceptance Criteria of #{rel}" if commands.empty?
+      gates = parse_gates(text)
+      raise Space::Core::Error, "no gate commands found in the frozen Acceptance Criteria of #{rel}" if gates.empty?
 
       lanes = entry["lanes"] || []
-      dir =
+      repo_root = nil
+      base_dir =
         if lane
           le = lanes.find { |l| l["name"] == lane }
           raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless le
+          repo_root = le["repo"] ? space.path.join("repos", le["repo"]) : nil
           space.path.join(le["worktree"] || "build/#{iteration_id(entry)}-#{lane}/wt")
         else
           repo = lanes.first&.dig("repo")
           raise Space::Core::Error, "No lane/repo recorded for '#{iteration}' — cannot resolve a directory to run gates in" unless repo
           space.path.join("repos", repo)
         end
-      raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
+      raise Space::Core::Error, "directory does not exist: #{base_dir}" unless base_dir.exist?
 
-      commands.map do |row|
-        out, err, status = Open3.capture3(row[:command], chdir: dir.to_s)
-        { ac: row[:ac], command: row[:command], stdout: out, stderr: err, exit_code: status.exitstatus, dir: dir }
+      gates.map do |gate|
+        g   = gate.transform_keys(&:to_s)
+        dir =
+          if (cwd = g["cwd"])
+            gate_cwd = space.path.join(cwd)
+            if lane && repo_root && (gate_cwd == repo_root || gate_cwd.to_s.start_with?("#{repo_root}/"))
+              base_dir.join(gate_cwd.relative_path_from(repo_root)).cleanpath
+            else
+              gate_cwd
+            end
+          else
+            base_dir
+          end
+        raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
+
+        effective = g["timeout"] || DEFAULT_GATE_TIMEOUT
+        captured = capture_with_timeout(g["cmd"], dir: dir, timeout: effective)
+
+        if captured[:timed_out]
+          status = :fail
+          reason = "timed out after #{effective}s"
+        else
+          ev     = GateEvaluator.call(stdout: captured[:stdout], exit_code: captured[:exit_code], expect: g["expect"] || {})
+          status = ev.pass? ? :pass : :fail
+          reason = ev.reason
+        end
+
+        { id: g["id"], ac: g["ac"].to_s, cmd: g["cmd"], expect: g["expect"],
+          stdout: captured[:stdout], stderr: captured[:stderr], exit_code: captured[:exit_code],
+          dir: dir, status: status, reason: reason }
       end
+    end
+
+    # Emit grounding reads for the architect's SessionStart hook.
+    #
+    # Prints to stdout (via the caller), in order:
+    #   1. architecture/ARCHITECT.md — always, if present
+    #   2. architecture/BRIEF.md    — if present
+    #   3. In-flight iteration file — resolved as:
+    #        a) space.data["project"]["current_iteration"] entry's file, if it exists on disk
+    #        b) highest-ordinal architecture/I<NN>-*.md otherwise
+    #        c) nothing if neither
+    #
+    # WORKTREE GUARD (load-bearing, §1): when session_cwd is inside a builder
+    # worktree (<space>/build/<id>/wt/**), returns "" and the caller emits nothing.
+    # Builders never receive architect grounding.
+    #
+    # session_cwd defaults to Dir.pwd; callers may inject a path for testing or
+    # to pass the value received from the hook's stdin JSON {"cwd": "..."}.
+    def ground(session_cwd: nil)
+      cwd = File.expand_path(session_cwd || Dir.pwd)
+      build_root = space.path.join("build").to_s
+      if cwd.start_with?("#{build_root}/") && cwd.match?(%r{/build/[^/]+/wt(/|\z)})
+        return ""
+      end
+
+      parts = []
+
+      architect_path = space.path.join("architecture", "ARCHITECT.md")
+      parts << "=== architecture/ARCHITECT.md ===\n\n#{architect_path.read}" if architect_path.exist?
+
+      brief_path = space.path.join("architecture", "BRIEF.md")
+      parts << "=== architecture/BRIEF.md ===\n\n#{brief_path.read}" if brief_path.exist?
+
+      iter_path = resolve_inflight_iteration
+      if iter_path
+        rel = iter_path.relative_path_from(space.path).to_s
+        parts << "=== #{rel} ===\n\n#{iter_path.read}"
+      end
+
+      parts.join("\n")
     end
 
     def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false, effort: nil, touch: nil)
@@ -385,7 +575,8 @@ module Space::Architect
       raise Space::Core::Error, "repos/#{repo} does not exist" unless repo_path.exist?
 
       id = iteration_id(entry)
-      wt_path = space.path.join("build", "#{id}-#{lane}", "wt")
+      wt_path   = space.path.join("build", "#{id}-#{lane}", "wt")
+      build_dir = space.path.join("build", "#{id}-#{lane}")
       FileUtils.mkdir_p(wt_path.dirname)
 
       base_ref = base || "HEAD"
@@ -394,26 +585,48 @@ module Space::Architect
       base_sha = base_sha.strip
 
       branch = "lane/#{id}-#{lane}"
-      git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
+
+      # Guard: an existing directory that is not a registered worktree is ambiguous — refuse.
+      if wt_path.exist? && !worktree_registered?(repo_path, wt_path)
+        raise Space::Core::Error,
+          "#{wt_path} exists but is not a registered git worktree of #{repo} — " \
+          "resolve manually before re-running worktree_add"
+      end
+
+      # Skip git worktree add when the branch and worktree already exist (idempotent re-run).
+      unless branch_exists?(repo_path, branch) && worktree_registered?(repo_path, wt_path)
+        git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
+      end
+
+      # Seed prompt.md with a placeholder stub so the architect has a place to write the prompt.
+      # Never overwrite an existing file (real prompt or stub from a prior run).
+      prompt_path = build_dir.join("prompt.md")
+      prompt_path.write("#{PROMPT_STUB}\n") unless prompt_path.exist?
+
+      new_fields = {
+        "name" => lane,
+        "repo" => repo,
+        "base_sha" => base_sha,
+        "worktree" => "build/#{id}-#{lane}/wt",
+        "integration_branch" => nil,
+        "harness" => harness.to_s,
+        "model" => model,
+        "variant" => variant
+      }
+      new_fields["effort"]    = effort         if effort
+      new_fields["touch_set"] = Array(touch)   if touch && !Array(touch).empty?
 
       update_architect_block do |b|
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
           lanes = s["lanes"] || []
-          lane_entry = {
-            "name" => lane,
-            "repo" => repo,
-            "base_sha" => base_sha,
-            "worktree" => "build/#{id}-#{lane}/wt",
-            "integration_branch" => nil,
-            "harness" => harness.to_s,
-            "model" => model,
-            "variant" => variant
-          }
-          lane_entry["effort"] = effort if effort
-          lane_entry["touch_set"] = Array(touch) if touch && !Array(touch).empty?
-          lanes << lane_entry
-          s["lanes"] = lanes
+          existing = lanes.find { |l| l["name"] == lane }
+          if existing
+            existing.merge!(new_fields)
+          else
+            lanes << new_fields
+            s["lanes"] = lanes
+          end
         end
         b
       end
@@ -538,7 +751,7 @@ module Space::Architect
     def dispatch(iteration, lane, model: nil, max_turns: 200,
                  claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, detach: false,
                  push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
-                 push_client: nil)
+                 push_client: nil, timeout: nil)
       raise Space::Core::Error, "Specify --push-host or --push-url, not both" if push_host && push_url
       raise Space::Core::Error, "--push-host requires --push-token"           if push_host && !push_token
       raise Space::Core::Error, "--detach cannot be combined with --push-url or --push-host" \
@@ -565,6 +778,10 @@ module Space::Architect
       report_path  = build_dir.join("report.md")
       raise Space::Core::Error, "prompt.md not found: #{prompt_path}" unless prompt_path.exist?
 
+      prompt_content = prompt_path.read.strip
+      raise Space::Core::Error, "Write this lane's prompt to #{prompt_path} before dispatching." \
+        if prompt_content.empty? || prompt_content == PROMPT_STUB.strip
+
       bin = resolved_harness == "claude-code" ? claude_bin : opencode_bin
       harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
                                                   bin: bin, config_dir: build_dir, effort: resolved_effort)
@@ -585,6 +802,7 @@ module Space::Architect
         end
 
         run_kwargs = { prompt_path: prompt_path, run_log_path: run_log_path, chdir: wt_path }
+        run_kwargs[:timeout] = timeout if timeout
         if resolved_harness == "claude-code"
           run_kwargs[:push_url]    = push_url    if push_url
           run_kwargs[:push_token]  = push_token  if push_token
@@ -593,6 +811,7 @@ module Space::Architect
         exit_code = harness_obj.run(**run_kwargs)
 
         result = { exit_code: exit_code, run_log: run_log_path, report: report_path, worktree: wt_path }
+        result[:timed_out]      = true           if exit_code == Harness::ClaudeCodeHarness::TIMEOUT_EXIT_CODE
         result[:created_run_id] = created_run_id if created_run_id
         result[:push_url]       = push_url       if push_url
         result
@@ -603,12 +822,78 @@ module Space::Architect
 
     attr_reader :space
 
+    # Resolve the in-flight iteration file for ground output.
+    # Rule: (a) current_iteration from project block → entry's file if it exists on disk,
+    #        (b) else highest-ordinal architecture/I<NN>-*.md,
+    #        (c) else nil.
+    def resolve_inflight_iteration
+      block = space.data["project"] || {}
+      arch_dir = space.path.join("architecture")
+      return nil unless arch_dir.exist?
+
+      current = block["current_iteration"]
+      if current
+        entry = (block["iterations"] || []).find { |s| s["name"] == current }
+        if entry && entry["file"]
+          path = space.path.join(entry["file"])
+          return path if path.exist?
+        end
+      end
+
+      candidates = arch_dir.children.select { |f| f.basename.to_s.match?(/\AI\d+-.+\.md\z/) }
+      return nil if candidates.empty?
+      candidates.max_by { |f| f.basename.to_s[/\AI(\d+)/, 1].to_i }
+    end
+
+    # Spawn cmd in dir with pgroup: true, writing stdout/stderr to temp files so
+    # pipe buffers can never block. Polls with WNOHANG; kills the process group on
+    # timeout. Returns { stdout:, stderr:, exit_code:, timed_out: }.
+    def capture_with_timeout(cmd, dir:, timeout:)
+      out_f = Tempfile.new(["gate-stdout", ".log"])
+      err_f = Tempfile.new(["gate-stderr", ".log"])
+      pid   = Process.spawn(cmd, pgroup: true, chdir: dir.to_s, out: out_f.path, err: err_f.path)
+
+      deadline  = Time.now + timeout
+      status    = nil
+      timed_out = false
+
+      until status
+        if Time.now > deadline
+          timed_out = true
+          Process.kill("TERM", -pid) rescue nil
+          sleep 0.5
+          Process.kill("KILL", -pid) rescue nil
+          Process.wait(pid) rescue nil
+          break
+        end
+        _, st = Process.waitpid2(pid, Process::WNOHANG)
+        if st
+          status = st
+        else
+          sleep 0.05
+        end
+      end
+
+      out_f.rewind; err_f.rewind
+      { stdout: out_f.read, stderr: err_f.read, exit_code: status&.exitstatus, timed_out: timed_out }
+    ensure
+      out_f&.close!
+      err_f&.close!
+    end
+
     def iteration_id(entry)
       "I#{format('%02d', entry['ordinal'])}-#{entry['name']}"
     end
 
+    def project_integration_branch
+      b = space.data["project"] || {}
+      return b["integration_branch"] if b["integration_branch"]
+      slug = space.title.downcase.gsub(/[^a-z0-9]+/, "-").gsub(/\A-|-\z/, "")
+      "project/#{slug}"
+    end
+
     def slice_entry(iteration)
-      block = space.data["architect"] || {}
+      block = space.data["project"] || {}
       entry = (block["iterations"] || []).find { |s| s["name"] == iteration }
       raise Space::Core::Error, "Iteration '#{iteration}' not recorded in space.yaml — run `architect new #{iteration}` first" unless entry
       entry
@@ -642,21 +927,40 @@ module Space::Architect
       # (a) frozen sections of the iteration file untouched since freeze
       checks[:frozen_untouched] = (!frozen_region_changed?(freeze_sha, rel) if freeze_sha && rel)
 
-      # (b) no builder commits in the worktree
-      log_out, = git_capture("-C", wt_path.to_s, "log", "#{base_sha}..")
-      checks[:no_builder_commits] = log_out.strip.empty?
+      # (b) no builder commits in the worktree (the architect's integrate commit is excluded)
+      log_out, = git_capture("-C", wt_path.to_s, "log", "--format=%H", "#{base_sha}..")
+      commit_shas = log_out.strip.split("\n").map(&:strip).reject(&:empty?)
+      recorded_integrate = lane["integrate_sha"]&.strip
+      builder_shas = recorded_integrate ? commit_shas.reject { |s| s == recorded_integrate } : commit_shas
+      checks[:no_builder_commits] = builder_shas.empty?
 
       # (c) builder's scratch report exists and is non-empty
       report = space.path.join("build", "#{iteration_id(entry)}-#{lane_name}", "report.md")
       checks[:report_exists] = report.exist? && !report.read.strip.empty?
 
-      # (d) in-bounds: changed paths ⊆ touch_set (nil if no touch_set recorded)
+      # (d) in-bounds: changed paths ⊆ touch_set (:no_touch_set if none recorded)
       checks[:in_bounds] = if touch_set.empty?
-        nil
+        :no_touch_set
       else
-        status_out, = git_capture("-C", wt_path.to_s, "status", "--porcelain")
-        changed = status_out.lines.map { |l| l[3..].to_s.strip }
-        changed.all? { |f| touch_set.any? { |g| File.fnmatch(g, f) } }
+        # -z: NUL-delimited; renames emit new_path NUL old_path — include both
+        status_out, = git_capture("-C", wt_path.to_s, "status", "--porcelain", "-z")
+        changed = []
+        entries = status_out.split("\0")
+        i = 0
+        while i < entries.length
+          entry = entries[i]
+          i += 1
+          next if entry.empty? || entry.length < 3
+          code = entry[0, 2]
+          path = entry[3..]
+          changed << path if path && !path.empty?
+          next unless code[0] == "R" || code[0] == "C"
+          orig = entries[i]
+          i += 1
+          changed << orig if orig && !orig.empty?
+        end
+        fnm = File::FNM_PATHNAME | File::FNM_EXTGLOB
+        changed.all? { |f| touch_set.any? { |g| File.fnmatch(g, f, fnm) } }
       end
 
       checks
@@ -702,30 +1006,34 @@ module Space::Architect
       lines[(start + 1)...finish].join.strip
     end
 
-    # Parse the Acceptance Criteria markdown table into [{ac:, command:}]. Reads the
-    # Command column by header name (so an added "Brief §" column doesn't shift it);
-    # strips surrounding backticks and unescapes \| inside a cell.
-    def acceptance_criteria_commands(text)
+    # Extract and parse the fenced ```gates block from the Acceptance Criteria section.
+    # Returns an array of gate hashes (string-keyed). Returns [] when the block is
+    # absent, empty, or contains only YAML comments.
+    def parse_gates(text)
       body = section_body(text, "## Acceptance Criteria")
       return [] unless body
-      rows = body.lines.map(&:strip).select { |l| l.start_with?("|") }
-      return [] if rows.length < 2
-
-      header = split_md_row(rows[0])
-      cmd_idx = header.index { |c| c.downcase == "command" } || 1
-      ac_idx = header.index { |c| c.downcase.start_with?("ac") } || 0
-
-      rows[2..].to_a.filter_map do |line|
-        cells = split_md_row(line)
-        command = cells[cmd_idx].to_s.gsub(/\A`+|`+\z/, "").strip
-        next if command.empty?
-        { ac: cells[ac_idx].to_s.strip, command: command }
-      end
+      match = body.match(/^```gates\n(.*?)^```/m)
+      return [] unless match
+      parsed = YAML.safe_load(match[1], aliases: false)
+      parsed.is_a?(Array) ? parsed : []
     end
 
-    def split_md_row(line)
-      inner = line.strip.sub(/\A\|/, "").sub(/\|\z/, "")
-      inner.split(/(?<!\\)\|/).map { |c| c.strip.gsub('\\|', "|") }
+    # Lint the gates block in the given iteration file text. Raises Space::Core::Error
+    # with aggregated messages on failure. Absent/empty gates appends a warning to
+    # the optional warnings array but does not fail.
+    def lint_gates!(text, warnings: nil)
+      gates = begin
+        parse_gates(text)
+      rescue Psych::SyntaxError => e
+        raise Space::Core::Error, "ill-formed gates block: #{e.message}"
+      end
+      if gates.empty?
+        warnings << "no gates — this iteration is prose-judged only" if warnings
+        return
+      end
+      result = GateLint.call(gates)
+      return if result.success?
+      raise Space::Core::Error, "ill-formed gates block:\n#{result.failure.join("\n")}"
     end
 
     def staged_changes?
@@ -757,8 +1065,8 @@ module Space::Architect
     end
 
     def update_architect_block
-      block = space.data["architect"] || { "status" => "active", "current_iteration" => nil, "iterations" => [] }
-      space.data["architect"] = yield(block)
+      block = space.data["project"] || { "status" => "active", "current_iteration" => nil, "iterations" => [] }
+      space.data["project"] = yield(block)
       space.save
     end
 
@@ -771,6 +1079,17 @@ module Space::Architect
 
     def git_capture(*args)
       Open3.capture3("git", *args)
+    end
+
+    def branch_exists?(repo_path, branch)
+      _, _, st = git_capture("-C", repo_path.to_s, "rev-parse", "--verify", branch)
+      st.success?
+    end
+
+    def worktree_registered?(repo_path, wt_path)
+      out, _, _ = git_capture("-C", repo_path.to_s, "worktree", "list", "--porcelain")
+      real = File.exist?(wt_path.to_s) ? File.realpath(wt_path.to_s) : wt_path.to_s
+      out.lines.any? { |l| l.start_with?("worktree ") && l.chomp.delete_prefix("worktree ") == real }
     end
   end
 end
