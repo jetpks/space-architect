@@ -318,6 +318,75 @@ class OciPackerTest < Space::ArchitectTest
     end
   end
 
+  def test_seed_snapshot_run_emitted_after_provision_before_workdir
+    with_provisioned_and_persisted_space(provision: ["scripts/setup.sh"], persist: ["/root/.hermes"]) do |space, out_dir|
+      Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+      dockerfile = File.read(File.join(out_dir, "Dockerfile"))
+
+      assert_match(%r{RUN mkdir -p "/opt/space-seed/root/\.hermes"}, dockerfile)
+      assert_match(%r{cp -a "/root/\.hermes/\." "/opt/space-seed/root/\.hermes/"}, dockerfile)
+      assert_match(%r{2>/dev/null \|\| true}, dockerfile)
+
+      provision_pos = dockerfile.index("RUN /space/scripts/setup.sh")
+      seed_pos      = dockerfile.index('RUN mkdir -p "/opt/space-seed/root/.hermes"')
+      workdir_pos   = dockerfile.rindex("WORKDIR /space")
+
+      assert provision_pos < seed_pos,    "seed RUN must come after provision RUN"
+      assert seed_pos      < workdir_pos, "seed RUN must come before WORKDIR /space"
+    end
+  end
+
+  def test_no_persist_dockerfile_contains_no_seed_snapshot_run
+    with_space do |space, out_dir|
+      Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+      dockerfile = File.read(File.join(out_dir, "Dockerfile"))
+
+      refute_match(%r{space-seed}, dockerfile)
+    end
+  end
+
+  def test_entrypoint_restore_guard_with_empty_check_and_tolerant_cp
+    with_persisted_space(persist: ["/root/.hermes"]) do |space, out_dir|
+      Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+      entrypoint = File.read(File.join(out_dir, "entrypoint.sh"))
+
+      assert_match(%r{/opt/space-seed/root/\.hermes}, entrypoint)
+      assert_match(/ls -A.*2>\/dev\/null/, entrypoint)
+
+      empty_check_pos = entrypoint.index("ls -A")
+      cp_pos          = entrypoint.index("cp -a")
+      exec_pos        = entrypoint.index('if [ "$#" -eq 0 ]')
+
+      assert empty_check_pos < cp_pos,   "empty-check must precede cp"
+      assert cp_pos          < exec_pos, "restore guard must be before exec branch"
+
+      cp_line = entrypoint.lines.find { |l| l.include?("cp -a") && l.include?("space-seed") }
+      assert cp_line, "restore cp line must exist"
+      assert_match(/\|\| true/, cp_line, "restore cp must end with || true")
+    end
+  end
+
+  def test_no_persist_entrypoint_byte_identical_to_base
+    with_space do |space, out_dir|
+      Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
+      entrypoint = File.read(File.join(out_dir, "entrypoint.sh"))
+
+      expected = <<~'SH'
+        #!/bin/bash
+        set -e
+        git config --global --add safe.directory '*'
+        git config --global --get user.name >/dev/null 2>&1 || git config --global user.name 'space-architect'
+        git config --global --get user.email >/dev/null 2>&1 || git config --global user.email 'architect@localhost'
+        if [ "$#" -eq 0 ]; then
+          exec bash --login
+        else
+          exec "$@"
+        fi
+      SH
+      assert_equal expected, entrypoint
+    end
+  end
+
   private
 
   def with_space
@@ -344,6 +413,36 @@ class OciPackerTest < Space::ArchitectTest
       end
     end
     space.data["pack"] = { "provision" => provision }
+    out_dir = Dir.mktmpdir("oci-packer-test")
+    yield space, out_dir
+  ensure
+    FileUtils.rm_rf(out_dir) if out_dir && File.directory?(out_dir)
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def with_persisted_space(persist:)
+    setup = temp_env
+    store = build_store(env: setup.fetch(:env))
+    space = store.create("Persist Test Space", git: false).value!
+    space.data["pack"] = { "persist" => persist }
+    out_dir = Dir.mktmpdir("oci-packer-test")
+    yield space, out_dir
+  ensure
+    FileUtils.rm_rf(out_dir) if out_dir && File.directory?(out_dir)
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def with_provisioned_and_persisted_space(provision:, persist:)
+    setup = temp_env
+    store = build_store(env: setup.fetch(:env))
+    space = store.create("Provision+Persist Test Space", git: false).value!
+    provision.each do |rel_path|
+      script_path = space.path.join(rel_path)
+      FileUtils.mkdir_p(script_path.dirname)
+      File.write(script_path, "#!/bin/bash\necho provisioned\n")
+      File.chmod(0o755, script_path)
+    end
+    space.data["pack"] = { "provision" => provision, "persist" => persist }
     out_dir = Dir.mktmpdir("oci-packer-test")
     yield space, out_dir
   ensure
