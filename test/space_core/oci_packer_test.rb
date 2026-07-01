@@ -135,12 +135,12 @@ class OciPackerTest < Space::ArchitectTest
     end
   end
 
-  def test_dockerignore_excludes_git_and_secrets
+  def test_dockerignore_bakes_git_and_hides_secrets
     with_space do |space, out_dir|
       Space::Core::OciPacker.new(space: space, output_dir: out_dir).generate
       dockerignore = File.read(File.join(out_dir, "Dockerfile.dockerignore"))
 
-      assert_match(/^\.git$/, dockerignore)
+      refute_match(/^\.git$/, dockerignore)
       assert_match(/\.env/, dockerignore)
       assert_match(/\.key/, dockerignore)
       assert_match(/\.pem/, dockerignore)
