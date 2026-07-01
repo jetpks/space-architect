@@ -56,6 +56,13 @@ RUN printf 'export PATH="/usr/local/bundle/bin:/root/.local/bin:$PATH"\n' \
 RUN /space/<%= script %>
 <% end -%>
 <% end -%>
+<% if persist_paths.any? -%>
+
+# Seed snapshot: capture baked content of persisted dirs so a first-run (empty) mount is seeded from it
+<% persist_paths.each do |guest_path| -%>
+RUN mkdir -p "/opt/space-seed<%= guest_path %>" && cp -a "<%= guest_path %>/." "/opt/space-seed<%= guest_path %>/" 2>/dev/null || true
+<% end -%>
+<% end -%>
 
 WORKDIR /space
 
