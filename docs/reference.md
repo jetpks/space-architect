@@ -443,6 +443,55 @@ architect space shell fish path              # print install paths
 architect space shell complete spaces        # print completion candidates
 ```
 
+### `architect space pack`
+
+Render a portable OCI build context for the current space into `build/oci/` (override with `-o`): a `Dockerfile`, an executable `entrypoint.sh`, and a `Dockerfile.dockerignore`. The Dockerfile copies the space tree onto a `ruby:4.0.5` base with `git`, the Claude Code CLI, and the `space-architect` gem (from the in-space `repos/space-architect` checkout when present, else RubyGems); the generated ignore file keeps secrets and scratch (`.env`, `*.key`, `*.pem`, ssh keys, `build/`, `tmp/`) out of the layers. Reads and validates the `pack.provision` / `pack.persist` keys from `space.yaml` (see below). Writes the context only — no image is built.
+
+```sh
+architect space pack
+architect space pack -o /tmp/space-ctx
+```
+
+| Option | Description |
+|--------|-------------|
+| `-o, --output=DIR` | Output directory for the build context (default: `build/oci/` under the space root). |
+
+### `architect space build`
+
+Pack, then build **and tag** the image via the `container` CLI. Two tags are applied: `<space-id>:<sha>` — where `<sha>` is the space repo's 12-char `HEAD`, suffixed `-dirty` when the working tree has uncommitted changes — and a moving `<space-id>:latest`. Same commit ⇒ same tag ⇒ same image (reproducible by SHA). Requires the space to be a Git repository with at least one commit. The generated context is a standard OCI/Docker build context, so `docker build -f build/oci/Dockerfile .` from the space root builds the same image with any OCI builder.
+
+```sh
+architect space build
+```
+
+### `architect space run [COMMAND]`
+
+Run `<space-id>:latest` via `container run --rm`, injecting auth and mounting persisted state. With no `COMMAND` it starts a login shell; pass a command to run it once instead. Only the auth environment variables that are actually set are forwarded with `-e` — `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL` — so credentials are never baked into the image. Each `pack.persist` path is bind-mounted from `<space>/.state<path>` on the host (created before the run) so container state survives across runs.
+
+```sh
+architect space run                    # login shell
+architect space run architect status   # one-off command
+architect space run --tty              # force an interactive TTY
+```
+
+| Option | Description |
+|--------|-------------|
+| `--[no-]tty` | Force (or disable) an interactive TTY. Default: auto-detected from the output stream. |
+
+### Declaring provisioning & persistence (`space.yaml`)
+
+The `pack`-family commands read two optional keys from `space.yaml`:
+
+```yaml
+pack:
+  provision:                 # build-time scripts, run as RUN /space/<script> during build
+    - scripts/setup-toolchain.sh
+  persist:                   # absolute guest paths, bind-mounted from <space>/.state<path> at run
+    - /root/.claude
+```
+
+`provision` entries must be space-root-relative paths that exist under the space; `persist` entries must be absolute. Both are validated at pack time — an absolute or missing provision path, a provision path that escapes the space root, or a relative persist path fails the command before anything is written.
+
 ## Evergreen engine: `architect src …` 🌲
 
 The evergreen engine (`space-src`, exposed as `src`) keeps canonical copies of tracked repos in sync so spaces can clone via fast APFS copy-on-write. Run `architect src --help` to list available subcommands.

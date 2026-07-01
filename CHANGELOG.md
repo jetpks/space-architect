@@ -27,6 +27,19 @@ except where called out under **Changed** below.
 - **`architect dispatch --detach`** — detached builder launch that returns
   immediately with a PID and survives the harness wall-clock reap; poll the
   lane's report for completion.
+- **`space pack | build | run` — containerize a space.** `space pack` renders a
+  portable OCI build context under `build/oci/` (a `Dockerfile`, an
+  `entrypoint.sh`, and a `Dockerfile.dockerignore` that keeps secrets and scratch
+  out of the layers). `space build` packs and builds it via the `container` CLI,
+  tagging `<space-id>:<git-sha>` (suffixed `-dirty` when the tree has uncommitted
+  changes) plus a moving `:latest` — a reproducible-by-SHA image. `space run`
+  runs `<space-id>:latest` with auth (`ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`) injected at run time and never
+  baked into the image, bind-mounting persisted state back to the host. Two
+  optional `space.yaml` keys drive it: `pack.provision` (build-time scripts, run
+  as `RUN /space/<script>`) and `pack.persist` (absolute guest paths mounted from
+  `<space>/.state<path>`). All three are also reachable as
+  `architect space pack|build|run`.
 
 ### Changed
 
