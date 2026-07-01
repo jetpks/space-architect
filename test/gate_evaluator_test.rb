@@ -135,14 +135,24 @@ class GateEvaluatorTest < Space::ArchitectTest
   # ── threshold — last-occurrence matching (Fix A) ───────────────────────────
 
   def test_threshold_matches_last_occurrence_not_first
-    # minitest-style: throughput line appears BEFORE the summary line.
-    # "(\d+) runs" first matches "4183" inside "13.4183 runs/s"; the summary
-    # line "870 runs" appears later.  The gate must capture 870, not 4183.
+    # minitest prints the throughput line ("13.4183 runs/s") BEFORE the summary
+    # ("870 runs, ..."), so `(\d+) runs` matches 4183 first and 870 last. The gate
+    # must capture the trailing summary metric (870), never the decoy (4183). This
+    # test is green IFF check_threshold reads the LAST occurrence (Fix A, I14).
     stdout = "Finished in 64.8s, 13.4183 runs/s, 52.0 assertions/s.\n" \
              "870 runs, 3372 assertions, 0 failures, 0 errors, 0 skips\n"
-    r = ev(stdout: stdout, exit_code: 0,
-           expect: { "threshold" => { "match" => '(\d+) runs', "op" => ">=", "value" => 800 } })
-    assert r.pass?, "expected pass capturing 870 from summary line, got: #{r.reason}"
+
+    # last match (870) is captured — passes; under first-match this would be 4183.
+    hit = ev(stdout: stdout, exit_code: 0,
+             expect: { "threshold" => { "match" => '(\d+) runs', "op" => "==", "value" => 870 } })
+    assert hit.pass?, "expected the summary metric 870 to be captured, got: #{hit.reason}"
+
+    # the decoy 4183 is NOT captured: an == 4183 threshold fails, and the reason
+    # names the captured value as 870.0 — this is what fails under first-match.
+    decoy = ev(stdout: stdout, exit_code: 0,
+               expect: { "threshold" => { "match" => '(\d+) runs', "op" => "==", "value" => 4183 } })
+    refute decoy.pass?
+    assert_match(/870\.0 == 4183/, decoy.reason)
   end
 
   def test_threshold_single_match_unchanged
