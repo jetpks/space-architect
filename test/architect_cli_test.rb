@@ -972,7 +972,8 @@ class ArchitectCLITest < Space::ArchitectTest
 
         out, err = invoke("land")
         assert_empty err
-        assert_match(/gh pr create --base main/, out)
+        assert_match(/gh pr create/, out)
+        assert_match(/--base main/, out)
         assert_match(/project\/test-space/, out)
         body_file = File.join(space_path, "build", "land", "my-repo-pr-body.md")
         assert_path_exists body_file

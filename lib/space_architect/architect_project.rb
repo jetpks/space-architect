@@ -415,9 +415,9 @@ module Space::Architect
       merged
     end
 
-    # Generate the end-of-project PR command(s) for each integrated repo.
-    # Writes a PR body to build/land/<repo>-pr-body.md and returns, per repo:
-    # { repo:, integration_branch:, body_file:, command:, context: }.
+    # Generate the end-of-project paste-and-run block for each integrated repo.
+    # Writes a PR body template to build/land/<repo>-pr-body.md and returns, per repo:
+    # { repo:, integration_branch:, body_file:, cd_line:, push_line:, command: }.
     # Raises Space::Core::Error if nothing has been integrated yet.
     # Side-effect-free: no git write, no push, no gh.
     def land(env: ENV)
@@ -438,7 +438,7 @@ module Space::Architect
         body_path = body_dir.join("#{repo}-pr-body.md")
 
         iterations = b["iterations"] || []
-        body = +"# #{space.title}\n\nMerges `#{integration_branch}` → `main`.\n\n## Iterations\n\n"
+        body = +"# #{space.title}\n\nMerges `#{integration_branch}` → `main`.\n\n## Summary\n\n<one-line summary>\n\n## Iterations\n\n"
         iterations.each do |s|
           nn = format("%02d", s["ordinal"])
           verdict = s["verdict"] || "—"
@@ -446,10 +446,21 @@ module Space::Architect
         end
         body_path.write(body)
 
-        contracted = Space::Core::Paths.contract(body_path, env: env)
-        cmd = %(gh pr create --base main --head #{integration_branch} --title "#{space.title}" --body-file #{contracted})
-        context = "# Run from repos/#{repo} on branch #{integration_branch} (gh pushes it)"
-        { repo: repo, integration_branch: integration_branch, body_file: body_path.to_s, command: cmd, context: context }
+        contracted_body = Space::Core::Paths.contract(body_path, env: env)
+        repo_path = Space::Core::Paths.contract(space.path.join("repos", repo), env: env)
+
+        command = Space::Core::Commands.wrap(
+          %(gh pr create --base main --head #{integration_branch} --title "#{space.title}" --body-file #{contracted_body})
+        )
+
+        {
+          repo: repo,
+          integration_branch: integration_branch,
+          body_file: body_path.to_s,
+          cd_line: "cd #{repo_path}",
+          push_line: "git push -u origin #{integration_branch}",
+          command: command
+        }
       end
     end
 

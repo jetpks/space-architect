@@ -390,7 +390,7 @@ module Space::Architect
       end
 
       class Land < BaseCommand
-        desc "Generate the end-of-project PR command (no push, no gh — prints gh pr create)"
+        desc "Generate the end-of-project paste-and-run block (no push, no gh — prints commands to run)"
         argument :space, required: false, desc: "Space identifier (default: $PWD)"
 
         def call(space: nil, **opts)
@@ -398,11 +398,13 @@ module Space::Architect
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              results = project.land
+              results = project.land(env: project_config.env)
               results.each do |r|
-                terminal.say r[:context]
+                terminal.say "Fill the placeholders in #{terminal.path(r[:body_file])}, then run:"
+                terminal.say ""
+                terminal.say r[:cd_line]
+                terminal.say r[:push_line]
                 terminal.say r[:command]
-                terminal.say "Body: #{terminal.path(r[:body_file])}"
               end
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end

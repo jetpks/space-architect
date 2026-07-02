@@ -37,12 +37,24 @@ except where called out under **Changed** below.
 
 ### Fixed
 
+- **`architect land` — paste-and-run block.** `architect land` stdout is now a
+  copy-paste-ready block: a "Fill the placeholders in ~/…, then run:" instruction line
+  naming the body file, followed by shell-only commands — `cd` to the space's repo
+  checkout (`~`-contracted, unquoted), `git push -u origin <branch>`, and the wrapped
+  `gh pr create` invocation. The false "(gh pushes it)" context line and the redundant
+  `Body:` display line are gone; the push step is explicit. The generated PR body
+  template now includes prefilled data (merge line, iteration list with verdicts) **and**
+  `<…>` placeholder sections the human fills before running the command.
 - **`architect bug-report` / `architect land` — `~`-contracted paths in printed commands.**
-  The `gh issue create` / `gh pr create` invocations printed to stdout now render the
-  `--body-file` path as `~/…` instead of the user's expanded `$HOME`, so copying the
-  command into a GitHub issue or Slack message no longer leaks the home directory.
+  The `gh issue create` / `gh pr create` invocations printed to stdout render the
+  `--body-file` path as `~/…` instead of the user's expanded `$HOME`.
   `Space::Core::Paths.contract` is the single home-contraction helper; `Terminal#path`
   delegates to it.
+- **Command wrapping for narrow terminals.** `gh pr create` and `gh issue create`
+  commands are now rendered with trailing ` \` continuations broken at `--flag`
+  boundaries, continuation lines indented two spaces. The wrapped output is valid shell
+  (`bash -n` clean). `Space::Core::Commands.wrap` is the single wrapping helper; both
+  commands call it.
 
 ### Changed
 
