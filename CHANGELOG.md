@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-07-01
+
+Fast-follow completing the `pack.persist:` story from 2.0.0.
+
+### Added
+
+- **Seed-on-empty for `pack.persist:`.** Content baked at a persisted path now
+  survives a first-run empty bind mount. `space pack` snapshots each persisted
+  dir to a `/opt/space-seed<path>` sidecar after provisioning, and the entrypoint
+  restores an empty mount from its seed on first run only (a non-empty mount
+  keeps its evolving state). Previously the empty host mount shadowed the baked
+  content — e.g. a provisioned `~/.hermes/config.yaml` was hidden once
+  `/root/.hermes` was persisted. Template-only; a space with no `pack.persist:`
+  renders an identical Dockerfile and entrypoint.
+
+### Fixed
+
+- **First-run boot on bind-mount-root-restricted runtimes.** The seed restore
+  tolerates a benign copy failure (`2>/dev/null || true`) so that on runtimes
+  where the persisted path is a bind mount whose root rejects utime updates
+  (virtiofs under Apple `container`), the entrypoint's `set -e` no longer turns a
+  cosmetic `cp` EPERM into a fatal abort before the payload execs.
+
 ## [2.0.0] - 2026-07-01
 
 A ground-up release across four fronts:
@@ -293,6 +316,7 @@ the **BREAKING** items under Changed. The repository is now a monorepo; the
   lanes, worktrees, and headless `claude -p` dispatch, with variant sets and the
   claude-code and opencode harnesses.
 
+[2.0.1]: https://github.com/jetpks/space-architect/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/jetpks/space-architect/compare/v1.3.0...v2.0.0
 [1.3.0]: https://github.com/jetpks/space-architect/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/jetpks/space-architect/compare/v1.1.0...v1.2.0
