@@ -48,13 +48,7 @@ module Space::Core
     end
 
     def path(path)
-      value = path.to_s
-      homes.each do |home|
-        return "~" if value == home
-        return "~#{value.delete_prefix(home)}" if value.start_with?("#{home}/")
-      end
-
-      value
+      Paths.contract(path, env: config.env)
     end
 
     def with_spinner(message)
@@ -106,17 +100,6 @@ module Space::Core
       else
         stdout.tty?
       end
-    end
-
-    def homes
-      home = XDG.home(env: config.env)
-      [home, realpath_or_nil(home)].compact.uniq
-    end
-
-    def realpath_or_nil(path)
-      File.realpath(path)
-    rescue SystemCallError
-      nil
     end
 
     def table_row(headers, row, column_widths, header: false)

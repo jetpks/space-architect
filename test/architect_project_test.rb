@@ -1000,6 +1000,38 @@ class ArchitectProjectTest < Space::ArchitectTest
     assert_path_exists r[:body_file]
     body = File.read(r[:body_file])
     assert_match(/my-slice/, body)
+
+    # command string must not leak the expanded home directory
+    home = ENV.fetch("HOME", Dir.home)
+    refute_match(/#{Regexp.escape(home)}/, r[:command])
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_land_command_contracts_body_file_path
+    dir = Dir.mktmpdir("architect-project-test")
+    # Put the space under a fake home so body_path will start with it
+    fake_home = File.join(dir, "home")
+    FileUtils.mkdir_p(fake_home)
+    env = { "HOME" => fake_home }
+
+    space_dir = File.join(fake_home, "myspace")
+    FileUtils.mkdir_p(File.join(space_dir, "repos"))
+    space = create_real_space(space_dir)
+    create_real_repo(space_dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    File.write(File.join(space_dir, "build", "I01-my-slice-lane-a", "wt", "feature.rb"), "def feature; end\n")
+    project.merge_lane!("my-slice", "lane-a")
+
+    results = project.land(env: env)
+    r = results.first
+    assert_match(/--body-file ~\//, r[:command])
+    refute_match(/--body-file #{Regexp.escape(fake_home)}/, r[:command])
   ensure
     FileUtils.rm_rf(dir)
   end

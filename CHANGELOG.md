@@ -17,9 +17,10 @@ except where called out under **Changed** below.
 - **`architect bug-report`** — zero-friction bug-filing command. Gathers
   diagnostics (gem version, Ruby version/platform, and when run inside a space:
   space id, title, and iteration list with verdicts), writes a prefilled GitHub
-  issue-body template to `<space>/build/bug-report/body.md` (or
-  `./architect-bug-report.md` outside a space), and prints — never executes —
-  the `gh issue create -R jetpks/space-architect` invocation to run.
+  issue-body template to `<space>/build/bug-report/architect-bug-report-YYYYMMDD-HHMMSS.md`
+  (or `./architect-bug-report-YYYYMMDD-HHMMSS.md` outside a space — timestamped so
+  back-to-back runs in the same session never overwrite each other), and prints —
+  never executes — the `gh issue create -R jetpks/space-architect` invocation to run.
 - **`src` — standalone evergreen-engine binary** (`exe/src`). `repo`, `org`,
   `sync`, `status`, `config`, `daemon`, and `clone`, plus single-token fuzzy
   navigation (`src <query>` resolves to a repo and honours the `cd` contract)
@@ -33,6 +34,15 @@ except where called out under **Changed** below.
 - **`architect dispatch --detach`** — detached builder launch that returns
   immediately with a PID and survives the harness wall-clock reap; poll the
   lane's report for completion.
+
+### Fixed
+
+- **`architect bug-report` / `architect land` — `~`-contracted paths in printed commands.**
+  The `gh issue create` / `gh pr create` invocations printed to stdout now render the
+  `--body-file` path as `~/…` instead of the user's expanded `$HOME`, so copying the
+  command into a GitHub issue or Slack message no longer leaks the home directory.
+  `Space::Core::Paths.contract` is the single home-contraction helper; `Terminal#path`
+  delegates to it.
 
 ### Changed
 
