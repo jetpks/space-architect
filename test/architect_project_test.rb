@@ -19,11 +19,9 @@ class ArchitectProjectTest < Space::ArchitectTest
       "created_at" => "2026-06-19T00:00:00Z", "updated_at" => "2026-06-19T00:00:00Z",
       "repos" => [], "notes" => [], "tickets" => [], "tags" => []
     }
-    File.write(File.join(dir, "space.yaml"), YAML.dump(data))
-
-    seed_git_repo(dir)
-    system("git", "-C", dir, "add", "space.yaml")
-    system("git", "-C", dir, "commit", "-q", "-m", "init")
+    yaml = YAML.dump(data)
+    File.write(File.join(dir, "space.yaml"), yaml)
+    FileUtils.cp_r(File.join(Space::GitFixtureTemplate.space_dir(yaml), ".git"), dir)
 
     Space::Core::Space.load(dir)
   end
@@ -31,10 +29,8 @@ class ArchitectProjectTest < Space::ArchitectTest
   def create_real_repo(space_dir, name)
     repo_dir = File.join(space_dir, "repos", name)
     FileUtils.mkdir_p(repo_dir)
-    seed_git_repo(repo_dir)
+    FileUtils.cp_r(File.join(Space::GitFixtureTemplate.repo_dir, ".git"), repo_dir)
     File.write(File.join(repo_dir, "README.md"), "# #{name}\n")
-    system("git", "-C", repo_dir, "add", "README.md")
-    system("git", "-C", repo_dir, "commit", "-q", "-m", "init #{name}")
     repo_dir
   end
 
