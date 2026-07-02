@@ -6,7 +6,28 @@ require "tmpdir"
 require "minitest/autorun"
 require_relative "../lib/space_architect"
 
+# A git repo, `init`-ed and `config`-ed exactly once per test process, that
+# fixtures seed into fresh directories via FileUtils.cp_r instead of paying
+# for `git init` + two `git config` subprocess spawns on every call.
+module Space::GitFixtureTemplate
+  def self.dir
+    @dir ||= begin
+      d = Dir.mktmpdir("architect-git-template")
+      system("git", "-C", d, "init", "-q", "-b", "main", exception: false) ||
+        system("git", "-C", d, "init", "-q")
+      system("git", "-C", d, "config", "user.name", "Test Builder")
+      system("git", "-C", d, "config", "user.email", "test@example.com")
+      d
+    end
+  end
+end
+
 class Space::ArchitectTest < Minitest::Test
+  # Seeds `dir` (an existing, empty directory) with a pre-initialized,
+  # pre-configured git repo by copying the process-wide template's .git dir.
+  def seed_git_repo(dir)
+    FileUtils.cp_r(File.join(Space::GitFixtureTemplate.dir, ".git"), dir)
+  end
   def invoke(*argv)
     out = StringIO.new
     err = StringIO.new
