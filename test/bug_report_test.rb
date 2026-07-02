@@ -132,6 +132,16 @@ class BugReportTest < Space::ArchitectTest
     refute_match(/--body-file #{Regexp.escape(@tmp)}/, result[:command])
   end
 
+  # AC4: bug-report command is wrapped with " \" at flag boundaries
+  def test_generate_command_is_wrapped
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now)
+
+    lines = result[:command].split("\n")
+    assert lines.size > 1, "command must be wrapped to multiple lines"
+    lines[0..-2].each { |l| assert_match(/ \\$/, l, "all but last line must end with continuation") }
+    refute_match(/ \\$/, lines.last)
+  end
+
   def test_command_unquoted_body_file_arg
     env = { "HOME" => @tmp }
     now = Time.new(2026, 7, 1, 8, 0, 0)

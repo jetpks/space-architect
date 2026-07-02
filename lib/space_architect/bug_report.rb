@@ -15,7 +15,9 @@ module Space
           body = build_body(space)
           body_path.write(body)
           contracted = Space::Core::Paths.contract(body_path, env: env)
-          command = %(gh issue create -R #{REPO} --title "<one-line summary>" --body-file #{contracted})
+          command = Space::Core::Commands.wrap(
+            %(gh issue create -R #{REPO} --title "<one-line summary>" --body-file #{contracted})
+          )
           { body_path: body_path, command: command, body: body }
         end
 

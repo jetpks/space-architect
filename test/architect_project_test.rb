@@ -995,7 +995,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     r = results.first
     assert_equal "my-repo", r[:repo]
     assert_match(/\Aproject\//, r[:integration_branch])
-    assert_match(/gh pr create --base main/, r[:command])
+    assert_match(/gh pr create/, r[:command])
+    assert_match(/--base main/, r[:command])
     assert_match(/--head project\//, r[:command])
     assert_path_exists r[:body_file]
     body = File.read(r[:body_file])
@@ -1032,6 +1033,63 @@ class ArchitectProjectTest < Space::ArchitectTest
     r = results.first
     assert_match(/--body-file ~\//, r[:command])
     refute_match(/--body-file #{Regexp.escape(fake_home)}/, r[:command])
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2: land block — cd line, push line, wrapped command, no home leak (env-injected)
+  def test_land_block_cd_push_and_wrapped_command
+    dir = Dir.mktmpdir("architect-project-test")
+    fake_home = File.join(dir, "home")
+    FileUtils.mkdir_p(fake_home)
+    env = { "HOME" => fake_home }
+
+    space_dir = File.join(fake_home, "myspace")
+    FileUtils.mkdir_p(File.join(space_dir, "repos"))
+    space = create_real_space(space_dir)
+    create_real_repo(space_dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    File.write(File.join(space_dir, "build", "I01-my-slice-lane-a", "wt", "feature.rb"), "def feature; end\n")
+    project.merge_lane!("my-slice", "lane-a")
+
+    r = project.land(env: env).first
+
+    assert_match(/\Acd ~\//, r[:cd_line], "cd_line must start with cd ~/")
+    assert_match(/\Agit push -u origin project\//, r[:push_line])
+    assert_match(/ \\$/, r[:command].split("\n").first, "command first line must end with continuation")
+    refute_match(/#{Regexp.escape(fake_home)}/, r[:cd_line])
+    refute_match(/#{Regexp.escape(fake_home)}/, r[:push_line])
+    refute_match(/#{Regexp.escape(fake_home)}/, r[:command])
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: PR body has prefilled data and <...> placeholders
+  def test_land_pr_body_has_placeholder_sections_and_iterations
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "wt", "feature.rb"), "def feature; end\n")
+    project.merge_lane!("my-slice", "lane-a")
+
+    r = project.land.first
+    body = File.read(r[:body_file])
+
+    assert_match(/<[^>]+>/, body, "body must contain <...> placeholder")
+    assert_match(/## Iterations/, body)
+    assert_match(/my-slice/, body)
+    assert_match(/project\//, body)
   ensure
     FileUtils.rm_rf(dir)
   end
