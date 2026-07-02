@@ -84,6 +84,10 @@ module Space::Core
       [entrypoint_content].pack("m0")
     end
 
+    def local_space_architect?
+      space.path.join("repos/space-architect").directory?
+    end
+
     def render_template(name)
       template_path = TEMPLATE_DIR.join(name)
       ERB.new(template_path.read, trim_mode: "-").result(binding)
