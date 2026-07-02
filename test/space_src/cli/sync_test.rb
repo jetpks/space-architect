@@ -36,15 +36,11 @@ class CLISyncTest < Minitest::Test
             owner = i.zero? ? "foo" : "bar"
             name = "repo#{i}"
             repo_dir = File.join(bares_dir, "repo-#{i}")
-            FileUtils.cp_r(TestHelpers.bare_and_clone_template, repo_dir)
+            FileUtils.cp_r(TestHelpers.seeded_trunk_template, repo_dir)
             bare = File.join(repo_dir, "bare.git")
             clone = File.join(repo_dir, "clone")
             in_async do
-              Shell.run("git", "remote", "add", "origin", bare, chdir: clone)
-              File.write(File.join(clone, "README.md"), "hello\n")
-              Shell.run("git", "add", ".", chdir: clone)
-              Shell.run("git", "commit", "-qm", "initial", chdir: clone)
-              Shell.run("git", "push", "-q", "-u", "origin", "trunk", chdir: clone)
+              Shell.run("git", "remote", "set-url", "origin", bare, chdir: clone)
             end
             ref = RepoRef.new(host: "github.com", owner: owner, name: name)
             repo_path = File.join(base_dir, ref.host, ref.owner, ref.name)
