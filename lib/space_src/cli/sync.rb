@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "dry/monads"
-require "space_src/cli"
 require "space_src/cli/repo"  # for Repo::Helpers.parse_ref
 require "space_src/cli/options"
 require "space_src/ui/mode"

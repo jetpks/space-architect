@@ -287,8 +287,7 @@ class SyncEngineTest < Minitest::Test
   # ===========================================================================
   def test_g1_clean_behind_fast_forwards_to_clean
     with_engine_home do |paths, base_dir, state_file|
-      with_trunk_repo do |bare, clone|
-        seed_initial_commit(clone)
+      with_seeded_trunk_repo do |bare, clone|
         # Push a new commit from a second clone, then rewind the
         # original clone's trunk ref so it is one commit behind
         # origin/trunk.
@@ -296,12 +295,11 @@ class SyncEngineTest < Minitest::Test
         system("git", "-c", "init.defaultBranch=trunk", "init", "-q", clone2,
           exception: true, out: File::NULL)
         Shell.run("git", "remote", "add", "origin", bare, chdir: clone2)
-        Shell.run("git", "config", "user.email", "t@t.com", chdir: clone2)
-        Shell.run("git", "config", "user.name", "T", chdir: clone2)
         Shell.run("git", "pull", "-q", "origin", "trunk", chdir: clone2)
         File.write(File.join(clone2, "remote.md"), "remote\n")
         Shell.run("git", "add", ".", chdir: clone2)
-        Shell.run("git", "commit", "-qm", "remote commit", chdir: clone2)
+        Shell.run("git", "-c", "user.email=t@t.com", "-c", "user.name=T",
+          "commit", "-qm", "remote commit", chdir: clone2)
         Shell.run("git", "push", "-q", "origin", "trunk", chdir: clone2)
         parent_sha = Shell.run("git", "rev-parse", "HEAD", chdir: clone).success.strip
         Shell.run("git", "update-ref", "refs/heads/trunk", parent_sha, chdir: clone)
@@ -334,8 +332,7 @@ class SyncEngineTest < Minitest::Test
   # ===========================================================================
   def test_g2_fresh_repo_makes_no_network_call
     with_engine_home do |paths, base_dir, state_file|
-      with_trunk_repo do |bare, clone|
-        seed_initial_commit(clone)
+      with_seeded_trunk_repo do |bare, clone|
         # Create a FETCH_HEAD with a recent mtime so the plan sees "fresh".
         Shell.run("git", "fetch", chdir: clone)
         # Place the repo under base_dir (preserving mtime so the
@@ -361,8 +358,7 @@ class SyncEngineTest < Minitest::Test
   # ===========================================================================
   def test_g3_dirty_repo_left_byte_untouched_and_reported
     with_engine_home do |paths, base_dir, state_file|
-      with_trunk_repo do |bare, clone|
-        seed_initial_commit(clone)
+      with_seeded_trunk_repo do |bare, clone|
         ref = RepoRef.new(host: "github.com", owner: "ruby", name: "ruby")
         repo_path = File.join(base_dir, ref.host, ref.owner, ref.name)
         FileUtils.mkdir_p(File.dirname(repo_path))
@@ -400,8 +396,7 @@ class SyncEngineTest < Minitest::Test
   # ===========================================================================
   def test_g4_diverged_repo_local_commits_intact
     with_engine_home do |paths, base_dir, state_file|
-      with_trunk_repo do |bare, clone|
-        seed_initial_commit(clone)
+      with_seeded_trunk_repo do |bare, clone|
         ref = RepoRef.new(host: "github.com", owner: "ruby", name: "ruby")
         repo_path = File.join(base_dir, ref.host, ref.owner, ref.name)
         FileUtils.mkdir_p(File.dirname(repo_path))
@@ -413,12 +408,11 @@ class SyncEngineTest < Minitest::Test
         system("git", "-c", "init.defaultBranch=trunk", "init", "-q", clone2,
           exception: true, out: File::NULL)
         Shell.run("git", "remote", "add", "origin", bare, chdir: clone2)
-        Shell.run("git", "config", "user.email", "t@t.com", chdir: clone2)
-        Shell.run("git", "config", "user.name", "T", chdir: clone2)
         Shell.run("git", "pull", "-q", "origin", "trunk", chdir: clone2)
         File.write(File.join(clone2, "remote.md"), "remote\n")
         Shell.run("git", "add", ".", chdir: clone2)
-        Shell.run("git", "commit", "-qm", "remote commit", chdir: clone2)
+        Shell.run("git", "-c", "user.email=t@t.com", "-c", "user.name=T",
+          "commit", "-qm", "remote commit", chdir: clone2)
         Shell.run("git", "push", "-q", "origin", "trunk", chdir: clone2)
         # NB: no explicit `git fetch` in repo_path — the plan's own
         # scm.fetch is what discovers the divergence. If we fetched
@@ -454,8 +448,7 @@ class SyncEngineTest < Minitest::Test
   # ===========================================================================
   def test_g5_wrong_branch_clean_switches_back_to_default
     with_engine_home do |paths, base_dir, state_file|
-      with_trunk_repo do |bare, clone|
-        seed_initial_commit(clone)
+      with_seeded_trunk_repo do |bare, clone|
         Shell.run("git", "switch", "-c", "feature", chdir: clone)
         ref = RepoRef.new(host: "github.com", owner: "ruby", name: "ruby")
         repo_path = File.join(base_dir, ref.host, ref.owner, ref.name)
@@ -480,8 +473,7 @@ class SyncEngineTest < Minitest::Test
 
   def test_g5_wrong_branch_dirty_left_untouched_and_reported
     with_engine_home do |paths, base_dir, state_file|
-      with_trunk_repo do |bare, clone|
-        seed_initial_commit(clone)
+      with_seeded_trunk_repo do |bare, clone|
         Shell.run("git", "switch", "-c", "feature", chdir: clone)
         ref = RepoRef.new(host: "github.com", owner: "ruby", name: "ruby")
         repo_path = File.join(base_dir, ref.host, ref.owner, ref.name)
@@ -511,8 +503,7 @@ class SyncEngineTest < Minitest::Test
 
   def test_g5_detached_dirty_left_untouched_and_reported
     with_engine_home do |paths, base_dir, state_file|
-      with_trunk_repo do |bare, clone|
-        seed_initial_commit(clone)
+      with_seeded_trunk_repo do |bare, clone|
         head_sha = Shell.run("git", "rev-parse", "HEAD", chdir: clone).success.strip
         Shell.run("git", "checkout", "--detach", head_sha, chdir: clone)
         ref = RepoRef.new(host: "github.com", owner: "ruby", name: "ruby")
@@ -545,20 +536,9 @@ class SyncEngineTest < Minitest::Test
   def test_g6_missing_path_clones_to_derived_path
     with_engine_home do |paths, base_dir, state_file|
       Dir.mktmpdir("repo-tender-bare-") do |bare_dir|
-        bare = File.join(bare_dir, "bare.git")
-        work = File.join(bare_dir, "work")
-        system("git", "init", "-b", "trunk", "--bare", bare, exception: true, out: File::NULL)
-        system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work,
-          exception: true, out: File::NULL)
-        in_async do
-          Shell.run("git", "remote", "add", "origin", bare, chdir: work)
-          Shell.run("git", "config", "user.email", "t@t.com", chdir: work)
-          Shell.run("git", "config", "user.name", "T", chdir: work)
-          File.write(File.join(work, "README.md"), "hello\n")
-          Shell.run("git", "add", ".", chdir: work)
-          Shell.run("git", "commit", "-qm", "init", chdir: work)
-          Shell.run("git", "push", "-q", "-u", "origin", "trunk", chdir: work)
-        end
+        fixture = File.join(bare_dir, "fixture")
+        FileUtils.cp_r(TestHelpers.seeded_trunk_template, fixture)
+        bare = File.join(fixture, "bare.git")
 
         ref = RepoRef.new(host: "github.com", owner: "foo", name: "bar")
         expected_path = File.join(base_dir, "github.com", "foo", "bar")
@@ -681,8 +661,7 @@ class SyncEngineTest < Minitest::Test
   # ===========================================================================
   def test_g9_idempotent_second_run_no_network
     with_engine_home do |paths, base_dir, state_file|
-      with_trunk_repo do |bare, clone|
-        seed_initial_commit(clone)
+      with_seeded_trunk_repo do |bare, clone|
         ref = RepoRef.new(host: "github.com", owner: "ruby", name: "ruby")
         repo_path = File.join(base_dir, ref.host, ref.owner, ref.name)
         FileUtils.mkdir_p(File.dirname(repo_path))
@@ -1139,11 +1118,10 @@ class SyncEngineTest < Minitest::Test
           system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work_a, exception: true, out: File::NULL)
           in_async do
             Shell.run("git", "remote", "add", "origin", bare_a, chdir: work_a)
-            Shell.run("git", "config", "user.email", "t@t.com", chdir: work_a)
-            Shell.run("git", "config", "user.name", "T", chdir: work_a)
             File.write(File.join(work_a, "README.md"), "a\n")
             Shell.run("git", "add", ".", chdir: work_a)
-            Shell.run("git", "commit", "-qm", "init", chdir: work_a)
+            Shell.run("git", "-c", "user.email=t@t.com", "-c", "user.name=T",
+              "commit", "-qm", "init", chdir: work_a)
             Shell.run("git", "push", "-q", "-u", "origin", "trunk", chdir: work_a)
           end
           # Push a second commit from a second clone, leaving work_a one behind
@@ -1151,12 +1129,11 @@ class SyncEngineTest < Minitest::Test
           system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work_a2, exception: true, out: File::NULL)
           in_async do
             Shell.run("git", "remote", "add", "origin", bare_a, chdir: work_a2)
-            Shell.run("git", "config", "user.email", "t@t.com", chdir: work_a2)
-            Shell.run("git", "config", "user.name", "T", chdir: work_a2)
             Shell.run("git", "pull", "-q", "origin", "trunk", chdir: work_a2)
             File.write(File.join(work_a2, "extra.md"), "extra\n")
             Shell.run("git", "add", ".", chdir: work_a2)
-            Shell.run("git", "commit", "-qm", "extra", chdir: work_a2)
+            Shell.run("git", "-c", "user.email=t@t.com", "-c", "user.name=T",
+              "commit", "-qm", "extra", chdir: work_a2)
             Shell.run("git", "push", "-q", "origin", "trunk", chdir: work_a2)
             # Rewind work_a's local branch to be behind
             parent_sha = Shell.run("git", "rev-parse", "HEAD~1", chdir: work_a2).success.strip
@@ -1175,11 +1152,10 @@ class SyncEngineTest < Minitest::Test
           system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work_b, exception: true, out: File::NULL)
           in_async do
             Shell.run("git", "remote", "add", "origin", bare_b, chdir: work_b)
-            Shell.run("git", "config", "user.email", "t@t.com", chdir: work_b)
-            Shell.run("git", "config", "user.name", "T", chdir: work_b)
             File.write(File.join(work_b, "README.md"), "b\n")
             Shell.run("git", "add", ".", chdir: work_b)
-            Shell.run("git", "commit", "-qm", "init", chdir: work_b)
+            Shell.run("git", "-c", "user.email=t@t.com", "-c", "user.name=T",
+              "commit", "-qm", "init", chdir: work_b)
             Shell.run("git", "push", "-q", "-u", "origin", "trunk", chdir: work_b)
           end
           ref_b = RepoRef.new(host: "github.com", owner: "o", name: "repo-b")
@@ -1196,11 +1172,10 @@ class SyncEngineTest < Minitest::Test
           system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work_c, exception: true, out: File::NULL)
           in_async do
             Shell.run("git", "remote", "add", "origin", bare_c, chdir: work_c)
-            Shell.run("git", "config", "user.email", "t@t.com", chdir: work_c)
-            Shell.run("git", "config", "user.name", "T", chdir: work_c)
             File.write(File.join(work_c, "README.md"), "c\n")
             Shell.run("git", "add", ".", chdir: work_c)
-            Shell.run("git", "commit", "-qm", "init", chdir: work_c)
+            Shell.run("git", "-c", "user.email=t@t.com", "-c", "user.name=T",
+              "commit", "-qm", "init", chdir: work_c)
             Shell.run("git", "push", "-q", "-u", "origin", "trunk", chdir: work_c)
           end
           ref_c = RepoRef.new(host: "github.com", owner: "o", name: "repo-c")
@@ -1214,11 +1189,10 @@ class SyncEngineTest < Minitest::Test
           system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work_d, exception: true, out: File::NULL)
           in_async do
             Shell.run("git", "remote", "add", "origin", bare_d, chdir: work_d)
-            Shell.run("git", "config", "user.email", "t@t.com", chdir: work_d)
-            Shell.run("git", "config", "user.name", "T", chdir: work_d)
             File.write(File.join(work_d, "README.md"), "d\n")
             Shell.run("git", "add", ".", chdir: work_d)
-            Shell.run("git", "commit", "-qm", "init", chdir: work_d)
+            Shell.run("git", "-c", "user.email=t@t.com", "-c", "user.name=T",
+              "commit", "-qm", "init", chdir: work_d)
             Shell.run("git", "push", "-q", "-u", "origin", "trunk", chdir: work_d)
           end
           # Push a remote commit
@@ -1226,12 +1200,11 @@ class SyncEngineTest < Minitest::Test
           system("git", "-c", "init.defaultBranch=trunk", "init", "-q", work_d2, exception: true, out: File::NULL)
           in_async do
             Shell.run("git", "remote", "add", "origin", bare_d, chdir: work_d2)
-            Shell.run("git", "config", "user.email", "t@t.com", chdir: work_d2)
-            Shell.run("git", "config", "user.name", "T", chdir: work_d2)
             Shell.run("git", "pull", "-q", "origin", "trunk", chdir: work_d2)
             File.write(File.join(work_d2, "remote.md"), "remote\n")
             Shell.run("git", "add", ".", chdir: work_d2)
-            Shell.run("git", "commit", "-qm", "remote", chdir: work_d2)
+            Shell.run("git", "-c", "user.email=t@t.com", "-c", "user.name=T",
+              "commit", "-qm", "remote", chdir: work_d2)
             Shell.run("git", "push", "-q", "origin", "trunk", chdir: work_d2)
           end
           ref_d = RepoRef.new(host: "github.com", owner: "o", name: "repo-d")
@@ -1679,7 +1652,10 @@ class SyncEngineTest < Minitest::Test
         begin
           config = make_config(base_dir: base_dir, repos: [])
           scm = StubSCM.new(status_value: clean_status)
-          result = Engine.new(scm: scm).call(config: config, paths: paths)
+          # A contended lock emits a real `Kernel#warn` — capture_io keeps
+          # that off the suite's combined stdout/stderr.
+          result = nil
+          capture_io { result = Engine.new(scm: scm).call(config: config, paths: paths) }
 
           # (a) state.yaml bytes unchanged — the in-flight run was not clobbered
           assert_equal prior_bytes, File.binread(state_file),
@@ -1916,8 +1892,7 @@ class SyncEngineTest < Minitest::Test
   # ===========================================================================
   def test_gb5_real_error_stays_error_not_swallowed_by_empty_path
     with_engine_home do |paths, base_dir, state_file|
-      with_trunk_repo do |_bare, clone|
-        seed_initial_commit(clone)
+      with_seeded_trunk_repo do |_bare, clone|
         ref = RepoRef.new(host: "github.com", owner: "ruby", name: "ruby")
         repo_path = File.join(base_dir, ref.host, ref.owner, ref.name)
         FileUtils.mkdir_p(File.dirname(repo_path))

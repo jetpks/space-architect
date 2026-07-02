@@ -2,7 +2,6 @@
 
 require "pastel"
 require "dry/monads"
-require "space_src/cli"
 require "space_src/cli/options"
 require "space_src/cloner"
 

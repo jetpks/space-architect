@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "dry/cli"
-require "space_src"
 require "space_src/migration"
 
 module Space::Src

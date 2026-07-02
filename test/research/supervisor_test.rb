@@ -71,7 +71,7 @@ class SupervisorTest < Space::ArchitectTest
     end
     assert elapsed < 1.0, "dispatch must be non-blocking (took #{elapsed.round(3)}s)"
   ensure
-    sleep 0.3
+    sleep 0.1
     FileUtils.rm_rf(root)
   end
 
@@ -92,7 +92,7 @@ class SupervisorTest < Space::ArchitectTest
     assert_equal run.dir.join("run.jsonl"), run.run_log_path
     assert_equal run.dir.join("report.md"), run.report_path
   ensure
-    sleep 0.3
+    sleep 0.1
     FileUtils.rm_rf(root)
   end
 
@@ -114,7 +114,7 @@ class SupervisorTest < Space::ArchitectTest
     assert_equal "01-topic", entries.first["id"]
     assert_equal runs.first.pid, entries.first["pid"]
   ensure
-    sleep 0.3
+    sleep 0.1
     FileUtils.rm_rf(root)
   end
 
@@ -196,7 +196,7 @@ class SupervisorTest < Space::ArchitectTest
     p1 = write_prompt(space, "01-status")
 
     supervisor = Space::Architect::Research::Supervisor.new(space: space, bin: STUB_BIN)
-    runs = supervisor.dispatch([p1.to_s])
+    supervisor.dispatch([p1.to_s])
 
     # wait for the child to finish
     wait_for_completion(space)

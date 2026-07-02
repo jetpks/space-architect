@@ -15,28 +15,40 @@ class DispatcherTest < Space::ArchitectTest
     exit((ENV["FAKE_EXIT"] || "0").to_i)
   RUBY
 
+  # Template space + my-repo (identical across every call): build the git fixtures once
+  # per test run and cp_r them into each test's tmpdir instead of paying for `git
+  # init`/`git commit` subprocess spawns every time.
+  def self.template_space_dir
+    @template_space_dir ||= begin
+      root      = Dir.mktmpdir("dispatcher-template")
+      space_dir = File.join(root, "space")
+      FileUtils.mkdir_p(space_dir)
+      data = {
+        "id" => "x", "title" => "T", "status" => "active",
+        "repos" => [], "notes" => [], "tickets" => [], "tags" => []
+      }
+      File.write(File.join(space_dir, "space.yaml"), YAML.dump(data))
+      system("git", "-C", space_dir, "init", "-q")
+      system("git", "-C", space_dir, "config", "user.email", "t@t")
+      system("git", "-C", space_dir, "config", "user.name", "t")
+      system("git", "-C", space_dir, "add", "space.yaml")
+      system("git", "-C", space_dir, "commit", "-q", "-m", "init")
+
+      repo_dir = File.join(space_dir, "repos", "my-repo")
+      FileUtils.mkdir_p(repo_dir)
+      system("git", "-C", repo_dir, "init", "-q")
+      system("git", "-C", repo_dir, "config", "user.email", "t@t")
+      system("git", "-C", repo_dir, "config", "user.name", "t")
+      File.write(File.join(repo_dir, "f.txt"), "x")
+      system("git", "-C", repo_dir, "add", "f.txt")
+      system("git", "-C", repo_dir, "commit", "-q", "-m", "c0")
+      space_dir
+    end
+  end
+
   def setup_space_with_worktree(root)
     space_dir = File.join(root, "space")
-    FileUtils.mkdir_p(space_dir)
-    data = {
-      "id" => "x", "title" => "T", "status" => "active",
-      "repos" => [], "notes" => [], "tickets" => [], "tags" => []
-    }
-    File.write(File.join(space_dir, "space.yaml"), YAML.dump(data))
-    system("git", "-C", space_dir, "init", "-q")
-    system("git", "-C", space_dir, "config", "user.email", "t@t")
-    system("git", "-C", space_dir, "config", "user.name", "t")
-    system("git", "-C", space_dir, "add", "space.yaml")
-    system("git", "-C", space_dir, "commit", "-q", "-m", "init")
-
-    repo_dir = File.join(space_dir, "repos", "my-repo")
-    FileUtils.mkdir_p(repo_dir)
-    system("git", "-C", repo_dir, "init", "-q")
-    system("git", "-C", repo_dir, "config", "user.email", "t@t")
-    system("git", "-C", repo_dir, "config", "user.name", "t")
-    File.write(File.join(repo_dir, "f.txt"), "x")
-    system("git", "-C", repo_dir, "add", "f.txt")
-    system("git", "-C", repo_dir, "commit", "-q", "-m", "c0")
+    FileUtils.cp_r(self.class.template_space_dir, space_dir)
 
     fake = File.join(root, "fake_claude")
     File.write(fake, FAKE_CLAUDE_SCRIPT)
@@ -78,7 +90,7 @@ class DispatcherTest < Space::ArchitectTest
 
   def test_dispatch_reflects_nonzero_exit_code
     root = Dir.mktmpdir("dispatcher-test")
-    _space_dir, project, fake, build_dir = setup_space_with_worktree(root)
+    _space_dir, project, fake, _build_dir = setup_space_with_worktree(root)
 
     with_env("FAKE_EXIT" => "7") do
       res = project.dispatch("demo", "A", claude_bin: fake)
@@ -104,7 +116,7 @@ class DispatcherTest < Space::ArchitectTest
     #!/usr/bin/env ruby
     $stdout.puts "pid=\#{Process.pid}"
     $stdout.flush
-    sleep 0.2
+    sleep 0.05
     $stdout.puts "done"
     $stdout.flush
     exit 0
@@ -129,7 +141,7 @@ class DispatcherTest < Space::ArchitectTest
     assert pid > 0
     assert_equal pid, Process.getpgid(pid), "child must be its own pgroup leader"
   ensure
-    sleep 0.25
+    sleep 0.1
     FileUtils.rm_rf(root)
   end
 end

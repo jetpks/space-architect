@@ -20,15 +20,9 @@ class ArchitectCLITest < Space::ArchitectTest
       "created_at" => "2026-06-19T00:00:00Z", "updated_at" => "2026-06-19T00:00:00Z",
       "repos" => repos, "notes" => [], "tickets" => [], "tags" => []
     }
-    File.write(File.join(space_dir, "space.yaml"), YAML.dump(data))
-
-    system("git", "-C", space_dir, "init", "-q", "-b", "main",
-      exception: false) ||
-      system("git", "-C", space_dir, "init", "-q")
-    system("git", "-C", space_dir, "config", "user.name", "Test Builder")
-    system("git", "-C", space_dir, "config", "user.email", "test@example.com")
-    system("git", "-C", space_dir, "add", "space.yaml")
-    system("git", "-C", space_dir, "commit", "-q", "-m", "init")
+    yaml = YAML.dump(data)
+    File.write(File.join(space_dir, "space.yaml"), yaml)
+    FileUtils.cp_r(File.join(Space::GitFixtureTemplate.space_dir(yaml), ".git"), space_dir)
 
     Pathname.new(space_dir)
   end
@@ -37,14 +31,8 @@ class ArchitectCLITest < Space::ArchitectTest
   def create_real_repo(space_path, name)
     repo_dir = File.join(space_path, "repos", name)
     FileUtils.mkdir_p(repo_dir)
-    system("git", "-C", repo_dir, "init", "-q", "-b", "main",
-      exception: false) ||
-      system("git", "-C", repo_dir, "init", "-q")
-    system("git", "-C", repo_dir, "config", "user.name", "Test Builder")
-    system("git", "-C", repo_dir, "config", "user.email", "test@example.com")
+    FileUtils.cp_r(File.join(Space::GitFixtureTemplate.repo_dir, ".git"), repo_dir)
     File.write(File.join(repo_dir, "README.md"), "# #{name}\n")
-    system("git", "-C", repo_dir, "add", "README.md")
-    system("git", "-C", repo_dir, "commit", "-q", "-m", "init #{name}")
     repo_dir
   end
 

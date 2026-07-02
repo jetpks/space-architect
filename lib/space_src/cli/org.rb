@@ -2,7 +2,6 @@
 
 require "pastel"
 require "dry/monads"
-require "space_src/cli"
 require "space_src/ui/mode"
 require "space_src/cli/options"
 

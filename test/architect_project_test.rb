@@ -19,14 +19,9 @@ class ArchitectProjectTest < Space::ArchitectTest
       "created_at" => "2026-06-19T00:00:00Z", "updated_at" => "2026-06-19T00:00:00Z",
       "repos" => [], "notes" => [], "tickets" => [], "tags" => []
     }
-    File.write(File.join(dir, "space.yaml"), YAML.dump(data))
-
-    system("git", "-C", dir, "init", "-q", "-b", "main", exception: false) ||
-      system("git", "-C", dir, "init", "-q")
-    system("git", "-C", dir, "config", "user.name", "Test Builder")
-    system("git", "-C", dir, "config", "user.email", "test@example.com")
-    system("git", "-C", dir, "add", "space.yaml")
-    system("git", "-C", dir, "commit", "-q", "-m", "init")
+    yaml = YAML.dump(data)
+    File.write(File.join(dir, "space.yaml"), yaml)
+    FileUtils.cp_r(File.join(Space::GitFixtureTemplate.space_dir(yaml), ".git"), dir)
 
     Space::Core::Space.load(dir)
   end
@@ -34,13 +29,8 @@ class ArchitectProjectTest < Space::ArchitectTest
   def create_real_repo(space_dir, name)
     repo_dir = File.join(space_dir, "repos", name)
     FileUtils.mkdir_p(repo_dir)
-    system("git", "-C", repo_dir, "init", "-q", "-b", "main", exception: false) ||
-      system("git", "-C", repo_dir, "init", "-q")
-    system("git", "-C", repo_dir, "config", "user.name", "Test Builder")
-    system("git", "-C", repo_dir, "config", "user.email", "test@example.com")
+    FileUtils.cp_r(File.join(Space::GitFixtureTemplate.repo_dir, ".git"), repo_dir)
     File.write(File.join(repo_dir, "README.md"), "# #{name}\n")
-    system("git", "-C", repo_dir, "add", "README.md")
-    system("git", "-C", repo_dir, "commit", "-q", "-m", "init #{name}")
     repo_dir
   end
 
@@ -1061,7 +1051,7 @@ class ArchitectProjectTest < Space::ArchitectTest
       - id: timeout-gate
         ac: AC3
         cmd: sleep 30
-        timeout: 1
+        timeout: 0.2
         expect:
           exit_code: 0
     YAML
@@ -1078,7 +1068,9 @@ class ArchitectProjectTest < Space::ArchitectTest
     assert_equal :fail, results[0][:status]
     assert_match(/timed out/, results[0][:reason])
     assert_nil results[0][:exit_code]
-    assert elapsed < 10, "timeout-kill test took #{elapsed.round(1)}s — expected ~1s"
+    # capture_with_timeout waits a fixed 0.5s between TERM and KILL, so the
+    # floor here is ~0.2s (gate timeout) + 0.5s, not the gate timeout alone.
+    assert elapsed < 3, "timeout-kill test took #{elapsed.round(1)}s — expected ~0.7s"
   ensure
     FileUtils.rm_rf(dir)
   end

@@ -35,20 +35,12 @@ class CLISyncTest < Minitest::Test
           2.times do |i|
             owner = i.zero? ? "foo" : "bar"
             name = "repo#{i}"
-            bare = File.join(bares_dir, "bare-#{i}.git")
-            clone = File.join(bares_dir, "clone-#{i}")
-            system("git", "init", "-b", "trunk", "--bare", bare,
-              exception: true, out: File::NULL)
-            system("git", "-c", "init.defaultBranch=trunk", "init", "-q", clone,
-              exception: true, out: File::NULL)
+            repo_dir = File.join(bares_dir, "repo-#{i}")
+            FileUtils.cp_r(TestHelpers.seeded_trunk_template, repo_dir)
+            bare = File.join(repo_dir, "bare.git")
+            clone = File.join(repo_dir, "clone")
             in_async do
-              Shell.run("git", "remote", "add", "origin", bare, chdir: clone)
-              Shell.run("git", "config", "user.email", "test@example.com", chdir: clone)
-              Shell.run("git", "config", "user.name", "Test", chdir: clone)
-              File.write(File.join(clone, "README.md"), "hello\n")
-              Shell.run("git", "add", ".", chdir: clone)
-              Shell.run("git", "commit", "-qm", "initial", chdir: clone)
-              Shell.run("git", "push", "-q", "-u", "origin", "trunk", chdir: clone)
+              Shell.run("git", "remote", "set-url", "origin", bare, chdir: clone)
             end
             ref = RepoRef.new(host: "github.com", owner: owner, name: name)
             repo_path = File.join(base_dir, ref.host, ref.owner, ref.name)
@@ -219,7 +211,11 @@ class CLISyncTest < Minitest::Test
 
   def log_max_bytes(value)
     cmd = PristineCLI::Sync::Run.new
-    cmd.send(:log_max_bytes, value)
+    # Invalid values emit a real `Kernel#warn` (CF6) — capture_io keeps
+    # that off the suite's combined stdout/stderr.
+    result = nil
+    capture_io { result = cmd.send(:log_max_bytes, value) }
+    result
   end
 
   def test_log_max_bytes_unset_returns_default
@@ -289,9 +285,12 @@ class CLISyncTest < Minitest::Test
       Space::Src::Config::Store.write(paths.config_file, config)
 
       prev = ENV["SPACE_SRC_LOG_MAX_BYTES"]
+      out = nil
       begin
         ENV["SPACE_SRC_LOG_MAX_BYTES"] = "10MB"
-        out, _err = invoke_command(PristineCLI::Sync::Run)
+        # The malformed value triggers a real `Kernel#warn` (CF6) —
+        # capture_io keeps that off the suite's combined stdout/stderr.
+        capture_io { out, _err = invoke_command(PristineCLI::Sync::Run) }
       ensure
         ENV["SPACE_SRC_LOG_MAX_BYTES"] = prev
       end

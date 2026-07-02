@@ -177,11 +177,8 @@ module Space::Architect
 
       files = [rel]
       files << "architecture/ARCHITECT.md" if space.path.join("architecture", "ARCHITECT.md").exist?
-      git_run("-C", space.path.to_s, "add", *files)
-      if staged_changes?
-        nn = format("%02d", entry["ordinal"] || 0)
-        git_run("-C", space.path.to_s, "commit", "-m", "I#{nn}: acceptance criteria (freeze)")
-      end
+      nn = format("%02d", entry["ordinal"] || 0)
+      git_capture("-C", space.path.to_s, "commit", "-m", "I#{nn}: acceptance criteria (freeze)", "--", *files)
 
       sha, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
       sha = sha.strip
@@ -242,13 +239,13 @@ module Space::Architect
       path.write(replace_section_body(path.read, spec[:heading], block, append: append))
 
       nn = format("%02d", entry["ordinal"] || 0)
-      git_run("-C", space.path.to_s, "add", rel)
-      committed = staged_changes?
-      git_run("-C", space.path.to_s, "commit", "-m", "I#{nn}: #{spec[:message]}") if committed
-
-      head, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
-      diffstat, = committed ? git_capture("-C", space.path.to_s, "show", "--stat", "--format=", "HEAD") : [""]
-      { section: section, heading: spec[:heading], sha: head.strip, committed: committed, diffstat: diffstat.strip }
+      _o, _e, cst = git_capture("-C", space.path.to_s, "commit", "-m", "I#{nn}: #{spec[:message]}", "--", rel)
+      committed = cst.success?
+      show_out, = git_capture("-C", space.path.to_s, "show", "--stat", "--format=%H", "HEAD")
+      show_lines = show_out.to_s.lines
+      sha = show_lines.first&.strip || ""
+      diffstat = committed ? show_lines.drop(1).join.strip : ""
+      { section: section, heading: spec[:heading], sha: sha, committed: committed, diffstat: diffstat }
     end
 
     # Write the ## Verdict prose AND record the decision to space.yaml in one commit.
@@ -272,8 +269,7 @@ module Space::Architect
       end
 
       nn = format("%02d", entry["ordinal"] || 0)
-      git_run("-C", space.path.to_s, "add", rel, Space::Core::Space::METADATA_FILE)
-      git_run("-C", space.path.to_s, "commit", "-m", "I#{nn}: verdict")
+      git_run("-C", space.path.to_s, "commit", "-m", "I#{nn}: verdict", "--", rel, Space::Core::Space::METADATA_FILE)
 
       head, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
       { decision: decision, sha: head.strip }
@@ -297,8 +293,7 @@ module Space::Architect
       path.write(replace_section_body(path.read, "## Builder Report", block, append: !lane.nil?))
 
       nn = format("%02d", entry["ordinal"] || 0)
-      git_run("-C", space.path.to_s, "add", rel)
-      git_run("-C", space.path.to_s, "commit", "-m", "I#{nn}: evidence") if staged_changes?
+      git_capture("-C", space.path.to_s, "commit", "-m", "I#{nn}: evidence", "--", rel)
       head, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
 
       status_line = raw.lines.reverse_each.find { |l| l.strip.start_with?("STATUS:") }&.strip

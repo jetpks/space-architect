@@ -77,10 +77,12 @@ class CLIRunTest < Space::ArchitectTest
     captured = nil
     singleton = Kernel.singleton_class
     original = Kernel.method(:exec)
+    singleton.send(:remove_method, :exec)
     singleton.define_method(:exec) { |*argv| captured = argv; throw :execed }
     catch(:execed) { yield }
     captured
   ensure
+    singleton.send(:remove_method, :exec)
     singleton.define_method(:exec, original)
   end
 end
