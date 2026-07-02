@@ -420,7 +420,7 @@ module Space::Architect
     # { repo:, integration_branch:, body_file:, command:, context: }.
     # Raises Space::Core::Error if nothing has been integrated yet.
     # Side-effect-free: no git write, no push, no gh.
-    def land
+    def land(env: ENV)
       b = space.data["project"] || {}
       integration_branch = project_integration_branch
 
@@ -446,7 +446,8 @@ module Space::Architect
         end
         body_path.write(body)
 
-        cmd = %(gh pr create --base main --head #{integration_branch} --title "#{space.title}" --body-file #{body_path})
+        contracted = Space::Core::Paths.contract(body_path, env: env)
+        cmd = %(gh pr create --base main --head #{integration_branch} --title "#{space.title}" --body-file #{contracted})
         context = "# Run from repos/#{repo} on branch #{integration_branch} (gh pushes it)"
         { repo: repo, integration_branch: integration_branch, body_file: body_path.to_s, command: cmd, context: context }
       end

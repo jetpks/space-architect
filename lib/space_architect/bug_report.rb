@@ -6,27 +6,27 @@ require "pathname"
 module Space
   module Architect
     module BugReport
-      REPO         = "jetpks/space-architect"
-      BODY_FILE    = "body.md"
-      OUT_FILE     = "architect-bug-report.md"
+      REPO = "jetpks/space-architect"
 
       class << self
-        def generate(space: nil, env: ENV, cwd: Dir.pwd)
-          body_path = resolve_body_path(space, cwd)
+        def generate(space: nil, env: ENV, cwd: Dir.pwd, now: Time.now)
+          body_path = resolve_body_path(space, cwd, now)
           FileUtils.mkdir_p(body_path.dirname)
           body = build_body(space)
           body_path.write(body)
-          command = %(gh issue create -R #{REPO} --title "<one-line summary>" --body-file #{body_path})
+          contracted = Space::Core::Paths.contract(body_path, env: env)
+          command = %(gh issue create -R #{REPO} --title "<one-line summary>" --body-file #{contracted})
           { body_path: body_path, command: command, body: body }
         end
 
         private
 
-        def resolve_body_path(space, cwd)
+        def resolve_body_path(space, cwd, now)
+          filename = "architect-bug-report-#{now.strftime('%Y%m%d-%H%M%S')}.md"
           if space
-            space.path.join("build", "bug-report", BODY_FILE)
+            space.path.join("build", "bug-report", filename)
           else
-            Pathname.new(cwd).join(OUT_FILE)
+            Pathname.new(cwd).join(filename)
           end
         end
 

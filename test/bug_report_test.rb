@@ -15,15 +15,16 @@ class BugReportTest < Space::ArchitectTest
   # ── BugReport.generate without a space ─────────────────────────────────────
 
   def test_generate_outside_space_writes_to_cwd
-    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp)
+    now = Time.new(2026, 7, 1, 12, 0, 0)
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: now)
 
-    expected_path = File.join(@tmp, "architect-bug-report.md")
+    expected_path = File.join(@tmp, "architect-bug-report-20260701-120000.md")
     assert_equal Pathname.new(expected_path), result[:body_path]
     assert_path_exists expected_path
   end
 
   def test_generate_outside_space_body_contains_diagnostics
-    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp)
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now)
 
     assert_match(/## Diagnostics/, result[:body])
     assert_match(/space-architect: #{Space::Core::VERSION}/, result[:body])
@@ -31,20 +32,20 @@ class BugReportTest < Space::ArchitectTest
   end
 
   def test_generate_outside_space_body_has_no_space_section
-    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp)
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now)
 
     refute_match(/## Space context/, result[:body])
   end
 
   def test_generate_outside_space_command_targets_repo
-    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp)
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now)
 
     assert_match(/gh issue create -R jetpks\/space-architect/, result[:command])
     assert_match(/--body-file/, result[:command])
   end
 
   def test_generate_outside_space_body_has_template_sections
-    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp)
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now)
 
     assert_match(/\*\*Kind:\*\*/, result[:body])
     assert_match(/## Summary/, result[:body])
@@ -57,9 +58,10 @@ class BugReportTest < Space::ArchitectTest
 
   def test_generate_inside_space_writes_to_space_build_dir
     space = build_fake_space
-    result = Space::Architect::BugReport.generate(space: space, cwd: @tmp)
+    now = Time.new(2026, 7, 1, 9, 30, 0)
+    result = Space::Architect::BugReport.generate(space: space, cwd: @tmp, now: now)
 
-    expected = space.path.join("build", "bug-report", "body.md")
+    expected = space.path.join("build", "bug-report", "architect-bug-report-20260701-093000.md")
     assert_equal expected, result[:body_path]
     assert_path_exists result[:body_path]
   end
@@ -73,7 +75,7 @@ class BugReportTest < Space::ArchitectTest
         { "ordinal" => 2, "name" => "second-iter" }
       ]
     )
-    result = Space::Architect::BugReport.generate(space: space, cwd: @tmp)
+    result = Space::Architect::BugReport.generate(space: space, cwd: @tmp, now: Time.now)
 
     assert_match(/## Space context/, result[:body])
     assert_match(/Space id: 20260701-myspace/, result[:body])
@@ -84,7 +86,7 @@ class BugReportTest < Space::ArchitectTest
 
   def test_generate_inside_space_body_contains_diagnostics
     space = build_fake_space
-    result = Space::Architect::BugReport.generate(space: space, cwd: @tmp)
+    result = Space::Architect::BugReport.generate(space: space, cwd: @tmp, now: Time.now)
 
     assert_match(/## Diagnostics/, result[:body])
     assert_match(/space-architect: #{Space::Core::VERSION}/, result[:body])
@@ -93,10 +95,51 @@ class BugReportTest < Space::ArchitectTest
 
   def test_generate_inside_space_with_no_iterations
     space = build_fake_space(iterations: [])
-    result = Space::Architect::BugReport.generate(space: space, cwd: @tmp)
+    result = Space::Architect::BugReport.generate(space: space, cwd: @tmp, now: Time.now)
 
     assert_match(/## Space context/, result[:body])
     assert_match(/\(none\)/, result[:body])
+  end
+
+  # ── Timestamped uniqueness ──────────────────────────────────────────────────
+
+  def test_different_clocks_produce_distinct_body_paths
+    t1 = Time.new(2026, 7, 1, 10, 0, 0)
+    t2 = Time.new(2026, 7, 1, 10, 0, 1)
+    r1 = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: t1)
+    r2 = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: t2)
+
+    refute_equal r1[:body_path], r2[:body_path]
+    assert_path_exists r1[:body_path]
+    assert_path_exists r2[:body_path]
+  end
+
+  # ── Path contraction in command string ──────────────────────────────────────
+
+  def test_command_contracts_home_in_body_file_path
+    env = { "HOME" => @tmp }
+    now = Time.new(2026, 7, 1, 8, 0, 0)
+    space = build_fake_space
+    # Move the space under @tmp so body_path is under $HOME
+    space_in_home = Space::Core::Space.new(
+      Pathname.new(@tmp).join("myspace"),
+      space.data
+    )
+    FileUtils.mkdir_p(space_in_home.path.join("build"))
+    result = Space::Architect::BugReport.generate(space: space_in_home, cwd: @tmp, env: env, now: now)
+
+    assert_match(/--body-file ~\//, result[:command])
+    refute_match(/--body-file #{Regexp.escape(@tmp)}/, result[:command])
+  end
+
+  def test_command_unquoted_body_file_arg
+    env = { "HOME" => @tmp }
+    now = Time.new(2026, 7, 1, 8, 0, 0)
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, env: env, now: now)
+
+    # Unquoted means no surrounding quotes around the ~ path
+    refute_match(/--body-file "~/, result[:command])
+    assert_match(/--body-file ~/, result[:command])
   end
 
   # ── CLI command ─────────────────────────────────────────────────────────────
