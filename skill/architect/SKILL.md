@@ -110,6 +110,7 @@ loop.
 8. **Stop conditions:** failing verification you can't root-cause, instructions
    conflicting with project docs, irreversible/destructive calls, or scope
    growth beyond the iteration → checkpoint to the handoff and ask the human.
+   For bugs in the architect tooling or process itself, run `architect bug-report` — it prints a prefilled issue template and the `gh` command to file it.
 
 ## Procedure
 

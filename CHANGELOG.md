@@ -14,6 +14,12 @@ except where called out under **Changed** below.
 
 ### Added
 
+- **`architect bug-report`** — zero-friction bug-filing command. Gathers
+  diagnostics (gem version, Ruby version/platform, and when run inside a space:
+  space id, title, and iteration list with verdicts), writes a prefilled GitHub
+  issue-body template to `<space>/build/bug-report/body.md` (or
+  `./architect-bug-report.md` outside a space), and prints — never executes —
+  the `gh issue create -R jetpks/space-architect` invocation to run.
 - **`src` — standalone evergreen-engine binary** (`exe/src`). `repo`, `org`,
   `sync`, `status`, `config`, `daemon`, and `clone`, plus single-token fuzzy
   navigation (`src <query>` resolves to a repo and honours the `cd` contract)

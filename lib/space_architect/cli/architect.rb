@@ -439,6 +439,29 @@ module Space::Architect
         end
       end
 
+      class BugReport < BaseCommand
+        desc "Generate a prefilled GitHub issue template for filing bugs against space-architect"
+
+        def call(**opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            space = store.find.value_or(nil)
+            result = Space::Architect::BugReport.generate(
+              space: space,
+              env: project_config.env
+            )
+            terminal.say "Fill the placeholders in #{terminal.path(result[:body_path].to_s)}, then run:"
+            terminal.say result[:command]
+            terminal.say ""
+            terminal.say "Diagnostics:"
+            terminal.say "  space-architect #{Space::Core::VERSION}"
+            terminal.say "  ruby #{RUBY_VERSION} (#{RUBY_PLATFORM})"
+            terminal.say "  space: #{space.id} — #{space.title}" if space
+            CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
       class InstallSkills < BaseCommand
         desc "Install bundled skills (architect, architect-research, architect-vocabulary) for a harness"
         option :provider, default: "claude", desc: "Harness: claude, codex, opencode, pi"
@@ -655,6 +678,7 @@ Space::Architect::CLI::Registry.register "integrate", Space::Architect::CLI::Arc
 Space::Architect::CLI::Registry.register "land",      Space::Architect::CLI::Architect::Land
 Space::Architect::CLI::Registry.register "gate",      Space::Architect::CLI::Architect::Gate
 Space::Architect::CLI::Registry.register "install-skills", Space::Architect::CLI::Architect::InstallSkills
+Space::Architect::CLI::Registry.register "bug-report",     Space::Architect::CLI::Architect::BugReport
 Space::Architect::CLI::Registry.register "brief" do |b|
   b.register "new", Space::Architect::CLI::Architect::Brief::New
 end
