@@ -254,7 +254,7 @@ architect verdict my-feature kill --body "AC2 gate failed: 0 tests found"
 | `--body=TEXT` | — | Inline verdict body. |
 | `--stdin` | `false` | Read the verdict body from stdin. |
 
-Landing (writing the PR body and presenting the push + `gh pr create` block) is the architect's end-of-project procedure; see the architect skill.
+> **Note:** landing is not a CLI command. At project end the architect writes the PR body and presents the push + `gh pr create` block — see the architect skill's procedure.
 
 ### `architect variant [SUBCOMMAND]`
 

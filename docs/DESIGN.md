@@ -459,7 +459,8 @@ one work block:
                  (`architect gate`); write the Verdict (`architect verdict`)
 
 The space's architecture/ carries everything across the gap between sessions;
-At project end the architect writes the PR body and presents the push + `gh pr create` block; the CLI has no land command.
+at project end the architect writes the PR body and presents the push +
+`gh pr create` block — the CLI has no land command.
 ```
 
 The dispatch session's documented job **ends when the builders finish** — it
