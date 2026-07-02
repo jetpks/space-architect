@@ -56,6 +56,12 @@ module Space::Core
       Array(data.dig("pack", "persist")).map(&:to_s)
     end
 
+    # Host env vars to forward into the container at `space run` (bare passthrough).
+    # Declared per-space so payloads needing credentials run without a wall of flags.
+    def run_env
+      Array(data.dig("run", "env")).map(&:to_s)
+    end
+
     def architect
       data["project"]
     end

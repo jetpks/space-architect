@@ -200,4 +200,76 @@ class OciRunnerTest < Space::ArchitectTest
       runner.command([]).value!
     )
   end
+
+  def test_command_forwards_declared_run_env_var
+    space = space_with(
+      { "id" => "20260630-test", "title" => "Test", "run" => { "env" => ["FIREWORKS_API_KEY"] } }
+    )
+    runner = Space::Core::OciRunner.new(
+      space: space, env: { "FIREWORKS_API_KEY" => "fw_secret" }, interactive: false
+    )
+
+    argv = runner.command([]).value!
+    idx = argv.index("-e")
+
+    assert_equal "FIREWORKS_API_KEY", argv[idx + 1]
+    refute_match(/=/, argv[idx + 1], "must be bare key, no =value on the command line")
+  end
+
+  def test_command_forwards_cli_env_var_on_top_of_declared
+    space = space_with(
+      { "id" => "20260630-test", "title" => "Test", "run" => { "env" => ["DECLARED"] } }
+    )
+    runner = Space::Core::OciRunner.new(
+      space: space,
+      env: { "DECLARED" => "a", "ADHOC" => "b" },
+      interactive: false,
+      env_vars: ["ADHOC"]
+    )
+
+    argv = runner.command([]).value!
+
+    assert_includes argv, "DECLARED"
+    assert_includes argv, "ADHOC"
+  end
+
+  def test_command_omits_declared_env_var_when_unset
+    space = space_with(
+      { "id" => "20260630-test", "title" => "Test", "run" => { "env" => ["FIREWORKS_API_KEY"] } }
+    )
+    runner = Space::Core::OciRunner.new(space: space, env: {}, interactive: false)
+
+    refute_includes runner.command([]).value!, "-e"
+  end
+
+  def test_command_dedupes_var_declared_in_both_auth_and_run_env
+    space = space_with(
+      { "id" => "20260630-test", "title" => "Test", "run" => { "env" => ["ANTHROPIC_API_KEY"] } }
+    )
+    runner = Space::Core::OciRunner.new(
+      space: space, env: { "ANTHROPIC_API_KEY" => "sk-ant-key" }, interactive: false
+    )
+
+    argv = runner.command([]).value!
+
+    assert_equal 1, argv.each_index.count { |i| argv[i] == "-e" }
+  end
+
+  def test_missing_env_reports_requested_but_unset_vars_only
+    space = space_with(
+      { "id" => "20260630-test", "title" => "Test", "run" => { "env" => ["SET_VAR", "UNSET_VAR"] } }
+    )
+    runner = Space::Core::OciRunner.new(
+      space: space, env: { "SET_VAR" => "x" }, interactive: false, env_vars: ["ALSO_UNSET"]
+    )
+
+    assert_equal %w[UNSET_VAR ALSO_UNSET], runner.missing_env
+  end
+
+  def test_missing_env_ignores_opportunistic_auth_vars
+    space = space_with("id" => "20260630-test", "title" => "Test")
+    runner = Space::Core::OciRunner.new(space: space, env: {}, interactive: false)
+
+    assert_empty runner.missing_env
+  end
 end

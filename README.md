@@ -158,6 +158,19 @@ variables that are actually set — `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKE
 `ANTHROPIC_BASE_URL` — with `-e` at run time, so credentials live in your shell,
 never in the image. 🗝️
 
+**Forwarding payload credentials.** Beyond the always-on auth trio, a space can declare
+`run.env:` in `space.yaml` — a list of host env var names forwarded into the container at
+run time. You can also pass `space run --env VAR` (repeatable) for ad hoc additions. All
+forwarding is bare `-e VAR` passthrough: values never appear in argv, `ps`, or the image.
+A requested-but-unset var warns on stderr instead of silently failing inside the guest.
+
+```yaml
+run:
+  env:                         # run-time: host var names, forwarded as bare -e VAR
+    - FIREWORKS_API_KEY
+    - OPENAI_API_KEY
+```
+
 **Declaring provisioning & persistence** — two optional keys in `space.yaml`:
 
 ```yaml
@@ -169,10 +182,19 @@ pack:
     - /root/.local/state
 ```
 
-`provision` scripts must live under the space root and run as `RUN /space/<script>`
-while the image builds. `persist` paths must be absolute; `space run` bind-mounts
-each one from `<space>/.state<path>` on the host (created on first run) so a
-container's mutable state survives across runs. Both are validated at pack time.
+`provision` scripts must live under the space root and be executable. Each script is
+copied into the image individually (`COPY <script> /space/<script>`) and then invoked
+(`RUN /space/<script>`) **before** the full space tree lands and **before** the gem is
+installed. This ordering is the cache-hygiene guarantee: editing any other space file
+leaves the provision and gem-install layers cached, so a rebuild completes in seconds
+instead of minutes. Scripts must therefore be self-contained — they run with only the
+base system layers and any earlier provision scripts' outputs; they cannot read other
+space files or call `architect`/`space`. Scripts must have the executable bit set; COPY
+preserves the mode from the build context.
+
+`persist` paths must be absolute; `space run` bind-mounts each one from
+`<space>/.state<path>` on the host (created on first run) so a container's mutable state
+survives across runs. Both are validated at pack time.
 
 Like everything else, these are reachable as `architect space pack|build|run`
 from inside a project.
