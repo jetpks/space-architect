@@ -437,6 +437,66 @@ architect space shell fish path              # print install paths
 architect space shell complete spaces        # print completion candidates
 ```
 
+### `architect space pack`
+
+Render a portable OCI build context for the current space into `build/oci/` (override with `-o`): a `Dockerfile`, an executable `entrypoint.sh`, and a `Dockerfile.dockerignore`. The Dockerfile is rendered in cache-hygiene layer order: stable system layers first, then each `pack.provision` script copied and run individually, then the gem install, then the full space tree. This means a space-content edit after a cold build leaves the provision and gem-install layers cached — only `COPY . /space` and later re-run, so the rebuild completes in seconds. The gem is installed from the in-space `repos/space-architect` checkout when present (determined at render time), else from RubyGems; the generated ignore file keeps secrets and scratch (`.env`, `*.key`, `*.pem`, ssh keys, `build/`, `tmp/`) out of the layers. Reads and validates the `pack.provision` / `pack.persist` keys from `space.yaml` (see below). Writes the context only — no image is built.
+
+```sh
+architect space pack
+architect space pack -o /tmp/space-ctx
+```
+
+| Option | Description |
+|--------|-------------|
+| `-o, --output=DIR` | Output directory for the build context (default: `build/oci/` under the space root). |
+
+### `architect space build`
+
+Pack, then build **and tag** the image via the `container` CLI. Two tags are applied: `<space-id>:<sha>` — where `<sha>` is the space repo's 12-char `HEAD`, suffixed `-dirty` when the working tree has uncommitted changes — and a moving `<space-id>:latest`. Same commit ⇒ same tag ⇒ same image (reproducible by SHA). Requires the space to be a Git repository with at least one commit. The generated context is a standard OCI/Docker build context, so `docker build -f build/oci/Dockerfile .` from the space root builds the same image with any OCI builder.
+
+```sh
+architect space build
+```
+
+### `architect space run [COMMAND]`
+
+Run `<space-id>:latest` via `container run --rm`, injecting auth and mounting persisted state. With no `COMMAND` it starts a login shell; pass a command to run it once instead. Only the auth environment variables that are actually set are forwarded with bare `-e VAR` — `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL` — so credentials are never baked into the image. Each `pack.persist` path is bind-mounted from `<space>/.state<path>` on the host (created before the run) so container state survives across runs.
+
+Vars declared under `run.env:` in `space.yaml` and vars passed via `--env` are also forwarded as bare `-e VAR` passthrough — values never appear in argv, `ps`, or the image. Declared vars that overlap the always-on auth trio are deduplicated to a single `-e`. A requested-but-unset var emits a stderr warning and is omitted from argv (it does not fail the run).
+
+```sh
+architect space run                         # login shell
+architect space run architect status        # one-off command
+architect space run --tty                   # force an interactive TTY
+architect space run --env FIREWORKS_API_KEY -- hermes -z 'hello' # ad hoc env forward; -- keeps the payload's flags from the CLI parser
+```
+
+| Option | Description |
+|--------|-------------|
+| `--[no-]tty` | Force (or disable) an interactive TTY. Default: auto-detected from the output stream. |
+| `--env VAR` | Forward a host env var into the container as bare `-e VAR` (repeatable; adds to `run.env:`). |
+
+### Declaring provisioning, persistence & runtime env (`space.yaml`)
+
+The `pack`-family commands and `space run` read optional keys from `space.yaml`:
+
+```yaml
+pack:
+  provision:                 # build-time scripts, each COPY'd and RUN before the space tree lands
+    - scripts/setup-toolchain.sh
+  persist:                   # absolute guest paths, bind-mounted from <space>/.state<path> at run
+    - /root/.claude
+run:
+  env:                       # host var names forwarded as bare -e VAR at run time (values never baked)
+    - FIREWORKS_API_KEY
+```
+
+**`provision` contract.** Entries must be space-root-relative paths that exist under the space and must be executable (COPY preserves the bit from the build context). Each script is copied into the image individually — `COPY <script> /space/<script>` immediately followed by `RUN /space/<script>` — so its cache key is the script's own content: editing any other space file leaves its layer cached. Scripts run **before** the full space tree is copied and **before** the gem is installed, in declared order. A script therefore sees only the base system layers plus outputs of any earlier scripts; it must be self-contained (network + its own file only) and cannot read other space files or call `architect`/`space`. The payoff: after the first (cold) build, a space-content edit triggers only `COPY . /space` and later — provision and gem-install layers stay cached and the rebuild completes in seconds.
+
+`persist` entries must be absolute. Both `provision` and `persist` are validated at pack time — an absolute or missing provision path, a provision path that escapes the space root, or a relative persist path fails the command before anything is written.
+
+**`run.env` contract.** Entries are host env var **names only** — values are never written to `space.yaml` or baked into the image (R5). At `space run` time, each named var is read from the host and forwarded as bare `-e VAR` (no `=value` in argv). A var that is unset or empty on the host is omitted from argv and a stderr warning names it — the run continues so you can diagnose which credential is missing. Vars that overlap the always-on auth trio are deduplicated. Ad hoc additions use `space run --env VAR` (repeatable).
+
 ## Evergreen engine: `architect src …` 🌲
 
 The evergreen engine (`space-src`, exposed as `src`) keeps canonical copies of tracked repos in sync so spaces can clone via fast APFS copy-on-write. Run `architect src --help` to list available subcommands.

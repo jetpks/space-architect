@@ -45,6 +45,30 @@ class CLIRunTest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # --env forwards a present host var as a bare `-e VAR` before the image.
+  def test_run_forwards_env_flag_into_container_argv
+    setup = temp_env
+
+    with_env(setup.fetch(:env).merge("FIREWORKS_API_KEY" => "fw_secret")) do
+      invoke("space", "init")
+      out, = invoke("space", "new", "Env Flag Test", "--no-git")
+      space_id = out[/Created (\d{8}-env-flag-test)/, 1]
+      space_path = File.join(setup.fetch(:env)["HOME"], "architect", "spaces", space_id)
+
+      argv = Dir.chdir(space_path) do
+        intercept_exec { invoke("space", "run", "--env", "FIREWORKS_API_KEY", "hermes") }
+      end
+
+      assert argv, "space run --env must reach Kernel.exec"
+      idx = argv.index("-e")
+      assert idx, "expected -e flag in argv"
+      assert_equal "FIREWORKS_API_KEY", argv[idx + 1]
+      assert_operator idx, :<, argv.index("#{space_id}:latest"), "-e must precede the image"
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   private
 
   # Replace Kernel.exec for the duration of the block (it would otherwise replace the

@@ -13,7 +13,7 @@ The gem ships **three composable binaries** over clean library seams:
 
 | Binary | What it does | Library |
 |--------|--------------|---------|
-| **`space`** 🪐 | Create and manage task-scoped workspaces | `Space::Core` |
+| **`space`** 🪐 | Create, manage & containerize task-scoped workspaces | `Space::Core` |
 | **`architect`** 🏗️ | Run the Architect Loop — judgment + headless builders | `Space::Architect` |
 | **`src`** 🌲 | Tend evergreen repo checkouts for copy-on-write provisioning | `Space::Src` |
 
@@ -84,6 +84,11 @@ architect init                                    # scaffold ARCHITECT.md + arch
 architect new my-feature                          # scaffold the next iteration file
 architect freeze my-feature                       # lock the Acceptance Criteria ❄️
 architect dispatch my-feature lane-a              # send a headless builder to work
+
+# Containers (run from inside a space) — a portable, reproducible-by-SHA image of the space
+space pack                                         # render build/oci/ (Dockerfile + entrypoint)
+space build                                        # pack + build & tag <space-id>:<git-sha>
+space run                                          # run it — login shell, auth from your env
 ```
 
 ## `space` — task-scoped workspaces 🌌
@@ -117,6 +122,82 @@ same day get a counter (`…-name-of-space-2`). 📅
 
 Everything `space` does is also reachable as `architect space …` from within a
 project.
+
+## Containerize a space: `pack` · `build` · `run` 📦
+
+A space is self-describing enough to become a container. `space pack` renders a
+portable OCI build context from the space; `space build` packs and builds it into
+a **reproducible-by-SHA** image; `space run` runs that image with your auth
+injected at runtime and stateful paths bind-mounted back to the host. 🐳
+
+```sh
+space pack                    # render build/oci/ (Dockerfile + entrypoint + ignore file)
+space pack -o /tmp/ctx        # …to a different output directory
+space build                   # pack, then build & tag <space-id>:<git-sha> and :latest
+space run                     # run <space-id>:latest — login shell, auth from your env
+space run architect status    # …or run a one-off command instead of the login shell
+space run --tty               # force an interactive TTY (default: auto-detect)
+```
+
+**What lands in the image.** The context copies the whole space tree (filtered by
+a generated `Dockerfile.dockerignore`) onto a `ruby:4.0.5` base with `git`, the
+Claude Code CLI, and the `space-architect` gem — installed from the in-space
+`repos/space-architect` checkout when present (a pinned build), else from
+RubyGems. Secrets never enter the layers: `.env`, `*.key`, `*.pem`, ssh keys,
+`build/`, and `tmp/` are all excluded by the generated ignore file. 🔒
+
+**Reproducible by SHA.** `space build` tags the image `<space-id>:<sha>`, where
+`<sha>` is the space repo's 12-char `HEAD` (suffixed `-dirty` when the tree has
+uncommitted changes), plus a moving `:latest`. Same commit → same tag → same
+image. It drives the `container` CLI, but the output is an ordinary OCI/Docker
+build context, so `docker build -f build/oci/Dockerfile .` (from the space root)
+works just as well.
+
+**Auth stays out of the layers.** `space run` injects only the auth environment
+variables that are actually set — `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`,
+`ANTHROPIC_BASE_URL` — with `-e` at run time, so credentials live in your shell,
+never in the image. 🗝️
+
+**Forwarding payload credentials.** Beyond the always-on auth trio, a space can declare
+`run.env:` in `space.yaml` — a list of host env var names forwarded into the container at
+run time. You can also pass `space run --env VAR` (repeatable) for ad hoc additions. All
+forwarding is bare `-e VAR` passthrough: values never appear in argv, `ps`, or the image.
+A requested-but-unset var warns on stderr instead of silently failing inside the guest.
+
+```yaml
+run:
+  env:                         # run-time: host var names, forwarded as bare -e VAR
+    - FIREWORKS_API_KEY
+    - OPENAI_API_KEY
+```
+
+**Declaring provisioning & persistence** — two optional keys in `space.yaml`:
+
+```yaml
+pack:
+  provision:                 # build-time: relative scripts, baked in by `space build`
+    - scripts/setup-toolchain.sh
+  persist:                   # run-time: absolute guest paths, bind-mounted per run
+    - /root/.claude
+    - /root/.local/state
+```
+
+`provision` scripts must live under the space root and be executable. Each script is
+copied into the image individually (`COPY <script> /space/<script>`) and then invoked
+(`RUN /space/<script>`) **before** the full space tree lands and **before** the gem is
+installed. This ordering is the cache-hygiene guarantee: editing any other space file
+leaves the provision and gem-install layers cached, so a rebuild completes in seconds
+instead of minutes. Scripts must therefore be self-contained — they run with only the
+base system layers and any earlier provision scripts' outputs; they cannot read other
+space files or call `architect`/`space`. Scripts must have the executable bit set; COPY
+preserves the mode from the build context.
+
+`persist` paths must be absolute; `space run` bind-mounts each one from
+`<space>/.state<path>` on the host (created on first run) so a container's mutable state
+survives across runs. Both are validated at pack time.
+
+Like everything else, these are reachable as `architect space pack|build|run`
+from inside a project.
 
 ## `src` — the evergreen engine 🌲
 
