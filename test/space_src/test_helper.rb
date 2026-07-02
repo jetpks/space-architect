@@ -60,6 +60,47 @@ module TestHelpers
     end
   end
 
+  # A bare remote (`trunk`) + a clone with the initial commit already
+  # pushed — built once per process, stamped out per test with `cp_r`.
+  # README.md ("hello\n") is committed and pushed; `origin` is stored in
+  # the clone's config pointing at the template's bare. After cp_r,
+  # callers run `git remote set-url origin <new_bare>` (1 spawn) instead
+  # of the add+commit+push chain (3 spawns).
+  def self.seeded_trunk_template
+    @seeded_trunk_template ||= begin
+      dir = Dir.mktmpdir("repo-tender-seeded-trunk-template-")
+      bare = File.join(dir, "bare.git")
+      clone = File.join(dir, "clone")
+      system("git", "init", "-b", "trunk", "--bare", bare, exception: true, out: File::NULL)
+      system("git", "-c", "init.defaultBranch=trunk", "init", "-q", clone, exception: true, out: File::NULL)
+      system("git", "-C", clone, "config", "user.email", "test@example.com", exception: true, out: File::NULL)
+      system("git", "-C", clone, "config", "user.name", "Test", exception: true, out: File::NULL)
+      system("git", "-C", clone, "remote", "add", "origin", bare, exception: true, out: File::NULL)
+      File.write(File.join(clone, "README.md"), "hello\n")
+      system("git", "-C", clone, "add", ".", exception: true, out: File::NULL)
+      system("git", "-C", clone, "commit", "-qm", "initial", exception: true, out: File::NULL)
+      system("git", "-C", clone, "push", "-q", "-u", "origin", "trunk", exception: true, out: File::NULL)
+      dir
+    end
+  end
+
+  # A plain working dir with README.md ("hello\n") already committed —
+  # built once per process, stamped out per test with `cp_r`. The caller
+  # adds the remote and pushes (1 spawn) without the add+commit overhead.
+  def self.committed_seeder_template
+    @committed_seeder_template ||= begin
+      dir = Dir.mktmpdir("repo-tender-committed-seeder-template-")
+      seeder = File.join(dir, "seeder")
+      system("git", "-c", "init.defaultBranch=trunk", "init", "-q", seeder, exception: true, out: File::NULL)
+      system("git", "-C", seeder, "config", "user.email", "test@example.com", exception: true, out: File::NULL)
+      system("git", "-C", seeder, "config", "user.name", "Test", exception: true, out: File::NULL)
+      File.write(File.join(seeder, "README.md"), "hello\n")
+      system("git", "-C", seeder, "add", ".", exception: true, out: File::NULL)
+      system("git", "-C", seeder, "commit", "-qm", "first commit", exception: true, out: File::NULL)
+      dir
+    end
+  end
+
   # Set up a real bare git remote + a working clone on disk.
   # The bare remote's default branch is `trunk` (per gate G5, the test
   # must NOT assume `main`). Yields paths to the bare and the clone.
@@ -71,6 +112,23 @@ module TestHelpers
       clone = File.join(fixture, "clone")
       in_async do
         Shell.run("git", "remote", "add", "origin", bare, chdir: clone)
+        yield(bare, clone)
+      end
+    end
+  end
+
+  # Like `with_trunk_repo` but with the initial commit already baked in —
+  # README.md ("hello\n") is committed and pushed. Callers that used
+  # `with_trunk_repo { seed_initial_commit(clone); … }` can switch to this
+  # and drop the `seed_initial_commit` call (saves 3 git spawns per test).
+  def with_seeded_trunk_repo
+    Dir.mktmpdir("repo-tender-git-") do |parent|
+      fixture = File.join(parent, "repo")
+      FileUtils.cp_r(TestHelpers.seeded_trunk_template, fixture)
+      bare = File.join(fixture, "bare.git")
+      clone = File.join(fixture, "clone")
+      in_async do
+        Shell.run("git", "remote", "set-url", "origin", bare, chdir: clone)
         yield(bare, clone)
       end
     end
@@ -125,12 +183,9 @@ module TestHelpers
   def push_first_commit_to_bare(bare, content: "hello\n", filename: "README.md", message: "first commit")
     Dir.mktmpdir("repo-tender-seeder-") do |parent|
       fixture = File.join(parent, "repo")
-      FileUtils.cp_r(TestHelpers.seeder_template, fixture)
+      FileUtils.cp_r(TestHelpers.committed_seeder_template, fixture)
       seeder = File.join(fixture, "seeder")
       in_async do
-        File.write(File.join(seeder, filename), content)
-        Shell.run("git", "add", ".", chdir: seeder)
-        Shell.run("git", "commit", "-qm", message, chdir: seeder)
         Shell.run("git", "push", "-q", bare, "trunk", chdir: seeder)
       end
     end
