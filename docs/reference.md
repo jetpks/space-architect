@@ -445,7 +445,7 @@ architect space shell complete spaces        # print completion candidates
 
 ### `architect space pack`
 
-Render a portable OCI build context for the current space into `build/oci/` (override with `-o`): a `Dockerfile`, an executable `entrypoint.sh`, and a `Dockerfile.dockerignore`. The Dockerfile copies the space tree onto a `ruby:4.0.5` base with `git`, the Claude Code CLI, and the `space-architect` gem (from the in-space `repos/space-architect` checkout when present, else RubyGems); the generated ignore file keeps secrets and scratch (`.env`, `*.key`, `*.pem`, ssh keys, `build/`, `tmp/`) out of the layers. Reads and validates the `pack.provision` / `pack.persist` keys from `space.yaml` (see below). Writes the context only — no image is built.
+Render a portable OCI build context for the current space into `build/oci/` (override with `-o`): a `Dockerfile`, an executable `entrypoint.sh`, and a `Dockerfile.dockerignore`. The Dockerfile is rendered in cache-hygiene layer order: stable system layers first, then each `pack.provision` script copied and run individually, then the gem install, then the full space tree. This means a space-content edit after a cold build leaves the provision and gem-install layers cached — only `COPY . /space` and later re-run, so the rebuild completes in seconds. The gem is installed from the in-space `repos/space-architect` checkout when present (determined at render time), else from RubyGems; the generated ignore file keeps secrets and scratch (`.env`, `*.key`, `*.pem`, ssh keys, `build/`, `tmp/`) out of the layers. Reads and validates the `pack.provision` / `pack.persist` keys from `space.yaml` (see below). Writes the context only — no image is built.
 
 ```sh
 architect space pack
@@ -484,13 +484,15 @@ The `pack`-family commands read two optional keys from `space.yaml`:
 
 ```yaml
 pack:
-  provision:                 # build-time scripts, run as RUN /space/<script> during build
+  provision:                 # build-time scripts, each COPY'd and RUN before the space tree lands
     - scripts/setup-toolchain.sh
   persist:                   # absolute guest paths, bind-mounted from <space>/.state<path> at run
     - /root/.claude
 ```
 
-`provision` entries must be space-root-relative paths that exist under the space; `persist` entries must be absolute. Both are validated at pack time — an absolute or missing provision path, a provision path that escapes the space root, or a relative persist path fails the command before anything is written.
+**`provision` contract.** Entries must be space-root-relative paths that exist under the space and must be executable (COPY preserves the bit from the build context). Each script is copied into the image individually — `COPY <script> /space/<script>` immediately followed by `RUN /space/<script>` — so its cache key is the script's own content: editing any other space file leaves its layer cached. Scripts run **before** the full space tree is copied and **before** the gem is installed, in declared order. A script therefore sees only the base system layers plus outputs of any earlier scripts; it must be self-contained (network + its own file only) and cannot read other space files or call `architect`/`space`. The payoff: after the first (cold) build, a space-content edit triggers only `COPY . /space` and later — provision and gem-install layers stay cached and the rebuild completes in seconds.
+
+`persist` entries must be absolute. Both are validated at pack time — an absolute or missing provision path, a provision path that escapes the space root, or a relative persist path fails the command before anything is written.
 
 ## Evergreen engine: `architect src …` 🌲
 
