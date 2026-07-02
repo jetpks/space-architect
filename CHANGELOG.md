@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-07-01
+
+### Added
+
+- **Declarative runtime env forwarding for `space run`.** A space can declare
+  `run.env:` in `space.yaml` — a list of host env vars forwarded into the
+  container as bare `-e VAR` passthrough (value never lands in argv/`ps`), on top
+  of the always-on substrate auth vars. `space run --env VAR` (repeatable) adds
+  more ad hoc. A requested-but-unset var warns on stderr instead of failing
+  opaquely in-guest. This lets credentialed payloads (e.g. a Fireworks/OpenAI key)
+  run via a plain `space run <cmd>` with no wall of flags, without baking secrets.
+
 ## [2.0.1] - 2026-07-01
 
 Fast-follow completing the `pack.persist:` story from 2.0.0.
@@ -316,6 +328,7 @@ the **BREAKING** items under Changed. The repository is now a monorepo; the
   lanes, worktrees, and headless `claude -p` dispatch, with variant sets and the
   claude-code and opencode harnesses.
 
+[2.0.2]: https://github.com/jetpks/space-architect/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/jetpks/space-architect/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/jetpks/space-architect/compare/v1.3.0...v2.0.0
 [1.3.0]: https://github.com/jetpks/space-architect/compare/v1.2.0...v1.3.0

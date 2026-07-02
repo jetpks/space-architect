@@ -158,6 +158,19 @@ variables that are actually set — `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKE
 `ANTHROPIC_BASE_URL` — with `-e` at run time, so credentials live in your shell,
 never in the image. 🗝️
 
+**Forwarding payload credentials.** Beyond the always-on auth trio, a space can declare
+`run.env:` in `space.yaml` — a list of host env var names forwarded into the container at
+run time. You can also pass `space run --env VAR` (repeatable) for ad hoc additions. All
+forwarding is bare `-e VAR` passthrough: values never appear in argv, `ps`, or the image.
+A requested-but-unset var warns on stderr instead of silently failing inside the guest.
+
+```yaml
+run:
+  env:                         # run-time: host var names, forwarded as bare -e VAR
+    - FIREWORKS_API_KEY
+    - OPENAI_API_KEY
+```
+
 **Declaring provisioning & persistence** — two optional keys in `space.yaml`:
 
 ```yaml
