@@ -35,18 +35,14 @@ except where called out under **Changed** below.
   immediately with a PID and survives the harness wall-clock reap; poll the
   lane's report for completion.
 
+### Removed
+
+- **`architect land` removed** — landing is the architect skill's procedure: the architect writes the PR body and presents the push + PR command.
+
 ### Fixed
 
-- **`architect land` — paste-and-run block.** `architect land` stdout is now a
-  copy-paste-ready block: a "Fill the placeholders in ~/…, then run:" instruction line
-  naming the body file, followed by shell-only commands — `cd` to the space's repo
-  checkout (`~`-contracted, unquoted), `git push -u origin <branch>`, and the wrapped
-  `gh pr create` invocation. The false "(gh pushes it)" context line and the redundant
-  `Body:` display line are gone; the push step is explicit. The generated PR body
-  template now includes prefilled data (merge line, iteration list with verdicts) **and**
-  `<…>` placeholder sections the human fills before running the command.
-- **`architect bug-report` / `architect land` — `~`-contracted paths in printed commands.**
-  The `gh issue create` / `gh pr create` invocations printed to stdout render the
+- **`architect bug-report` — `~`-contracted paths in printed commands.**
+  The `gh issue create` invocation printed to stdout renders the
   `--body-file` path as `~/…` instead of the user's expanded `$HOME`.
   `Space::Core::Paths.contract` is the single home-contraction helper; `Terminal#path`
   delegates to it.

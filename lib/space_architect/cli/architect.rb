@@ -389,29 +389,6 @@ module Space::Architect
         end
       end
 
-      class Land < BaseCommand
-        desc "Generate the end-of-project paste-and-run block (no push, no gh — prints commands to run)"
-        argument :space, required: false, desc: "Space identifier (default: $PWD)"
-
-        def call(space: nil, **opts)
-          setup_terminal(**opts.slice(:color, :colors))
-          handle_errors do
-            render(store.find(space)) do |sp|
-              project = ArchitectProject.new(space: sp)
-              results = project.land(env: project_config.env)
-              results.each do |r|
-                terminal.say "Fill the placeholders in #{terminal.path(r[:body_file])}, then run:"
-                terminal.say ""
-                terminal.say r[:cd_line]
-                terminal.say r[:push_line]
-                terminal.say r[:command]
-              end
-              CLI.record_outcome(Outcome.new(exit_code: 0))
-            end
-          end
-        end
-      end
-
       class Gate < BaseCommand
         desc "Run the frozen Acceptance Criteria gate commands and report PASS/FAIL"
         argument :iteration, required: true,  desc: "Iteration name"
@@ -677,7 +654,6 @@ Space::Architect::CLI::Registry.register "verdict",   Space::Architect::CLI::Arc
 Space::Architect::CLI::Registry.register "evidence",  Space::Architect::CLI::Architect::Evidence
 Space::Architect::CLI::Registry.register "merge",     Space::Architect::CLI::Architect::Merge
 Space::Architect::CLI::Registry.register "integrate", Space::Architect::CLI::Architect::Integrate
-Space::Architect::CLI::Registry.register "land",      Space::Architect::CLI::Architect::Land
 Space::Architect::CLI::Registry.register "gate",      Space::Architect::CLI::Architect::Gate
 Space::Architect::CLI::Registry.register "install-skills", Space::Architect::CLI::Architect::InstallSkills
 Space::Architect::CLI::Registry.register "bug-report",     Space::Architect::CLI::Architect::BugReport
