@@ -11,34 +11,46 @@ class DispatchDetachTest < Space::ArchitectTest
     #!/usr/bin/env ruby
     $stdout.puts "child_pid=\#{Process.pid}"
     $stdout.flush
-    sleep 0.3
+    sleep 0.15
     $stdout.puts "done"
     $stdout.flush
     exit 0
   RUBY
 
+  # Template space + my-repo (identical across every call): build the git fixtures once
+  # per test run and cp_r them into each test's tmpdir instead of paying for `git
+  # init`/`git commit` subprocess spawns every time.
+  def self.template_space_dir
+    @template_space_dir ||= begin
+      root      = Dir.mktmpdir("detach-template")
+      space_dir = File.join(root, "space")
+      FileUtils.mkdir_p(space_dir)
+      data = {
+        "id" => "x", "title" => "T", "status" => "active",
+        "repos" => [], "notes" => [], "tickets" => [], "tags" => []
+      }
+      File.write(File.join(space_dir, "space.yaml"), YAML.dump(data))
+      system("git", "-C", space_dir, "init", "-q")
+      system("git", "-C", space_dir, "config", "user.email", "t@t")
+      system("git", "-C", space_dir, "config", "user.name", "t")
+      system("git", "-C", space_dir, "add", "space.yaml")
+      system("git", "-C", space_dir, "commit", "-q", "-m", "init")
+
+      repo_dir = File.join(space_dir, "repos", "my-repo")
+      FileUtils.mkdir_p(repo_dir)
+      system("git", "-C", repo_dir, "init", "-q")
+      system("git", "-C", repo_dir, "config", "user.email", "t@t")
+      system("git", "-C", repo_dir, "config", "user.name", "t")
+      File.write(File.join(repo_dir, "f.txt"), "x")
+      system("git", "-C", repo_dir, "add", "f.txt")
+      system("git", "-C", repo_dir, "commit", "-q", "-m", "c0")
+      space_dir
+    end
+  end
+
   def setup_detach_space(root)
     space_dir = File.join(root, "space")
-    FileUtils.mkdir_p(space_dir)
-    data = {
-      "id" => "x", "title" => "T", "status" => "active",
-      "repos" => [], "notes" => [], "tickets" => [], "tags" => []
-    }
-    File.write(File.join(space_dir, "space.yaml"), YAML.dump(data))
-    system("git", "-C", space_dir, "init", "-q")
-    system("git", "-C", space_dir, "config", "user.email", "t@t")
-    system("git", "-C", space_dir, "config", "user.name", "t")
-    system("git", "-C", space_dir, "add", "space.yaml")
-    system("git", "-C", space_dir, "commit", "-q", "-m", "init")
-
-    repo_dir = File.join(space_dir, "repos", "my-repo")
-    FileUtils.mkdir_p(repo_dir)
-    system("git", "-C", repo_dir, "init", "-q")
-    system("git", "-C", repo_dir, "config", "user.email", "t@t")
-    system("git", "-C", repo_dir, "config", "user.name", "t")
-    File.write(File.join(repo_dir, "f.txt"), "x")
-    system("git", "-C", repo_dir, "add", "f.txt")
-    system("git", "-C", repo_dir, "commit", "-q", "-m", "c0")
+    FileUtils.cp_r(self.class.template_space_dir, space_dir)
 
     fake_bin = File.join(root, "fake_detach_builder")
     File.write(fake_bin, FAKE_DETACH_BUILDER)
@@ -73,11 +85,11 @@ class DispatchDetachTest < Space::ArchitectTest
 
     assert_instance_of Integer, pid
     assert pid > 0
-    # builder sleeps 0.3s — returning in < 0.1s proves we did not wait for it
-    assert elapsed < 0.1, "run_detached blocked (took #{elapsed.round(3)}s; builder sleeps 0.3s)"
+    # builder sleeps 0.15s — returning in < 0.1s proves we did not wait for it
+    assert elapsed < 0.1, "run_detached blocked (took #{elapsed.round(3)}s; builder sleeps 0.15s)"
   ensure
     Process.waitpid(pid, Process::WNOHANG) rescue nil
-    sleep 0.35 # let child finish so it doesn't outlive the tmpdir removal
+    sleep 0.2 # let child finish so it doesn't outlive the tmpdir removal
     FileUtils.rm_rf(root)
   end
 
@@ -90,11 +102,11 @@ class DispatchDetachTest < Space::ArchitectTest
     res = project.dispatch("demo", "B", claude_bin: fake_bin, detach: true)
     pid = res[:pid]
 
-    # Child is sleeping 0.3s — safe to check pgroup while it's alive
+    # Child is sleeping 0.15s — safe to check pgroup while it's alive
     pgid = Process.getpgid(pid)
     assert_equal pid, pgid, "child must be its own process-group leader"
   ensure
-    sleep 0.35
+    sleep 0.2
     FileUtils.rm_rf(root)
   end
 
@@ -104,8 +116,7 @@ class DispatchDetachTest < Space::ArchitectTest
     space_dir, project, fake_bin = setup_detach_space(root)
     build_dir = setup_lane(space_dir, project, fake_bin, "C")
 
-    res = project.dispatch("demo", "C", claude_bin: fake_bin, detach: true)
-    pid = res[:pid]
+    project.dispatch("demo", "C", claude_bin: fake_bin, detach: true)
     run_log = File.join(build_dir, "run.jsonl")
 
     # Give the child a moment to write its pid line, but NOT long enough for "done"
@@ -114,7 +125,7 @@ class DispatchDetachTest < Space::ArchitectTest
     refute_includes content_before, "done",
       "run.jsonl should not contain 'done' immediately after run_detached returns (child still sleeping)"
 
-    # Wait for child to complete (it sleeps 0.3s then writes "done")
+    # Wait for child to complete (it sleeps 0.15s then writes "done")
     deadline = Time.now + 5
     sleep 0.05 until (File.exist?(run_log) && File.read(run_log).include?("done")) || Time.now > deadline
 
@@ -138,14 +149,14 @@ class DispatchDetachTest < Space::ArchitectTest
     assert res.key?(:worktree),  "result must include :worktree"
     refute res.key?(:exit_code), "detach result must NOT include :exit_code"
   ensure
-    sleep 0.35
+    sleep 0.2
     FileUtils.rm_rf(root)
   end
 
   # Existing blocking path is unchanged when detach: false (default)
   def test_dispatch_detach_false_returns_exit_code_hash
     root = Dir.mktmpdir("detach-test")
-    space_dir, project, fake_bin = setup_detach_space(root)
+    space_dir, project, _fake_bin = setup_detach_space(root)
     # Use a fast-exiting stub for the blocking path
     fast_bin = File.join(root, "fast_builder")
     File.write(fast_bin, "#!/usr/bin/env ruby\n$stdout.puts 'ok'\nexit 0\n")
