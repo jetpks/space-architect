@@ -302,7 +302,7 @@ architect evidence <it> --lane <lane>       # transcribe the builder's report ve
 architect gate <iteration>                  # run the frozen gate commands, stream raw output
 architect merge <it> <lane>                 # integrate ONE judged-passing lane (--no-ff)
 architect integrate <it> --lanes a,b        # integrate a set of passing lanes, in order
-architect land                              # end-of-project PR command (no push, no gh)
+# landing (PR body + push/PR command) is the architect's end-of-project procedure (see skill)
 architect status                            # project state (read-only)
 architect variant add|compare|promote …     # competing (harness, model) lanes over one frozen spec
 architect research dispatch|status|wait …   # parallel read-only research lanes (see below)
@@ -321,7 +321,7 @@ architect evidence my-feature --lane lane-a      # transcribe raw evidence
 architect gate my-feature                        # run the frozen gates yourself
 # … read the diff against the spec, then write the Verdict …
 architect integrate my-feature --lanes lane-a    # merge passing lanes → project/<slug>
-architect land                                   # print gh pr create at project end
+# landing (PR body + push/PR command) is the architect's end-of-project procedure (see skill)
 ```
 
 ### Streaming builder output 📡

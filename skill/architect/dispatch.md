@@ -112,7 +112,9 @@ lanes pass; the CLI does the git mechanics. Canonical path:
 architect integrate <iteration> --lanes <passing-set>   # e.g. --lanes lane-a,lane-b
 architect gate <iteration>                              # integration smoke (raw output; verdict stays yours)
 architect integrate <iteration> --lanes <passing-set> --teardown   # or remove worktrees + lane branches after
-architect land                                          # end of project: prints gh pr create --base main --head project/<slug>
+# end of project: landing is the architect's, not a CLI command — write the PR
+# body to build/land/<repo>-pr-body.md yourself, then present the paste-and-run
+# block (cd, git push -u origin project/<slug>, gh pr create) — see SKILL.md §6
 ```
 
 `architect integrate` commits each named lane on its branch and merges it
@@ -138,8 +140,8 @@ git -C repos/<repo> merge --no-ff lane/<iteration>-<lane>
 <run the gate commands>          # integration smoke after every merge
 architect worktree remove <iteration> <lane>
 git -C repos/<repo> branch -d lane/<iteration>-<lane>
-# at project end:
-architect land                   # prints gh pr create --base main --head project/<slug>
+# at project end there is no CLI step: the architect writes
+# build/land/<repo>-pr-body.md and presents the push + gh pr create block
 ```
 
 ### Parallel + fast-follow

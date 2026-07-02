@@ -10,6 +10,8 @@ require "space_core/warnings"
 Space::Core::Warnings.disable_experimental!
 require "space_core/atomic_write"
 require "space_core/xdg"
+require "space_core/paths"
+require "space_core/commands"
 require "space_core/config"
 require "space_core/state"
 require "space_core/slugger"

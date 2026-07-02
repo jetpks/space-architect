@@ -972,38 +972,6 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # land generates PR body and command for each integrated repo; raises if nothing integrated.
-  def test_land_generates_pr_command
-    dir = Dir.mktmpdir("architect-project-test")
-    space = create_real_space(dir)
-    create_real_repo(dir, "my-repo")
-
-    project = Space::Architect::ArchitectProject.new(space: space)
-    project.init!
-
-    err = assert_raises(Space::Core::Error) { project.land }
-    assert_match(/nothing integrated yet/, err.message)
-
-    project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
-    project.worktree_add("my-repo", "my-slice", "lane-a")
-    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "wt", "feature.rb"), "def feature; end\n")
-    project.merge_lane!("my-slice", "lane-a")
-
-    results = project.land
-    assert_equal 1, results.size
-    r = results.first
-    assert_equal "my-repo", r[:repo]
-    assert_match(/\Aproject\//, r[:integration_branch])
-    assert_match(/gh pr create --base main/, r[:command])
-    assert_match(/--head project\//, r[:command])
-    assert_path_exists r[:body_file]
-    body = File.read(r[:body_file])
-    assert_match(/my-slice/, body)
-  ensure
-    FileUtils.rm_rf(dir)
-  end
-
   # run_gates reads the frozen gates block, executes each command, and attaches
   # a mechanical :status/:reason from GateEvaluator. Raw :stdout/:stderr/:exit_code
   # are preserved unchanged; verdict tokens (PASS/FAIL/INVALID) must NOT appear in

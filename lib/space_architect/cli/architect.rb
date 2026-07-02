@@ -389,27 +389,6 @@ module Space::Architect
         end
       end
 
-      class Land < BaseCommand
-        desc "Generate the end-of-project PR command (no push, no gh — prints gh pr create)"
-        argument :space, required: false, desc: "Space identifier (default: $PWD)"
-
-        def call(space: nil, **opts)
-          setup_terminal(**opts.slice(:color, :colors))
-          handle_errors do
-            render(store.find(space)) do |sp|
-              project = ArchitectProject.new(space: sp)
-              results = project.land
-              results.each do |r|
-                terminal.say r[:context]
-                terminal.say r[:command]
-                terminal.say "Body: #{terminal.path(r[:body_file])}"
-              end
-              CLI.record_outcome(Outcome.new(exit_code: 0))
-            end
-          end
-        end
-      end
-
       class Gate < BaseCommand
         desc "Run the frozen Acceptance Criteria gate commands and report PASS/FAIL"
         argument :iteration, required: true,  desc: "Iteration name"
@@ -435,6 +414,29 @@ module Space::Architect
               any_fail = results.any? { |r| r[:status] == :fail }
               CLI.record_outcome(Outcome.new(exit_code: any_fail ? 1 : 0))
             end
+          end
+        end
+      end
+
+      class BugReport < BaseCommand
+        desc "Generate a prefilled GitHub issue template for filing bugs against space-architect"
+
+        def call(**opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            space = store.find.value_or(nil)
+            result = Space::Architect::BugReport.generate(
+              space: space,
+              env: project_config.env
+            )
+            terminal.say "Fill the placeholders in #{terminal.path(result[:body_path].to_s)}, then run:"
+            terminal.say result[:command]
+            terminal.say ""
+            terminal.say "Diagnostics:"
+            terminal.say "  space-architect #{Space::Core::VERSION}"
+            terminal.say "  ruby #{RUBY_VERSION} (#{RUBY_PLATFORM})"
+            terminal.say "  space: #{space.id} — #{space.title}" if space
+            CLI.record_outcome(Outcome.new(exit_code: 0))
           end
         end
       end
@@ -652,9 +654,9 @@ Space::Architect::CLI::Registry.register "verdict",   Space::Architect::CLI::Arc
 Space::Architect::CLI::Registry.register "evidence",  Space::Architect::CLI::Architect::Evidence
 Space::Architect::CLI::Registry.register "merge",     Space::Architect::CLI::Architect::Merge
 Space::Architect::CLI::Registry.register "integrate", Space::Architect::CLI::Architect::Integrate
-Space::Architect::CLI::Registry.register "land",      Space::Architect::CLI::Architect::Land
 Space::Architect::CLI::Registry.register "gate",      Space::Architect::CLI::Architect::Gate
 Space::Architect::CLI::Registry.register "install-skills", Space::Architect::CLI::Architect::InstallSkills
+Space::Architect::CLI::Registry.register "bug-report",     Space::Architect::CLI::Architect::BugReport
 Space::Architect::CLI::Registry.register "brief" do |b|
   b.register "new", Space::Architect::CLI::Architect::Brief::New
 end

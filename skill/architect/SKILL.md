@@ -110,6 +110,7 @@ loop.
 8. **Stop conditions:** failing verification you can't root-cause, instructions
    conflicting with project docs, irreversible/destructive calls, or scope
    growth beyond the iteration → checkpoint to the handoff and ask the human.
+   For bugs in the architect tooling or process itself, run `architect bug-report` — it prints a prefilled issue template and the `gh` command to file it.
 
 ## Procedure
 
@@ -373,10 +374,15 @@ cited BRIEF §sections (per §2), then write the **Verdict** (`architect verdict
 <iteration> continue|kill --from <file>`): disagreement rulings, per-AC
 PASS/FAIL/INVALID, the KILL/CONTINUE call.
 
-At project end, `architect land` prints the single `gh pr create --base main
---head project/<slug>` command per touched repo and writes a PR body to
-`build/land/` — no push, no `gh` call; the human runs it from the repo when
-the project is ready to ship.
+At project end, landing is yours, not the CLI's — the PR body is judgment
+output, the same class as a Verdict. Per touched repo: write the PR body
+yourself — from the iteration verdicts, the integrated diff, and the BRIEF —
+to `build/land/<repo>-pr-body.md`, then present the paste-and-run block to the
+human: `cd` to the repo checkout, `git push -u origin project/<slug>`, and
+`gh pr create --base main --head project/<slug> --title … --body-file …` —
+paths `~`-contracted, the multi-flag command broken with trailing ` \` at flag
+boundaries. No push, no `gh` call by you or the CLI; the human runs the block
+when the project is ready to ship.
 
 ## Maintenance
 

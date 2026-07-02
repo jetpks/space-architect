@@ -5,6 +5,37 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-07-01
+
+### Added
+
+- **`architect bug-report`** — zero-friction bug-filing command. Gathers
+  diagnostics (gem version, Ruby version/platform, and when run inside a space:
+  space id, title, and iteration list with verdicts), writes a prefilled GitHub
+  issue-body template to `<space>/build/bug-report/architect-bug-report-YYYYMMDD-HHMMSS.md`
+  (or `./architect-bug-report-YYYYMMDD-HHMMSS.md` outside a space — timestamped so
+  back-to-back runs in the same session never overwrite each other), and prints —
+  never executes — the `gh issue create -R jetpks/space-architect` invocation to run.
+
+### Removed
+
+- **BREAKING — `architect land` removed** (added in 2.0.0) — landing is the architect
+  skill's procedure: the architect writes the PR body and presents the push +
+  PR command. The command as shipped never produced a runnable block (#25) and
+  authored content the CLI has no context for (#24).
+
+### Fixed
+
+- **`architect bug-report` — `~`-contracted paths in printed commands.**
+  The `gh issue create` invocation printed to stdout renders the
+  `--body-file` path as `~/…` instead of the user's expanded `$HOME`.
+  `Space::Core::Paths.contract` is the single home-contraction helper; `Terminal#path`
+  delegates to it.
+- **Command wrapping for narrow terminals.** The `gh issue create` command is
+  now rendered with trailing ` \` continuations broken at `--flag` boundaries,
+  continuation lines indented two spaces. The wrapped output is valid shell
+  (`bash -n` clean). `Space::Core::Commands.wrap` is the single wrapping helper.
+
 ## [2.0.2] - 2026-07-01
 
 ### Added
