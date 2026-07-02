@@ -1679,7 +1679,10 @@ class SyncEngineTest < Minitest::Test
         begin
           config = make_config(base_dir: base_dir, repos: [])
           scm = StubSCM.new(status_value: clean_status)
-          result = Engine.new(scm: scm).call(config: config, paths: paths)
+          # A contended lock emits a real `Kernel#warn` — capture_io keeps
+          # that off the suite's combined stdout/stderr.
+          result = nil
+          capture_io { result = Engine.new(scm: scm).call(config: config, paths: paths) }
 
           # (a) state.yaml bytes unchanged — the in-flight run was not clobbered
           assert_equal prior_bytes, File.binread(state_file),

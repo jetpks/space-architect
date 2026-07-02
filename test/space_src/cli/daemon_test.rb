@@ -71,6 +71,7 @@ class CLIDaemonTest < Minitest::Test
     fake.restart_result = restart_result || Dry::Monads::Success("")
     fake.status_result = status_result || Dry::Monads::Success({loaded: false, running: false, pid: nil, last_exit: nil})
     @agent_new_orig = Agent.method(:new)
+    Agent.singleton_class.send(:remove_method, :new) if Agent.singleton_class.method_defined?(:new, false)
     Agent.define_singleton_method(:new) { |**_| fake }
     fake
   end
@@ -85,6 +86,7 @@ class CLIDaemonTest < Minitest::Test
       bin_path: "#{repo_root}/exe/src"
     )
     @resolve_detect_orig = Daemon::Helpers::Resolve.method(:detect)
+    Daemon::Helpers::Resolve.singleton_class.send(:remove_method, :detect)
     Daemon::Helpers::Resolve.define_singleton_method(:detect) { |**| fake }
     fake
   end
@@ -96,10 +98,11 @@ class CLIDaemonTest < Minitest::Test
     # the singleton-class prepend would otherwise leave every
     # subsequent `Agent.new` returning our fake).
     if @agent_new_orig
-      Agent.define_singleton_method(:new, @agent_new_orig)
+      Agent.singleton_class.send(:remove_method, :new)
       @agent_new_orig = nil
     end
     if @resolve_detect_orig
+      Daemon::Helpers::Resolve.singleton_class.send(:remove_method, :detect)
       Daemon::Helpers::Resolve.define_singleton_method(:detect, @resolve_detect_orig)
       @resolve_detect_orig = nil
     end

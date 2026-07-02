@@ -38,7 +38,7 @@ class SrcShellFishTest < Minitest::Test
 
   def test_fish_install_default_subcommand
     with_cli_env do |env, _home|
-      out, _err = invoke_command(CLI::Shell::Fish)
+      _out, _err = invoke_command(CLI::Shell::Fish)
       assert_equal 0, CLI.last_outcome.exit_code
       fn_path = ShellIntegration.path_for("fish", env: env)
       assert File.exist?(fn_path)
@@ -114,7 +114,7 @@ class SrcShellFishTest < Minitest::Test
 
   def test_complete_checkouts_tolerates_missing_config
     with_cli_env do
-      out, _err = invoke_command(CLI::Shell::Complete, kind: "checkouts")
+      _out, _err = invoke_command(CLI::Shell::Complete, kind: "checkouts")
       assert_equal 0, CLI.last_outcome.exit_code
       # No crash; empty or default output is fine
     end
