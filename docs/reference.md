@@ -254,13 +254,7 @@ architect verdict my-feature kill --body "AC2 gate failed: 0 tests found"
 | `--body=TEXT` | — | Inline verdict body. |
 | `--stdin` | `false` | Read the verdict body from stdin. |
 
-### `architect land [SPACE]`
-
-Generate the end-of-project PR command for each integrated repo. Writes a PR body to `build/land/<repo>-pr-body.md` summarising all iterations and their verdicts, then prints the `gh pr create --base main --head project/<slug>` command to run from `repos/<repo>`. Side-effect-free: no git write, no push, no `gh` call. Run the printed command when the project is ready to ship.
-
-```sh
-architect land
-```
+Landing (writing the PR body and presenting the push + `gh pr create` block) is the architect's end-of-project procedure; see the architect skill.
 
 ### `architect variant [SUBCOMMAND]`
 
