@@ -38,19 +38,39 @@ module TestHelpers
     Sync(&block)
   end
 
-  # Set up a real bare git remote + a working clone on disk.
-  # The bare remote's default branch is `trunk` (per gate G5, the test
-  # must NOT assume `main`). Yields paths to the bare and the clone.
-  def with_trunk_repo
-    Dir.mktmpdir("repo-tender-git-") do |dir|
+  # A bare remote (`trunk`) + a clone with author identity already
+  # configured — built once per process via `git init`/`config`
+  # subprocesses, then stamped out per test with a plain file copy.
+  # `with_trunk_repo` and `with_empty_repo` both start from this same
+  # shape (neither has any commits yet); real git still does every
+  # subsequent remote-add/fetch/add/commit/push a test performs. `origin`
+  # is added fresh per copy (not baked in) because callers routinely
+  # `cp_r` the clone to a different final location while the bare stays
+  # put, which would strand a baked-in relative remote URL.
+  def self.bare_and_clone_template
+    @bare_and_clone_template ||= begin
+      dir = Dir.mktmpdir("repo-tender-git-template-")
       bare = File.join(dir, "bare.git")
       clone = File.join(dir, "clone")
       system("git", "init", "-b", "trunk", "--bare", bare, exception: true, out: File::NULL)
       system("git", "-c", "init.defaultBranch=trunk", "init", "-q", clone, exception: true, out: File::NULL)
+      system("git", "-C", clone, "config", "user.email", "test@example.com", exception: true, out: File::NULL)
+      system("git", "-C", clone, "config", "user.name", "Test", exception: true, out: File::NULL)
+      dir
+    end
+  end
+
+  # Set up a real bare git remote + a working clone on disk.
+  # The bare remote's default branch is `trunk` (per gate G5, the test
+  # must NOT assume `main`). Yields paths to the bare and the clone.
+  def with_trunk_repo
+    Dir.mktmpdir("repo-tender-git-") do |parent|
+      fixture = File.join(parent, "repo")
+      FileUtils.cp_r(TestHelpers.bare_and_clone_template, fixture)
+      bare = File.join(fixture, "bare.git")
+      clone = File.join(fixture, "clone")
       in_async do
         Shell.run("git", "remote", "add", "origin", bare, chdir: clone)
-        Shell.run("git", "config", "user.email", "test@example.com", chdir: clone)
-        Shell.run("git", "config", "user.name", "Test", chdir: clone)
         yield(bare, clone)
       end
     end
@@ -74,17 +94,28 @@ module TestHelpers
   # anywhere. Yields paths to the bare and the clone inside an in_async
   # block (Shell.run is available throughout).
   def with_empty_repo
-    Dir.mktmpdir("repo-tender-empty-") do |dir|
-      bare = File.join(dir, "bare.git")
-      clone = File.join(dir, "clone")
-      system("git", "init", "-b", "trunk", "--bare", bare, exception: true, out: File::NULL)
-      system("git", "-c", "init.defaultBranch=trunk", "init", "-q", clone, exception: true, out: File::NULL)
+    Dir.mktmpdir("repo-tender-empty-") do |parent|
+      fixture = File.join(parent, "repo")
+      FileUtils.cp_r(TestHelpers.bare_and_clone_template, fixture)
+      bare = File.join(fixture, "bare.git")
+      clone = File.join(fixture, "clone")
       in_async do
         Shell.run("git", "remote", "add", "origin", bare, chdir: clone)
-        Shell.run("git", "config", "user.email", "test@example.com", chdir: clone)
-        Shell.run("git", "config", "user.name", "Test", chdir: clone)
         yield(bare, clone)
       end
+    end
+  end
+
+  # A plain git working dir (init + author identity, no remote — the
+  # bare remote to push to varies per call) built once per process.
+  def self.seeder_template
+    @seeder_template ||= begin
+      dir = Dir.mktmpdir("repo-tender-git-seeder-template-")
+      seeder = File.join(dir, "seeder")
+      system("git", "-c", "init.defaultBranch=trunk", "init", "-q", seeder, exception: true, out: File::NULL)
+      system("git", "-C", seeder, "config", "user.email", "test@example.com", exception: true, out: File::NULL)
+      system("git", "-C", seeder, "config", "user.name", "Test", exception: true, out: File::NULL)
+      dir
     end
   end
 
@@ -92,17 +123,15 @@ module TestHelpers
   # Used in GB3 tests to simulate the remote gaining its first commit(s)
   # after an initially empty clone is already set up.
   def push_first_commit_to_bare(bare, content: "hello\n", filename: "README.md", message: "first commit")
-    Dir.mktmpdir("repo-tender-seeder-") do |sdir|
-      seeder = File.join(sdir, "seeder")
-      system("git", "-c", "init.defaultBranch=trunk", "init", "-q", seeder, exception: true, out: File::NULL)
+    Dir.mktmpdir("repo-tender-seeder-") do |parent|
+      fixture = File.join(parent, "repo")
+      FileUtils.cp_r(TestHelpers.seeder_template, fixture)
+      seeder = File.join(fixture, "seeder")
       in_async do
-        Shell.run("git", "remote", "add", "origin", bare, chdir: seeder)
-        Shell.run("git", "config", "user.email", "test@example.com", chdir: seeder)
-        Shell.run("git", "config", "user.name", "Test", chdir: seeder)
         File.write(File.join(seeder, filename), content)
         Shell.run("git", "add", ".", chdir: seeder)
         Shell.run("git", "commit", "-qm", message, chdir: seeder)
-        Shell.run("git", "push", "-q", "origin", "trunk", chdir: seeder)
+        Shell.run("git", "push", "-q", bare, "trunk", chdir: seeder)
       end
     end
   end

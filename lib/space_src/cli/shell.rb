@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "space_src/cli"
 require "space_src/shell_integration"
 
 module Space::Src

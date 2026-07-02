@@ -109,15 +109,18 @@ module Space::Core::CLI
 end
 
 # Route dry-cli's plain namespace/root listing through our colourful renderer.
-# We replace Usage.call wholesale and depend only on the LookupResult/Node API
-# (children, command, leaf?/children?/hidden, names) rather than copying Usage's
-# internals — see notes/ruby-cli-gems-report.md.
+# We prepend over Usage.call wholesale and depend only on the LookupResult/Node
+# API (children, command, leaf?/children?/hidden, names) rather than copying
+# Usage's internals — see notes/ruby-cli-gems-report.md.
 module Dry
   class CLI
     module Usage
-      def self.call(result)
-        Space::Core::CLI::Help.call(result)
+      module ColourPatch
+        def call(result)
+          Space::Core::CLI::Help.call(result)
+        end
       end
+      singleton_class.prepend(ColourPatch)
     end
   end
 end

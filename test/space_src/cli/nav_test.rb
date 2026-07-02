@@ -159,7 +159,7 @@ class CLINavTest < Minitest::Test
 
   def test_status_subprocess_routes_to_dry_cli
     with_nav_env do |env, _home, _base|
-      stdout, stderr, status = run_cli_subprocess(env: env, args: ["status"])
+      _stdout, stderr, status = run_cli_subprocess(env: env, args: ["status"])
       assert status.success?, "status must exit 0; stderr=#{stderr}"
     end
   end
