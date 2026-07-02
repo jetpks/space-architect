@@ -22,11 +22,7 @@ class ArchitectCLITest < Space::ArchitectTest
     }
     File.write(File.join(space_dir, "space.yaml"), YAML.dump(data))
 
-    system("git", "-C", space_dir, "init", "-q", "-b", "main",
-      exception: false) ||
-      system("git", "-C", space_dir, "init", "-q")
-    system("git", "-C", space_dir, "config", "user.name", "Test Builder")
-    system("git", "-C", space_dir, "config", "user.email", "test@example.com")
+    seed_git_repo(space_dir)
     system("git", "-C", space_dir, "add", "space.yaml")
     system("git", "-C", space_dir, "commit", "-q", "-m", "init")
 
@@ -37,11 +33,7 @@ class ArchitectCLITest < Space::ArchitectTest
   def create_real_repo(space_path, name)
     repo_dir = File.join(space_path, "repos", name)
     FileUtils.mkdir_p(repo_dir)
-    system("git", "-C", repo_dir, "init", "-q", "-b", "main",
-      exception: false) ||
-      system("git", "-C", repo_dir, "init", "-q")
-    system("git", "-C", repo_dir, "config", "user.name", "Test Builder")
-    system("git", "-C", repo_dir, "config", "user.email", "test@example.com")
+    seed_git_repo(repo_dir)
     File.write(File.join(repo_dir, "README.md"), "# #{name}\n")
     system("git", "-C", repo_dir, "add", "README.md")
     system("git", "-C", repo_dir, "commit", "-q", "-m", "init #{name}")
