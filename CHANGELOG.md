@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.3] - 2026-07-01
+## [3.0.0] - 2026-07-01
 
 ### Added
 
@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **`architect land` removed** (added in 2.0.0) — landing is the architect
+- **BREAKING — `architect land` removed** (added in 2.0.0) — landing is the architect
   skill's procedure: the architect writes the PR body and presents the push +
   PR command. The command as shipped never produced a runnable block (#25) and
   authored content the CLI has no context for (#24).
