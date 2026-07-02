@@ -31,29 +31,41 @@ class HarnessTest < Space::ArchitectTest
     exit((ENV["FAKE_EXIT"] || "0").to_i)
   RUBY
 
+  # Template space + my-repo (identical across every setup_space call): build the git
+  # fixtures once per test run and cp_r them into each test's tmpdir instead of paying
+  # for `git init`/`git commit` subprocess spawns every time.
+  def self.template_space_dir
+    @template_space_dir ||= begin
+      root      = Dir.mktmpdir("harness-template")
+      space_dir = File.join(root, "space")
+      FileUtils.mkdir_p(space_dir)
+      data = {
+        "id" => "x", "title" => "T", "status" => "active",
+        "repos" => [], "notes" => [], "tickets" => [], "tags" => []
+      }
+      File.write(File.join(space_dir, "space.yaml"), YAML.dump(data))
+      system("git", "-C", space_dir, "init", "-q")
+      system("git", "-C", space_dir, "config", "user.email", "t@t")
+      system("git", "-C", space_dir, "config", "user.name", "t")
+      system("git", "-C", space_dir, "add", "space.yaml")
+      system("git", "-C", space_dir, "commit", "-q", "-m", "init")
+
+      repo_dir = File.join(space_dir, "repos", "my-repo")
+      FileUtils.mkdir_p(repo_dir)
+      system("git", "-C", repo_dir, "init", "-q")
+      system("git", "-C", repo_dir, "config", "user.email", "t@t")
+      system("git", "-C", repo_dir, "config", "user.name", "t")
+      File.write(File.join(repo_dir, "f.txt"), "x")
+      system("git", "-C", repo_dir, "add", "f.txt")
+      system("git", "-C", repo_dir, "commit", "-q", "-m", "c0")
+      space_dir
+    end
+  end
+
   # Shared setup: minimal space + worktree + prompt.md + both fake binaries
   def setup_space(root)
     space_dir = File.join(root, "space")
-    FileUtils.mkdir_p(space_dir)
-    data = {
-      "id" => "x", "title" => "T", "status" => "active",
-      "repos" => [], "notes" => [], "tickets" => [], "tags" => []
-    }
-    File.write(File.join(space_dir, "space.yaml"), YAML.dump(data))
-    system("git", "-C", space_dir, "init", "-q")
-    system("git", "-C", space_dir, "config", "user.email", "t@t")
-    system("git", "-C", space_dir, "config", "user.name", "t")
-    system("git", "-C", space_dir, "add", "space.yaml")
-    system("git", "-C", space_dir, "commit", "-q", "-m", "init")
-
-    repo_dir = File.join(space_dir, "repos", "my-repo")
-    FileUtils.mkdir_p(repo_dir)
-    system("git", "-C", repo_dir, "init", "-q")
-    system("git", "-C", repo_dir, "config", "user.email", "t@t")
-    system("git", "-C", repo_dir, "config", "user.name", "t")
-    File.write(File.join(repo_dir, "f.txt"), "x")
-    system("git", "-C", repo_dir, "add", "f.txt")
-    system("git", "-C", repo_dir, "commit", "-q", "-m", "c0")
+    FileUtils.cp_r(self.class.template_space_dir, space_dir)
 
     fake_claude   = File.join(root, "fake_claude")
     fake_opencode = File.join(root, "fake_opencode")
@@ -482,7 +494,7 @@ class HarnessTest < Space::ArchitectTest
     #!/usr/bin/env ruby
     $stdout.puts "detach_pid=\#{Process.pid}"
     $stdout.flush
-    sleep 0.2
+    sleep 0.05
     $stdout.puts "detach_done"
     $stdout.flush
     exit 0
@@ -509,7 +521,7 @@ class HarnessTest < Space::ArchitectTest
     assert pid > 0
     assert_equal pid, Process.getpgid(pid), "child must be its own pgroup leader"
   ensure
-    sleep 0.25
+    sleep 0.1
     FileUtils.rm_rf(root)
   end
 
@@ -537,7 +549,7 @@ class HarnessTest < Space::ArchitectTest
     assert pid > 0
     assert_equal pid, Process.getpgid(pid), "child must be its own pgroup leader"
   ensure
-    sleep 0.25
+    sleep 0.1
     FileUtils.rm_rf(root)
   end
 
@@ -659,12 +671,14 @@ class HarnessTest < Space::ArchitectTest
     w.write("line2\n")
     w.close
 
+    err = StringIO.new
     File.open(log_path, "w") do |log|
-      Sync { harness.send(:tee_pipe, r, log, body) }
+      Sync { harness.send(:tee_pipe, r, log, body, err: err) }
     end
 
     assert_equal "line1\nline2\n", File.read(log_path),
       "log must contain all lines even after push body closes"
+    assert_includes err.string, "tee_pipe: push write failed"
   ensure
     FileUtils.rm_rf(root)
   end
@@ -697,14 +711,17 @@ class HarnessTest < Space::ArchitectTest
     w.write("line3\n")
     w.close
 
+    err = StringIO.new
     File.open(log_path, "w") do |log|
-      Sync { harness.send(:tee_pipe, r, log, fake_body) }
+      Sync { harness.send(:tee_pipe, r, log, fake_body, err: err) }
     end
 
     assert_equal "line1\nline2\nline3\n", File.read(log_path),
       "log must contain all lines even when push write raises Errno::ECONNRESET"
     assert_equal 1, write_count,
       "body.write must be called exactly once — push disabled after first error (was called #{write_count} times on base)"
+    assert_includes err.string, "tee_pipe: push write failed"
+    assert_includes err.string, "Errno::ECONNRESET"
   ensure
     FileUtils.rm_rf(root)
   end
@@ -728,19 +745,23 @@ class HarnessTest < Space::ArchitectTest
       model: Space::Architect::Harness::CLAUDE_DEFAULT_MODEL, max_turns: 10, bin: fake_claude
     )
 
+    err = StringIO.new
     exit_code = Sync do
       harness.run(
         prompt_path:  prompt_path,
         run_log_path: run_log_path,
         chdir:        wt_path,
         push_url:     "http://localhost/runs/test/ingest",
-        push_client:  failing_client
+        push_client:  failing_client,
+        err:          err
       )
     end
 
     assert_equal 0, exit_code, "run must return child exit status even when push transport fails"
     log = File.read(run_log_path)
     assert_includes log, "argv=", "log must be intact after push transport failure"
+    assert_includes err.string, "push_body: transport error"
+    assert_includes err.string, "Errno::ECONNREFUSED"
   ensure
     FileUtils.rm_rf(root)
   end
@@ -770,17 +791,13 @@ class HarnessTest < Space::ArchitectTest
       model: "claude-sonnet-4-6", max_turns: 10, bin: fake_bin
     )
 
-    child_pid = nil
-    # Capture the child pid before the timeout fires via a shared variable.
-    # We'll poll for the pid from the run.jsonl (nothing is written by sleep builder),
-    # so instead we track it by inspecting the process group right after launch.
     t0 = Time.now
 
     exit_code = harness.run(
       prompt_path:  prompt_path,
       run_log_path: run_log_path,
       chdir:        wt_dir,
-      timeout:      1
+      timeout:      0.2
     )
 
     elapsed = Time.now - t0
@@ -801,7 +818,7 @@ class HarnessTest < Space::ArchitectTest
   # nil timeout preserves today's behavior (no timeout, returns child exit status).
   def test_claude_code_harness_run_nil_timeout_no_regression
     root = Dir.mktmpdir("harness-nil-timeout")
-    _space_dir, project, fake_claude, _fake_oc, build_dir = setup_space(root)
+    _space_dir, project, fake_claude, _fake_oc, _build_dir = setup_space(root)
 
     res = project.dispatch("demo", "A", claude_bin: fake_claude, timeout: nil)
     assert_equal 0, res[:exit_code]
@@ -813,7 +830,7 @@ class HarnessTest < Space::ArchitectTest
   # zero timeout preserves today's behavior (disabled).
   def test_claude_code_harness_run_zero_timeout_no_regression
     root = Dir.mktmpdir("harness-zero-timeout")
-    _space_dir, project, fake_claude, _fake_oc, build_dir = setup_space(root)
+    _space_dir, project, fake_claude, _fake_oc, _build_dir = setup_space(root)
 
     res = project.dispatch("demo", "A", claude_bin: fake_claude, timeout: 0)
     assert_equal 0, res[:exit_code]
