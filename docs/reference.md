@@ -474,7 +474,7 @@ Vars declared under `run.env:` in `space.yaml` and vars passed via `--env` are a
 architect space run                         # login shell
 architect space run architect status        # one-off command
 architect space run --tty                   # force an interactive TTY
-architect space run --env FIREWORKS_API_KEY hermes -z 'hello'   # ad hoc env forward
+architect space run --env FIREWORKS_API_KEY -- hermes -z 'hello' # ad hoc env forward; -- keeps the payload's flags from the CLI parser
 ```
 
 | Option | Description |
