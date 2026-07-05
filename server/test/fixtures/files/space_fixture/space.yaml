@@ -25,6 +25,7 @@ architect:
       harness: claude-code
       model:
       variant: false
+      dispatched_at: "2026-06-28T15:32:12-06:00"
   - name: second-iteration
     ordinal: 2
     file: architecture/I02-second-iteration.md

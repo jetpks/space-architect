@@ -709,7 +709,7 @@ module Space::Architect
     def dispatch(iteration, lane, model: nil, max_turns: 200,
                  claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, detach: false,
                  push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
-                 push_client: nil, timeout: nil)
+                 push_client: nil, timeout: nil, now: Time.now)
       raise Space::Core::Error, "Specify --push-host or --push-url, not both" if push_host && push_url
       raise Space::Core::Error, "--push-host requires --push-token"           if push_host && !push_token
       raise Space::Core::Error, "--detach cannot be combined with --push-url or --push-host" \
@@ -743,6 +743,17 @@ module Space::Architect
       bin = resolved_harness == "claude-code" ? claude_bin : opencode_bin
       harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
                                                   bin: bin, config_dir: build_dir, effort: resolved_effort)
+
+      update_architect_block do |b|
+        (b["iterations"] || []).each do |s|
+          next unless s["name"] == iteration
+          (s["lanes"] || []).each do |l|
+            next unless l["name"] == lane
+            l["dispatched_at"] = now.iso8601
+          end
+        end
+        b
+      end
 
       if detach
         pid = harness_obj.run_detached(
