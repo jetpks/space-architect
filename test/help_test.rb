@@ -10,7 +10,48 @@ require "pastel"
 # space_core, so its plain Usage is untouched).
 class HelpTest < Space::ArchitectTest
   def architect_root = Space::Architect::CLI::Registry.get([])
+  def space_root = Space::Core::CLI::Registry.get([])
   def core_config_ns = Space::Core::CLI::Registry.get(["config"])
+
+  PHASE_HEADERS = %w[Spec Build Judge Land Project Groups].freeze
+
+  # AC1: the architect listing is grouped under loop-phase headers in canonical
+  # order, commands ordered by loop step within each group, each exactly once.
+  def test_architect_help_groups_commands_by_loop_phase
+    plain = with_program_name("architect") do
+      Space::Core::CLI::Help.call(architect_root, pastel: Pastel.new(enabled: false))
+    end
+
+    positions = PHASE_HEADERS.map { |h| plain.index(/^#{h}$/) }
+    assert positions.all?, "every phase header must be present: #{PHASE_HEADERS.zip(positions).inspect}"
+    assert_equal positions, positions.sort, "phase headers must appear in canonical order"
+
+    # loop order within a group (not alpha): Spec is new → section → freeze
+    assert_operator plain.index("architect new "), :<, plain.index("architect section ")
+    assert_operator plain.index("architect section "), :<, plain.index("architect freeze ")
+    # namespaces land under the trailing Groups header
+    assert_operator plain.index(/^Groups$/), :<, plain.index("architect worktree ")
+
+    %w[init ground new status freeze verify provision dispatch section verdict
+       evidence merge integrate gate install-skills bug-report brief worktree
+       variant research].each do |cmd|
+      count = plain.scan(/^  architect #{Regexp.escape(cmd)}(?=[ \[\n])/).length
+      assert_equal 1, count, "#{cmd} must appear exactly once, saw #{count}"
+    end
+  end
+
+  # AC1: the `space` listing declares no phase → single default listing, no phase
+  # headers, alpha-sorted — byte-unchanged from before.
+  def test_space_help_stays_ungrouped_and_alpha_sorted
+    with_program_name("space") do
+      plain = Space::Core::CLI::Help.call(space_root, pastel: Pastel.new(enabled: false))
+
+      PHASE_HEADERS.each { |h| refute_match(/^#{h}$/, plain, "no phase header in `space` help") }
+      assert_operator plain.index("space build"), :<, plain.index("space config")
+      assert_operator plain.index("space status"), :<, plain.index("space use")
+      assert_match(/space status \[REST\]\s+# Set a space status/, plain)
+    end
+  end
 
   def test_plain_listing_has_no_ansi_but_keeps_dry_cli_tokens
     plain = Space::Core::CLI::Help.call(architect_root, pastel: Pastel.new(enabled: false))

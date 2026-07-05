@@ -2,8 +2,19 @@
 
 require_relative "test_helper"
 require "yaml"
+require "pastel"
 
 class ArchitectCLITest < Space::ArchitectTest
+  # Render the architect ROOT help (plain) with $PROGRAM_NAME set to the given
+  # binary, so the opportunistic loop-status embed (architect-only) can fire.
+  def help_render(prog)
+    original = $PROGRAM_NAME
+    $PROGRAM_NAME = prog
+    Space::Core::CLI::Help.call(Space::Architect::CLI::Registry.get([]), pastel: Pastel.new(enabled: false))
+  ensure
+    $PROGRAM_NAME = original
+  end
+
   # Build a real git-backed space in a temp dir so architect commands can commit.
   # Does not go through `space new` (which uses Async::Process). Instead writes
   # space.yaml and calls the real git binary directly.
@@ -109,6 +120,119 @@ class ArchitectCLITest < Space::ArchitectTest
           "ARCHITECT.md must still be present after second init"
         assert_path_exists File.join(space_path, ".claude", "settings.json"),
           "settings.json must still be present after second init"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # ── AC2: architect --help embeds the loop-status block, opportunistically ──────
+
+  def test_help_embeds_loop_status_when_in_architect_space
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        out = help_render("architect")
+        assert_match(/Commands:/, out)
+        assert_match(/^Loop:$/, out)
+        assert_match(/Project status:\s+active/, out)
+        assert_match(/I01 demo — speccing/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Totality: outside any space the grouped list still renders, without the
+  # block, and nothing raises.
+  def test_help_omits_loop_status_outside_a_space
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          out = help_render("architect")
+          assert_match(/Commands:/, out)
+          refute_match(/^Loop:$/, out)
+        end
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Totality: a space with no `project` block renders the list, no block, no raise.
+  def test_help_omits_loop_status_when_space_has_no_project_block
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"])) # no `architect init` → no project block
+
+      Dir.chdir(space_path) do
+        out = help_render("architect")
+        assert_match(/Commands:/, out)
+        refute_match(/^Loop:$/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Totality: malformed/legacy space.yaml must not surface an exception; the
+  # grouped list renders and the block is omitted.
+  def test_help_stays_total_on_malformed_space_yaml
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      File.write(File.join(space_path, "space.yaml"), "version: 2\nrepos: [broken\n")
+
+      Dir.chdir(space_path) do
+        out = help_render("architect") # must not raise
+        assert_match(/Commands:/, out)
+        refute_match(/^Loop:$/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC3: `space status` reports the space metadata PLUS the loop-status block
+  # (read from space.data["project"] directly), exit 0.
+  def test_space_status_reports_metadata_and_loop_block
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        out, err = invoke("space", "status")
+
+        assert_empty err
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match("ID:         20260619-test-space", out)
+        assert_match("Status:     active", out)
+        assert_match(/Project status:\s+active/, out)
+        assert_match(/I01 demo — speccing/, out)
       end
     end
   ensure
