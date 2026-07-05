@@ -162,7 +162,8 @@ module Space
             worktree = lane_data["worktree"]
             next unless worktree
             build_rel = File.dirname(worktree)
-            map[build_rel] = { iteration: iter, lane: lane_data["name"], harness: lane_data["harness"] }
+            map[build_rel] = { iteration: iter, lane: lane_data["name"], harness: lane_data["harness"],
+                               dispatched_at: lane_data["dispatched_at"] }
           end
         end
       end
@@ -177,7 +178,7 @@ module Space
         end
       end
 
-      def import_builder_run(run_jsonl, space:, iteration:, lane:, harness:, user:)
+      def import_builder_run(run_jsonl, space:, iteration:, lane:, harness:, user:, dispatched_at: nil)
         existing = @runs_repo.find_builder_run(space.id, iteration&.id, lane)
 
         if existing&.conversation_id
@@ -232,6 +233,7 @@ module Space
           status:          2,
           producer:        producer,
           session_id:      session_id,
+          occurred_at:     parse_iso8601(dispatched_at),
           conversation_id: persistor.conversation_id,
           harness:         harness,
           model:           persistor.first_model,

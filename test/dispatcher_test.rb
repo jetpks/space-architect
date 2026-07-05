@@ -112,6 +112,53 @@ class DispatcherTest < Space::ArchitectTest
     FileUtils.rm_rf(root)
   end
 
+  def test_dispatch_records_dispatched_at_in_space_yaml
+    root = Dir.mktmpdir("dispatcher-dispatched-at")
+    space_dir, project, fake, _build_dir = setup_space_with_worktree(root)
+
+    fixed_now = Time.iso8601("2026-06-15T09:30:00-05:00")
+    project.dispatch("demo", "A", claude_bin: fake, now: fixed_now)
+
+    yaml = YAML.load_file(File.join(space_dir, "space.yaml"))
+    lane = yaml.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal fixed_now.iso8601, lane["dispatched_at"]
+    assert Time.iso8601(lane["dispatched_at"]), "dispatched_at must parse as ISO8601"
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  def test_dispatch_detach_records_dispatched_at_in_space_yaml
+    root = Dir.mktmpdir("dispatcher-dispatched-at-detach")
+    space_dir, project, fake, _build_dir = setup_space_with_worktree(root)
+
+    fixed_now = Time.iso8601("2026-06-15T10:00:00-05:00")
+    project.dispatch("demo", "A", claude_bin: fake, detach: true, now: fixed_now)
+
+    yaml = YAML.load_file(File.join(space_dir, "space.yaml"))
+    lane = yaml.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal fixed_now.iso8601, lane["dispatched_at"]
+  ensure
+    sleep 0.1
+    FileUtils.rm_rf(root)
+  end
+
+  def test_dispatch_overwrites_dispatched_at_on_redispatch
+    root = Dir.mktmpdir("dispatcher-dispatched-at-overwrite")
+    space_dir, project, fake, _build_dir = setup_space_with_worktree(root)
+
+    first_now = Time.iso8601("2026-06-15T09:00:00-05:00")
+    project.dispatch("demo", "A", claude_bin: fake, now: first_now)
+
+    second_now = Time.iso8601("2026-06-15T11:00:00-05:00")
+    project.dispatch("demo", "A", claude_bin: fake, now: second_now)
+
+    yaml = YAML.load_file(File.join(space_dir, "space.yaml"))
+    lane = yaml.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal second_now.iso8601, lane["dispatched_at"]
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
   FAKE_DETACH_SCRIPT = <<~RUBY
     #!/usr/bin/env ruby
     $stdout.puts "pid=\#{Process.pid}"

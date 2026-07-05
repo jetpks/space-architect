@@ -4,6 +4,7 @@ require "fileutils"
 require "tmpdir"
 require "open3"
 require "json"
+require "yaml"
 require_relative "../test_helper"
 require "space/server/space_importer"
 
@@ -332,6 +333,54 @@ class SpaceImporterTest < Minitest::Test
       # occurred_at must be the session timestamp (2026-06-28), not Time.now
       refute run[:occurred_at].utc >= before,
         "occurred_at must come from the jsonl, not import time"
+    end
+  end
+
+  # ── occurred_at — builder runs ────────────────────────────────────────────────
+
+  def test_builder_run_occurred_at_from_dispatched_at
+    import!
+    run = conn[:runs].where(role: "builder").first
+    expected = Time.iso8601("2026-06-28T15:32:12-06:00").utc
+    assert_equal expected, run[:occurred_at].utc,
+      "occurred_at must come from dispatched_at in space.yaml"
+  end
+
+  def test_builder_run_occurred_at_not_import_time
+    before = Time.now - 1
+    import!
+    run = conn[:runs].where(role: "builder").first
+    refute run[:occurred_at].utc >= before,
+      "occurred_at must come from dispatched_at, not import time"
+  end
+
+  def test_builder_run_occurred_at_nil_when_dispatched_at_absent
+    Dir.mktmpdir("no_dispatched_at") do |dir|
+      yaml = {
+        "id" => "no-dispatch-space", "title" => "T", "status" => "active",
+        "architect" => {
+          "status" => "active",
+          "iterations" => [{
+            "name" => "first-iteration", "ordinal" => 1,
+            "file" => "architecture/I01.md", "freeze_sha" => "", "verdict" => "pending",
+            "lanes" => [{
+              "name" => "lane-a", "repo" => "test-repo", "base_sha" => "abc",
+              "worktree" => "build/I01-first-iteration-lane-a/wt", "harness" => "claude-code"
+            }]
+          }]
+        }
+      }
+      File.write(File.join(dir, "space.yaml"), YAML.dump(yaml))
+      build_dir = File.join(dir, "build", "I01-first-iteration-lane-a")
+      FileUtils.mkdir_p(build_dir)
+      FileUtils.cp(
+        File.join(FIXTURE_DIR, "build", "I01-first-iteration-lane-a", "run.jsonl"),
+        File.join(build_dir, "run.jsonl")
+      )
+
+      @importer.import!(dir, user: @user, opencode_db_path: ABSENT_OPENCODE_DB)
+      run = conn[:runs].where(role: "builder").first
+      assert_nil run[:occurred_at], "occurred_at must be nil when dispatched_at is absent"
     end
   end
 
