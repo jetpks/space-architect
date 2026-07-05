@@ -295,7 +295,7 @@ module Space::Core
       complete -c space -f -n "__space_architect_complete_needs_command" -a path -d "Print a space path"
       complete -c space -f -n "__space_architect_complete_needs_command" -a use -d "Select and cd to a space with fish integration"
       complete -c space -f -n "__space_architect_complete_needs_command" -a current -d "Show the current space"
-      complete -c space -f -n "__space_architect_complete_needs_command" -a status -d "Set a space status"
+      complete -c space -f -n "__space_architect_complete_needs_command" -a status -d "Report or set a space status"
       complete -c space -f -n "__space_architect_complete_needs_command" -a config -d "Show or update config"
       complete -c space -f -n "__space_architect_complete_needs_command" -a repo -d "Manage repos in the current space"
       complete -c space -f -n "__space_architect_complete_needs_command" -a repos -d "Manage repos in the current space"
