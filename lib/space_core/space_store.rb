@@ -232,7 +232,7 @@ module Space::Core
     def metadata_for(id:, title:, timestamp:)
       iso_timestamp = timestamp.iso8601
       {
-        "version" => 1,
+        "version" => 2,
         "id" => id,
         "title" => title,
         "status" => "active",
