@@ -245,9 +245,17 @@ contract, self-contained:
   task.
 - **Lane plan** — split the iteration into 1–4 parallel lanes, each declaring
   its **target repo + file-touch set, checked for overlap**: name the repo
-  (`repos/<repo>`) and every file each lane may touch. Lanes in *different*
-  repos are inherently disjoint; same-repo lanes with any file overlap run as
-  one. Each lane gets its own objective, output format, and boundaries. Most
+  (`repos/<repo>`) and every file each lane may touch. The machine-readable
+  declaration lives in a fenced ` ```lanes ` block in the Specification — one
+  entry per lane (`name`, `repo`, `touch` globs) — the single frozen source of
+  truth `architect freeze` records into `space.yaml` and `architect provision`
+  materializes. The touch-set now lives *with* the frozen spec by design: it
+  closes the drift where a `worktree add --touch` flag could diverge from the
+  spec's intent. The scaffold ships a commented ` ```lanes ` stub in the
+  Specification (see `templates/iteration.md.erb`) — uncomment it. Lanes in
+  *different* repos are inherently disjoint; same-repo lanes with any file
+  overlap run as one. Each lane gets its own objective, output format, and
+  boundaries. Most
   iterations are one lane — fan out only when the work is genuinely parallel (a
   cross-repo project often is). Two first-class patterns — runnable recipes in `dispatch.md`: **parallel +
   fast-follow** (disjoint lanes integrate first; a fast-follow lane off
@@ -293,13 +301,24 @@ once a frozen section changed afterward.
 
 ### 5. Dispatch (one fresh `claude -p` per lane, worktree-isolated)
 
-Per the mechanics in `dispatch.md`:
+Per the mechanics in `dispatch.md`. The lane lifecycle is **declare → freeze →
+provision → write prompts → dispatch** — every lane gets a worktree; there is no
+dispatch-in-the-checkout path:
 
-- **1 lane** → dispatch in the target repo's checkout (`repos/<repo>`).
-- **2–4 lanes** → `architect worktree add <repo> <iteration> <lane>
-  [--base <repo-base>]` per lane (creates `build/<id>-<lane>/wt` off the target
-  repo's base commit — a repo commit, distinct from the freeze, which is a
-  space commit — and records it in `space.yaml`).
+- **Declare** — at spec time, each lane is one entry in the Specification's
+  fenced ` ```lanes ` block (§4): `name`, `repo`, `touch` globs.
+- **Freeze** — `architect freeze` parses that block and records each lane
+  (name, repo, touch_set) into `space.yaml`.
+- **Provision** — `architect provision <iteration>` materializes every declared
+  lane's worktree + `lane/<id>-<lane>` branch in one shot, each off the resolved
+  base (`--base` override, else `project/<slug>` when it exists, else the repo's
+  default branch — a repo commit, distinct from the freeze, which is a space
+  commit) and recorded in `space.yaml`; it is idempotent, and `--lane <name>`
+  provisions a single lane. The manual `architect worktree add` it wraps stays
+  registered as an internal primitive for edge cases — not a step you run.
+- `dispatch`, `integrate`, and `gate` auto-materialize a lane whose worktree is
+  missing from its frozen declaration, so a lane you didn't pre-provision can't
+  dead-end the flow.
 
 Assemble each lane's lane-prompt (the template in `dispatch.md` + this lane's
 section of the Specification + the frozen Acceptance Criteria) and write it to
@@ -363,9 +382,9 @@ it (never hand-resolve). A cross-repo project yields one `project/<slug>` branch
 per touched repo. `main` is never touched per-iteration — `--teardown` deletes
 only the per-lane `lane/<iteration>-<lane>` branches and worktrees, never the
 project branch. Update the iteration index in `architecture/ARCHITECT.md`
-(recording the `project/<slug>` branch), remove the worktrees (`architect
-integrate … --teardown`, or `architect worktree remove <iteration> <lane>`), and
-commit the space.
+(recording the `project/<slug>` branch), remove the provisioned worktrees
+(`architect integrate … --teardown`, or `architect worktree remove <iteration>
+<lane>`), and commit the space.
 
 **Run the frozen gates cold** — `architect gate <iteration>` runs the frozen
 gate commands against the integration tree and streams raw output (a runner, not
