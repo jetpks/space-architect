@@ -45,7 +45,7 @@ gem "dry-monads", "1.10.0"
 gem "dry-operation", ">= 1.0.1"
 
 # CLI + build
-gem "hanami-cli", "2.3.5"
+gem "hanami-cli", "3.0.0"
 gem "rake"
 
 # Former stdlib gems removed in Ruby 4.0
