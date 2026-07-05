@@ -27,8 +27,22 @@ Write + commit: `architect section <%= @_name %> specification --from <file>`. -
 - **Boundaries** — may-touch / must-not-touch / out-of-scope; no placeholders;
   no refactors beyond the task. (Frozen stack: cite `BRIEF §2`.)
 - **Lane plan** — 1–4 lanes, each declaring: target repo `repos/<repo>`,
-  file-touch set (overlap-checked), objective, output format, boundaries.
+  file-touch set (overlap-checked), objective, output format, boundaries. The
+  machine-readable declaration lives in the fenced ```lanes block below — the single
+  frozen source of truth `architect freeze` records and `architect provision`
+  materializes.
 - **Effort** — `think hard` … `ultrathink` per lane, with one line of why.
+
+```lanes
+# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`
+# writes each into space.yaml (name, repo, touch_set); `architect provision <%= @_name %>`
+# materializes the worktrees + lane branches. Remove the comment markers to activate.
+# - name: lane-a            # lane name (required)
+#   repo: my-repo           # target repo under repos/ (required)
+#   touch:                  # file globs this lane may write (required, non-empty)
+#     - lib/my_repo/**
+#     - test/my_repo_test.rb
+```
 
 ## Acceptance Criteria
 

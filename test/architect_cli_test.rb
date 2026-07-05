@@ -1339,4 +1339,52 @@ class ArchitectCLITest < Space::ArchitectTest
     assert_includes out, "--timeout", "dispatch --help must list the --timeout option"
     assert_includes out, "14400",     "dispatch --help must show the default 4h (14400s) value"
   end
+
+  # ── I03: provision command ───────────────────────────────────────────────
+
+  # AC2: `architect provision` materializes declared lanes and prints each path.
+  def test_provision_cli_materializes_declared_lanes
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "slice-1")
+        slice_file = File.join(space_path, "architecture", "I01-slice-1.md")
+        File.write(slice_file, <<~MD)
+          # I01: slice-1
+
+          ## Specification
+
+          ```lanes
+          - name: lane-a
+            repo: my-repo
+            touch:
+              - lib/**
+          ```
+
+          ## Acceptance Criteria
+
+          ## Builder Prompt
+        MD
+
+        invoke("freeze", "slice-1")
+        out, err = invoke("provision", "slice-1")
+
+        assert_empty err
+        assert_match(%r{lane-a:.*build/I01-slice-1-lane-a/wt \(created\)}, out)
+        assert_path_exists File.join(space_path, "build", "I01-slice-1-lane-a", "wt")
+
+        out2, = invoke("provision", "slice-1")
+        assert_match(/already present/, out2)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
 end

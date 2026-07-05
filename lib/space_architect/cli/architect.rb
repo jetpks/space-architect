@@ -251,6 +251,33 @@ module Space::Architect
         end
       end
 
+      class Provision < BaseCommand
+        desc "Materialize declared lanes (worktree + lane/<id>-<lane> branch) from the frozen lane plan"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option   :base,      default: nil,    desc: "Base ref override (default: project/<slug> HEAD if it exists, else the repo's default branch)"
+        option   :lane,      default: nil,    desc: "Provision only this lane (default: all declared lanes)"
+
+        def call(iteration:, space: nil, base: nil, lane: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              results = project.provision(iteration, base: base, lane: lane)
+              if results.empty?
+                terminal.say "No declared lanes to provision for '#{iteration}'"
+              else
+                results.each do |r|
+                  state = r[:created] ? "created" : "already present"
+                  terminal.say "#{r[:lane]}: #{terminal.path(r[:worktree])} (#{state})"
+                end
+              end
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+      end
+
       class Section < BaseCommand
         desc "Write a section of the iteration file and commit it (one call)"
         argument :iteration, required: true,  desc: "Iteration name"
@@ -661,6 +688,7 @@ Space::Architect::CLI::Registry.register "new",    Space::Architect::CLI::Archit
 Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Architect::Status
 Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
 Space::Architect::CLI::Registry.register "verify", Space::Architect::CLI::Architect::Verify
+Space::Architect::CLI::Registry.register "provision", Space::Architect::CLI::Architect::Provision
 Space::Architect::CLI::Registry.register "dispatch", Space::Architect::CLI::Architect::Dispatch
 Space::Architect::CLI::Registry.register "section",   Space::Architect::CLI::Architect::Section
 Space::Architect::CLI::Registry.register "verdict",   Space::Architect::CLI::Architect::Verdict
