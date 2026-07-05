@@ -164,6 +164,7 @@ module Space::Architect
       end
 
       lint_gates!(text, warnings: warnings)
+      lint_lanes!(text)
 
       if entry["freeze_sha"]
         sha = entry["freeze_sha"]
@@ -183,12 +184,20 @@ module Space::Architect
       sha, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
       sha = sha.strip
 
+      declared = parse_lanes(text)
       update_architect_block do |b|
         b["current_iteration"] = iteration
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
           s["freeze_sha"] = sha
           s["verdict"] ||= "pending"
+          lanes = s["lanes"] || []
+          declared.each do |d|
+            fields = { "name" => d["name"], "repo" => d["repo"], "touch_set" => Array(d["touch"]) }
+            existing = lanes.find { |l| l["name"] == d["name"] }
+            existing ? existing.merge!(fields) : lanes << fields
+          end
+          s["lanes"] = lanes
         end
         b
       end
@@ -325,6 +334,7 @@ module Space::Architect
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
+      lane_entry = ensure_lane_materialized(iteration, lane)
 
       checks = lane_mechanical_checks(entry, lane_entry)
       if checks[:no_builder_commits] == false
@@ -431,6 +441,7 @@ module Space::Architect
         if lane
           le = lanes.find { |l| l["name"] == lane }
           raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless le
+          le = ensure_lane_materialized(iteration, lane)
           repo_root = le["repo"] ? space.path.join("repos", le["repo"]) : nil
           space.path.join(le["worktree"] || "build/#{iteration_id(entry)}-#{lane}/wt")
         else
@@ -697,9 +708,38 @@ module Space::Architect
       wt_base.children.select(&:directory?).map { |p| p.basename.to_s }.sort
     end
 
+    # Materialize the iteration's declared lanes: for each lane (or the one named via
+    # `lane:`), create its worktree + lane/<id>-<lane> branch from the resolved base and
+    # record worktree/base_sha/integration_branch. Idempotent — an already-materialized
+    # lane is skipped, not re-created. Refuses until the iteration is frozen, because
+    # declarations are not authoritative until then.
+    def provision(iteration, base: nil, lane: nil)
+      entry = slice_entry(iteration)
+      raise Space::Core::Error,
+        "Iteration '#{iteration}' is not frozen — freeze before provisioning (declarations are not authoritative until frozen)." \
+        unless entry["freeze_sha"]
+
+      lanes = entry["lanes"] || []
+      lanes = lanes.select { |l| l["name"] == lane } if lane
+      raise Space::Core::Error, "No lane '#{lane}' declared for iteration '#{iteration}'" if lane && lanes.empty?
+
+      lanes.map do |l|
+        name = l["name"]
+        repo_path = space.path.join("repos", l["repo"])
+        wt_path = space.path.join(l["worktree"] || "build/#{iteration_id(entry)}-#{name}/wt")
+        if wt_path.exist? && worktree_registered?(repo_path, wt_path)
+          { lane: name, worktree: wt_path, base_sha: l["base_sha"], created: false }
+        else
+          result = worktree_add(l["repo"], iteration, name, base: resolve_lane_base(l["repo"], base))
+          { lane: name, worktree: result[:worktree], base_sha: result[:base_sha], created: true }
+        end
+      end
+    end
+
     def verify(iteration)
       entry = slice_entry(iteration)
       (entry["lanes"] || []).map do |lane|
+        ensure_lane_materialized(iteration, lane["name"])
         { lane: lane["name"], repo: lane["repo"], checks: lane_mechanical_checks(entry, lane) }
       end
     end
@@ -716,6 +756,7 @@ module Space::Architect
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
+      lane_entry = ensure_lane_materialized(iteration, lane)
 
       resolved_harness = harness || lane_entry["harness"] || "claude-code"
       resolved_model   = model   || lane_entry["model"]   || Harness::CLAUDE_DEFAULT_MODEL
@@ -863,6 +904,42 @@ module Space::Architect
       "project/#{slug}"
     end
 
+    # Materialize a declared lane on demand: when its worktree is absent, create it
+    # identically to `provision` (same base resolution, same worktree_add primitive)
+    # so no dispatch/integrate/gate path dead-ends on a missing worktree. Returns the
+    # (possibly refreshed) lane entry; a no-op when already materialized or undeclared.
+    def ensure_lane_materialized(iteration, lane)
+      entry = slice_entry(iteration)
+      lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
+      return lane_entry unless lane_entry && lane_entry["repo"]
+
+      repo_path = space.path.join("repos", lane_entry["repo"])
+      return lane_entry unless repo_path.exist?
+      wt_path = space.path.join(lane_entry["worktree"] || "build/#{iteration_id(entry)}-#{lane}/wt")
+      return lane_entry if wt_path.exist? && worktree_registered?(repo_path, wt_path)
+
+      worktree_add(lane_entry["repo"], iteration, lane, base: resolve_lane_base(lane_entry["repo"], nil))
+      (slice_entry(iteration)["lanes"] || []).find { |l| l["name"] == lane }
+    end
+
+    # Resolve the base ref a lane's worktree branches from: an explicit override wins;
+    # otherwise the project/<slug> integration branch when it exists, else the repo's
+    # default branch.
+    def resolve_lane_base(repo, override)
+      return override if override
+      repo_path = space.path.join("repos", repo)
+      integration = project_integration_branch
+      return integration if branch_exists?(repo_path, integration)
+      repo_default_branch(repo_path)
+    end
+
+    def repo_default_branch(repo_path)
+      out, _, st = git_capture("-C", repo_path.to_s, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+      return out.strip.sub(%r{\Aorigin/}, "") if st.success? && !out.strip.empty?
+      out, _, st = git_capture("-C", repo_path.to_s, "symbolic-ref", "--short", "HEAD")
+      st.success? && !out.strip.empty? ? out.strip : "HEAD"
+    end
+
     def slice_entry(iteration)
       block = space.data["project"] || {}
       entry = (block["iterations"] || []).find { |s| s["name"] == iteration }
@@ -987,6 +1064,44 @@ module Space::Architect
       return [] unless match
       parsed = YAML.safe_load(match[1], aliases: false)
       parsed.is_a?(Array) ? parsed : []
+    end
+
+    # Extract and parse the fenced ```lanes block from the Specification section.
+    # Returns an array of lane declaration hashes (string-keyed). Returns [] when the
+    # block is absent, empty, or contains only YAML comments (back-compat).
+    def parse_lanes(text)
+      body = section_body(text, "## Specification")
+      return [] unless body
+      match = body.match(/^```lanes\n(.*?)^```/m)
+      return [] unless match
+      parsed = YAML.safe_load(match[1], aliases: false)
+      parsed.is_a?(Array) ? parsed : []
+    end
+
+    # Lint the lanes block in the given iteration file text. Raises Space::Core::Error
+    # with aggregated messages on failure. An absent/empty block is allowed (back-compat).
+    def lint_lanes!(text)
+      lanes = begin
+        parse_lanes(text)
+      rescue Psych::SyntaxError => e
+        raise Space::Core::Error, "ill-formed lanes block: #{e.message}"
+      end
+      return if lanes.empty?
+
+      errors = lanes.each_with_index.flat_map do |l, i|
+        unless l.is_a?(Hash)
+          next ["lane #{i}: expected a mapping with name/repo/touch"]
+        end
+        touch = l["touch"]
+        [
+          ("lane #{i}: missing 'name'" if l["name"].to_s.strip.empty?),
+          ("lane #{i}: missing 'repo'" if l["repo"].to_s.strip.empty?),
+          ("lane #{i} (#{l["name"]}): 'touch' must be a non-empty array of globs" \
+            unless touch.is_a?(Array) && touch.any? && touch.all? { |g| g.is_a?(String) && !g.strip.empty? })
+        ].compact
+      end
+      return if errors.empty?
+      raise Space::Core::Error, "ill-formed lanes block:\n#{errors.join("\n")}"
     end
 
     # Lint the gates block in the given iteration file text. Raises Space::Core::Error
