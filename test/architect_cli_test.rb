@@ -938,6 +938,91 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # AC1: neither --lanes nor --teardown must exit 1 with a friendly usage
+  # message, not a raw ArgumentError backtrace from a missing keyword.
+  def test_integrate_cli_without_lanes_or_teardown_gives_usage_error_not_backtrace
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+
+        out, err = invoke("integrate", "s1")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/--lanes/, err)
+        assert_match(/--teardown/, err)
+        refute_match(/ArgumentError/, err)
+        assert_empty out
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC2: `integrate <it> --teardown` with no --lanes tears down the recorded
+  # lane (worktree + branch) without merging anything.
+  def test_integrate_cli_teardown_only_removes_worktree_and_branch
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+
+        wt = File.join(space_path, "build", "I01-s1-lane-a", "wt")
+        File.write(File.join(wt, "feature.rb"), "def feature; end\n")
+        invoke("integrate", "s1", "--lanes", "lane-a")
+
+        out, err = invoke("integrate", "s1", "--teardown")
+        assert_empty err
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/Tore down lane-a \(removed worktree, deleted lane\/I01-s1-lane-a\)/, out)
+        refute_path_exists wt
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC2: teardown-only on an iteration with no recorded lanes prints a clear
+  # no-op message and exits 0.
+  def test_integrate_cli_teardown_only_with_no_lanes_recorded
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("freeze", "s1")
+
+        out, err = invoke("integrate", "s1", "--teardown")
+        assert_empty err
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/Nothing to tear down for s1/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   # I06: --push-url and --push-token CLI options are accepted and the push
   # endpoint receives the builder's stdout.
   def test_dispatch_cli_push_url_and_push_token_options

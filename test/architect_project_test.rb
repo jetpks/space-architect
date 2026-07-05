@@ -1783,4 +1783,71 @@ class ArchitectProjectTest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  # AC1: integrate! with no lanes and no teardown raises a friendly usage error,
+  # not "missing keyword" — the CLI is the ArgumentError-avoidance layer, this
+  # is the underlying guard it relies on.
+  def test_integrate_bang_raises_without_lanes_or_teardown
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+
+    err = assert_raises(Space::Core::Error) { project.integrate!("my-slice") }
+    assert_match(/No lanes given to integrate/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2: integrate! with teardown: true and no lanes tears down every RECORDED
+  # lane for the iteration (not just ones merged in this call) — removes the
+  # worktree and safe-deletes the lane branch.
+  def test_integrate_bang_teardown_only_over_recorded_lanes
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "feature.rb"), "def feature; end\n")
+    project.merge_lane!("my-slice", "lane-a")
+
+    results = project.integrate!("my-slice", teardown: true)
+    assert_equal [{ lane: "lane-a", repo: "my-repo", lane_branch: "lane/I01-my-slice-lane-a" }], results
+
+    refute_path_exists wt, "expected lane worktree to be removed"
+    branch_ref = File.join(dir, "repos", "my-repo", ".git", "refs", "heads", "lane", "I01-my-slice-lane-a")
+    refute_path_exists branch_ref, "expected lane branch to be deleted"
+
+    repo = File.join(dir, "repos", "my-repo")
+    branches, = Open3.capture3("git", "-C", repo, "branch", "--list")
+    assert_match(/project\/test/, branches, "the persistent project branch must survive teardown")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2: teardown-only on an iteration with no recorded lanes is a no-op that
+  # returns an empty result set (the CLI prints "Nothing to tear down").
+  def test_integrate_bang_teardown_only_with_no_lanes_recorded
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+
+    assert_equal [], project.integrate!("my-slice", teardown: true)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end

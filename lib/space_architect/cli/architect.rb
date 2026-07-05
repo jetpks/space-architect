@@ -369,20 +369,33 @@ module Space::Architect
         desc "Integrate the architect-supplied set of passing lanes, in order (stops on conflict)"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-        option   :lanes,     required: true,  desc: "Comma-separated passing lane names (you decide the set)"
+        option   :lanes,     required: false, desc: "Comma-separated passing lane names (you decide the set)"
         option   :teardown,  type: :boolean, default: false, desc: "Remove worktrees + delete lane branches after merge"
 
-        def call(iteration:, space: nil, lanes:, teardown: false, **opts)
+        def call(iteration:, space: nil, lanes: nil, teardown: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
+            lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
+            raise Space::Core::Error, "integrate needs --lanes <set>, or --teardown for teardown-only" \
+              if lane_names.empty? && !teardown
+
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
               results = project.integrate!(iteration, lanes: lane_names, teardown: teardown)
-              results.each do |r|
-                terminal.say "Merged #{r[:lane]} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
+              if lane_names.empty?
+                if results.empty?
+                  terminal.say "Nothing to tear down for #{iteration}"
+                else
+                  results.each do |r|
+                    terminal.say "Tore down #{r[:lane]} (removed worktree, deleted #{r[:lane_branch]})"
+                  end
+                end
+              else
+                results.each do |r|
+                  terminal.say "Merged #{r[:lane]} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
+                end
+                terminal.say "Gates NOT run — run `architect gate #{iteration}`; the verdict is the next session's."
               end
-              terminal.say "Gates NOT run — run `architect gate #{iteration}`; the verdict is the next session's."
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
           end

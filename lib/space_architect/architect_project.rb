@@ -388,9 +388,13 @@ module Space::Architect
     end
 
     # Loop merge_lane! over the architect-supplied passing set, in order. Stops on the
-    # first conflict (a disjointness defect). Never decides which lanes pass.
-    def integrate!(iteration, lanes:, teardown: false)
-      raise Space::Core::Error, "No lanes given to integrate" if lanes.nil? || lanes.empty?
+    # first conflict (a disjointness defect). Never decides which lanes pass. With no
+    # lanes and teardown: true, tears down every lane recorded for the iteration instead
+    # (the second, teardown-only call in the loop's integrate-then-teardown rhythm).
+    def integrate!(iteration, lanes: nil, teardown: false)
+      lanes = Array(lanes)
+      return teardown_lanes!(iteration, slice_entry(iteration)["lanes"] || []) if lanes.empty? && teardown
+      raise Space::Core::Error, "No lanes given to integrate" if lanes.empty?
 
       merged = []
       lanes.each do |lane|
@@ -400,13 +404,7 @@ module Space::Architect
         raise Space::Core::Error, "Integrated #{done.empty? ? "(none)" : done} then stopped at '#{lane}': #{e.message}"
       end
 
-      if teardown
-        id = iteration_id(slice_entry(iteration))
-        merged.each do |m|
-          worktree_remove(iteration, m[:lane])
-          git_capture("-C", space.path.join("repos", m[:repo]).to_s, "branch", "-d", "lane/#{id}-#{m[:lane]}")
-        end
-      end
+      teardown_lanes!(iteration, merged) if teardown
       merged
     end
 
@@ -779,6 +777,21 @@ module Space::Architect
     private
 
     attr_reader :space
+
+    # Remove each lane's worktree and safe-delete (`-d`) its lane branch. Accepts
+    # either merge_lane! results (symbol keys) or recorded lane entries (string
+    # keys) — both carry a lane name and a repo.
+    def teardown_lanes!(iteration, lane_entries)
+      id = iteration_id(slice_entry(iteration))
+      lane_entries.map do |l|
+        lane = l[:lane] || l["name"]
+        repo = l[:repo] || l["repo"]
+        worktree_remove(iteration, lane)
+        lane_branch = "lane/#{id}-#{lane}"
+        git_capture("-C", space.path.join("repos", repo).to_s, "branch", "-d", lane_branch)
+        { lane: lane, repo: repo, lane_branch: lane_branch }
+      end
+    end
 
     # Resolve the in-flight iteration file for ground output.
     # Rule: (a) current_iteration from project block → entry's file if it exists on disk,
