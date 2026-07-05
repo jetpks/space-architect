@@ -102,7 +102,9 @@ space show 20260531-name-of-space
 space path 20260531-name-of-space
 space current                                # based on $PWD
 space show                                   # based on $PWD
-space status done                            # based on $PWD
+space status                                 # report: metadata + loop status (based on $PWD)
+space status 20260531-name-of-space          # report another space
+space status done                            # set: active | paused | done | archived
 space status 20260531-name-of-space done
 space config set default_provider github.com
 space config set default_organization example-org
@@ -114,6 +116,12 @@ space repo ls                                # alias: space repos ls
 space use 20260531-name-of-space             # records recent state, prints the path
 space ls --color=always                      # auto | always | never (--colors also accepted)
 ```
+
+`space status` is **report-or-set**: with no status keyword (bare, or with just
+a space id) it *reports* the space — its metadata plus a compact loop-status
+block (project status, current iteration, derived state) when the space runs an
+Architect project, quietly omitted otherwise; pass a status keyword (`active`,
+`paused`, `done`, `archived`) to *set* it instead. 🔁
 
 Repos are passed with a repeatable `-r` flag (`-r org/repo -r org/lib`); the
 comma form (`-r a,b`) works too. Space ids are date-prefixed
@@ -307,6 +315,11 @@ architect status                            # project state (read-only)
 architect variant add|compare|promote …     # competing (harness, model) lanes over one frozen spec
 architect research dispatch|status|wait …   # parallel read-only research lanes (see below)
 ```
+
+`architect help` (or bare `architect`, `architect --help`) lists these grouped by
+loop phase — **Spec · Build · Judge · Land · Project · Groups**, in canonical
+order — and, inside an architect space, ends with a compact loop-status block
+(project status + current iteration) so you can see where you are in the loop. 🧭
 
 A typical session:
 

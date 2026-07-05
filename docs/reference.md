@@ -23,7 +23,7 @@ Being *inside* a space is what makes it current — `architect space use` record
 
 ## Architect Loop commands 🔄
 
-These root-level commands manage the Architect Loop within a space.
+These root-level commands manage the Architect Loop within a space. `architect help` (or bare `architect`, `architect --help`) lists them grouped by loop phase — Spec, Build, Judge, Land, Project, Groups — in canonical order; inside an architect space the listing ends with a compact loop-status block (project status + current iteration).
 
 ### `architect init [SPACE]`
 
@@ -374,13 +374,15 @@ Show the current space, resolved from `$PWD`.
 architect space current
 ```
 
-### `architect space status [SPACE] STATUS`
+### `architect space status [SPACE] [STATUS]`
 
-Set a space's status. Supported statuses: `active`, `paused`, `done`, `archived`.
+**Report or set.** With no status keyword — bare, or with just a space id — it *reports* the space: its metadata (ID, Title, Status, Path, Created, Updated) followed by a compact loop-status block (project status, current iteration, derived state) when the space runs an Architect project, quietly omitted for a non-architect space. Pass a status keyword to *set* it instead; supported statuses: `active`, `paused`, `done`, `archived`.
 
 ```sh
-architect space status done                              # current space
-architect space status 20260531-name-of-space archived
+architect space status                                   # report the current space
+architect space status 20260531-name-of-space            # report another space
+architect space status done                              # set the current space's status
+architect space status 20260531-name-of-space archived   # set another space's status
 ```
 
 ### `architect space config [SUBCOMMAND]`
