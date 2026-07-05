@@ -49,23 +49,30 @@ Write the lane's prompt to `build/<id>-<lane>/prompt.md` first (never pass a
 big prompt as a shell argument — shells mangle quotes), then:
 
 ```bash
-# single-lane iteration — run from the space root
+# single-lane iteration — run from the space root; dispatch runs in the lane's
+# provisioned worktree (materialized on demand from the frozen declaration)
 architect dispatch <iteration> <lane>
 ```
 
-For multi-lane iterations, create worktrees first (one per lane), then dispatch
-each lane from its worktree:
+For multi-lane iterations, materialize every declared lane in one shot with
+`architect provision`, then dispatch each lane from its worktree:
 
 ```bash
-# per lane:
-architect worktree add <repo> <iteration> <lane> [--base <repo-base>]
-architect dispatch <iteration> <lane>
+architect provision <iteration>          # all declared lanes: worktree + lane/<id>-<lane> branch
+architect dispatch <iteration> lane-a    # own background Bash call each
+architect dispatch <iteration> lane-b
 ```
 
-`architect worktree add` creates `build/<id>-<lane>/wt` off the target repo's
-base commit (a repo commit — distinct from the freeze, which is a space
-commit), adds it with a `lane/<iteration>-<lane>` branch, and records it in
-`space.yaml`.
+`architect provision` reads the frozen lane declarations from `space.yaml` and,
+per lane, creates `build/<id>-<lane>/wt` off the resolved base (`--base`
+override, else `project/<slug>` when it exists, else the repo's default branch —
+a repo commit, distinct from the freeze, which is a space commit), adds it with a
+`lane/<iteration>-<lane>` branch, and records it in `space.yaml`. It is
+idempotent (`--lane <name>` provisions a single lane), and wraps the
+`architect worktree add` primitive — still registered for edge cases, not a step
+in the flow. `dispatch`, `integrate`, and `gate` also lazily materialize a lane
+whose worktree is missing from its frozen declaration, so the flow can't
+dead-end on a missing worktree.
 
 Issue each dispatch as its **own background Bash tool call** — one call per
 lane. Never use a shell `&` loop. A `for … & done` launcher is a *launcher*
@@ -157,10 +164,12 @@ integrate without conflict.
    fast-follow lane's `--touch` set and exclude them from every parallel lane's
    touch-set — so the parallel set is disjoint by construction.
 
-2. **Create worktrees and dispatch the parallel lanes** (off the repo base):
+2. **Provision and dispatch the parallel lanes** (off the repo base). Provision
+   only the parallel lanes by name — leave the fast-follow lane unmaterialized
+   until step 4, so it can root at the integrated tip:
    ```bash
-   architect worktree add <repo> <iteration> lane-a
-   architect worktree add <repo> <iteration> lane-b
+   architect provision <iteration> --lane lane-a
+   architect provision <iteration> --lane lane-b
    architect dispatch <iteration> lane-a   # own background Bash call each
    architect dispatch <iteration> lane-b
    ```
@@ -172,11 +181,11 @@ integrate without conflict.
    architect gate <iteration>
    ```
 
-4. **Create the fast-follow lane off the integrated tip.** `--base` accepts any
-   git ref — passing `project/<slug>` roots the new worktree at the merged tip
-   (the keystone move):
+4. **Provision the fast-follow lane off the integrated tip.** `--base` accepts
+   any git ref — passing `project/<slug>` roots the new worktree at the merged
+   tip (the keystone move); `--lane ff` provisions just that lane:
    ```bash
-   architect worktree add <repo> <iteration> ff --base project/<slug>
+   architect provision <iteration> --lane ff --base project/<slug>
    architect dispatch <iteration> ff
    ```
 
