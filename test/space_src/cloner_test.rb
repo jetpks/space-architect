@@ -4,7 +4,19 @@ require "space_src/test_helper"
 require "space_src/cloner"
 
 class ClonerTest < Minitest::Test
+  cover Space::Src::Cloner
   include TestHelpers
+
+  def setup
+    @orig_dir = Dir.pwd
+    @cwd_tmp = Dir.mktmpdir("cloner-cwd-")
+    Dir.chdir(@cwd_tmp)
+  end
+
+  def teardown
+    Dir.chdir(@orig_dir)
+    FileUtils.remove_entry(@cwd_tmp)
+  end
 
   # ---- GB1: happy path COW copy ----
 

@@ -3,6 +3,8 @@
 require_relative "test_helper"
 
 class GateEvaluatorTest < Space::ArchitectTest
+  cover Space::Architect::GateEvaluator
+
   def ev(stdout:, exit_code:, expect:)
     Space::Architect::GateEvaluator.call(stdout: stdout, exit_code: exit_code, expect: expect)
   end

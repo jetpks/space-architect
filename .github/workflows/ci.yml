@@ -52,3 +52,27 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           tail -5 /tmp/audit.log >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  mutation:
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_PATH: vendor/bundle
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
+      - uses: actions/cache@v6
+        with:
+          path: vendor/bundle
+          key: bundle-ruby-${{ hashFiles('Gemfile.lock') }}
+          restore-keys: bundle-ruby-
+      - run: bundle install
+      - run: bundle exec rake mutant 2>&1 | tee /tmp/mutant.log
+        continue-on-error: true
+      - if: always()
+        name: Summary
+        run: |
+          echo "## Mutation testing" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^(Coverage|Kills|Alive):' /tmp/mutant.log >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
