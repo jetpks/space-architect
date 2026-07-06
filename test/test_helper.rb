@@ -4,6 +4,7 @@ require "fileutils"
 require "stringio"
 require "tmpdir"
 require "minitest/autorun"
+require "mutant/minitest/coverage"
 require_relative "../lib/space_architect"
 
 # Git fixture templates: process-wide singletons. Tests copy .git from these

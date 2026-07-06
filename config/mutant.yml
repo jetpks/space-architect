@@ -1,0 +1,8 @@
+---
+usage: opensource
+integration: minitest
+includes:
+  - lib
+  - test
+requires:
+  - space_architect
