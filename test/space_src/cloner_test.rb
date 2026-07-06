@@ -7,6 +7,17 @@ class ClonerTest < Minitest::Test
   cover Space::Src::Cloner
   include TestHelpers
 
+  def setup
+    @orig_dir = Dir.pwd
+    @cwd_tmp = Dir.mktmpdir("cloner-cwd-")
+    Dir.chdir(@cwd_tmp)
+  end
+
+  def teardown
+    Dir.chdir(@orig_dir)
+    FileUtils.remove_entry(@cwd_tmp)
+  end
+
   # ---- GB1: happy path COW copy ----
 
   def test_bare_name_resolves_and_copies
