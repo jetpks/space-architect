@@ -56,7 +56,12 @@ module Space::Architect
 
       TIMEOUT_EXIT_CODE = 124
 
-      def run(prompt_path:, run_log_path:, chdir:, push_url: nil, push_token: nil, push_client: nil, timeout: nil, err: $stderr)
+      # How long the liveness fiber waits before reading the run log's stream-json init
+      # event. Injectable via the run(liveness_delay:) kwarg so tests need not sleep seconds.
+      LIVENESS_DELAY_SECONDS = 5.0
+
+      def run(prompt_path:, run_log_path:, chdir:, push_url: nil, push_token: nil, push_client: nil, timeout: nil,
+              liveness_delay: LIVENESS_DELAY_SECONDS, err: $stderr)
         prompt_path  = Pathname.new(prompt_path)
         run_log_path = Pathname.new(run_log_path)
 
@@ -84,8 +89,21 @@ module Space::Architect
                 end
               end
 
+              # Liveness self-check: after a bounded delay, read the run log's stream-json
+              # init event and print ONE line naming the streamed model + confirming growth.
+              # transient: true so it never keeps the reactor alive; best-effort so it never
+              # raises into the run path. run_detached gets no such fiber.
+              liveness_task = nil
+              if liveness_delay && liveness_delay > 0
+                liveness_task = Async(transient: true) do
+                  sleep liveness_delay
+                  emit_liveness(run_log_path, liveness_delay, err)
+                end
+              end
+
               status = child.wait
               timeout_task&.stop
+              liveness_task&.stop
 
               tasks.each(&:wait)
               timed_out ? TIMEOUT_EXIT_CODE : status.exitstatus
@@ -112,6 +130,42 @@ module Space::Architect
       end
 
       private
+
+      # Read the run log's stream-json init event and print exactly one bounded liveness
+      # line to err. Best-effort: swallows any read/parse error so it never raises into run.
+      def emit_liveness(run_log_path, delay, err)
+        bytes = run_log_path.exist? ? run_log_path.size : 0
+        if bytes.zero?
+          err.puts "liveness: WARN no growth — run log still empty #{delay}s after dispatch"
+          return
+        end
+
+        streamed = streamed_init_model(run_log_path)
+        if streamed.nil?
+          err.puts "liveness: WARN model unverified — no stream-json init event after #{delay}s (run log #{bytes} bytes)"
+        elsif streamed == @model
+          err.puts "liveness: OK streaming model=#{streamed} (run log growing, #{bytes} bytes)"
+        else
+          err.puts "liveness: WARN model mismatch — pinned=#{@model} streamed=#{streamed} (run log growing, #{bytes} bytes)"
+        end
+      rescue StandardError
+        # Best-effort: an internal read/parse failure must never break the run.
+      end
+
+      # The model named by the stream-json init event ({"type":"system","subtype":"init",...}),
+      # or nil if no such event has been logged yet.
+      def streamed_init_model(run_log_path)
+        run_log_path.each_line do |line|
+          ev = begin
+            JSON.parse(line)
+          rescue JSON::ParserError
+            next
+          end
+          next unless ev.is_a?(Hash) && ev["type"] == "system" && ev["subtype"] == "init"
+          return ev["model"]
+        end
+        nil
+      end
 
       def argv
         args = [

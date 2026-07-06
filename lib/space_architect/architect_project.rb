@@ -6,6 +6,7 @@ require "open3"
 require "fileutils"
 require "pathname"
 require "tempfile"
+require "time"
 
 module Space::Architect
   # Manages an architect-loop project inside a space: one self-contained file per
@@ -562,7 +563,13 @@ module Space::Architect
 
       # Skip git worktree add when the branch and worktree already exist (idempotent re-run).
       unless branch_exists?(repo_path, branch) && worktree_registered?(repo_path, wt_path)
-        git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
+        if branch_exists?(repo_path, branch)
+          # The worktree was removed but its lane branch survived — re-attach the branch
+          # (carrying its own tip) instead of `-b`, which would fail "branch already exists".
+          git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, branch)
+        else
+          git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
+        end
       end
 
       # Seed prompt.md with a placeholder stub so the architect has a place to write the prompt.
@@ -702,6 +709,19 @@ module Space::Architect
       end
     end
 
+    # Record an ISO 8601 launch timestamp onto a dispatched lane's entry (matching the
+    # research subsystem's dispatched_at.iso8601 precedent). Re-dispatch overwrites it.
+    def record_dispatched_at(iteration, lane)
+      stamp = Time.now.iso8601
+      update_architect_block do |b|
+        (b["iterations"] || []).each do |s|
+          next unless s["name"] == iteration
+          (s["lanes"] || []).each { |l| l["dispatched_at"] = stamp if l["name"] == lane }
+        end
+        b
+      end
+    end
+
     def worktree_list
       wt_base = space.path.join("build")
       return [] unless wt_base.exist?
@@ -730,7 +750,8 @@ module Space::Architect
         if wt_path.exist? && worktree_registered?(repo_path, wt_path)
           { lane: name, worktree: wt_path, base_sha: l["base_sha"], created: false }
         else
-          result = worktree_add(l["repo"], iteration, name, base: resolve_lane_base(l["repo"], base))
+          result = worktree_add(l["repo"], iteration, name, base: resolve_lane_base(l["repo"], base),
+                                **recorded_lane_fields(l))
           { lane: name, worktree: result[:worktree], base_sha: result[:base_sha], created: true }
         end
       end
@@ -782,6 +803,11 @@ module Space::Architect
       bin = resolved_harness == "claude-code" ? claude_bin : opencode_bin
       harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
                                                   bin: bin, config_dir: build_dir, effort: resolved_effort)
+
+      # Stamp launch time onto the lane entry: after every preflight validation has passed
+      # (a dispatch that raises above records nothing) and before the blocking foreground run
+      # or a detached dispatch returns. A re-dispatch overwrites the prior value.
+      record_dispatched_at(iteration, lane)
 
       if detach
         pid = harness_obj.run_detached(
@@ -918,8 +944,21 @@ module Space::Architect
       wt_path = space.path.join(lane_entry["worktree"] || "build/#{iteration_id(entry)}-#{lane}/wt")
       return lane_entry if wt_path.exist? && worktree_registered?(repo_path, wt_path)
 
-      worktree_add(lane_entry["repo"], iteration, lane, base: resolve_lane_base(lane_entry["repo"], nil))
+      worktree_add(lane_entry["repo"], iteration, lane, base: resolve_lane_base(lane_entry["repo"], nil),
+                   **recorded_lane_fields(lane_entry))
       (slice_entry(iteration)["lanes"] || []).find { |l| l["name"] == lane }
+    end
+
+    # The lane's declared harness/model/variant/effort, as worktree_add kwargs — so a
+    # re-materialize preserves them instead of merging back to defaults. touch_set is
+    # deliberately omitted: worktree_add leaves it untouched, so it already survives.
+    def recorded_lane_fields(lane_entry)
+      {
+        harness: lane_entry["harness"] || "claude-code",
+        model:   lane_entry["model"],
+        variant: lane_entry["variant"] || false,
+        effort:  lane_entry["effort"]
+      }
     end
 
     # Resolve the base ref a lane's worktree branches from: an explicit override wins;
