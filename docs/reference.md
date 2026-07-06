@@ -34,6 +34,8 @@ architect init
 architect init 20260531-name-of-space
 ```
 
+Takes the shared commit-message options (`-m`/`--message`, `--message-from`) for the initialization commit.
+
 ### `architect ground [SPACE]`
 
 Print the grounding reads for a fresh session to stdout — `architecture/ARCHITECT.md`, `architecture/BRIEF.md` (if present), and the in-flight iteration file — under per-file delimiters. This is what the `SessionStart` hook scaffolded by `architect init` runs, so a resumed or newly-cleared session starts oriented without re-reading by hand. Emits nothing (exit 0) when invoked from inside a lane worktree under `build/`, so builders are never grounded. `CLAUDE.md` is never re-emitted.
@@ -72,6 +74,17 @@ Provider destination paths:
 | `opencode` | `~/.config/opencode/skills/` | `./.opencode/skills/` |
 | `pi` | `~/.pi/agent/skills/` (or `$PI_CODING_AGENT_DIR/skills/`) | `./.pi/skills/` |
 
+### Commit messages (all committing commands)
+
+Every architect command that commits — `init`, `new`, `freeze`, `brief new`, `section`, `verdict`, `evidence`, `merge`, `integrate` — takes the same two options. The space's git log is the loop's durable memory: detailed messages are encouraged everywhere.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-m`, `--message=TEXT` | canonical message | Your first line completes the subject after a short canonical prefix (e.g. `I01 spec: <your subject>`); remaining lines become the commit body. |
+| `--message-from=FILE` | — | Read the commit message from a file (subject line + detailed body). Wins over `--message`; preferred for multiline bodies. |
+
+Without either option the canonical message is used unchanged (e.g. `I01: specification`). Prefixes: `init:`, `I<NN> scaffold:`, `I<NN> freeze:`, `brief:`, `I<NN> grounds:`, `I<NN> spec:`, `I<NN> prompt:`, `I<NN> verdict:`, `I<NN> evidence:`, `lane <lane>:`.
+
 ### `architect new ITERATION [SPACE]`
 
 Scaffold the next iteration file at `architecture/I<NN>-<ITERATION>.md` from the iteration template. Allocates the next ordinal and records the iteration in `space.yaml`.
@@ -79,6 +92,7 @@ Scaffold the next iteration file at `architecture/I<NN>-<ITERATION>.md` from the
 ```sh
 architect new dry-cli-port
 architect new dispatch-engine 20260531-name-of-space
+architect new dry-cli-port -m "port the CLI off thor" --message-from why.md
 ```
 
 ### `architect status [SPACE]`
@@ -96,7 +110,7 @@ Commit the iteration file (Grounds + Specification + Acceptance Criteria must be
 
 ```sh
 architect freeze dry-cli-port
-architect freeze dry-cli-port 20260531-name-of-space
+architect freeze dry-cli-port 20260531-name-of-space -m "AC pinned to BRIEF §3"
 ```
 
 ### `architect verify ITERATION [SPACE]`
@@ -110,10 +124,10 @@ architect verify dry-cli-port 20260531-name-of-space
 
 ### `architect dispatch ITERATION LANE [SPACE]`
 
-Dispatch a builder for a lane: runs the harness (`claude -p` by default) headless in the lane's worktree, reads the lane's `build/<id>-<lane>/prompt.md`, and streams the full conversation to `build/<id>-<lane>/run.jsonl`, with the builder's report at `build/<id>-<lane>/report.md`. Refuses to dispatch a missing, empty, or still-stubbed prompt.
+Dispatch a builder for a lane: copies the `--prompt` file to the canonical `build/<id>-<lane>/prompt.md`, runs the harness (`claude -p` by default) headless in the lane's worktree feeding that prompt on stdin, and streams the full conversation to `build/<id>-<lane>/run.jsonl`, with the builder's report at `build/<id>-<lane>/report.md`. Author the prompt in a fresh scratch file and pass it via `--prompt` — the CLI owns the canonical path. Refuses to dispatch a missing, empty, or still-stubbed prompt.
 
 ```sh
-architect dispatch dry-cli-port lane-a
+architect dispatch dry-cli-port lane-a --prompt tmp/prompts/I01-lane-a.md
 architect dispatch dispatch-engine lane-b 20260531-name-of-space --model claude-opus-4-8
 architect dispatch dry-cli-port lane-a --max-turns 100
 architect dispatch dry-cli-port lane-a --detach          # returns a PID; poll report.md
@@ -121,6 +135,7 @@ architect dispatch dry-cli-port lane-a --detach          # returns a PID; poll r
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `--prompt=FILE` | — | Read the lane prompt from this file — copied byte-for-byte to `build/<id>-<lane>/prompt.md` before launch. Omit to reuse an existing canonical prompt. |
 | `--model=VALUE` | lane entry, else the reference default `claude-sonnet-4-6` | Builder model to pin — any provider/tier; pin a full id, not a floating alias. |
 | `--max-turns=VALUE` | `200` | Max conversation turns. |
 | `--harness=VALUE` | lane entry, else `claude-code` | Harness override (`claude-code`, `opencode`). |
@@ -163,9 +178,9 @@ architect worktree remove dry-cli-port lane-a
 Write a section of the current iteration file and commit it in one step. `SECTION` must be one of: `grounds`, `specification`, `prompt`, `verdict`. Provide the body via `--from <file>` (recommended for multi-line content), `--body <text>` (inline), or `--stdin`. Pass `--append --lane <name>` to stack a `### <lane>` subsection instead of replacing the section body — used to record per-lane Builder Prompts. Refuses to write a frozen section (Grounds/Specification) once the iteration is frozen.
 
 ```sh
-architect section my-feature specification --from spec.md
+architect section my-feature specification --from spec.md -m "pull-based dispatcher seam"
 architect section my-feature grounds --from grounds.md
-architect section my-feature prompt --append --lane lane-a --from build/I01-my-feature-lane-a/prompt.md
+architect section my-feature prompt --append --lane lane-a --from tmp/prompts/I01-lane-a.md
 architect section my-feature verdict --from verdict.md
 ```
 
@@ -177,18 +192,25 @@ architect section my-feature verdict --from verdict.md
 | `--append` | `false` | Append a `### <lane>` subsection instead of replacing. |
 | `--lane=NAME` | — | Lane name for an appended subsection. |
 
+Plus the shared commit-message options (`-m`/`--message`, `--message-from`).
+
 ### `architect brief new [SPACE]`
 
-Scaffold the durable project brief at `architecture/BRIEF.md` and commit it. The brief holds numbered §sections (§1 goal, §2 constraints, … §N definition of done) that span all iterations; each iteration's Specification and Verdict cites it as **BRIEF §N**. Idempotent guard: refuses if `BRIEF.md` already exists unless `--force` is passed.
+Write the durable project brief at `architecture/BRIEF.md` and commit it. The brief holds numbered §sections (§1 goal, §2 constraints, … §N definition of done) that span all iterations; each iteration's Specification and Verdict cites it as **BRIEF §N**. Author the brief in a fresh scratch file and pass `--from` (or `--stdin`); called bare it scaffolds a placeholder template and says so. Idempotent guard: refuses if `BRIEF.md` already exists unless `--force` is passed.
 
 ```sh
-architect brief new
-architect brief new --force   # overwrite an existing BRIEF.md
+architect brief new --from tmp/brief.md -m "founding contract for the migration"
+architect brief new                        # placeholder template for a human to fill
+architect brief new --force --from tmp/brief-v2.md   # overwrite an existing BRIEF.md
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `--from=FILE` | — | Read the authored brief body from a file. |
+| `--stdin` | `false` | Read the authored brief body from stdin. |
 | `--force` | `false` | Overwrite an existing `BRIEF.md`. |
+
+Plus the shared commit-message options (`-m`/`--message`, `--message-from`).
 
 ### `architect evidence ITERATION [SPACE]`
 
@@ -203,18 +225,18 @@ architect evidence my-feature --lane lane-a
 |--------|---------|-------------|
 | `--lane=NAME` | — | Lane name (appends a `### <lane>` subsection; omit for single-lane iterations). |
 
+Plus the shared commit-message options (`-m`/`--message`, `--message-from`).
+
 ### `architect merge ITERATION LANE [SPACE]`
 
 Integrate a single architect-judged-passing lane: commits the builder's working-tree changes on the per-lane `lane/<id>-<lane>` branch, then merges `--no-ff` into the repo's stable `project/<slug>` branch. Runs no gates and makes no verdict — those are the architect's. Refuses a lane that left builder commits or wrote outside its declared touch set. Aborts cleanly on a merge conflict (a lane-plan disjointness defect — kill the conflicting lane and re-spec; do not hand-resolve).
 
 ```sh
 architect merge my-feature lane-a
-architect merge my-feature lane-a --message "lane lane-a: integrate"
+architect merge my-feature lane-a -m "add the dispatcher seam"   # commits as "lane lane-a: add the dispatcher seam"
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--message=TEXT` | `"lane <lane>: integrate"` | Commit message for the lane's working-tree changes. |
+The lane's working-tree commit takes the shared commit-message options (`-m`/`--message`, `--message-from`); the commit lands in the repo's PR history under the `lane <lane>:` prefix, so say what the lane did.
 
 ### `architect integrate ITERATION [SPACE]`
 
@@ -229,6 +251,8 @@ architect integrate my-feature --lanes lane-a,lane-b --teardown
 |--------|---------|-------------|
 | `--lanes=NAMES` | (required) | Comma-separated list of passing lane names (the architect decides the set). |
 | `--teardown` | `false` | Remove worktrees and delete per-lane branches after merge. |
+
+Plus the shared commit-message options (`-m`/`--message`, `--message-from`), applied to each lane's working-tree commit.
 
 ### `architect gate ITERATION [LANE] [SPACE]`
 
@@ -254,7 +278,9 @@ architect verdict my-feature kill --body "AC2 gate failed: 0 tests found"
 | `--body=TEXT` | — | Inline verdict body. |
 | `--stdin` | `false` | Read the verdict body from stdin. |
 
-> **Note:** landing is not a CLI command. At project end the architect writes the PR body and presents the push + `gh pr create` block — see the architect skill's procedure.
+Plus the shared commit-message options (`-m`/`--message`, `--message-from`).
+
+> **Note:** landing is not a CLI command. At project end the architect writes the PR body to a fresh timestamped `build/land/<repo>-pr-body-<yyyymmdd-hhmm>.md` and presents the push + `gh pr create` block — see the architect skill's procedure.
 
 ### `architect variant [SUBCOMMAND]`
 

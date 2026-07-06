@@ -39,22 +39,27 @@ with the pinned `<builder-model>` or the log isn't growing.
 
 ## Canonical dispatch — `architect dispatch <iteration> <lane>`
 
-The canonical path is `architect dispatch <iteration> <lane>`. The tool
-assembles the canonical `claude -p` argv, pins the builder model (the lane's
+The canonical path is `architect dispatch <iteration> <lane> --prompt <file>`.
+The tool copies your prompt file to `build/<id>-<lane>/prompt.md` (the CLI owns
+that canonical path — you never write it directly), assembles the canonical
+`claude -p` argv, pins the builder model (the lane's
 configured model or the CLI's reference default; see `docs/DESIGN.md` §4),
-reads the lane prompt from `build/<id>-<lane>/prompt.md` on stdin, and streams
+feeds the copied lane prompt to the builder on stdin, and streams
 `--output-format stream-json --verbose` output to
 `build/<id>-<lane>/run.jsonl`. Run each lane as its own **background Bash tool
 call** (`run_in_background`) so your turn doesn't block for the full run (30–60
 minutes is typical).
 
-Write the lane's prompt to `build/<id>-<lane>/prompt.md` first (never pass a
-big prompt as a shell argument — shells mangle quotes), then:
+Author the lane's prompt in a **fresh timestamped scratch file**
+(`tmp/prompts/<id>-<lane>-<hhmmss>.md` — never a pre-existing canonical path,
+which trips your harness's read-before-write guard; never a shell argument —
+shells mangle quotes), then hand it to dispatch:
 
 ```bash
-# single-lane iteration — run from the space root; dispatch runs in the lane's
-# provisioned worktree (materialized on demand from the frozen declaration)
-architect dispatch <iteration> <lane>
+# single-lane iteration — run from the space root; dispatch copies the prompt to
+# build/<id>-<lane>/prompt.md and runs in the lane's provisioned worktree
+# (materialized on demand from the frozen declaration)
+architect dispatch <iteration> <lane> --prompt tmp/prompts/<id>-<lane>-<hhmmss>.md
 ```
 
 For multi-lane iterations, materialize every declared lane in one shot with
@@ -62,8 +67,8 @@ For multi-lane iterations, materialize every declared lane in one shot with
 
 ```bash
 architect provision <iteration>          # all declared lanes: worktree + lane/<id>-<lane> branch
-architect dispatch <iteration> lane-a    # own background Bash call each
-architect dispatch <iteration> lane-b
+architect dispatch <iteration> lane-a --prompt <lane-a scratch file>   # own background Bash call each
+architect dispatch <iteration> lane-b --prompt <lane-b scratch file>
 ```
 
 `architect provision` reads the frozen lane declarations from `space.yaml` and,
@@ -92,7 +97,8 @@ survives the full run and reports completion per lane.
 and as the manual fallback:
 
 ```bash
-# write prompt to build/<id>-<lane>/prompt.md first, then:
+# dispatch --prompt copies the scratch prompt to build/<id>-<lane>/prompt.md; the
+# manual equivalent is that copy followed by:
 ( cd build/<id>-<lane>/wt && \
   claude -p --model <builder-model> \
     --permission-mode acceptEdits \
@@ -123,13 +129,16 @@ architect integrate <iteration> --lanes <passing-set>   # e.g. --lanes lane-a,la
 architect gate <iteration>                              # integration smoke (raw output; verdict stays yours)
 architect integrate <iteration> --lanes <passing-set> --teardown   # or remove worktrees + lane branches after
 # end of project: landing is the architect's, not a CLI command — write the PR
-# body to build/land/<repo>-pr-body.md yourself, then present the paste-and-run
-# block (cd, git push -u origin project/<slug>, gh pr create) — see SKILL.md §6
+# body to a fresh build/land/<repo>-pr-body-<yyyymmdd-hhmm>.md yourself, then
+# present the paste-and-run block (cd, git push -u origin project/<slug>,
+# gh pr create) — see SKILL.md §6
 ```
 
 `architect integrate` commits each named lane on its branch and merges it
 `--no-ff` into the repo's stable `project/<slug>` branch (slug of `space.title`,
-persistent across all iterations), in order. It **refuses** a lane that left
+persistent across all iterations), in order. Pass `-m`/`--message-from` — the
+lane commit lands in the repo's PR history, so say what the lane did and why,
+not just that it integrated. It **refuses** a lane that left
 builder commits or wrote out-of-bounds (the mechanical post-flight checks), and
 aborts on a merge conflict. A merge conflict = the lane plan wasn't disjoint = a
 spec defect: kill the conflicting lane and re-spec; don't hand-resolve builder
@@ -150,8 +159,9 @@ git -C repos/<repo> merge --no-ff lane/<iteration>-<lane>
 <run the gate commands>          # integration smoke after every merge
 architect worktree remove <iteration> <lane>
 git -C repos/<repo> branch -d lane/<iteration>-<lane>
-# at project end there is no CLI step: the architect writes
-# build/land/<repo>-pr-body.md and presents the push + gh pr create block
+# at project end there is no CLI step: the architect writes a fresh
+# build/land/<repo>-pr-body-<yyyymmdd-hhmm>.md and presents the push +
+# gh pr create block
 ```
 
 ### Parallel + fast-follow
