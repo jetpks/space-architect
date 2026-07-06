@@ -32,4 +32,9 @@ task install: :build do
   sh_unbundled "gem", "install", *install_args, GEM_FILE
 end
 
+desc "Run mutation testing on Space::Architect::GateEvaluator"
+task :mutant do
+  sh "bundle", "exec", "mutant", "run", "--", "Space::Architect::GateEvaluator"
+end
+
 task default: :test
