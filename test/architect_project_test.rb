@@ -2038,6 +2038,218 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # ── I05: dispatched_at, field-clobber, surviving-branch re-materialize ────────
+
+  ISO8601_RE = /\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:\d{2})\z/
+
+  # A fake claude bin that consumes stdin and exits 0 quickly (so the default liveness
+  # fiber is stopped on child exit — no test slowdown).
+  FAKE_CLAUDE_OK = <<~RUBY
+    #!/usr/bin/env ruby
+    $stdin.read
+    exit 0
+  RUBY
+
+  def write_fake_claude(dir)
+    bin = File.join(dir, "fake_claude")
+    File.write(bin, FAKE_CLAUDE_OK)
+    File.chmod(0o755, bin)
+    bin
+  end
+
+  def lane_on_disk(dir, name)
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    demo = yml.dig("project", "iterations").find { |i| i["name"] == "demo" }
+    (demo["lanes"] || []).find { |l| l["name"] == name }
+  end
+
+  # AC1: a foreground dispatch records an ISO 8601 dispatched_at on the lane entry.
+  def test_dispatch_records_dispatched_at_on_foreground
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    project.dispatch("demo", "A", claude_bin: write_fake_claude(dir))
+
+    stamp = lane_on_disk(dir, "A")["dispatched_at"]
+    assert_match ISO8601_RE, stamp, "dispatched_at must be ISO 8601, got #{stamp.inspect}"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1: a detached dispatch also records dispatched_at before it returns.
+  def test_dispatch_records_dispatched_at_on_detached
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    res = project.dispatch("demo", "A", claude_bin: write_fake_claude(dir), detach: true)
+    assert res[:pid], "detached dispatch returns a pid"
+
+    stamp = lane_on_disk(dir, "A")["dispatched_at"]
+    assert_match ISO8601_RE, stamp, "detached dispatch must record dispatched_at, got #{stamp.inspect}"
+  ensure
+    Process.kill("KILL", res[:pid]) rescue nil if defined?(res) && res.is_a?(Hash)
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1: a re-dispatch overwrites a prior dispatched_at value.
+  def test_dispatch_overwrites_prior_dispatched_at
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    # Seed a sentinel value directly on the lane entry the project holds in memory.
+    space.data.dig("project", "iterations", 0, "lanes", 0)["dispatched_at"] = "SENTINEL"
+    space.save
+
+    project.dispatch("demo", "A", claude_bin: write_fake_claude(dir))
+
+    stamp = lane_on_disk(dir, "A")["dispatched_at"]
+    refute_equal "SENTINEL", stamp, "re-dispatch must overwrite the prior value"
+    assert_match ISO8601_RE, stamp
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1: a dispatch that raises during preflight records nothing.
+  def test_dispatch_records_nothing_when_preflight_raises
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    # prompt.md left as the seeded stub → dispatch raises before launch.
+
+    assert_raises(Space::Core::Error) do
+      project.dispatch("demo", "A", claude_bin: write_fake_claude(dir))
+    end
+
+    refute lane_on_disk(dir, "A").key?("dispatched_at"),
+      "a dispatch that raises in preflight must record no dispatched_at"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: re-materialize via ensure_lane_materialized preserves harness/model/variant/
+  # effort/touch_set (threaded through worktree_add, not merged back to defaults).
+  def test_ensure_lane_materialized_preserves_recorded_fields
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "V",
+                         harness: "opencode",
+                         model: "fireworks-ai/custom-model",
+                         variant: true,
+                         effort: "high",
+                         touch: ["lib/**"])
+
+    project.worktree_remove("demo", "V")
+    assert_nil lane_on_disk(dir, "V")["worktree"], "worktree nilled after removal"
+
+    project.send(:ensure_lane_materialized, "demo", "V")
+
+    lane = lane_on_disk(dir, "V")
+    assert_equal "opencode",                 lane["harness"]
+    assert_equal "fireworks-ai/custom-model", lane["model"]
+    assert_equal true,                       lane["variant"]
+    assert_equal "high",                     lane["effort"]
+    assert_equal ["lib/**"],                 lane["touch_set"]
+    assert_equal "build/I01-demo-V/wt",      lane["worktree"], "worktree re-materialized"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: re-materialize via provision preserves the same recorded fields.
+  def test_provision_preserves_recorded_fields_on_rematerialize
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: V
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    project.freeze!("demo")
+    # Record harness/model/variant/effort onto the frozen lane via worktree_add.
+    project.worktree_add("my-repo", "demo", "V",
+                         harness: "opencode",
+                         model: "fireworks-ai/custom-model",
+                         variant: true,
+                         effort: "high")
+
+    project.worktree_remove("demo", "V")
+    project.provision("demo")
+
+    lane = lane_on_disk(dir, "V")
+    assert_equal "opencode",                  lane["harness"]
+    assert_equal "fireworks-ai/custom-model", lane["model"]
+    assert_equal true,                        lane["variant"]
+    assert_equal "high",                      lane["effort"]
+    assert_equal ["lib/**"],                  lane["touch_set"], "touch_set stays preserved"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5: re-materialize over a surviving lane branch checks it out (no -b), carrying
+  # the branch's own tip rather than failing "branch already exists".
+  def test_rematerialize_reattaches_surviving_branch_with_its_tip
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+
+    # Advance the lane branch's tip with a commit made in the worktree.
+    wt = File.join(dir, "build", "I01-demo-A", "wt")
+    File.write(File.join(wt, "new.txt"), "hi\n")
+    system("git", "-C", wt, "add", "new.txt", out: File::NULL, err: File::NULL)
+    system("git", "-C", wt, "commit", "-q", "-m", "advance tip")
+    branch_tip, _, st = Open3.capture3("git", "-C", repo_dir, "rev-parse", "lane/I01-demo-A")
+    assert st.success?
+    branch_tip = branch_tip.strip
+
+    # Remove the worktree; the lane/I01-demo-A branch survives at branch_tip.
+    project.worktree_remove("demo", "A")
+    assert project.send(:branch_exists?, Pathname.new(repo_dir), "lane/I01-demo-A"),
+      "lane branch must survive worktree removal"
+
+    # Re-materialize: must succeed (not raise "branch already exists").
+    project.send(:ensure_lane_materialized, "demo", "A")
+
+    head, _, st2 = Open3.capture3("git", "-C", wt, "rev-parse", "HEAD")
+    assert st2.success?, "re-attached worktree must exist"
+    assert_equal branch_tip, head.strip, "re-attached worktree carries the branch's own tip"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # AC4: an iteration frozen with no ```lanes block still works — freeze adds no
   # lanes, and provision reads the pre-existing worktree_add entry unchanged.
   def test_no_lanes_block_falls_back_to_recorded_entries
