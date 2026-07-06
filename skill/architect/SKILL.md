@@ -121,8 +121,11 @@ loop.
   gate (test/lint/typecheck/build commands) from docs or CI config.
 - Once per environment: `claude --version` and confirm the builder model
   resolves (`echo ok | claude -p --model <builder-model> --max-turns 1`;
-  details in `dispatch.md`). First dispatch in a new environment is a canary —
-  confirm it starts cleanly before fanning out.
+  details in `dispatch.md`). Past that one-time check, every foreground dispatch
+  self-verifies — it prints a liveness line naming the streamed model and
+  confirming the run log is growing (a WARN line instead if the streamed model
+  disagrees with the pin or the log isn't growing) — so no lone lane needs
+  launching-and-watching before the fan-out.
 - Read `architecture/ARCHITECT.md` (the cross-iteration table of contents),
   `architecture/BRIEF.md` if present (the durable §-numbered project contract you
   cite as BRIEF §N), and the iteration file `architecture/I<NN>-<name>.md` for any

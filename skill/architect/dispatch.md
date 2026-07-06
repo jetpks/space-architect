@@ -27,12 +27,15 @@ pattern match), so the post-flight `git log` is what the loop actually trusts.
 If a lane committed, treat the worktree as tampered: reset and re-dispatch.
 
 **Preflight (once per environment):** run `claude --version`, and confirm the
-builder model resolves with a one-shot canary
+builder model resolves with a one-shot
 (`echo ok | claude -p --model <builder-model> --max-turns 1`). No API key —
 the builder runs on your Claude plan — but note headless `claude -p` draws on
 the Agent SDK credit pool (separate from interactive usage since June 15 2026;
-see `docs/DESIGN.md` §4). On the first real dispatch in a new environment, launch
-ONE canary lane and confirm it starts cleanly before fanning anything out.
+see `docs/DESIGN.md` §4). Past that one-time check, no dispatch needs a manual
+start-check: every foreground dispatch self-verifies. Shortly after launch it
+prints a liveness line to stderr naming the streamed model and confirming the
+run log is growing — or a WARN line instead when the streamed model disagrees
+with the pinned `<builder-model>` or the log isn't growing.
 
 ## Canonical dispatch — `architect dispatch <iteration> <lane>`
 
