@@ -1783,4 +1783,493 @@ class ArchitectProjectTest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  # AC1: integrate! with no lanes and no teardown raises a friendly usage error,
+  # not "missing keyword" — the CLI is the ArgumentError-avoidance layer, this
+  # is the underlying guard it relies on.
+  def test_integrate_bang_raises_without_lanes_or_teardown
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+
+    err = assert_raises(Space::Core::Error) { project.integrate!("my-slice") }
+    assert_match(/No lanes given to integrate/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2: integrate! with teardown: true and no lanes tears down every RECORDED
+  # lane for the iteration (not just ones merged in this call) — removes the
+  # worktree and safe-deletes the lane branch.
+  def test_integrate_bang_teardown_only_over_recorded_lanes
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "feature.rb"), "def feature; end\n")
+    project.merge_lane!("my-slice", "lane-a")
+
+    results = project.integrate!("my-slice", teardown: true)
+    assert_equal [{ lane: "lane-a", repo: "my-repo", lane_branch: "lane/I01-my-slice-lane-a" }], results
+
+    refute_path_exists wt, "expected lane worktree to be removed"
+    branch_ref = File.join(dir, "repos", "my-repo", ".git", "refs", "heads", "lane", "I01-my-slice-lane-a")
+    refute_path_exists branch_ref, "expected lane branch to be deleted"
+
+    repo = File.join(dir, "repos", "my-repo")
+    branches, = Open3.capture3("git", "-C", repo, "branch", "--list")
+    assert_match(/project\/test/, branches, "the persistent project branch must survive teardown")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2: teardown-only on an iteration with no recorded lanes is a no-op that
+  # returns an empty result set (the CLI prints "Nothing to tear down").
+  def test_integrate_bang_teardown_only_with_no_lanes_recorded
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+
+    assert_equal [], project.integrate!("my-slice", teardown: true)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── I03: lane-declaration model ──────────────────────────────────────────────
+
+  # Write a full iteration file with a ```lanes block (and optional ```gates block),
+  # replacing the scaffold, so freeze parses declarations from the Specification.
+  def write_iteration_with_lanes(dir, name, lanes_yaml, gates_yaml: nil)
+    gates = gates_yaml ? "\n```gates\n#{gates_yaml}```\n" : ""
+    File.write(File.join(dir, "architecture", "I01-#{name}.md"), <<~MD)
+      # I01: #{name}
+
+      ## Grounds
+
+      ## Specification
+
+      Build stuff.
+
+      ```lanes
+      #{lanes_yaml}```
+
+      ## Acceptance Criteria
+      #{gates}
+      ## Builder Prompt
+
+      ## Builder Report
+
+      ## Verdict
+    MD
+  end
+
+  # AC1: freeze parses the ```lanes block and writes name/repo/touch_set into the
+  # iteration's space.yaml lane entries in the freeze operation.
+  def test_freeze_populates_lane_entries_from_lanes_block
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+      - name: lane-b
+        repo: my-repo
+        touch:
+          - test/**
+    YAML
+
+    project.freeze!("my-slice")
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lanes = yml.dig("project", "iterations", 0, "lanes")
+    assert_equal %w[lane-a lane-b], lanes.map { |l| l["name"] }
+    assert_equal "my-repo", lanes[0]["repo"]
+    assert_equal ["lib/**"], lanes[0]["touch_set"]
+    assert_equal ["test/**"], lanes[1]["touch_set"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1: a lane already recorded (e.g. by worktree_add) is updated in place — not
+  # duplicated — and re-freeze is a no-op.
+  def test_freeze_updates_recorded_lane_in_place_and_refreeze_is_noop
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", harness: "opencode", model: "some/model")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+
+    sha = project.freeze!("my-slice")
+
+    lanes = space.data.dig("project", "iterations", 0, "lanes")
+    assert_equal 1, lanes.length, "declared lane must merge into the recorded entry, not duplicate"
+    assert_equal ["lib/**"], lanes[0]["touch_set"]
+    assert_equal "opencode", lanes[0]["harness"], "worktree_add fields survive freeze-populate"
+
+    assert_equal sha, project.freeze!("my-slice"), "re-freeze returns the same sha"
+    assert_equal 1, space.data.dig("project", "iterations", 0, "lanes").length
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1: a malformed ```lanes block (missing repo) fails freeze with a clear error.
+  def test_freeze_rejects_malformed_lanes_block
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        touch:
+          - lib/**
+    YAML
+
+    err = assert_raises(Space::Core::Error) { project.freeze!("my-slice") }
+    assert_match(/ill-formed lanes block/, err.message)
+    assert_match(/missing 'repo'/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2: provision materializes every declared lane (worktree + lane branch), is
+  # idempotent, records base_sha, and refuses when the iteration is not frozen.
+  def test_provision_materializes_declared_lanes_and_is_idempotent
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+
+    err = assert_raises(Space::Core::Error) { project.provision("my-slice") }
+    assert_match(/not frozen/, err.message)
+
+    project.freeze!("my-slice")
+
+    created = project.provision("my-slice")
+    assert_equal ["lane-a"], created.map { |r| r[:lane] }
+    assert created[0][:created], "first provision creates the worktree"
+    assert_path_exists created[0][:worktree].to_s
+    branch_ref = File.join(dir, "repos", "my-repo", ".git", "refs", "heads", "lane", "I01-my-slice-lane-a")
+    assert_path_exists branch_ref
+
+    lane = space.data.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal "build/I01-my-slice-lane-a/wt", lane["worktree"]
+    assert_match(/\A[0-9a-f]{40}\z/, lane["base_sha"])
+
+    again = project.provision("my-slice")
+    refute again[0][:created], "second provision skips the already-materialized lane"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: with a declared lane whose worktree is absent, a resolution call site
+  # (run_gates) auto-materializes it from the declaration rather than dead-ending.
+  def test_run_gates_auto_materializes_missing_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML, gates_yaml: <<~GATES)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+      - id: g1
+        ac: AC1
+        cmd: "true"
+        expect:
+          exit_code: 0
+    GATES
+
+    project.freeze!("my-slice")
+    refute_path_exists File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+
+    results = project.run_gates("my-slice", lane: "lane-a")
+    assert_equal :pass, results[0][:status]
+    assert_path_exists File.join(dir, "build", "I01-my-slice-lane-a", "wt"),
+      "gate run must materialize the declared lane's worktree"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── I05: dispatched_at, field-clobber, surviving-branch re-materialize ────────
+
+  ISO8601_RE = /\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:\d{2})\z/
+
+  # A fake claude bin that consumes stdin and exits 0 quickly (so the default liveness
+  # fiber is stopped on child exit — no test slowdown).
+  FAKE_CLAUDE_OK = <<~RUBY
+    #!/usr/bin/env ruby
+    $stdin.read
+    exit 0
+  RUBY
+
+  def write_fake_claude(dir)
+    bin = File.join(dir, "fake_claude")
+    File.write(bin, FAKE_CLAUDE_OK)
+    File.chmod(0o755, bin)
+    bin
+  end
+
+  def lane_on_disk(dir, name)
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    demo = yml.dig("project", "iterations").find { |i| i["name"] == "demo" }
+    (demo["lanes"] || []).find { |l| l["name"] == name }
+  end
+
+  # AC1: a foreground dispatch records an ISO 8601 dispatched_at on the lane entry.
+  def test_dispatch_records_dispatched_at_on_foreground
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    project.dispatch("demo", "A", claude_bin: write_fake_claude(dir))
+
+    stamp = lane_on_disk(dir, "A")["dispatched_at"]
+    assert_match ISO8601_RE, stamp, "dispatched_at must be ISO 8601, got #{stamp.inspect}"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1: a detached dispatch also records dispatched_at before it returns.
+  def test_dispatch_records_dispatched_at_on_detached
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    res = project.dispatch("demo", "A", claude_bin: write_fake_claude(dir), detach: true)
+    assert res[:pid], "detached dispatch returns a pid"
+
+    stamp = lane_on_disk(dir, "A")["dispatched_at"]
+    assert_match ISO8601_RE, stamp, "detached dispatch must record dispatched_at, got #{stamp.inspect}"
+  ensure
+    Process.kill("KILL", res[:pid]) rescue nil if defined?(res) && res.is_a?(Hash)
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1: a re-dispatch overwrites a prior dispatched_at value.
+  def test_dispatch_overwrites_prior_dispatched_at
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    # Seed a sentinel value directly on the lane entry the project holds in memory.
+    space.data.dig("project", "iterations", 0, "lanes", 0)["dispatched_at"] = "SENTINEL"
+    space.save
+
+    project.dispatch("demo", "A", claude_bin: write_fake_claude(dir))
+
+    stamp = lane_on_disk(dir, "A")["dispatched_at"]
+    refute_equal "SENTINEL", stamp, "re-dispatch must overwrite the prior value"
+    assert_match ISO8601_RE, stamp
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1: a dispatch that raises during preflight records nothing.
+  def test_dispatch_records_nothing_when_preflight_raises
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    # prompt.md left as the seeded stub → dispatch raises before launch.
+
+    assert_raises(Space::Core::Error) do
+      project.dispatch("demo", "A", claude_bin: write_fake_claude(dir))
+    end
+
+    refute lane_on_disk(dir, "A").key?("dispatched_at"),
+      "a dispatch that raises in preflight must record no dispatched_at"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: re-materialize via ensure_lane_materialized preserves harness/model/variant/
+  # effort/touch_set (threaded through worktree_add, not merged back to defaults).
+  def test_ensure_lane_materialized_preserves_recorded_fields
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "V",
+                         harness: "opencode",
+                         model: "fireworks-ai/custom-model",
+                         variant: true,
+                         effort: "high",
+                         touch: ["lib/**"])
+
+    project.worktree_remove("demo", "V")
+    assert_nil lane_on_disk(dir, "V")["worktree"], "worktree nilled after removal"
+
+    project.send(:ensure_lane_materialized, "demo", "V")
+
+    lane = lane_on_disk(dir, "V")
+    assert_equal "opencode",                 lane["harness"]
+    assert_equal "fireworks-ai/custom-model", lane["model"]
+    assert_equal true,                       lane["variant"]
+    assert_equal "high",                     lane["effort"]
+    assert_equal ["lib/**"],                 lane["touch_set"]
+    assert_equal "build/I01-demo-V/wt",      lane["worktree"], "worktree re-materialized"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: re-materialize via provision preserves the same recorded fields.
+  def test_provision_preserves_recorded_fields_on_rematerialize
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: V
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    project.freeze!("demo")
+    # Record harness/model/variant/effort onto the frozen lane via worktree_add.
+    project.worktree_add("my-repo", "demo", "V",
+                         harness: "opencode",
+                         model: "fireworks-ai/custom-model",
+                         variant: true,
+                         effort: "high")
+
+    project.worktree_remove("demo", "V")
+    project.provision("demo")
+
+    lane = lane_on_disk(dir, "V")
+    assert_equal "opencode",                  lane["harness"]
+    assert_equal "fireworks-ai/custom-model", lane["model"]
+    assert_equal true,                        lane["variant"]
+    assert_equal "high",                      lane["effort"]
+    assert_equal ["lib/**"],                  lane["touch_set"], "touch_set stays preserved"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5: re-materialize over a surviving lane branch checks it out (no -b), carrying
+  # the branch's own tip rather than failing "branch already exists".
+  def test_rematerialize_reattaches_surviving_branch_with_its_tip
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+
+    # Advance the lane branch's tip with a commit made in the worktree.
+    wt = File.join(dir, "build", "I01-demo-A", "wt")
+    File.write(File.join(wt, "new.txt"), "hi\n")
+    system("git", "-C", wt, "add", "new.txt", out: File::NULL, err: File::NULL)
+    system("git", "-C", wt, "commit", "-q", "-m", "advance tip")
+    branch_tip, _, st = Open3.capture3("git", "-C", repo_dir, "rev-parse", "lane/I01-demo-A")
+    assert st.success?
+    branch_tip = branch_tip.strip
+
+    # Remove the worktree; the lane/I01-demo-A branch survives at branch_tip.
+    project.worktree_remove("demo", "A")
+    assert project.send(:branch_exists?, Pathname.new(repo_dir), "lane/I01-demo-A"),
+      "lane branch must survive worktree removal"
+
+    # Re-materialize: must succeed (not raise "branch already exists").
+    project.send(:ensure_lane_materialized, "demo", "A")
+
+    head, _, st2 = Open3.capture3("git", "-C", wt, "rev-parse", "HEAD")
+    assert st2.success?, "re-attached worktree must exist"
+    assert_equal branch_tip, head.strip, "re-attached worktree carries the branch's own tip"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: an iteration frozen with no ```lanes block still works — freeze adds no
+  # lanes, and provision reads the pre-existing worktree_add entry unchanged.
+  def test_no_lanes_block_falls_back_to_recorded_entries
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice") # scaffold carries only a commented (inert) lanes stub
+
+    assert_equal [], space.data.dig("project", "iterations", 0, "lanes"),
+      "an absent/commented lanes block populates nothing"
+
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    results = project.provision("my-slice")
+    assert_equal ["lane-a"], results.map { |r| r[:lane] }
+    refute results[0][:created], "provision reads the pre-existing worktree_add entry, already materialized"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end

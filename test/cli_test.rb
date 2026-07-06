@@ -73,6 +73,124 @@ class CLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # AC3: `space status` (bare) reports metadata; with no `project` block the
+  # loop block is omitted quietly.
+  def test_space_status_reports_metadata_and_omits_loop_block_without_project
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      out, = invoke("space", "new", "Reportable")
+      space_id = out[/Created (\d{8}-reportable)/, 1]
+      space_path = File.join(env["HOME"], "architect", "spaces", space_id)
+
+      Dir.chdir(space_path) do
+        out, err = invoke("space", "status")
+
+        assert_empty err
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match("ID:         #{space_id}", out)
+        assert_match("Status:     active", out)
+        refute_match(/Project status:/, out, "no loop block without a project block")
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC4: each setter form still sets — a lone keyword sets the current space; a
+  # `<space> <keyword>` pair sets the named one.
+  def test_space_status_setter_forms_preserved
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      out, = invoke("space", "new", "Settable")
+      space_id = out[/Created (\d{8}-settable)/, 1]
+      space_path = File.join(env["HOME"], "architect", "spaces", space_id)
+
+      # `<space> <keyword>` form (named)
+      out, err = invoke("space", "status", space_id, "paused")
+      assert_empty err
+      assert_match(/#{space_id} is paused/, out)
+
+      # lone keyword form (current)
+      Dir.chdir(space_path) do
+        out, err = invoke("space", "status", "done")
+        assert_empty err
+        assert_match(/#{space_id} is done/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC4: a lone NON-keyword arg is a space identifier to REPORT, not a malformed
+  # status (must not raise "Invalid status").
+  def test_space_status_lone_nonkeyword_arg_reports
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      out, = invoke("space", "new", "Named Report")
+      space_id = out[/Created (\d{8}-named-report)/, 1]
+
+      out, err = invoke("space", "status", space_id)
+
+      assert_empty err
+      assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+      assert_match("ID:         #{space_id}", out)
+      refute_match(/Invalid status/, err)
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC4b: the bare word `help` shows the command help and exits 0 — it must NOT
+  # set status to "help" (no "Invalid status 'help'") and must NOT report.
+  def test_space_status_help_token_shows_help_and_does_not_set
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      out, = invoke("space", "new", "Helpable")
+      space_id = out[/Created (\d{8}-helpable)/, 1]
+      space_path = File.join(env["HOME"], "architect", "spaces", space_id)
+
+      Dir.chdir(space_path) do
+        out, err = invoke("space", "status", "help")
+
+        assert_empty err
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/Usage:/, out)
+        refute_match(/Invalid status/, out)
+        refute_match(/ID:/, out, "help must not report")
+
+        # status untouched
+        show, = invoke("space", "show")
+        assert_match("Status:     active", show)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC4b: dry-cli's -h/--help are sacred too — they render help and exit 0.
+  # dry-cli calls exit() for these, so exercise them via subprocess.
+  def test_space_status_help_flags_show_help_and_exit_zero
+    %w[-h --help].each do |flag|
+      out = IO.popen(["bundle", "exec", "space", "status", flag], err: [:child, :out]) { |f| f.read }
+      status = $?.exitstatus
+      assert_equal 0, status, "space status #{flag} must exit 0"
+      assert_includes out, "Usage:", "space status #{flag} must render help"
+      refute_match(/Invalid status/, out)
+    end
+  end
+
   def test_pwd_current_space_wins_over_recent_or_used_space
     setup = temp_env
     env = setup.fetch(:env)

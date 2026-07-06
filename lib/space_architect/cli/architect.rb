@@ -4,9 +4,23 @@ require "json"
 
 module Space::Architect
   module CLI
+    # Optional loop-phase DSL on the shared command base, read by
+    # Space::Core::CLI::Help to group the help listing. A command may declare
+    # `phase <order>, "<Label>"`; groups, and members within a group, sort by
+    # <order>. Only architect commands declare one — space commands leave it nil
+    # and render as the single ungrouped default listing (unchanged).
+    class BaseCommand
+      def self.phase(order = nil, label = nil)
+        return @phase if order.nil?
+
+        @phase = [order, label]
+      end
+    end
+
     module Architect
       class Init < BaseCommand
         desc "Scaffold (or top up) the architect project: ARCHITECT.md, space.yaml project block, SessionStart hook"
+        phase 50, "Project"
         argument :space, required: false, desc: "Space identifier (default: $PWD)"
 
         def call(space: nil, **opts)
@@ -24,6 +38,7 @@ module Space::Architect
 
       class Ground < BaseCommand
         desc "Print grounding reads (ARCHITECT.md, BRIEF.md, in-flight iteration) to stdout"
+        phase 51, "Project"
         argument :space, required: false, desc: "Space identifier (default: $PWD)"
 
         def call(space: nil, **opts)
@@ -56,6 +71,7 @@ module Space::Architect
 
       class New < BaseCommand
         desc "Scaffold the next iteration file (architecture/I<NN>-<iteration>.md)"
+        phase 10, "Spec"
         argument :iteration, required: true,  desc: "Iteration name (kebab-case)"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
 
@@ -74,6 +90,7 @@ module Space::Architect
 
       class Status < BaseCommand
         desc "Show architect project state (read-only)"
+        phase 52, "Project"
         argument :space, required: false, desc: "Space identifier (default: $PWD)"
 
         def call(space: nil, **opts)
@@ -126,6 +143,7 @@ module Space::Architect
 
       class Freeze < BaseCommand
         desc "Freeze the iteration's frozen region (Grounds/Specification/Acceptance Criteria) and record the freeze SHA"
+        phase 12, "Spec"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
 
@@ -152,6 +170,7 @@ module Space::Architect
 
       class Verify < BaseCommand
         desc "Post-flight mechanical lane checks — frozen-untouched, no builder commits, report exists, in-bounds (reports only, no judgment)"
+        phase 30, "Judge"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
 
@@ -199,6 +218,7 @@ module Space::Architect
 
       class Dispatch < BaseCommand
         desc "Dispatch a builder for a lane (streams to build/<id>-<lane>/run.jsonl)"
+        phase 21, "Build"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -251,8 +271,37 @@ module Space::Architect
         end
       end
 
+      class Provision < BaseCommand
+        desc "Materialize declared lanes (worktree + lane/<id>-<lane> branch) from the frozen lane plan"
+        phase 20, "Build"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option   :base,      default: nil,    desc: "Base ref override (default: project/<slug> HEAD if it exists, else the repo's default branch)"
+        option   :lane,      default: nil,    desc: "Provision only this lane (default: all declared lanes)"
+
+        def call(iteration:, space: nil, base: nil, lane: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              results = project.provision(iteration, base: base, lane: lane)
+              if results.empty?
+                terminal.say "No declared lanes to provision for '#{iteration}'"
+              else
+                results.each do |r|
+                  state = r[:created] ? "created" : "already present"
+                  terminal.say "#{r[:lane]}: #{terminal.path(r[:worktree])} (#{state})"
+                end
+              end
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+      end
+
       class Section < BaseCommand
         desc "Write a section of the iteration file and commit it (one call)"
+        phase 11, "Spec"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :section,   required: true,  desc: "Section: grounds, specification, prompt, verdict"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -292,6 +341,7 @@ module Space::Architect
 
       class Verdict < BaseCommand
         desc "Record the architect's verdict decision (continue or kill) and write ## Verdict prose"
+        phase 33, "Judge"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :decision,  required: true,  desc: "Decision: continue or kill"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -324,6 +374,7 @@ module Space::Architect
 
       class Evidence < BaseCommand
         desc "Transcribe a lane's scratch report VERBATIM into Builder Report and commit"
+        phase 31, "Judge"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :lane,      default: nil,    desc: "Lane name (per-lane subsection; omit for a single-lane iteration)"
@@ -345,6 +396,7 @@ module Space::Architect
 
       class Merge < BaseCommand
         desc "Integrate ONE judged-passing lane (merges --no-ff; runs no gates, makes no verdict)"
+        phase 41, "Land"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name (architect-judged passing)"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -367,22 +419,36 @@ module Space::Architect
 
       class Integrate < BaseCommand
         desc "Integrate the architect-supplied set of passing lanes, in order (stops on conflict)"
+        phase 40, "Land"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-        option   :lanes,     required: true,  desc: "Comma-separated passing lane names (you decide the set)"
+        option   :lanes,     required: false, desc: "Comma-separated passing lane names (you decide the set)"
         option   :teardown,  type: :boolean, default: false, desc: "Remove worktrees + delete lane branches after merge"
 
-        def call(iteration:, space: nil, lanes:, teardown: false, **opts)
+        def call(iteration:, space: nil, lanes: nil, teardown: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
+            lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
+            raise Space::Core::Error, "integrate needs --lanes <set>, or --teardown for teardown-only" \
+              if lane_names.empty? && !teardown
+
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
               results = project.integrate!(iteration, lanes: lane_names, teardown: teardown)
-              results.each do |r|
-                terminal.say "Merged #{r[:lane]} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
+              if lane_names.empty?
+                if results.empty?
+                  terminal.say "Nothing to tear down for #{iteration}"
+                else
+                  results.each do |r|
+                    terminal.say "Tore down #{r[:lane]} (removed worktree, deleted #{r[:lane_branch]})"
+                  end
+                end
+              else
+                results.each do |r|
+                  terminal.say "Merged #{r[:lane]} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
+                end
+                terminal.say "Gates NOT run — run `architect gate #{iteration}`; the verdict is the next session's."
               end
-              terminal.say "Gates NOT run — run `architect gate #{iteration}`; the verdict is the next session's."
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
           end
@@ -391,6 +457,7 @@ module Space::Architect
 
       class Gate < BaseCommand
         desc "Run the frozen Acceptance Criteria gate commands and report PASS/FAIL"
+        phase 32, "Judge"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: false, desc: "Run in a lane worktree (default: the integration repo)"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
@@ -420,6 +487,7 @@ module Space::Architect
 
       class BugReport < BaseCommand
         desc "Generate a prefilled GitHub issue template for filing bugs against space-architect"
+        phase 54, "Project"
 
         def call(**opts)
           setup_terminal(**opts.slice(:color, :colors))
@@ -443,6 +511,7 @@ module Space::Architect
 
       class InstallSkills < BaseCommand
         desc "Install bundled skills (architect, architect-research, architect-vocabulary) for a harness"
+        phase 53, "Project"
         option :provider, default: "claude", desc: "Harness: claude, codex, opencode, pi"
         option :project, type: :boolean, default: false, desc: "Install to CWD instead of global"
         option :force,   type: :boolean, default: false, desc: "Overwrite existing skills that differ"
@@ -642,12 +711,17 @@ module Space::Architect
   end
 end
 
+# Loop-phase declarations above sort the architect help listing; its namespaces
+# (brief/worktree/variant/research) declare no phase and list under this header.
+Space::Core::CLI::Help.trailing_group_label = "Groups"
+
 Space::Architect::CLI::Registry.register "init",   Space::Architect::CLI::Architect::Init
 Space::Architect::CLI::Registry.register "ground", Space::Architect::CLI::Architect::Ground
 Space::Architect::CLI::Registry.register "new",    Space::Architect::CLI::Architect::New
 Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Architect::Status
 Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
 Space::Architect::CLI::Registry.register "verify", Space::Architect::CLI::Architect::Verify
+Space::Architect::CLI::Registry.register "provision", Space::Architect::CLI::Architect::Provision
 Space::Architect::CLI::Registry.register "dispatch", Space::Architect::CLI::Architect::Dispatch
 Space::Architect::CLI::Registry.register "section",   Space::Architect::CLI::Architect::Section
 Space::Architect::CLI::Registry.register "verdict",   Space::Architect::CLI::Architect::Verdict

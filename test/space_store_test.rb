@@ -42,6 +42,7 @@ class SpaceStoreTest < Space::ArchitectTest
     assert_equal [], metadata.fetch("notes")
     assert_equal [], metadata.fetch("tickets")
     assert_equal [], metadata.fetch("tags")
+    assert_equal 2, metadata.fetch("version")
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end

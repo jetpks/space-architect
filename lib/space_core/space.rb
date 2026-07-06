@@ -9,6 +9,11 @@ module Space::Core
     METADATA_FILE = "space.yaml"
     VALID_STATUSES = %w[active paused done archived].freeze
 
+    # Canonical space.yaml shape: registry under `project:` (renamed from the
+    # pre-2.0 `architect:` key). Bumped from 1 in the release that did the
+    # rename, since that release shipped no read-side alias for it.
+    SCHEMA_VERSION = 2
+
     attr_reader :path, :data
 
     def self.load(path)
@@ -18,12 +23,57 @@ module Space::Core
       parsed = YAML.safe_load(metadata_path.read, aliases: false) || {}
       raise Error, "Space metadata must contain a YAML mapping: #{metadata_path}" unless parsed.is_a?(Hash)
 
-      new(Pathname.new(path), stringify_keys(parsed))
+      data = stringify_keys(parsed)
+      normalize_schema!(data, metadata_path)
+      new(Pathname.new(path), data)
     end
 
     def self.stringify_keys(hash)
       hash.each_with_object({}) { |(key, value), result| result[key.to_s] = value }
     end
+
+    # Normalizes a parsed space.yaml hash to canonical schema v2, in place:
+    #   - future version (> SCHEMA_VERSION) → raise, refuse to misread it.
+    #   - `architect:` only (v1a) → becomes `project:`.
+    #   - `project:` only (v1b or v2) → left as-is.
+    #   - both present, `project:` empty and `architect:` non-empty → the
+    #     corruption from the old silent-default read path; take `architect:`.
+    #   - both present and non-empty: identical → keep; differing → raise
+    #     rather than silently pick one and lose data.
+    # Idempotent, so a canonical v2 space is a no-op through this method.
+    def self.normalize_schema!(data, metadata_path)
+      version = data["version"]
+      if version.is_a?(Integer) && version > SCHEMA_VERSION
+        raise Error,
+          "space.yaml schema version #{version} is newer than this gem supports " \
+          "(#{SCHEMA_VERSION}); upgrade space-architect: #{metadata_path}"
+      end
+
+      legacy = data.delete("architect")
+      current = data["project"]
+
+      data["project"] =
+        if legacy.nil?
+          current
+        elsif current.nil? || empty_project_block?(current)
+          legacy
+        elsif legacy == current
+          current
+        else
+          raise Error,
+            "#{metadata_path} has both 'architect:' and 'project:' blocks with " \
+            "conflicting content; resolve manually.\narchitect: #{legacy.inspect}\n" \
+            "project: #{current.inspect}"
+        end
+
+      data["version"] = SCHEMA_VERSION
+    end
+    private_class_method :normalize_schema!
+
+    def self.empty_project_block?(block)
+      block.is_a?(Hash) && Array(block["iterations"]).empty? && block["current_iteration"].nil?
+    end
+    private_class_method :empty_project_block?
 
     def initialize(path, data)
       @path = Pathname.new(path)

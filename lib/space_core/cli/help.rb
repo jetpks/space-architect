@@ -2,6 +2,7 @@
 
 require "dry/cli"
 require "pastel"
+require_relative "loop_status"
 
 module Space::Core::CLI
   # Colourful replacement for dry-cli's plain `Usage` listing — the "global
@@ -27,17 +28,30 @@ module Space::Core::CLI
 
     module_function
 
-    def call(result, pastel: CLI.help_pastel)
-      rows  = listing(result)
-      width = rows.map { |label, _| label.length }.max || 0
+    # Header for the trailing group of children that declare no phase. Left nil
+    # for the `space` binary (whose commands are all phase-less → one ungrouped
+    # listing); the `architect` binary sets it so its namespaces list under a
+    # "Groups" header. Keeps phase vocabulary out of this generic renderer.
+    def self.trailing_group_label = @trailing_group_label
 
-      lines = rows.map do |label, description|
-        painted = pastel.cyan(label.ljust(width))
-        description ? "  #{painted}   #{pastel.dim("# #{description}")}" : "  #{painted}"
+    def self.trailing_group_label=(label)
+      @trailing_group_label = label
+    end
+
+    def call(result, pastel: CLI.help_pastel)
+      groups = grouped_listing(result)
+      width  = groups.flat_map { |_h, rows| rows.map { |label, _| label.length } }.max || 0
+
+      body = groups.flat_map do |group_header, rows|
+        lines = rows.map do |label, description|
+          painted = pastel.cyan(label.ljust(width))
+          description ? "  #{painted}   #{pastel.dim("# #{description}")}" : "  #{painted}"
+        end
+        group_header ? ["", pastel.bold(group_header), *lines] : lines
       end
 
-      [header(result, pastel), pastel.bold("Commands:"), *lines, footer(result, pastel)]
-        .compact.join("\n")
+      [header(result, pastel), pastel.bold("Commands:"), *body,
+       footer(result, pastel), loop_status_block(result, pastel)].compact.join("\n")
     end
 
     # The richer header only makes sense at the true root (`space` / `architect`),
@@ -69,13 +83,66 @@ module Space::Core::CLI
       [prog, *names].join(" ")
     end
 
-    # [[label_with_banner, description_or_nil], ...] sorted by command name.
-    def listing(result)
-      result.children.sort_by { |name, _| name }.filter_map do |name, node|
-        next if node.hidden
-
-        [label(result, name, node), description(node)]
+    # Group non-hidden children into an ordered list of [header_or_nil, rows].
+    # When no child declares a phase (e.g. the `space` binary), returns a single
+    # unlabelled group sorted by name — byte-identical to the pre-phase listing.
+    # Otherwise groups declared commands under their phase label (groups, and
+    # members within a group, ordered by the declared order), with undeclared
+    # children (namespaces) trailing in the default group.
+    def grouped_listing(result)
+      decorated = result.children.filter_map do |name, node|
+        [name, node, phase_of(node)] unless node.hidden
       end
+
+      if decorated.all? { |_name, _node, phase| phase.nil? }
+        rows = decorated.sort_by { |name, _node, _phase| name }
+                        .map { |name, node, _phase| row(result, name, node) }
+        return [[nil, rows]]
+      end
+
+      phased, unphased = decorated.partition { |_name, _node, phase| phase }
+      groups = phased.group_by { |_name, _node, phase| phase.last }
+      listing = groups.sort_by { |_label, members| members.map { |_n, _node, phase| phase.first }.min }
+                      .map do |label, members|
+        rows = members.sort_by { |_n, _node, phase| phase.first }
+                      .map { |name, node, _phase| row(result, name, node) }
+        [label, rows]
+      end
+      listing << [trailing_group_label, unphased.map { |name, node, _phase| row(result, name, node) }] \
+        unless unphased.empty?
+      listing
+    end
+
+    def row(result, name, node)
+      [label(result, name, node), description(node)]
+    end
+
+    def phase_of(node)
+      node.command.respond_to?(:phase) ? node.command.phase : nil
+    end
+
+    # Opportunistic, TOTAL loop-status embed: only the architect binary's ROOT
+    # listing gets it. Resolves the current space best-effort and renders the
+    # shared block from that space's own space.yaml `project` data (no
+    # space_architect dependency). ANY failure — no space, store failure,
+    # malformed yaml, no `project` block — omits the block; help always renders.
+    def loop_status_block(result, pastel)
+      return unless result.names.empty? && File.basename($PROGRAM_NAME) == "architect"
+
+      project = current_space_project
+      lines = project && LoopStatus.lines(project)
+      return if lines.nil? || lines.empty?
+
+      ["", pastel.bold("Loop:"), *lines.map { |l| "  #{pastel.dim(l)}" }].join("\n")
+    rescue StandardError
+      nil
+    end
+
+    def current_space_project
+      store = Space::Core::SpaceStore.new(config: Space::Core::Config.load, state: Space::Core::State.load)
+      store.current.value_or(nil)&.data&.[]("project")
+    rescue StandardError
+      nil
     end
 
     def label(result, name, node)
