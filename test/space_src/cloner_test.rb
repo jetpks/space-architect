@@ -4,6 +4,7 @@ require "space_src/test_helper"
 require "space_src/cloner"
 
 class ClonerTest < Minitest::Test
+  cover Space::Src::Cloner
   include TestHelpers
 
   # ---- GB1: happy path COW copy ----
