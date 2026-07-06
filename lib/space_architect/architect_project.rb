@@ -709,19 +709,6 @@ module Space::Architect
       end
     end
 
-    # Record an ISO 8601 launch timestamp onto a dispatched lane's entry (matching the
-    # research subsystem's dispatched_at.iso8601 precedent). Re-dispatch overwrites it.
-    def record_dispatched_at(iteration, lane)
-      stamp = Time.now.iso8601
-      update_architect_block do |b|
-        (b["iterations"] || []).each do |s|
-          next unless s["name"] == iteration
-          (s["lanes"] || []).each { |l| l["dispatched_at"] = stamp if l["name"] == lane }
-        end
-        b
-      end
-    end
-
     def worktree_list
       wt_base = space.path.join("build")
       return [] unless wt_base.exist?
@@ -768,7 +755,7 @@ module Space::Architect
     def dispatch(iteration, lane, model: nil, max_turns: 200,
                  claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, detach: false,
                  push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
-                 push_client: nil, timeout: nil)
+                 push_client: nil, timeout: nil, now: Time.now)
       raise Space::Core::Error, "Specify --push-host or --push-url, not both" if push_host && push_url
       raise Space::Core::Error, "--push-host requires --push-token"           if push_host && !push_token
       raise Space::Core::Error, "--detach cannot be combined with --push-url or --push-host" \
@@ -805,9 +792,18 @@ module Space::Architect
                                                   bin: bin, config_dir: build_dir, effort: resolved_effort)
 
       # Stamp launch time onto the lane entry: after every preflight validation has passed
-      # (a dispatch that raises above records nothing) and before the blocking foreground run
-      # or a detached dispatch returns. A re-dispatch overwrites the prior value.
-      record_dispatched_at(iteration, lane)
+      # (a dispatch that raises above records nothing) and before the blocking run or a
+      # detached dispatch returns. A re-dispatch overwrites the prior value.
+      update_architect_block do |b|
+        (b["iterations"] || []).each do |s|
+          next unless s["name"] == iteration
+          (s["lanes"] || []).each do |l|
+            next unless l["name"] == lane
+            l["dispatched_at"] = now.iso8601
+          end
+        end
+        b
+      end
 
       if detach
         pid = harness_obj.run_detached(
