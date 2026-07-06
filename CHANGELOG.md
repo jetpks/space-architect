@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [5.0.0] - 2026-07-06
 
 ### Added
 
@@ -40,6 +40,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--from`/`--prompt`; PR bodies land at
   `build/land/<repo>-pr-body-<yyyymmdd-hhmm>.md`; committing commands should
   carry detailed `--message-from` bodies.
+
+## [4.0.0] - 2026-07-05
+
+Backfilled — the bump shipped without an entry. Five iterations run through the
+Architect Loop against `space-architect`'s own live-loop papercuts (#46), plus
+the `dispatched_at` producer (#45) and a test-suite hygiene pass (#32).
+
+### Added
+
+- **`architect provision <iteration> [--base <ref>] [--lane <name>]`** — materializes
+  every declared lane's worktree + `lane/<id>-<lane>` branch in one shot from the
+  frozen lane plan (idempotent; base resolves `--base`, else `project/<slug>` HEAD,
+  else the repo's default branch). `dispatch`/`integrate`/`gate`/`verify`
+  auto-materialize a missing worktree from the frozen declaration, so the flow
+  can't dead-end (#26).
+- **Fenced ` ```lanes ` block in the Specification** — `name`, `repo`, `touch`
+  globs, parsed at **freeze** into `space.yaml` lane entries, making the lane plan
+  (including the out-of-bounds touch-set contract) part of the frozen spec (#26).
+- **`space.yaml` schema v2** — the never-bumped `version` key now means something:
+  canonicalize on save, read + self-heal the two known v1 variants (v1a
+  `architect:`, v1b `project:`+`version: 1`) on load; a both-keys conflict refuses
+  and names both blocks rather than silently picking one (#33).
+- **`dispatched_at` on lane entries** — every dispatch stamps an ISO 8601 launch
+  time after preflight, before the run, on both foreground and detached paths
+  (#18, producer landed via #45).
+- **Self-verifying dispatch liveness** — a transient fiber inside dispatch checks
+  the launched run matches intent (model, growth of `run.jsonl`), retiring the
+  manual "canary" ceremony (#43, #44).
+- **`architect help` grouped by loop phase** — Spec / Build / Judge / Land /
+  Project, commands in loop order, with an embedded loop-status block when run
+  inside a project space; `space status` reports on a bare call and still sets on
+  `space status <value>`.
+
+### Changed
+
+- **Lane declaration is single-source-of-truth** — lanes were declared twice
+  (Specification prose + `worktree add` flags) with the touch-set divorced from
+  the frozen spec; the ` ```lanes ` block at freeze is now the one declaration.
+  The single-lane "dispatch in the repo checkout" fast path is removed (it never
+  worked with `merge_lane!`); manual `worktree add` remains as the internal
+  primitive `provision` wraps (#26).
+- **Skill prose** (`SKILL.md` §4–§6, `dispatch.md`) rewritten to the
+  declare → freeze → provision → dispatch lane lifecycle.
+
+### Fixed
+
+- **`architect integrate <it> --teardown`** (no `--lanes`) backtraced; teardown-only
+  mode now deletes per-lane branches and worktrees, never `project/<slug>` or
+  `main` (#30).
+- **Test suite hygiene** — zero warnings, zero stray output, 58.8s → 49.1s (#32).
 
 ## [3.0.0] - 2026-07-01
 
