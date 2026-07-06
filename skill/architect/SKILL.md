@@ -46,7 +46,20 @@ message, and prints back what changed (SHA + diff stat; `freeze` prints the
 frozen AC; `evidence` echoes the builder's STATUS line) — so you don't hand-edit
 the file or run a separate `git add`/`commit`, and you don't run three follow-ups
 to see what happened. You still author the *content*; the CLI owns the
-*persistence*.
+*persistence*. Two disciplines fall out of that split:
+
+- **Author in fresh files; canonical paths are CLI-owned.** Write your content
+  to a fresh scratch file (timestamp it — `tmp/` in the space) and hand it to
+  the command via `--from`/`--prompt`/`--stdin`. Never `Write`/`Edit` a path you
+  haven't read this session — the pre-existing file trips your harness's
+  read-before-write guard and burns a failed-write → read → rewrite round trip.
+- **Write detailed commit messages.** Every committing command takes
+  `-m`/`--message` and `--message-from <file>`: your first line completes the
+  subject after a short canonical prefix (`I01 spec: <your subject>`), the rest
+  becomes the body. The space's git log is the loop's durable memory — record
+  the *why* (rejected alternatives, BRIEF §refs, judgment reasoning) there, not
+  just in your head. Prefer `--message-from <fresh file>` for multiline bodies
+  (shells mangle quotes).
 
 The builder **never** writes this file — the Acceptance Criteria must stay out
 of its editable blast radius. Each lane builder writes raw evidence to a scratch
@@ -62,7 +75,9 @@ of done) that span iterations. Every iteration's Grounds/Specification/Acceptanc
 Criteria/Verdict cites it as **BRIEF §N** (e.g. `(BRIEF §3.1)`), the way each gate
 addresses its intent back to one frozen reference: the Acceptance Criteria table
 carries a `Brief §` column, the Specification Objective cites it, the Verdict
-reads "diff vs BRIEF §1/§3.3 — CONTINUE". Scaffold it with `architect brief new`.
+reads "diff vs BRIEF §1/§3.3 — CONTINUE". Author it in a fresh scratch file and
+persist with `architect brief new --from <file>` (bare `architect brief new`
+drops a placeholder template for a human to fill).
 The brief is frozen at the project level — edits to a §section are logged
 decisions in `ARCHITECT.md`, never silent per-iteration drift. Discovery projects
 that are still finding their shape defer the brief, cite per-iteration Grounds,
@@ -325,10 +340,14 @@ dispatch-in-the-checkout path:
 
 Assemble each lane's lane-prompt (the template in `dispatch.md` + this lane's
 section of the Specification + the frozen Acceptance Criteria) and write it to
-`build/<id>-<lane>/prompt.md` (fed to the builder on stdin); record it in the
+a **fresh timestamped scratch file**, `tmp/prompts/<id>-<lane>-<hhmmss>.md` —
+never to `build/<id>-<lane>/prompt.md` directly (a pre-existing canonical file
+trips your harness's read-before-write guard). Record it in the
 iteration file's **Builder Prompt** section — the dispatched-prompt provenance —
 with `architect section <iteration> prompt --append --lane <lane> --from
-build/<id>-<lane>/prompt.md`. Then run `architect dispatch <iteration> <lane>` — it assembles the
+<that scratch file>`. Then run `architect dispatch <iteration> <lane> --prompt
+<that scratch file>` — it copies the prompt to the canonical
+`build/<id>-<lane>/prompt.md` (fed to the builder on stdin), assembles the
 canonical `claude -p` argv, pins the model, and streams stream-json to
 `build/<id>-<lane>/run.jsonl`. Launch one dispatch per worktree — each as its
 **own background Bash tool call** (your harness's `run_in_background`), **not**
@@ -399,7 +418,9 @@ PASS/FAIL/INVALID, the KILL/CONTINUE call.
 At project end, landing is yours, not the CLI's — the PR body is judgment
 output, the same class as a Verdict. Per touched repo: write the PR body
 yourself — from the iteration verdicts, the integrated diff, and the BRIEF —
-to `build/land/<repo>-pr-body.md`, then present the paste-and-run block to the
+to a fresh timestamped file `build/land/<repo>-pr-body-<yyyymmdd-hhmm>.md`
+(never rewrite a prior session's body in place — fresh file, fresh Write),
+then present the paste-and-run block to the
 human: `cd` to the repo checkout, `git push -u origin project/<slug>`, and
 `gh pr create --base main --head project/<slug> --title … --body-file …` —
 paths `~`-contracted, the multi-flag command broken with trailing ` \` at flag

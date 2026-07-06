@@ -15,6 +15,36 @@ module Space::Architect
 
         @phase = [order, label]
       end
+
+      # Declares -m/--message and --message-from on a committing command. Every
+      # loop command that commits takes both: the space's git log is the loop's
+      # durable memory, so detailed messages are encouraged everywhere.
+      def self.commit_message_options
+        option :message, aliases: ["-m"], default: nil,
+          desc: "Commit message: first line completes the subject after the canonical prefix, the rest becomes the body"
+        option :message_from, default: nil,
+          desc: "Read the commit message from this file (subject line + detailed body)"
+      end
+
+      private
+
+      # Authored-content intake shared by section/verdict/brief: a file, an
+      # inline flag, or stdin — canonical files are only ever written by the CLI.
+      def read_body(from: nil, body: nil, stdin: false, what: "section body")
+        return File.read(from) if from
+        return body if body
+        return $stdin.read if stdin
+
+        raise Space::Core::Error, "provide the #{what} via --from <file>, --body <text>, or --stdin"
+      end
+
+      # Commit-message intake for commit_message_options: --message-from wins
+      # over -m/--message; nil means the command's canonical default message.
+      def read_commit_message(message: nil, message_from: nil)
+        return File.read(message_from) if message_from
+
+        message
+      end
     end
 
     module Architect
@@ -22,13 +52,14 @@ module Space::Architect
         desc "Scaffold (or top up) the architect project: ARCHITECT.md, space.yaml project block, SessionStart hook"
         phase 50, "Project"
         argument :space, required: false, desc: "Space identifier (default: $PWD)"
+        commit_message_options
 
-        def call(space: nil, **opts)
+        def call(space: nil, message: nil, message_from: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              path = project.init!
+              path = project.init!(message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Project ready: #{terminal.path(path)}"
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
@@ -74,13 +105,15 @@ module Space::Architect
         phase 10, "Spec"
         argument :iteration, required: true,  desc: "Iteration name (kebab-case)"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        commit_message_options
 
-        def call(iteration:, space: nil, **opts)
+        def call(iteration:, space: nil, message: nil, message_from: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              path = project.new_iteration!(iteration)
+              path = project.new_iteration!(iteration,
+                message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Iteration scaffolded: #{terminal.path(path)}"
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
@@ -146,14 +179,16 @@ module Space::Architect
         phase 12, "Spec"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        commit_message_options
 
-        def call(iteration:, space: nil, **opts)
+        def call(iteration:, space: nil, message: nil, message_from: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
               warnings = []
-              sha = project.freeze!(iteration, warnings: warnings)
+              sha = project.freeze!(iteration, warnings: warnings,
+                message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Frozen #{iteration} at #{sha}"
               warnings.each { |w| terminal.say "Warning: #{w}" }
               ac = project.acceptance_criteria(iteration)
@@ -222,6 +257,7 @@ module Space::Architect
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option   :prompt,    default: nil,    desc: "Read the lane prompt from this file (copied byte-for-byte to build/<id>-<lane>/prompt.md)"
         option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's model, else the reference default claude-sonnet-4-6). Any provider/tier; pin a full id, not a floating alias"
         option   :max_turns, default: "200",  desc: "Max turns for the builder"
         option   :harness,   default: nil,    desc: "Harness override (claude-code, opencode)"
@@ -232,7 +268,7 @@ module Space::Architect
         option   :push_token, default: nil,   desc: "Bearer token for push endpoint authorization"
         option   :push_host,  default: nil,   desc: "Base URL of the ingest server; the CLI creates a run via POST <host>/runs and streams to /runs/<id>/ingest (requires --push-token)"
 
-        def call(iteration:, lane:, space: nil, model: nil,
+        def call(iteration:, lane:, space: nil, prompt: nil, model: nil,
                  max_turns: "200", harness: nil, effort: nil, detach: false,
                  timeout: "14400", push_url: nil, push_token: nil, push_host: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
@@ -240,6 +276,7 @@ module Space::Architect
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
               kwargs = { max_turns: max_turns.to_i, detach: detach }
+              kwargs[:prompt]     = prompt          if prompt
               kwargs[:model]      = model           if model
               kwargs[:harness]    = harness         if harness
               kwargs[:effort]     = effort          if effort
@@ -248,6 +285,7 @@ module Space::Architect
               kwargs[:push_token] = push_token      if push_token
               kwargs[:push_host]  = push_host       if push_host
               res = project.dispatch(iteration, lane, **kwargs)
+              terminal.say "Prompt:  #{prompt} → #{terminal.path(res[:prompt_copied])}" if res[:prompt_copied]
               if detach
                 terminal.say "PID:     #{res[:pid]}"
                 terminal.say "Run log: #{terminal.path(res[:run_log])}"
@@ -310,14 +348,17 @@ module Space::Architect
         option   :stdin,  type: :boolean, default: false, desc: "Read the section body from stdin"
         option   :append, type: :boolean, default: false, desc: "Append a ### <lane> subsection instead of replacing"
         option   :lane,   default: nil, desc: "Lane name for an appended ### subsection"
+        commit_message_options
 
-        def call(iteration:, section:, space: nil, from: nil, body: nil, stdin: false, append: false, lane: nil, **opts)
+        def call(iteration:, section:, space: nil, from: nil, body: nil, stdin: false, append: false, lane: nil,
+                 message: nil, message_from: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
-            content = read_section_body(from: from, body: body, stdin: stdin)
+            content = read_body(from: from, body: body, stdin: stdin, what: "section body")
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              res = project.write_section!(iteration, section, body: content, append: append, lane: lane)
+              res = project.write_section!(iteration, section, body: content, append: append, lane: lane,
+                message: read_commit_message(message: message, message_from: message_from))
               if res[:committed]
                 terminal.say "Committed #{res[:heading]} → #{res[:sha][0, 8]}"
                 terminal.say res[:diffstat] unless res[:diffstat].empty?
@@ -327,15 +368,6 @@ module Space::Architect
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
           end
-        end
-
-        private
-
-        def read_section_body(from:, body:, stdin:)
-          return File.read(from) if from
-          return body if body
-          return $stdin.read if stdin
-          raise Space::Core::Error, "provide the section body via --from <file>, --body <text>, or --stdin"
         end
       end
 
@@ -348,27 +380,21 @@ module Space::Architect
         option   :from,  default: nil,   desc: "Read the verdict body from this file"
         option   :body,  default: nil,   desc: "Inline verdict body"
         option   :stdin, type: :boolean, default: false, desc: "Read the verdict body from stdin"
+        commit_message_options
 
-        def call(iteration:, decision:, space: nil, from: nil, body: nil, stdin: false, **opts)
+        def call(iteration:, decision:, space: nil, from: nil, body: nil, stdin: false,
+                 message: nil, message_from: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
-            content = read_section_body(from: from, body: body, stdin: stdin)
+            content = read_body(from: from, body: body, stdin: stdin, what: "verdict body")
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              res = project.record_verdict!(iteration, decision: decision, body: content)
+              res = project.record_verdict!(iteration, decision: decision, body: content,
+                message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Verdict '#{res[:decision]}' recorded → #{res[:sha][0, 8]}"
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
           end
-        end
-
-        private
-
-        def read_section_body(from:, body:, stdin:)
-          return File.read(from) if from
-          return body if body
-          return $stdin.read if stdin
-          raise Space::Core::Error, "provide the verdict body via --from <file>, --body <text>, or --stdin"
         end
       end
 
@@ -378,13 +404,15 @@ module Space::Architect
         argument :iteration, required: true,  desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :lane,      default: nil,    desc: "Lane name (per-lane subsection; omit for a single-lane iteration)"
+        commit_message_options
 
-        def call(iteration:, space: nil, lane: nil, **opts)
+        def call(iteration:, space: nil, lane: nil, message: nil, message_from: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              res = project.transcribe_evidence!(iteration, lane: lane)
+              res = project.transcribe_evidence!(iteration, lane: lane,
+                message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Transcribed #{res[:lines]} lines → #{res[:sha][0, 8]}"
               terminal.say "Builder STATUS: #{res[:status_line]}" if res[:status_line]
               terminal.say "Now rule on the builder's PHASE 0 disagreements in the Verdict (a later session)."
@@ -400,14 +428,15 @@ module Space::Architect
         argument :iteration, required: true,  desc: "Iteration name"
         argument :lane,      required: true,  desc: "Lane name (architect-judged passing)"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-        option   :message,   default: nil,    desc: "Commit message for the lane's working-tree changes"
+        commit_message_options
 
-        def call(iteration:, lane:, space: nil, message: nil, **opts)
+        def call(iteration:, lane:, space: nil, message: nil, message_from: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              r = project.merge_lane!(iteration, lane, message: message)
+              r = project.merge_lane!(iteration, lane,
+                message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Merged #{lane} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
               terminal.say r[:diffstat] unless r[:diffstat].empty?
               terminal.say "Gates NOT run — run `architect gate #{iteration}` against the integration branch."
@@ -424,8 +453,9 @@ module Space::Architect
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :lanes,     required: false, desc: "Comma-separated passing lane names (you decide the set)"
         option   :teardown,  type: :boolean, default: false, desc: "Remove worktrees + delete lane branches after merge"
+        commit_message_options
 
-        def call(iteration:, space: nil, lanes: nil, teardown: false, **opts)
+        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
@@ -434,7 +464,8 @@ module Space::Architect
 
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              results = project.integrate!(iteration, lanes: lane_names, teardown: teardown)
+              results = project.integrate!(iteration, lanes: lane_names, teardown: teardown,
+                message: read_commit_message(message: message, message_from: message_from))
               if lane_names.empty?
                 if results.empty?
                   terminal.say "Nothing to tear down for #{iteration}"
@@ -690,17 +721,23 @@ module Space::Architect
 
       module Brief
         class New < BaseCommand
-          desc "Scaffold the durable project brief (architecture/BRIEF.md)"
+          desc "Write the durable project brief (architecture/BRIEF.md) — authored via --from/--stdin, or a placeholder template"
           argument :space, required: false, desc: "Space identifier (default: $PWD)"
           option   :force, type: :boolean, default: false, desc: "Overwrite an existing BRIEF.md"
+          option   :from,  default: nil,   desc: "Read the authored brief body from this file"
+          option   :stdin, type: :boolean, default: false, desc: "Read the authored brief body from stdin"
+          commit_message_options
 
-          def call(space: nil, force: false, **opts)
+          def call(space: nil, force: false, from: nil, stdin: false, message: nil, message_from: nil, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
+              content = (from || stdin) ? read_body(from: from, stdin: stdin, what: "brief body") : nil
               render(store.find(space)) do |sp|
                 project = ArchitectProject.new(space: sp)
-                path = project.brief_new!(force: force)
-                terminal.say "Brief ready: #{terminal.path(path)}"
+                path = project.brief_new!(force: force, content: content,
+                  message: read_commit_message(message: message, message_from: message_from))
+                note = content ? "" : " (template — Read it before editing)"
+                terminal.say "Brief ready: #{terminal.path(path)}#{note}"
                 CLI.record_outcome(Outcome.new(exit_code: 0))
               end
             end

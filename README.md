@@ -271,8 +271,12 @@ build/
 ```
 
 **Iteration file anatomy** — one file, grown section by section. You author the
-*content*; the CLI owns the *persistence* (each command writes the section,
-commits it with the canonical message, and prints back what changed):
+*content* in fresh scratch files; the CLI owns the *persistence* (each command
+writes the section, commits it, and prints back what changed). Every committing
+command takes `-m`/`--message` and `--message-from <file>` — your first line
+completes the subject after a short canonical prefix (`I01 spec: <subject>`),
+the rest becomes the body. The space's git log is the loop's durable memory:
+write detailed messages.
 
 | Section | Holds | How you persist it |
 |---------|-------|--------------------|
@@ -299,12 +303,12 @@ inside a lane worktree are never grounded.
 
 ```sh
 architect init                              # scaffold ARCHITECT.md + the space.yaml project: block + SessionStart hook
-architect brief new                         # scaffold the durable project BRIEF.md
+architect brief new --from <f>              # write the durable project BRIEF.md (authored in a scratch file)
 architect new <iteration>                   # scaffold architecture/I<NN>-<iteration>.md
-architect section <it> <section> --from <f> # write + commit a section
+architect section <it> <section> --from <f> # write + commit a section (add -m/--message-from for a detailed commit)
 architect freeze <iteration>                # freeze the Acceptance Criteria ❄️
 architect worktree add <repo> <it> <lane>   # isolated worktree per lane (2–4 lanes)
-architect dispatch <it> <lane>              # dispatch a builder (add --detach to survive long runs)
+architect dispatch <it> <lane> --prompt <f> # copy the lane prompt in + dispatch a builder (--detach to survive long runs)
 architect verify <iteration>                # post-flight mechanical checks (reports only)
 architect evidence <it> --lane <lane>       # transcribe the builder's report verbatim
 architect gate <iteration>                  # run the frozen gate commands, stream raw output
@@ -326,9 +330,9 @@ A typical session:
 ```sh
 architect init                                   # first time
 architect new my-feature                         # scaffold I01-my-feature.md
-architect section my-feature specification --from spec.md
+architect section my-feature specification --from spec.md -m "pull-based dispatcher seam"
 architect freeze my-feature                      # lock it ❄️
-architect dispatch my-feature lane-a --detach    # send a builder; poll the report
+architect dispatch my-feature lane-a --prompt tmp/prompts/I01-lane-a.md --detach   # send a builder; poll the report
 architect verify my-feature                      # mechanical post-flight checks
 architect evidence my-feature --lane lane-a      # transcribe raw evidence
 architect gate my-feature                        # run the frozen gates yourself

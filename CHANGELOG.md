@@ -5,6 +5,42 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`architect dispatch --prompt <file>`** — the lane prompt is authored anywhere
+  (a fresh scratch file) and dispatch copies it byte-for-byte to the canonical
+  `build/<id>-<lane>/prompt.md` before launch, announcing the copy. The CLI owns
+  the canonical path; the architect never blind-writes it (#48, #42).
+- **`architect brief new --from <file>` / `--stdin`** — write the authored brief
+  in one step instead of filling a pre-seeded template. Bare `brief new` still
+  scaffolds the placeholder, and now says so
+  (`Brief ready: … (template — Read it before editing)`).
+- **Flexible commit messages on every committing loop command** — `init`, `new`,
+  `freeze`, `brief new`, `section`, `verdict`, `evidence`, `merge`, and
+  `integrate` all take `-m`/`--message` and `--message-from <file>`. The first
+  line completes the subject after a short canonical prefix (`I01 spec: <your
+  subject>`, `lane <lane>: <your subject>`); remaining lines become the commit
+  body. Without the flags, the canonical messages are unchanged. The space's git
+  log is the loop's durable memory — detailed bodies are the point.
+
+### Changed
+
+- **`worktree add`/`provision` no longer pre-seed `prompt.md` with a placeholder
+  stub.** The unannounced stub made the architect's first `Write` trip the
+  harness read-before-write guard on every single lane (a failed-write → read →
+  rewrite round trip; 40 occurrences mined from real transcripts). Dispatch
+  still refuses a missing, empty, or legacy-stub prompt (#48, #42).
+- **`architect merge --message` semantics** — the message now composes with the
+  canonical `lane <lane>:` prefix (subject + body) instead of replacing the
+  whole message, matching every other committing command.
+- **Skill prose** — the architect authors all content (lane prompts, brief, PR
+  bodies) in fresh timestamped scratch files and hands them to the CLI via
+  `--from`/`--prompt`; PR bodies land at
+  `build/land/<repo>-pr-body-<yyyymmdd-hhmm>.md`; committing commands should
+  carry detailed `--message-from` bodies.
+
 ## [3.0.0] - 2026-07-01
 
 ### Added

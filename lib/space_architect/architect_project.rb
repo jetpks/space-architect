@@ -25,10 +25,10 @@ module Space::Architect
     # command (`architect evidence`) because it is transcribed verbatim from scratch.
     # `frozen: true` sections live above the freeze boundary and are refused once frozen.
     SECTIONS = {
-      "grounds" => { heading: "## Grounds", message: "grounds", frozen: true },
-      "specification" => { heading: "## Specification", message: "specification", frozen: true },
-      "prompt" => { heading: "## Builder Prompt", message: "dispatched", frozen: false },
-      "verdict" => { heading: "## Verdict", message: "verdict", frozen: false }
+      "grounds" => { heading: "## Grounds", message: "grounds", prefix: "grounds", frozen: true },
+      "specification" => { heading: "## Specification", message: "specification", prefix: "spec", frozen: true },
+      "prompt" => { heading: "## Builder Prompt", message: "dispatched", prefix: "prompt", frozen: false },
+      "verdict" => { heading: "## Verdict", message: "verdict", prefix: "verdict", frozen: false }
     }.freeze
 
     # The fixed top-level section headings. Section boundaries are detected against
@@ -42,7 +42,10 @@ module Space::Architect
     # Hard per-gate timeout. Generous relative to the full suite (~55s).
     DEFAULT_GATE_TIMEOUT = 900
 
-    # Sentinel written to prompt.md by worktree_add. dispatch refuses to launch on this content.
+    # Legacy sentinel: worktree_add used to seed prompt.md with this placeholder
+    # (dropped — the blind-overwrite tripped harness read-before-write guards, #48).
+    # dispatch still refuses to launch on this content, so stubs in old spaces
+    # can't reach a builder.
     PROMPT_STUB = "<!-- ARCHITECT: write this lane's builder prompt here, then dispatch. -->"
 
     # Inlined settings.json template for `architect init`. Registers a SessionStart
@@ -74,7 +77,7 @@ module Space::Architect
       @space = space
     end
 
-    def init!
+    def init!(message: nil)
       handoff_path = space.path.join("architecture", "ARCHITECT.md")
       settings_path = space.path.join(".claude", "settings.json")
       to_add = []
@@ -97,15 +100,15 @@ module Space::Architect
 
       if to_add.any?
         git_run("-C", space.path.to_s, "add", *to_add)
-        msg = to_add.include?("architecture/ARCHITECT.md") ? "Initialize architect project" : "Add architect settings"
-        git_run("-C", space.path.to_s, "commit", "-m", msg)
+        default = to_add.include?("architecture/ARCHITECT.md") ? "Initialize architect project" : "Add architect settings"
+        git_run("-C", space.path.to_s, "commit", "-m", compose_message("init:", default, message))
       end
 
       handoff_path
     end
 
     # Allocate the next ordinal and scaffold architecture/I<NN>-<iteration>.md.
-    def new_iteration!(name)
+    def new_iteration!(name, message: nil)
       block = space.data["project"] || {}
       iterations = block["iterations"] || []
       if iterations.any? { |s| s["name"] == name }
@@ -133,7 +136,8 @@ module Space::Architect
       end
 
       git_run("-C", space.path.to_s, "add", rel, Space::Core::Space::METADATA_FILE)
-      git_run("-C", space.path.to_s, "commit", "-m", "I#{nn}: scaffold #{name}")
+      git_run("-C", space.path.to_s, "commit", "-m",
+        compose_message("I#{nn} scaffold:", "I#{nn}: scaffold #{name}", message))
 
       path
     end
@@ -154,7 +158,7 @@ module Space::Architect
     # Freeze the iteration: the iteration file must carry a "## Acceptance Criteria" section. Commits
     # any pending changes to the iteration file and records HEAD as freeze_sha. If
     # already frozen, refuses when the frozen region has changed since.
-    def freeze!(iteration, warnings: nil)
+    def freeze!(iteration, warnings: nil, message: nil)
       entry = slice_entry(iteration)
       rel = entry["file"]
       path = space.path.join(rel)
@@ -180,7 +184,8 @@ module Space::Architect
       files = [rel]
       files << "architecture/ARCHITECT.md" if space.path.join("architecture", "ARCHITECT.md").exist?
       nn = format("%02d", entry["ordinal"] || 0)
-      git_capture("-C", space.path.to_s, "commit", "-m", "I#{nn}: acceptance criteria (freeze)", "--", *files)
+      git_capture("-C", space.path.to_s, "commit", "-m",
+        compose_message("I#{nn} freeze:", "I#{nn}: acceptance criteria (freeze)", message), "--", *files)
 
       sha, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
       sha = sha.strip
@@ -208,17 +213,20 @@ module Space::Architect
 
     # Scaffold the durable, section-numbered project brief at architecture/BRIEF.md
     # and commit it. The brief is the stable cross-iteration address space iterations
-    # cite as "BRIEF §N"; it lives outside the per-iteration freeze region.
-    def brief_new!(force: false)
+    # cite as "BRIEF §N"; it lives outside the per-iteration freeze region. With
+    # content, writes the authored brief instead of the placeholder template.
+    def brief_new!(force: false, content: nil, message: nil)
       brief_path = space.path.join("architecture", "BRIEF.md")
       if brief_path.exist? && !force
         raise Space::Core::Error, "architecture/BRIEF.md already exists — edit it directly (idempotent guard), or pass --force to overwrite"
       end
 
       FileUtils.mkdir_p(brief_path.dirname)
-      brief_path.write(render_brief)
+      brief_path.write(content || render_brief)
       git_run("-C", space.path.to_s, "add", "architecture/BRIEF.md")
-      git_run("-C", space.path.to_s, "commit", "-m", "Add project brief") if staged_changes?
+      if staged_changes?
+        git_run("-C", space.path.to_s, "commit", "-m", compose_message("brief:", "Add project brief", message))
+      end
       brief_path
     end
 
@@ -226,7 +234,7 @@ module Space::Architect
     # per-section message, in one call. Refuses to write a frozen section
     # (Grounds/Specification) once the iteration is frozen. Acceptance Criteria is
     # NOT writable here (use freeze); Builder Report is not here (use evidence).
-    def write_section!(iteration, section, body:, append: false, lane: nil)
+    def write_section!(iteration, section, body:, append: false, lane: nil, message: nil)
       spec = SECTIONS[section]
       unless spec
         raise Space::Core::Error,
@@ -249,7 +257,8 @@ module Space::Architect
       path.write(replace_section_body(path.read, spec[:heading], block, append: append))
 
       nn = format("%02d", entry["ordinal"] || 0)
-      _o, _e, cst = git_capture("-C", space.path.to_s, "commit", "-m", "I#{nn}: #{spec[:message]}", "--", rel)
+      _o, _e, cst = git_capture("-C", space.path.to_s, "commit", "-m",
+        compose_message("I#{nn} #{spec[:prefix]}:", "I#{nn}: #{spec[:message]}", message), "--", rel)
       committed = cst.success?
       show_out, = git_capture("-C", space.path.to_s, "show", "--stat", "--format=%H", "HEAD")
       show_lines = show_out.to_s.lines
@@ -260,7 +269,7 @@ module Space::Architect
 
     # Write the ## Verdict prose AND record the decision to space.yaml in one commit.
     # decision must be "continue" or "kill".
-    def record_verdict!(iteration, decision:, body:)
+    def record_verdict!(iteration, decision:, body:, message: nil)
       unless %w[continue kill].include?(decision)
         raise Space::Core::Error,
           "Invalid verdict decision '#{decision}' — must be one of: continue, kill"
@@ -279,7 +288,8 @@ module Space::Architect
       end
 
       nn = format("%02d", entry["ordinal"] || 0)
-      git_run("-C", space.path.to_s, "commit", "-m", "I#{nn}: verdict", "--", rel, Space::Core::Space::METADATA_FILE)
+      git_run("-C", space.path.to_s, "commit", "-m",
+        compose_message("I#{nn} verdict:", "I#{nn}: verdict", message), "--", rel, Space::Core::Space::METADATA_FILE)
 
       head, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
       { decision: decision, sha: head.strip }
@@ -287,7 +297,7 @@ module Space::Architect
 
     # Transcribe a lane's scratch report (build/<id>[-<lane>]/report.md) VERBATIM into
     # the Builder Report section and commit. Byte-for-byte: no summarization, no judgment.
-    def transcribe_evidence!(iteration, lane: nil)
+    def transcribe_evidence!(iteration, lane: nil, message: nil)
       entry = slice_entry(iteration)
       rel = entry["file"]
       path = space.path.join(rel)
@@ -303,7 +313,8 @@ module Space::Architect
       path.write(replace_section_body(path.read, "## Builder Report", block, append: !lane.nil?))
 
       nn = format("%02d", entry["ordinal"] || 0)
-      git_capture("-C", space.path.to_s, "commit", "-m", "I#{nn}: evidence", "--", rel)
+      git_capture("-C", space.path.to_s, "commit", "-m",
+        compose_message("I#{nn} evidence:", "I#{nn}: evidence", message), "--", rel)
       head, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
 
       status_line = raw.lines.reverse_each.find { |l| l.strip.start_with?("STATUS:") }&.strip
@@ -358,7 +369,8 @@ module Space::Architect
       raise Space::Core::Error, "Lane '#{lane}' worktree has no changes to integrate." if status_out.strip.empty?
 
       git_run("-C", wt_path.to_s, "add", "-A")
-      git_run("-C", wt_path.to_s, "commit", "-m", message || "lane #{lane}: integrate")
+      git_run("-C", wt_path.to_s, "commit", "-m",
+        compose_message("lane #{lane}:", "lane #{lane}: integrate", message))
       integrate_sha_raw, = git_capture("-C", wt_path.to_s, "rev-parse", "HEAD")
       integrate_sha = integrate_sha_raw.strip
 
@@ -402,14 +414,14 @@ module Space::Architect
     # first conflict (a disjointness defect). Never decides which lanes pass. With no
     # lanes and teardown: true, tears down every lane recorded for the iteration instead
     # (the second, teardown-only call in the loop's integrate-then-teardown rhythm).
-    def integrate!(iteration, lanes: nil, teardown: false)
+    def integrate!(iteration, lanes: nil, teardown: false, message: nil)
       lanes = Array(lanes)
       return teardown_lanes!(iteration, slice_entry(iteration)["lanes"] || []) if lanes.empty? && teardown
       raise Space::Core::Error, "No lanes given to integrate" if lanes.empty?
 
       merged = []
       lanes.each do |lane|
-        merged << merge_lane!(iteration, lane)
+        merged << merge_lane!(iteration, lane, message: message)
       rescue Space::Core::Error => e
         done = merged.map { |m| m[:lane] }.join(", ")
         raise Space::Core::Error, "Integrated #{done.empty? ? "(none)" : done} then stopped at '#{lane}': #{e.message}"
@@ -571,11 +583,6 @@ module Space::Architect
           git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
         end
       end
-
-      # Seed prompt.md with a placeholder stub so the architect has a place to write the prompt.
-      # Never overwrite an existing file (real prompt or stub from a prior run).
-      prompt_path = build_dir.join("prompt.md")
-      prompt_path.write("#{PROMPT_STUB}\n") unless prompt_path.exist?
 
       new_fields = {
         "name" => lane,
@@ -755,7 +762,7 @@ module Space::Architect
     def dispatch(iteration, lane, model: nil, max_turns: 200,
                  claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, detach: false,
                  push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
-                 push_client: nil, timeout: nil, now: Time.now)
+                 push_client: nil, timeout: nil, prompt: nil, now: Time.now)
       raise Space::Core::Error, "Specify --push-host or --push-url, not both" if push_host && push_url
       raise Space::Core::Error, "--push-host requires --push-token"           if push_host && !push_token
       raise Space::Core::Error, "--detach cannot be combined with --push-url or --push-host" \
@@ -781,6 +788,15 @@ module Space::Architect
       prompt_path  = build_dir.join("prompt.md")
       run_log_path = build_dir.join("run.jsonl")
       report_path  = build_dir.join("report.md")
+
+      # --prompt: the caller authors the lane prompt anywhere (a fresh scratch file)
+      # and the CLI owns the canonical copy — byte-for-byte, like variant_add.
+      if prompt
+        src = Pathname.new(prompt)
+        raise Space::Core::Error, "prompt file not found: #{src}" unless src.exist?
+        File.open(prompt_path, "wb") { |f| f.write(File.binread(src)) }
+      end
+
       raise Space::Core::Error, "prompt.md not found: #{prompt_path}" unless prompt_path.exist?
 
       prompt_content = prompt_path.read.strip
@@ -811,7 +827,9 @@ module Space::Architect
           run_log_path: run_log_path,
           chdir:        wt_path
         )
-        { pid: pid, run_log: run_log_path, report: report_path, worktree: wt_path }
+        result = { pid: pid, run_log: run_log_path, report: report_path, worktree: wt_path }
+        result[:prompt_copied] = prompt_path if prompt
+        result
       else
         created_run_id = nil
         if push_host
@@ -830,6 +848,7 @@ module Space::Architect
         exit_code = harness_obj.run(**run_kwargs)
 
         result = { exit_code: exit_code, run_log: run_log_path, report: report_path, worktree: wt_path }
+        result[:prompt_copied]  = prompt_path    if prompt
         result[:timed_out]      = true           if exit_code == Harness::ClaudeCodeHarness::TIMEOUT_EXIT_CODE
         result[:created_run_id] = created_run_id if created_run_id
         result[:push_url]       = push_url       if push_url
@@ -840,6 +859,20 @@ module Space::Architect
     private
 
     attr_reader :space
+
+    # Compose a commit message. Without a custom message, the canonical default
+    # (unchanged). With one, a short canonical prefix keeps the loop's commit
+    # taxonomy grep-able while the author's first line owns the subject; any
+    # remaining lines become the commit body — the space's git log is the loop's
+    # durable memory, so callers are encouraged to write detailed bodies.
+    def compose_message(prefix, default, message)
+      return default if message.nil? || message.strip.empty?
+
+      subject, _, body = message.strip.partition("\n")
+      composed = "#{prefix} #{subject.strip}"
+      body = body.strip
+      body.empty? ? composed : "#{composed}\n\n#{body}"
+    end
 
     # Remove each lane's worktree and safe-delete (`-d`) its lane branch. Accepts
     # either merge_lane! results (symbol keys) or recorded lane entries (string
