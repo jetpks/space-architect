@@ -1026,7 +1026,7 @@ module Space::Architect
         :no_touch_set
       else
         # -z: NUL-delimited; renames emit new_path NUL old_path — include both
-        status_out, = git_capture("-C", wt_path.to_s, "status", "--porcelain", "-z")
+        status_out, = git_capture("-C", wt_path.to_s, "status", "--porcelain", "-z", "-uall")
         changed = []
         entries = status_out.split("\0")
         i = 0

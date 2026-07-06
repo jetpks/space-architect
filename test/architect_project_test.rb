@@ -873,6 +873,31 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # git collapses an untracked file inside a brand-new directory to the directory
+  # path (`?? allowed/`) unless `git status` is asked for `-uall`; that collapsed
+  # path never matches a file glob, so a legitimate new file in a new directory
+  # must still report in_bounds == true.
+  def test_in_bounds_accepts_new_file_in_new_dir
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["allowed/*.rb"])
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(File.join(wt, "allowed"))
+    File.write(File.join(wt, "allowed", "foo.rb"), "x = 1\n")
+
+    checks = project.verify("my-slice").first[:checks]
+    assert_equal true, checks[:in_bounds], "a new file in a new dir matching the touch glob must be in-bounds"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # merge_lane! refuses a lane whose worktree carries builder commits (tamper).
   def test_merge_lane_refuses_builder_commits
     dir = Dir.mktmpdir("architect-project-test")
