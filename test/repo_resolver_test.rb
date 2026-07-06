@@ -3,6 +3,7 @@
 require_relative "test_helper"
 
 class RepoResolverTest < Space::ArchitectTest
+  cover Space::Core::RepoResolver
   def test_resolves_bare_repo_with_default_provider_and_organization
     resolver = build_resolver(default_organization: "example-org")
 
