@@ -5,6 +5,92 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] - 2026-07-06
+
+### Added
+
+- **`architect dispatch --prompt <file>`** — the lane prompt is authored anywhere
+  (a fresh scratch file) and dispatch copies it byte-for-byte to the canonical
+  `build/<id>-<lane>/prompt.md` before launch, announcing the copy. The CLI owns
+  the canonical path; the architect never blind-writes it (#48, #42).
+- **`architect brief new --from <file>` / `--stdin`** — write the authored brief
+  in one step instead of filling a pre-seeded template. Bare `brief new` still
+  scaffolds the placeholder, and now says so
+  (`Brief ready: … (template — Read it before editing)`).
+- **Flexible commit messages on every committing loop command** — `init`, `new`,
+  `freeze`, `brief new`, `section`, `verdict`, `evidence`, `merge`, and
+  `integrate` all take `-m`/`--message` and `--message-from <file>`. The first
+  line completes the subject after a short canonical prefix (`I01 spec: <your
+  subject>`, `lane <lane>: <your subject>`); remaining lines become the commit
+  body. Without the flags, the canonical messages are unchanged. The space's git
+  log is the loop's durable memory — detailed bodies are the point.
+
+### Changed
+
+- **`worktree add`/`provision` no longer pre-seed `prompt.md` with a placeholder
+  stub.** The unannounced stub made the architect's first `Write` trip the
+  harness read-before-write guard on every single lane (a failed-write → read →
+  rewrite round trip; 40 occurrences mined from real transcripts). Dispatch
+  still refuses a missing, empty, or legacy-stub prompt (#48, #42).
+- **`architect merge --message` semantics** — the message now composes with the
+  canonical `lane <lane>:` prefix (subject + body) instead of replacing the
+  whole message, matching every other committing command.
+- **Skill prose** — the architect authors all content (lane prompts, brief, PR
+  bodies) in fresh timestamped scratch files and hands them to the CLI via
+  `--from`/`--prompt`; PR bodies land at
+  `build/land/<repo>-pr-body-<yyyymmdd-hhmm>.md`; committing commands should
+  carry detailed `--message-from` bodies.
+
+## [4.0.0] - 2026-07-05
+
+Backfilled — the bump shipped without an entry. Five iterations run through the
+Architect Loop against `space-architect`'s own live-loop papercuts (#46), plus
+the `dispatched_at` producer (#45) and a test-suite hygiene pass (#32).
+
+### Added
+
+- **`architect provision <iteration> [--base <ref>] [--lane <name>]`** — materializes
+  every declared lane's worktree + `lane/<id>-<lane>` branch in one shot from the
+  frozen lane plan (idempotent; base resolves `--base`, else `project/<slug>` HEAD,
+  else the repo's default branch). `dispatch`/`integrate`/`gate`/`verify`
+  auto-materialize a missing worktree from the frozen declaration, so the flow
+  can't dead-end (#26).
+- **Fenced ` ```lanes ` block in the Specification** — `name`, `repo`, `touch`
+  globs, parsed at **freeze** into `space.yaml` lane entries, making the lane plan
+  (including the out-of-bounds touch-set contract) part of the frozen spec (#26).
+- **`space.yaml` schema v2** — the never-bumped `version` key now means something:
+  canonicalize on save, read + self-heal the two known v1 variants (v1a
+  `architect:`, v1b `project:`+`version: 1`) on load; a both-keys conflict refuses
+  and names both blocks rather than silently picking one (#33).
+- **`dispatched_at` on lane entries** — every dispatch stamps an ISO 8601 launch
+  time after preflight, before the run, on both foreground and detached paths
+  (#18, producer landed via #45).
+- **Self-verifying dispatch liveness** — a transient fiber inside dispatch checks
+  the launched run matches intent (model, growth of `run.jsonl`), retiring the
+  manual "canary" ceremony (#43, #44).
+- **`architect help` grouped by loop phase** — Spec / Build / Judge / Land /
+  Project, commands in loop order, with an embedded loop-status block when run
+  inside a project space; `space status` reports on a bare call and still sets on
+  `space status <value>`.
+
+### Changed
+
+- **Lane declaration is single-source-of-truth** — lanes were declared twice
+  (Specification prose + `worktree add` flags) with the touch-set divorced from
+  the frozen spec; the ` ```lanes ` block at freeze is now the one declaration.
+  The single-lane "dispatch in the repo checkout" fast path is removed (it never
+  worked with `merge_lane!`); manual `worktree add` remains as the internal
+  primitive `provision` wraps (#26).
+- **Skill prose** (`SKILL.md` §4–§6, `dispatch.md`) rewritten to the
+  declare → freeze → provision → dispatch lane lifecycle.
+
+### Fixed
+
+- **`architect integrate <it> --teardown`** (no `--lanes`) backtraced; teardown-only
+  mode now deletes per-lane branches and worktrees, never `project/<slug>` or
+  `main` (#30).
+- **Test suite hygiene** — zero warnings, zero stray output, 58.8s → 49.1s (#32).
+
 ## [3.0.0] - 2026-07-01
 
 ### Added

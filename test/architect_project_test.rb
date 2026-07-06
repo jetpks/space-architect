@@ -1537,8 +1537,10 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # AC4: worktree_add seeds prompt.md with the stub on first add.
-  def test_worktree_add_seeds_prompt_stub_on_first_add
+  # worktree_add never creates prompt.md — the pre-seeded stub tripped harness
+  # read-before-write guards on the caller's first Write (#48). The prompt is
+  # authored by the architect (or copied in by dispatch --prompt).
+  def test_worktree_add_does_not_seed_prompt
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
@@ -1549,10 +1551,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     prompt_path = File.join(dir, "build", "I01-my-slice-lane-a", "prompt.md")
-    assert File.exist?(prompt_path), "prompt.md must be seeded by worktree_add"
-    content = File.read(prompt_path).strip
-    assert_equal Space::Architect::ArchitectProject::PROMPT_STUB, content,
-      "seeded prompt.md must contain the stub sentinel"
+    refute File.exist?(prompt_path), "worktree_add must not seed prompt.md"
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -1589,7 +1588,6 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("demo")
     project.worktree_add("my-repo", "demo", "A")
-    File.delete(File.join(dir, "build", "I01-demo-A", "prompt.md"))
 
     err = assert_raises(Space::Core::Error) { project.dispatch("demo", "A") }
     assert_match(/prompt\.md not found/, err.message)
@@ -1616,7 +1614,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # AC4: dispatch refuses when prompt.md contains the unedited stub.
+  # AC4: dispatch refuses when prompt.md contains the unedited stub (legacy
+  # spaces provisioned before the seeding was dropped may still carry one).
   def test_dispatch_refuses_stub_prompt
     dir = Dir.mktmpdir("architect-dispatch-guard")
     space = create_real_space(dir)
@@ -1626,7 +1625,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("demo")
     project.worktree_add("my-repo", "demo", "A")
-    # prompt.md was seeded with the stub — do not overwrite it
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"),
+      "#{Space::Architect::ArchitectProject::PROMPT_STUB}\n")
 
     err = assert_raises(Space::Core::Error) { project.dispatch("demo", "A") }
     assert_match(/Write this lane's prompt/, err.message)
@@ -2269,6 +2269,200 @@ class ArchitectProjectTest < Space::ArchitectTest
     results = project.provision("my-slice")
     assert_equal ["lane-a"], results.map { |r| r[:lane] }
     refute results[0][:created], "provision reads the pre-existing worktree_add entry, already materialized"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── dispatch --prompt: the CLI owns the canonical prompt.md copy ───────────
+
+  def test_dispatch_prompt_copies_file_to_build_dir
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+
+    scratch = File.join(dir, "tmp-lane-prompt.md")
+    File.write(scratch, "## Lane prompt\n\nBuild the thing. — bytes: é✓\n")
+
+    res = project.dispatch("demo", "A", claude_bin: write_fake_claude(dir), prompt: scratch)
+
+    copied = File.join(dir, "build", "I01-demo-A", "prompt.md")
+    assert_equal File.binread(scratch), File.binread(copied), "prompt.md must be a byte-for-byte copy"
+    assert_equal copied, res[:prompt_copied].to_s
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_dispatch_prompt_missing_file_raises
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+
+    err = assert_raises(Space::Core::Error) do
+      project.dispatch("demo", "A", prompt: File.join(dir, "nope.md"))
+    end
+    assert_match(/prompt file not found/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── brief_new! with authored content ───────────────────────────────────────
+
+  def test_brief_new_with_content_writes_authored_brief
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    body = "# Brief\n\n## §1 Goal\n\nShip it.\n"
+    path = project.brief_new!(content: body)
+
+    assert_equal body, File.read(path)
+    msg, = Open3.capture3("git", "-C", dir, "log", "-1", "--format=%s")
+    assert_equal "Add project brief", msg.strip
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── commit message composition: canonical prefix + author subject/body ─────
+
+  def last_commit(dir, format)
+    out, = Open3.capture3("git", "-C", dir, "log", "-1", "--format=#{format}")
+    out.strip
+  end
+
+  def test_init_message_composes_prefixed_subject_and_body
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    project = Space::Architect::ArchitectProject.new(space: space)
+
+    project.init!(message: "stand up the argo loop\n\nWhy: migrate the homelab to gitops.")
+
+    assert_equal "init: stand up the argo loop", last_commit(dir, "%s")
+    assert_equal "Why: migrate the homelab to gitops.", last_commit(dir, "%b")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_new_iteration_message_composes_single_line
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    project.new_iteration!("my-slice", message: "first slice off the brief")
+
+    assert_equal "I01 scaffold: first slice off the brief", last_commit(dir, "%s")
+    assert_equal "", last_commit(dir, "%b")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_freeze_message_composes_subject_and_body
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    # Dirty the iteration file so the freeze produces a real commit (an
+    # untouched scaffold freezes onto the scaffold commit).
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    File.write(slice, File.read(slice) + "\nAC1 — the seam holds.\n")
+
+    project.freeze!("my-slice", message: "AC pinned to BRIEF §3\n\nGate g1 covers the seam;\ng2 covers idempotence.")
+
+    assert_equal "I01 freeze: AC pinned to BRIEF §3", last_commit(dir, "%s")
+    assert_match(/g2 covers idempotence\./, last_commit(dir, "%b"))
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_write_section_message_composes_spec_prefix
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    project.write_section!("my-slice", "specification", body: "- Objective — the seam",
+      message: "pull-based dispatcher seam\n\nRejected push: reactor starvation risk.")
+
+    assert_equal "I01 spec: pull-based dispatcher seam", last_commit(dir, "%s")
+    assert_equal "Rejected push: reactor starvation risk.", last_commit(dir, "%b")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_record_verdict_message_composes
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    project.record_verdict!("my-slice", decision: "continue", body: "AC1 PASS",
+      message: "all ACs pass on raw gate output")
+
+    assert_equal "I01 verdict: all ACs pass on raw gate output", last_commit(dir, "%s")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_transcribe_evidence_message_composes
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice"))
+    File.write(File.join(dir, "build", "I01-my-slice", "report.md"), "STATUS: green\n")
+
+    project.transcribe_evidence!("my-slice", message: "builder reports green, 12 new tests")
+
+    assert_equal "I01 evidence: builder reports green, 12 new tests", last_commit(dir, "%s")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_brief_new_message_composes
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    project.brief_new!(content: "# Brief\n", message: "founding contract for the migration")
+
+    assert_equal "brief: founding contract for the migration", last_commit(dir, "%s")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_merge_lane_message_composes_on_lane_branch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "feature.rb"), "def feature; end\n")
+
+    project.merge_lane!("my-slice", "lane-a",
+      message: "add the feature seam\n\nCovers AC1; touch set repos/my-repo/feature.rb only.")
+
+    repo = File.join(dir, "repos", "my-repo")
+    log, = Open3.capture3("git", "-C", repo, "log", "lane/I01-my-slice-lane-a", "-2", "--format=%s")
+    assert_includes log, "lane lane-a: add the feature seam"
   ensure
     FileUtils.rm_rf(dir)
   end

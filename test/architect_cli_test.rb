@@ -593,6 +593,42 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # ── dispatch --prompt: authored anywhere, copied to the canonical path ───────
+
+  def test_dispatch_cli_prompt_flag_copies_and_announces
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake = File.join(setup[:root], "fake_claude")
+    File.write(fake, "#!/usr/bin/env ruby\n$stdin.read\nexit 0\n")
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        scratch = File.join(space_path, "tmp-prompt.md")
+        File.write(scratch, "## Lane prompt\n\nBuild the seam.\n")
+
+        out, err = invoke("dispatch", "demo", "A", "--prompt", scratch)
+
+        assert_empty err
+        assert_match(/Prompt:/, out, "dispatch must announce the prompt copy")
+        assert_match(/Builder exited with status 0/, out)
+        assert_equal "## Lane prompt\n\nBuild the seam.\n",
+          File.read(File.join(space_path, "build", "I01-demo-A", "prompt.md"))
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   # ── dispatch --detach: exits 0 immediately, prints PID + paths ───────────────
 
   def test_dispatch_cli_detach_flag_returns_immediately_exit_zero
@@ -951,6 +987,62 @@ class ArchitectCLITest < Space::ArchitectTest
 
         text = File.read(File.join(space_path, "architecture", "I01-s1.md"))
         assert_match(/the seam \(BRIEF §3\.1\)/, text)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_section_cli_message_from_composes_commit
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+
+        msg_file = File.join(space_path, "tmp-msg.md")
+        File.write(msg_file, "pull-based seam\n\nRejected push: starvation risk.\n")
+        _out, err = invoke("section", "s1", "specification", "--body", "- Objective", "--message-from", msg_file)
+        assert_empty err
+
+        log, = Open3.capture3("git", "-C", space_path.to_s, "log", "-1", "--format=%s%n%b")
+        assert_match(/\AI01 spec: pull-based seam\n+Rejected push: starvation risk\./, log)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_brief_cli_from_writes_authored_brief_and_bare_announces_template
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+
+        brief_file = File.join(space_path, "tmp-brief.md")
+        File.write(brief_file, "# Brief\n\n## §1 Goal\n\nShip it.\n")
+        out, err = invoke("brief", "new", "--from", brief_file, "-m", "founding contract")
+        assert_empty err
+        assert_match(/Brief ready:/, out)
+        refute_match(/template/, out, "authored brief must not carry the template note")
+        assert_equal "# Brief\n\n## §1 Goal\n\nShip it.\n",
+          File.read(File.join(space_path, "architecture", "BRIEF.md"))
+        msg, = Open3.capture3("git", "-C", space_path.to_s, "log", "-1", "--format=%s")
+        assert_equal "brief: founding contract", msg.strip
+
+        out, err = invoke("brief", "new", "--force")
+        assert_empty err
+        assert_match(/template — Read it before editing/, out, "bare scaffold must announce the template write")
       end
     end
   ensure
