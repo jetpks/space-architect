@@ -4,6 +4,7 @@ require_relative "test_helper"
 require "yaml"
 
 class GateLintTest < Space::ArchitectTest
+  cover Space::Architect::GateLint
   def lint(gates)
     Space::Architect::GateLint.call(gates)
   end
