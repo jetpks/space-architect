@@ -221,17 +221,15 @@ GEM
       rom (~> 5.4, >= 5.4.1)
       rom-sql (~> 3.7)
       zeitwerk (~> 2.6)
-    hanami-router (2.3.1)
+    hanami-router (3.0.0)
       csv (~> 3.3)
-      mustermann (~> 3.0)
-      mustermann-contrib (~> 3.0)
+      mustermann (~> 3.1)
       rack (>= 2.2.16)
     hanami-utils (2.3.0)
       bigdecimal (~> 3.1)
       concurrent-ruby (~> 1.0)
       dry-core (~> 1.0, < 2)
       dry-transformer (~> 1.0, < 2)
-    hansi (0.2.1)
     hashie (5.1.0)
       logger
     i18n (1.14.8)
@@ -259,9 +257,6 @@ GEM
     multi_xml (0.9.1)
       bigdecimal (>= 3.1, < 5)
     mustermann (3.1.1)
-    mustermann-contrib (3.1.1)
-      hansi (~> 0.2.0)
-      mustermann (= 3.1.1)
     mutex_m (0.3.0)
     net-http (0.9.1)
       uri (>= 0.11.1)
@@ -420,7 +415,7 @@ DEPENDENCIES
   hanami-db (= 2.3.0)
   hanami-force-ssl!
   hanami-healthcheck!
-  hanami-router (= 2.3.1)
+  hanami-router (= 3.0.0)
   inertia-hanami!
   logger
   minitest
@@ -494,9 +489,8 @@ CHECKSUMS
   hanami-db (2.3.0) sha256=d6baa6c16a9321e5132799b8b26c3e6a2e19b8c5515c8785fb1ab94720d94711
   hanami-force-ssl (0.1.0)
   hanami-healthcheck (0.1.0)
-  hanami-router (2.3.1) sha256=81b3665cb851de5703bd2fea3f375eccb2af871288cf130ab0fbc42b3b8ae31f
+  hanami-router (3.0.0) sha256=2438db070c7ed7d3f28f1777fc32bdc86e7a9b744a29ab51098f4fa41408210b
   hanami-utils (2.3.0) sha256=aa00f6c377ab4ad2cbe57d989781bace348c9f234201bc60715058dc6e220999
-  hansi (0.2.1) sha256=7e27dfd729f1692a3a7690fc0ef3af9d5e3cfc0285bb135cae7e56180e4805db
   hashie (5.1.0) sha256=c266471896f323c446ea8207f8ffac985d2718df0a0ba98651a3057096ca3870
   i18n (1.14.8) sha256=285778639134865c5e0f6269e0b818256017e8cde89993fdfcbfb64d088824a5
   ice_nine (0.11.2) sha256=5d506a7d2723d5592dc121b9928e4931742730131f22a1a37649df1c1e2e63db
@@ -514,7 +508,6 @@ CHECKSUMS
   minitest (6.0.6) sha256=153ea36d1d987a62942382b61075745042a2b3123b1cd48f4c3675af9cc7d6f1
   multi_xml (0.9.1) sha256=7ce766b59c17241ed62976caeae1fae9b2431b263398c35396239a68c4a64e57
   mustermann (3.1.1) sha256=4c6170c7234d5499c345562ba7c7dfe73e1754286dcc1abb053064d66a127198
-  mustermann-contrib (3.1.1) sha256=c3ecf24f71668222e7554721fa6957d9dfe504997fd8c12a8557d8c39a82a81d
   mutex_m (0.3.0) sha256=cfcb04ac16b69c4813777022fdceda24e9f798e48092a2b817eb4c0a782b0751
   net-http (0.9.1) sha256=25ba0b67c63e89df626ed8fac771d0ad24ad151a858af2cc8e6a716ca4336996
   oauth2 (2.0.23) sha256=e61160104ded11c4cd1b54bc0a7cb80212289e417a4652003bcf4c5a4344824c
