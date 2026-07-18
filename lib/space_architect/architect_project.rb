@@ -1076,7 +1076,12 @@ module Space::Architect
           changed << orig if orig && !orig.empty?
         end
         fnm = File::FNM_PATHNAME | File::FNM_EXTGLOB
-        changed.all? { |f| touch_set.any? { |g| File.fnmatch(g, f, fnm) } }
+        changed.all? do |f|
+          touch_set.any? do |g|
+            File.fnmatch(g, f, fnm) ||
+              (g.end_with?("/**") && File.fnmatch("#{g}/*", f, fnm))
+          end
+        end
       end
 
       checks
