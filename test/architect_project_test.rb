@@ -898,6 +898,44 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # FNM_PATHNAME makes a trailing `dir/**` behave like a single `*` (direct children
+  # only), so modifying a pre-existing tracked file ≥2 dirs deep false-negatived the
+  # in-bounds check. The fix also checks the `dir/**/*` form, whose whole-component
+  # `**/` DOES cross `/` under FNM_PATHNAME — a sibling directory must still reject.
+  def test_in_bounds_deep_modify_under_dir_glob
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+
+    FileUtils.mkdir_p(File.join(repo_dir, "roles", "cilium", "tasks"))
+    File.write(File.join(repo_dir, "roles", "cilium", "tasks", "Debian.yaml"), "orig: true\n")
+    system("git", "-C", repo_dir, "add", "roles/cilium/tasks/Debian.yaml")
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "seed deep file")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["roles/cilium/**"])
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+
+    # Modify the pre-existing deep tracked file — in-bounds.
+    File.write(File.join(wt, "roles", "cilium", "tasks", "Debian.yaml"), "orig: false\n")
+    system("git", "-C", wt, "add", "roles/cilium/tasks/Debian.yaml")
+    checks = project.verify("my-slice").first[:checks]
+    assert_equal true, checks[:in_bounds], "roles/cilium/** must accept a modified roles/cilium/tasks/Debian.yaml"
+
+    # Stage a sibling dir's file — out-of-bounds detection must not be loosened.
+    FileUtils.mkdir_p(File.join(wt, "roles", "kubeadm"))
+    File.write(File.join(wt, "roles", "kubeadm", "x.yaml"), "x: 1\n")
+    system("git", "-C", wt, "add", "roles/kubeadm/x.yaml")
+    checks = project.verify("my-slice").first[:checks]
+    assert_equal false, checks[:in_bounds], "roles/cilium/** must not accept roles/kubeadm/x.yaml"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # merge_lane! refuses a lane whose worktree carries builder commits (tamper).
   def test_merge_lane_refuses_builder_commits
     dir = Dir.mktmpdir("architect-project-test")
