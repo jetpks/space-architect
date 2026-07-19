@@ -32,8 +32,22 @@ module Space::Architect
         end
         raise Space::Core::Error, "config_dir is required for opencode harness" unless config_dir
         OpenCodeHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir, effort: effort)
+      when "pi"
+        if effort
+          raise Space::Core::Error,
+            "effort is opencode-only (sets opencode reasoningEffort) — " \
+            "pi uses --thinking, not yet wired to the harness"
+        end
+        if model == CLAUDE_DEFAULT_MODEL
+          raise Space::Core::Error,
+            "Pass --model when using --harness pi " \
+            "(#{CLAUDE_DEFAULT_MODEL} is a Claude model ID, not valid for pi — " \
+            "try e.g. openrouter/qwen/qwen3-27b-optiq or local-inference/qwen3-27b-optiq)"
+        end
+        raise Space::Core::Error, "config_dir is required for pi harness" unless config_dir
+        PiHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir)
       else
-        raise Space::Core::Error, "Unknown harness '#{name}' — valid values: claude-code, opencode"
+        raise Space::Core::Error, "Unknown harness '#{name}' — valid values: claude-code, opencode, pi"
       end
     end
 
@@ -344,6 +358,76 @@ module Space::Architect
           "--dir", chdir.to_s
         ]
         args
+      end
+    end
+
+    # `pi -p --mode json`, session redirected into the lane's build dir via --session-dir
+    # (pi otherwise auto-saves under ~/.pi/agent/sessions/, organized by mangled CWD).
+    class PiHarness
+      TIMEOUT_EXIT_CODE = 124
+
+      # max_turns is accepted for interface parity with the other harnesses but is
+      # intentionally absent from argv — pi has no turn cap; the wall-clock timeout
+      # (below) is the only bound on a run.
+      def initialize(model:, max_turns:, bin: nil, config_dir:)
+        @model      = model
+        @bin        = bin || ENV.fetch("ARCHITECT_PI_BIN", "pi")
+        @config_dir = Pathname.new(config_dir)
+      end
+
+      def run(prompt_path:, run_log_path:, chdir:, timeout: nil, **)
+        prompt_path  = Pathname.new(prompt_path)
+        run_log_path = Pathname.new(run_log_path)
+
+        File.open(prompt_path, "r") do |prompt_io|
+          File.open(run_log_path, "w") do |log|
+            Sync do
+              child = Async::Process::Child.new(*argv, chdir: chdir.to_s, in: prompt_io, out: log, err: log)
+              timed_out    = false
+              timeout_task = nil
+
+              # Same TERM→grace→KILL escalation as ClaudeCodeHarness — with: Async::Process::Child's
+              # #wait_thread ensure goes straight to KILL, so a concurrent fiber does the escalation.
+              if timeout && timeout > 0
+                timeout_task = Async(transient: true) do
+                  sleep timeout
+                  timed_out = true
+                  Process.kill("TERM", -child.pid) rescue nil
+                  sleep 0.5
+                  Process.kill("KILL", -child.pid) rescue nil
+                end
+              end
+
+              status = child.wait
+              timeout_task&.stop
+
+              timed_out ? TIMEOUT_EXIT_CODE : status.exitstatus
+            end
+          end
+        end
+      end
+
+      def run_detached(prompt_path:, run_log_path:, chdir:)
+        prompt_path  = Pathname.new(prompt_path)
+        run_log_path = Pathname.new(run_log_path)
+
+        prompt_io = File.open(prompt_path, "r")
+        log       = File.open(run_log_path, "w")
+        begin
+          pid = Process.spawn(*argv, chdir: chdir.to_s, pgroup: true,
+                              in: prompt_io, out: log, err: log)
+          Process.detach(pid)
+        ensure
+          prompt_io.close
+          log.close
+        end
+        pid
+      end
+
+      private
+
+      def argv
+        [@bin, "-p", "--mode", "json", "--model", @model, "--session-dir", @config_dir.to_s, "--no-approve"]
       end
     end
   end

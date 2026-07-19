@@ -191,4 +191,103 @@ class DispatcherTest < Space::ArchitectTest
     sleep 0.1
     FileUtils.rm_rf(root)
   end
+
+  # ── I09: pi harness ───────────────────────────────────────────────────────
+
+  FAKE_PI_SCRIPT = <<~RUBY
+    #!/usr/bin/env ruby
+    require "json"
+    a = ARGV; c = Dir.pwd; s = $stdin.gets
+    $stdout.puts JSON.generate({type: "session", version: 3, id: "fake-session", cwd: c})
+    $stdout.puts "argv=" + a.inspect
+    $stdout.puts "cwd=" + c.inspect
+    $stdout.puts "stdin=" + (s || "").chomp
+    $stdout.flush
+    exit((ENV["FAKE_EXIT"] || "0").to_i)
+  RUBY
+
+  def setup_space_with_pi_worktree(root)
+    space_dir = File.join(root, "space")
+    FileUtils.cp_r(self.class.template_space_dir, space_dir)
+
+    space   = Space::Core::Space.load(space_dir)
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A", harness: "pi", model: "openrouter/test-model")
+
+    build_dir = File.join(space_dir, "build", "I01-demo-A")
+    FileUtils.mkdir_p(build_dir)
+    File.write(File.join(build_dir, "prompt.md"), "PROMPT-MARKER-42\nrest\n")
+
+    [space_dir, project, build_dir]
+  end
+
+  def test_pi_dispatch_writes_run_jsonl_with_session_dir_and_no_no_session
+    root = Dir.mktmpdir("dispatcher-pi-test")
+    fake_pi = File.join(root, "fake_pi")
+    File.write(fake_pi, FAKE_PI_SCRIPT)
+    File.chmod(0o755, fake_pi)
+
+    _space_dir, project, build_dir = setup_space_with_pi_worktree(root)
+
+    res = nil
+    with_env("ARCHITECT_PI_BIN" => fake_pi) do
+      res = project.dispatch("demo", "A")
+    end
+    log = File.read(File.join(build_dir, "run.jsonl"))
+
+    assert_equal 0, res[:exit_code]
+    assert_includes log, "--session-dir"
+    assert_includes log, build_dir
+    assert_includes log, "\"type\":\"session\""
+    assert_includes log, "PROMPT-MARKER-42"
+    refute_includes log, "--no-session"
+    refute_includes log, ".pi/agent"
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  def test_footgun_guard_raises_when_pi_dispatch_uses_default_model
+    root = Dir.mktmpdir("dispatcher-pi-guard-test")
+    _space_dir, project, _fake, _build_dir = setup_space_with_worktree(root)
+
+    err = assert_raises(Space::Core::Error) do
+      project.dispatch("demo", "A", harness: "pi")
+    end
+    assert_match(/--harness pi/, err.message)
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  def test_footgun_guard_raises_when_pi_dispatch_combined_with_effort
+    root = Dir.mktmpdir("dispatcher-pi-effort-guard-test")
+    fake_pi = File.join(root, "fake_pi")
+    File.write(fake_pi, FAKE_PI_SCRIPT)
+    File.chmod(0o755, fake_pi)
+
+    _space_dir, project, _build_dir = setup_space_with_pi_worktree(root)
+
+    err = assert_raises(Space::Core::Error) do
+      with_env("ARCHITECT_PI_BIN" => fake_pi) do
+        project.dispatch("demo", "A", effort: "high")
+      end
+    end
+    assert_match(/opencode-only/, err.message)
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  def test_harness_factory_returns_pi_harness_instance
+    harness = Space::Architect::Harness.for("pi",
+      model: "openrouter/test-model", max_turns: 10, config_dir: Dir.mktmpdir)
+    assert_instance_of Space::Architect::Harness::PiHarness, harness
+  end
+
+  def test_harness_factory_unknown_harness_message_names_pi
+    err = assert_raises(Space::Core::Error) do
+      Space::Architect::Harness.for("bogus", model: "x", max_turns: 1, config_dir: Dir.mktmpdir)
+    end
+    assert_match(/claude-code, opencode, pi/, err.message)
+  end
 end

@@ -610,6 +610,12 @@ module Space::Architect
           "(#{Harness::CLAUDE_DEFAULT_MODEL} is a Claude model ID, not valid for opencode — " \
           "try e.g. fireworks-ai/accounts/fireworks/models/glm-5p2)"
       end
+      if harness.to_s == "pi" && (model.nil? || model == Harness::CLAUDE_DEFAULT_MODEL)
+        raise Space::Core::Error,
+          "Pass --model when using --harness pi " \
+          "(#{Harness::CLAUDE_DEFAULT_MODEL} is a Claude model ID, not valid for pi — " \
+          "try e.g. openrouter/qwen/qwen3-27b-optiq or local-inference/qwen3-27b-optiq)"
+      end
       if effort && harness.to_s != "opencode"
         raise Space::Core::Error,
           "effort is opencode-only (sets opencode reasoningEffort) — " \
