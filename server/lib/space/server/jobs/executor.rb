@@ -107,11 +107,20 @@ module Space
         end
 
         def spawn_and_relay(job, argv, stream)
-          secrets = @secret_resolver.call(job.spec.dig("environment", "secrets") || [])
+          secrets = @secret_resolver.call(secret_refs(job.spec))
           handle  = @spawner.call(argv, env: secrets)
           code    = supervise(job, handle, stream)
           stream.exit(code)
           code.zero? ? @jobs_repo.mark_succeeded(job.id) : @jobs_repo.mark_failed(job.id)
+        end
+
+        # environment.secrets plus the backend api-key ref (when present),
+        # appended last so the backend value wins any name collision in the
+        # resolved spawn env. Values ride ONLY there — never argv.
+        def secret_refs(spec)
+          refs = spec.dig("environment", "secrets") || []
+          ref  = spec.dig("harness", "backend", "api_key_ref")
+          ref ? refs + [{ "name" => SandboxArgv::API_KEY_ENV, "ref" => ref }] : refs
         end
 
         # One fiber per child stream pumps output onto the raw stream while the

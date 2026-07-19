@@ -4,6 +4,8 @@ require "falcon/environment/rack"
 require "async/service/managed/service"
 require "async/service/managed/environment"
 require_relative "app/services/import_worker_service"
+require_relative "app/services/executor_worker_service"
+require_relative "app/services/consumer_worker_service"
 
 # Web service: serves the Rack app (config.ru) on plain HTTP.
 #
@@ -26,4 +28,26 @@ service "architect.import-worker" do
 
   count 1
   redis_prefix { "architect-import" }
+end
+
+# Executor-worker service: a single managed child process that polls Postgres
+# for queued inference jobs and runs each in the container sandbox, relaying
+# harness output onto job:<id>:raw. Stop is container-driven — no signal traps.
+service "architect.executor-worker" do
+  include Async::Service::Managed::Environment
+
+  service_class { Space::Server::Services::ExecutorWorkerService }
+
+  count 1
+end
+
+# Consumer-worker service: a single managed child process that drains executor
+# raw streams into run:<id> display events and persisted conversations.
+# Stop is container-driven — no signal traps.
+service "architect.consumer-worker" do
+  include Async::Service::Managed::Environment
+
+  service_class { Space::Server::Services::ConsumerWorkerService }
+
+  count 1
 end

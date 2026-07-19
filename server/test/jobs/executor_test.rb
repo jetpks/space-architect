@@ -128,17 +128,26 @@ class ExecutorTest < Minitest::Test
 
   def key_for(job) = "job:#{job.id}:raw"
 
-  def build_executor(redis:, spawner:, env_image: nil, secrets: { "API_KEY" => "sekret-value" }, **opts)
+  def build_executor(redis:, spawner:, env_image: nil, secrets: { "API_KEY" => "sekret-value" }, resolver: nil, **opts)
     Space::Server::Jobs::Executor.new(
       jobs_repo: jobs_repo,
       runs_repo: runs_repo,
       redis: redis,
       env_image: env_image || ->(_environment) { Success("img:abc123") },
-      secret_resolver: ->(_refs) { secrets },
+      secret_resolver: resolver || ->(_refs) { secrets },
       spawner: spawner,
       interval: 0.01,
       **opts
     )
+  end
+
+  # Resolver fake that echoes each ref name as a distinguishable value.
+  def echo_resolver(seen = nil)
+    ->(refs) { seen&.concat(refs); refs.to_h { |r| [r["name"], "resolved-#{r['name']}"] } }
+  end
+
+  def backend(**overrides)
+    DEFAULT_SPEC["harness"].merge("backend" => { "base_url" => "https://api.example.com" }.merge(overrides))
   end
 
   # [type, data] pairs from the raw stream, in stream order.
@@ -262,7 +271,92 @@ class ExecutorTest < Minitest::Test
       assert_equal "none", argv[argv.index("--network") + 1]
       assert_equal "/data:/data:ro", argv[argv.index("-v") + 1]
       assert argv.index("img:abc123") < argv.index("claude"), "image tag must precede the harness command"
-      assert_equal ["claude", "-p", "do the thing", "--output-format", "stream-json", "--verbose"], argv.last(6)
+      assert_equal ["claude", "-p", "do the thing", "--model", "sonnet-5",
+                    "--output-format", "stream-json", "--verbose"], argv.last(8)
+    end
+  end
+
+  # --- backend wiring ---
+
+  def test_backend_base_url_rides_argv_env_pair_into_the_child
+    make_job
+    spawner = FakeSpawner.new(FakeHandle.new)
+
+    with_redis do |redis|
+      build_executor(redis: redis, spawner: spawner).tick
+
+      argv = spawner.argvs.first
+      pair = argv.index("ANTHROPIC_BASE_URL=https://api.example.com")
+      refute_nil pair, "backend base_url must reach the child env"
+      assert_equal "-e", argv[pair - 1]
+    end
+  end
+
+  def test_api_key_ref_rides_name_only_argv_with_value_in_spawn_env_only
+    make_job("harness" => backend("api_key_ref" => "op://vault/anthropic/key"))
+    spawner = FakeSpawner.new(FakeHandle.new)
+    seen    = []
+
+    with_redis do |redis|
+      build_executor(redis: redis, spawner: spawner, resolver: echo_resolver(seen)).tick
+
+      assert_includes seen, { "name" => "ANTHROPIC_API_KEY", "ref" => "op://vault/anthropic/key" },
+        "the ref must resolve through the existing secret machinery"
+      assert_equal "resolved-ANTHROPIC_API_KEY", spawner.envs.first["ANTHROPIC_API_KEY"]
+
+      argv = spawner.argvs.first
+      assert_equal "-e", argv[argv.index("ANTHROPIC_API_KEY") - 1]
+      assert argv.none? { |arg| arg.include?("resolved-ANTHROPIC_API_KEY") }, "api key value leaked into argv"
+      assert argv.none? { |arg| arg.start_with?("ANTHROPIC_API_KEY=") }, "api key must be a bare -e NAME"
+    end
+  end
+
+  def test_absent_api_key_ref_injects_no_key
+    make_job
+    spawner = FakeSpawner.new(FakeHandle.new)
+
+    with_redis do |redis|
+      build_executor(redis: redis, spawner: spawner, resolver: echo_resolver).tick
+
+      refute_includes spawner.envs.first.keys, "ANTHROPIC_API_KEY"
+      argv = spawner.argvs.first
+      refute_includes argv, "ANTHROPIC_API_KEY"
+      assert argv.none? { |arg| arg.start_with?("ANTHROPIC_API_KEY=") }
+    end
+  end
+
+  def test_harness_args_are_appended_to_harness_argv
+    make_job("harness" => DEFAULT_SPEC["harness"].merge("args" => ["--max-turns", "3"]))
+    spawner = FakeSpawner.new(FakeHandle.new)
+
+    with_redis do |redis|
+      build_executor(redis: redis, spawner: spawner).tick
+
+      argv = spawner.argvs.first
+      assert argv.index("--model") > argv.index("claude"), "--model belongs to the harness argv"
+      assert_equal ["--max-turns", "3"], argv.last(2)
+    end
+  end
+
+  def test_backend_wins_environment_env_collision
+    make_job(
+      "harness" => backend("api_key_ref" => "op://vault/anthropic/key"),
+      "environment" => DEFAULT_SPEC["environment"].merge(
+        "env" => { "ANTHROPIC_BASE_URL" => "https://rogue.example.com", "ANTHROPIC_API_KEY" => "inline-key", "FOO" => "bar" }
+      )
+    )
+    spawner = FakeSpawner.new(FakeHandle.new)
+
+    with_redis do |redis|
+      build_executor(redis: redis, spawner: spawner, resolver: echo_resolver).tick
+
+      argv = spawner.argvs.first
+      assert_includes argv, "ANTHROPIC_BASE_URL=https://api.example.com"
+      assert argv.none? { |arg| arg.include?("rogue.example.com") }, "declared env must not shadow the backend base url"
+      assert argv.none? { |arg| arg.start_with?("ANTHROPIC_API_KEY=") }, "inline key must yield to the secret transport"
+      assert_equal 1, argv.count("ANTHROPIC_API_KEY"), "exactly one bare -e ANTHROPIC_API_KEY"
+      assert_includes argv, "FOO=bar", "non-colliding declared env passes through"
+      assert_equal "resolved-ANTHROPIC_API_KEY", spawner.envs.first["ANTHROPIC_API_KEY"]
     end
   end
 
