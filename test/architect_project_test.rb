@@ -2797,4 +2797,148 @@ class ArchitectProjectTest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  # ── I05: repo sync command + ground staleness warning ───────────────────────
+
+  # AC1: sync_repos fast-forwards a behind repo, reports up-to-date for current,
+  #      and refuses dirty/diverged repos without clobbering the ref.
+  def test_sync_fast_forwards_behind_repo
+    dir        = Dir.mktmpdir("architect-sync-test")
+    origin_dir = Dir.mktmpdir("architect-sync-origin-test")
+
+    # Set up local "origin"
+    system("git", "-C", origin_dir, "init", "-q", "-b", "main", exception: false) ||
+      system("git", "-C", origin_dir, "init", "-q")
+    system("git", "-C", origin_dir, "config", "user.name", "Test Builder")
+    system("git", "-C", origin_dir, "config", "user.email", "test@example.com")
+    File.write(File.join(origin_dir, "README.md"), "# origin\n")
+    system("git", "-C", origin_dir, "add", "README.md")
+    system("git", "-C", origin_dir, "commit", "-q", "-m", "init")
+
+    # Clone into repos/my-repo
+    space    = create_real_space(dir)
+    repo_dir = File.join(dir, "repos", "my-repo")
+    system("git", "clone", "-q", origin_dir, repo_dir)
+    system("git", "-C", repo_dir, "config", "user.name", "Test Builder")
+    system("git", "-C", repo_dir, "config", "user.email", "test@example.com")
+    space.data["repos"] = [{ "name" => "my-repo" }]
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+
+    # (b) up-to-date: local and origin in sync
+    results = project.sync_repos
+    assert_equal 1, results.size
+    assert_equal :up_to_date, results.first[:status]
+    assert_match(/up to date/, results.first[:message])
+
+    # (a) behind: add a commit to origin, then sync → fast-forwarded
+    File.write(File.join(origin_dir, "v2.txt"), "v2\n")
+    system("git", "-C", origin_dir, "add", "v2.txt")
+    system("git", "-C", origin_dir, "commit", "-q", "-m", "v2")
+
+    results = project.sync_repos
+    assert_equal 1, results.size
+    assert_equal :fast_forwarded, results.first[:status]
+    assert_match(/fast-forwarded 1 commit/, results.first[:message])
+
+    # Verify the local ref actually moved to match origin
+    local_sha,  = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    origin_sha, = Open3.capture3("git", "-C", origin_dir, "rev-parse", "HEAD")
+    assert_equal origin_sha.strip, local_sha.strip
+
+    # (c) dirty: stage a change, then try to sync — must be refused
+    File.write(File.join(origin_dir, "v3.txt"), "v3\n")
+    system("git", "-C", origin_dir, "add", "v3.txt")
+    system("git", "-C", origin_dir, "commit", "-q", "-m", "v3")
+
+    File.write(File.join(repo_dir, "staged.txt"), "staged\n")
+    system("git", "-C", repo_dir, "add", "staged.txt")
+
+    ref_before, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    results = project.sync_repos
+    assert_equal :dirty, results.first[:status]
+    ref_after, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    assert_equal ref_before.strip, ref_after.strip, "dirty: ref must be unchanged"
+
+    # Unstage + remove so we can continue
+    system("git", "-C", repo_dir, "reset", "--", "staged.txt", out: File::NULL, err: File::NULL)
+    File.delete(File.join(repo_dir, "staged.txt"))
+
+    # (c) diverged: make a local commit not on origin → non-fast-forwardable, must be refused
+    File.write(File.join(repo_dir, "local_only.txt"), "local\n")
+    system("git", "-C", repo_dir, "add", "local_only.txt")
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "local-only")
+
+    ref_before, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    results = project.sync_repos
+    assert_equal :diverged, results.first[:status]
+    assert_match(/not fast-forwardable/, results.first[:message])
+    ref_after, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    assert_equal ref_before.strip, ref_after.strip, "diverged: ref must be unchanged"
+
+    # (single-repo) sync with an explicit name syncs only that repo
+    results = project.sync_repos(repo_name: "my-repo")
+    assert_equal 1, results.size
+
+    # (single-repo) sync with an unknown name raises
+    assert_raises(Space::Core::Error) { project.sync_repos(repo_name: "no-such-repo") }
+  ensure
+    FileUtils.rm_rf(dir)
+    FileUtils.rm_rf(origin_dir)
+  end
+
+  # AC2: ground emits a staleness warning when a tracked repo is behind origin,
+  #      is silent when up-to-date, and preserves existing ordering + worktree guard.
+  def test_ground_warns_stale_repo
+    dir        = Dir.mktmpdir("architect-ground-warn-test")
+    origin_dir = Dir.mktmpdir("architect-ground-warn-origin-test")
+
+    # Set up local "origin"
+    system("git", "-C", origin_dir, "init", "-q", "-b", "main", exception: false) ||
+      system("git", "-C", origin_dir, "init", "-q")
+    system("git", "-C", origin_dir, "config", "user.name", "Test Builder")
+    system("git", "-C", origin_dir, "config", "user.email", "test@example.com")
+    File.write(File.join(origin_dir, "README.md"), "# origin\n")
+    system("git", "-C", origin_dir, "add", "README.md")
+    system("git", "-C", origin_dir, "commit", "-q", "-m", "init")
+
+    # Clone into repos/my-repo
+    space    = create_real_space(dir)
+    repo_dir = File.join(dir, "repos", "my-repo")
+    system("git", "clone", "-q", origin_dir, repo_dir)
+
+    # Track the repo in space
+    space.data["repos"] = [{ "name" => "my-repo" }]
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    # (b) up-to-date: no warning expected
+    result = project.ground(session_cwd: dir)
+    refute_match(/WARNING.*my-repo/, result, "no warning expected when repo is up-to-date")
+
+    # Add a commit to origin so local is now behind
+    File.write(File.join(origin_dir, "extra.txt"), "extra\n")
+    system("git", "-C", origin_dir, "add", "extra.txt")
+    system("git", "-C", origin_dir, "commit", "-q", "-m", "extra commit")
+
+    # (a) stale: warning expected
+    result = project.ground(session_cwd: dir)
+    assert_match(/WARNING: repos\/my-repo.*behind.*origin\//, result)
+    assert_match(/architect sync my-repo/, result)
+
+    # Worktree guard still intact: builder wt → empty
+    wt_cwd = File.join(dir, "build", "I01-some-slice-lane-a", "wt")
+    assert_equal "", project.ground(session_cwd: wt_cwd)
+
+    # Existing ordering intact: ARCHITECT.md before BRIEF.md
+    project.brief_new!
+    result2 = project.ground(session_cwd: dir)
+    architect_idx = result2.index("ARCHITECT.md")
+    brief_idx     = result2.index("BRIEF.md")
+    assert architect_idx < brief_idx, "ARCHITECT.md must precede BRIEF.md even with staleness warning"
+  ensure
+    FileUtils.rm_rf(dir)
+    FileUtils.rm_rf(origin_dir)
+  end
 end
