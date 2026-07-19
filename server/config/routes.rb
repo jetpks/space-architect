@@ -49,10 +49,11 @@ module Space
 
       # Jobs (inference-job queue + browser UI — I06/I10; /jobs/new before /jobs/:id,
       # same precedent as conversations/new above)
-      get  "/jobs",     to: "jobs.index"
-      get  "/jobs/new", to: "jobs.new"
-      post "/jobs",     to: "jobs.create"
-      get  "/jobs/:id", to: "jobs.show"
+      get  "/jobs",            to: "jobs.index"
+      get  "/jobs/new",        to: "jobs.new"
+      post "/jobs",            to: "jobs.create"
+      get  "/jobs/:id",        to: "jobs.show"
+      post "/jobs/:id/cancel", to: "jobs.cancel"
 
       # Spaces
       get "/spaces",                    to: "spaces.index"

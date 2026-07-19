@@ -8,9 +8,32 @@ module Space
           include Space::Server::Deps["repos.jobs_repo"]
 
           def handle(req, res)
-            user = require_login(req, res)
+            if bearer_request?(req)
+              handle_bearer(req, res)
+            else
+              handle_browser(req, res)
+            end
+          end
 
-            job_list = jobs_repo.list_for_user(user.id).map do |job|
+          private
+
+          def handle_bearer(req, res)
+            user = authenticated_user(req)
+            unless user
+              res.content_type = JSON_CONTENT_TYPE
+              halt 401, JSON.generate(error: "Sign in required.")
+            end
+
+            render_json(res, { jobs: job_list(user) })
+          end
+
+          def handle_browser(req, res)
+            user = require_login(req, res)
+            render_inertia(req, res, "Jobs/Index", props: { jobs: job_list(user) })
+          end
+
+          def job_list(user)
+            jobs_repo.list_for_user(user.id).map do |job|
               {
                 id: job.id,
                 status: job.status,
@@ -19,7 +42,6 @@ module Space
                 run_id: job.run_id
               }
             end
-            render_inertia(req, res, "Jobs/Index", props: { jobs: job_list })
           end
         end
       end

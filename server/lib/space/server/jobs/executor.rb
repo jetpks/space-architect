@@ -138,7 +138,9 @@ module Space
         def spawn_and_relay(job, argv, stream, cidfile)
           secrets = @secret_resolver.call(secret_refs(job.spec))
           handle  = @spawner.call(argv, env: secrets, cidfile: cidfile)
-          code    = supervise(job, handle, stream)
+          code, canceled = supervise(job, handle, stream)
+          return if canceled
+
           stream.exit(code)
           code.zero? ? @jobs_repo.mark_succeeded(job.id) : @jobs_repo.mark_failed(job.id)
         ensure
@@ -156,19 +158,50 @@ module Space
 
         # One fiber per child stream pumps output onto the raw stream while the
         # parent fiber awaits exit under the wall-clock deadline; a heartbeat
-        # fiber extends the PG lease so a live job is never swept mid-run.
+        # fiber extends the PG lease so a live job is never swept mid-run —
+        # and, symmetrically, drives the cancel path (I14) when the lease
+        # stops extending. Returns [exit_code, canceled?].
         def supervise(job, handle, stream)
           Sync do |task|
             pumps = [
               task.async { pump(handle.stdout) { |line| stream.out(line) } },
               task.async { pump(handle.stderr) { |line| stream.err(line) } }
             ]
-            beat = heartbeat(task, job)
+            canceled = false
+            beat = task.async do
+              watch_lease(task, job)
+              canceled = true
+              stop_and_kill(task, handle)
+            end
             code = await_exit(task, handle)
             pumps.each(&:wait)
             beat.stop
-            code
+            [code, canceled]
           end
+        end
+
+        # Extends the PG lease every half-lease-interval; returns once a
+        # heartbeat UPDATE touches zero rows — meaning the job left "running"
+        # without our involvement. Under normal operation the only way that
+        # happens mid-execution is a cancel (BRIEF §1.5b), so detection
+        # latency is bounded by @lease_seconds / 2.
+        def watch_lease(task, job)
+          loop do
+            task.sleep(@lease_seconds / 2.0)
+            return unless @jobs_repo.heartbeat(job.id, lease_seconds: @lease_seconds).positive?
+          end
+        end
+
+        # Mirrors #await_exit's stop-then-kill cascade (graceful stop,
+        # @stop_grace grace period, then force-kill), triggered by a cancel
+        # instead of the wall-clock deadline. Runs concurrently with the
+        # parent fiber's blocking handle.wait; once that returns, #supervise
+        # calls beat.stop, which harmlessly interrupts this sleep if the
+        # process already exited on its own.
+        def stop_and_kill(task, handle)
+          handle.stop
+          task.sleep(@stop_grace)
+          handle.kill
         end
 
         def pump(io)
@@ -177,15 +210,6 @@ module Space
           end
         ensure
           io.close unless io.closed?
-        end
-
-        def heartbeat(task, job)
-          task.async do
-            loop do
-              task.sleep(@lease_seconds / 2.0)
-              @jobs_repo.heartbeat(job.id, lease_seconds: @lease_seconds)
-            end
-          end
         end
 
         # Wall-clock deadline: graceful stop at @timeout, kill after @stop_grace.

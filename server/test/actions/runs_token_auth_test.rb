@@ -118,6 +118,43 @@ class RunsTokenAuthTest < Minitest::Test
     end
   end
 
+  # --- AC2(f): GET /runs/:id/stream — Bearer streams for a token-visible run,
+  # session-only behavior (401 anon, 403 non-owner) otherwise unchanged. ---
+
+  def test_stream_bearer_wrong_token_returns_401
+    run = Factory[:run, user_id: @owner.id, status: 1, published: false]
+    with_token_settings do
+      env = Rack::MockRequest.env_for("/runs/#{run.id}/stream", "REQUEST_METHOD" => "GET")
+      env["HTTP_AUTHORIZATION"] = "Bearer wrong-token"
+      status, _, body = app.call(env)
+      assert_equal 401, status
+      assert parse_json(body).key?("error")
+    end
+  end
+
+  def test_stream_bearer_non_owner_returns_403
+    stranger = Factory[:user, github_uid: "ingest-stranger", username: "ingest_stranger"]
+    run = Factory[:run, user_id: @owner.id, status: 1, published: false]
+    with_token_settings(user_id: stranger.id) do
+      env = Rack::MockRequest.env_for("/runs/#{run.id}/stream", "REQUEST_METHOD" => "GET")
+      env["HTTP_AUTHORIZATION"] = "Bearer #{TOKEN}"
+      status, _, body = app.call(env)
+      assert_equal 403, status
+      assert parse_json(body).key?("error")
+    end
+  end
+
+  def test_stream_bearer_owner_returns_sse_headers
+    run = Factory[:run, user_id: @owner.id, status: 1, published: false]
+    with_token_settings(user_id: @owner.id) do
+      env = Rack::MockRequest.env_for("/runs/#{run.id}/stream", "REQUEST_METHOD" => "GET")
+      env["HTTP_AUTHORIZATION"] = "Bearer #{TOKEN}"
+      status, headers, _ = app.call(env)
+      assert_equal 200, status
+      assert_equal "text/event-stream", headers["content-type"]
+    end
+  end
+
   # --- AC3: CSRF exemption invariant — tested directly like omniauth_request_csrf_test.rb
   # calls request_validation_phase directly rather than going through the full Rack stack.
   # Hanami auto-disables CSRF before-hooks in test env, so we call verify_csrf_token? directly.

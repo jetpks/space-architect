@@ -159,4 +159,70 @@ class JobsRepoTest < Minitest::Test
     assert_equal "failed", failed.status
     assert_nil failed.leased_until
   end
+
+  # --- cancel (I14) -----------------------------------------------------
+
+  def test_cancel_queued_job_transitions_to_canceled_and_reports_prior_status
+    user = make_user
+    job  = Factory[:job, user_id: user.id]
+
+    assert_equal "queued", jobs_repo.cancel(job.id)
+    assert_equal "canceled", jobs_repo.by_pk(job.id).status
+  end
+
+  def test_cancel_running_job_transitions_to_canceled_clears_lease_and_reports_prior_status
+    user = make_user
+    Factory[:job, user_id: user.id]
+    claimed = jobs_repo.claim
+
+    assert_equal "running", jobs_repo.cancel(claimed.id)
+    canceled = jobs_repo.by_pk(claimed.id)
+    assert_equal "canceled", canceled.status
+    assert_nil canceled.leased_until
+  end
+
+  def test_cancel_is_a_no_op_on_each_terminal_status
+    user = make_user
+    succeeded = Factory[:job, user_id: user.id, status: "succeeded"]
+    failed    = Factory[:job, user_id: user.id, status: "failed"]
+    canceled  = Factory[:job, user_id: user.id, status: "canceled"]
+
+    assert_nil jobs_repo.cancel(succeeded.id)
+    assert_nil jobs_repo.cancel(failed.id)
+    assert_nil jobs_repo.cancel(canceled.id)
+    assert_equal "succeeded", jobs_repo.by_pk(succeeded.id).status
+    assert_equal "failed", jobs_repo.by_pk(failed.id).status
+    assert_equal "canceled", jobs_repo.by_pk(canceled.id).status
+  end
+
+  def test_cancel_unknown_id_returns_nil
+    assert_nil jobs_repo.cancel(99_999)
+  end
+
+  # finish-no-clobber-after-cancel: a straggling mark_succeeded/mark_failed
+  # (e.g. the executor racing a cancel) must not resurrect the canceled row.
+  def test_finish_does_not_clobber_a_canceled_job
+    user = make_user
+    Factory[:job, user_id: user.id]
+    claimed = jobs_repo.claim
+    jobs_repo.cancel(claimed.id)
+
+    jobs_repo.mark_succeeded(claimed.id)
+    assert_equal "canceled", jobs_repo.by_pk(claimed.id).status
+
+    jobs_repo.mark_failed(claimed.id)
+    assert_equal "canceled", jobs_repo.by_pk(claimed.id).status
+  end
+
+  # sweep_stale's dataset is scoped to status: "running" — once cancel moves
+  # a row off "running" it is structurally excluded, but assert it directly.
+  def test_sweep_stale_does_not_resurrect_a_canceled_job
+    user = make_user
+    job  = Factory[:job, user_id: user.id, status: "running", leased_until: Time.now - 5, attempts: 1]
+    jobs_repo.cancel(job.id)
+
+    result = jobs_repo.sweep_stale(max_attempts: 3)
+    assert_equal({ requeued: 0, failed: 0 }, result)
+    assert_equal "canceled", jobs_repo.by_pk(job.id).status
+  end
 end
