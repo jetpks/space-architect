@@ -84,10 +84,31 @@ module Space
         def mark_succeeded(id) = finish(id, "succeeded")
         def mark_failed(id)    = finish(id, "failed")
 
+        CANCELABLE_STATUSES = %w[queued running].freeze
+
+        # Atomically cancel a queued or running job: one guarded UPDATE per
+        # candidate prior status (each individually atomic, and mutually
+        # exclusive since a row holds exactly one status at a time), so a job
+        # already terminal — or one a concurrent claim/finish just moved out
+        # from under us — is left untouched. Returns the prior status
+        # ("queued" or "running") the job held when the transition landed, or
+        # nil for a no-op (already terminal, or unknown id).
+        def cancel(id)
+          now = Time.now
+          CANCELABLE_STATUSES.find do |prior_status|
+            jobs.dataset.where(id: id, status: prior_status)
+                .update(status: "canceled", leased_until: nil, updated_at: now) == 1
+          end
+        end
+
         private
 
+        # WHERE status='running' guards against resurrecting a job a
+        # concurrent #cancel already moved to "canceled" — the executor's own
+        # heartbeat-driven cancellation detection is a latency optimization,
+        # this guard is the correctness backstop.
         def finish(id, status)
-          jobs.dataset.where(id: id)
+          jobs.dataset.where(id: id, status: "running")
               .update(status: status, leased_until: nil, updated_at: Time.now)
         end
       end

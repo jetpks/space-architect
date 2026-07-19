@@ -11,7 +11,7 @@ module Space
             run = runs_repo.by_pk(req.params[:id].to_i)
             halt_not_found(res) unless run
 
-            user = current_user(req)
+            user = authenticated_user(req)
 
             unless run.visible_to?(user)
               res.content_type = JSON_CONTENT_TYPE

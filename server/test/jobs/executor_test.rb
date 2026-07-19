@@ -525,6 +525,38 @@ class ExecutorTest < Minitest::Test
     end
   end
 
+  # --- cancellation (I14) ---
+
+  # A running cancel is observed via the heartbeat coming back 0-row: the
+  # executor stops the container through the same Handle stop-then-kill path
+  # as a wall-clock timeout, but must skip the terminal write (status stays
+  # "canceled", never clobbered to "failed") and must not emit an exit frame
+  # onto the raw stream — the consumer already treats a canceled job as
+  # producer-gone (Jobs::Consumer#producer_gone?).
+  def test_running_cancel_stops_the_container_and_skips_the_terminal_write
+    job    = make_job
+    handle = FakeHandle.new(hang: true)
+
+    with_redis do |redis|
+      redis.del(key_for(job))
+      executor = build_executor(redis: redis, spawner: FakeSpawner.new(handle),
+        lease_seconds: 0.05, stop_grace: 0.05)
+
+      Async::Task.current.async do
+        sleep(0.03)
+        jobs_repo.cancel(job.id)
+      end
+
+      executor.tick
+
+      assert_equal 1, handle.stops
+      assert_equal 1, handle.kills
+      assert_equal "canceled", jobs_repo.by_pk(job.id).status
+      assert_equal 0, events(redis, key_for(job)).count { |t, _| t == "exit" },
+        "a canceled run must not emit a terminal exit frame"
+    end
+  end
+
   def test_tick_returns_nil_on_empty_queue
     with_redis do |redis|
       assert_nil build_executor(redis: redis, spawner: FakeSpawner.new).tick
