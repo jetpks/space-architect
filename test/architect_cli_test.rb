@@ -1659,6 +1659,184 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # ── dispatch --as-job: option handling + spec composition through the CLI ──
+
+  # --host/--token are required with --as-job, same posture as the `jobs` subcommands
+  # (dry-cli 1.4.1 doesn't enforce `required: true` on option — see Jobs.require_credentials!).
+  def test_dispatch_cli_as_job_requires_host_and_token
+    setup = temp_env
+    with_env(setup[:env]) do
+      _out, err = invoke("dispatch", "demo", "A", "--as-job", "--backend-url", "https://backend.example.com")
+      refute_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+      assert_match(/host/i, err)
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_dispatch_cli_as_job_requires_backend_url
+    setup = temp_env
+    with_env(setup[:env]) do
+      _out, err = invoke("dispatch", "demo", "A", "--as-job", "--host", "http://example.com", "--token", "tok")
+      refute_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+      assert_match(/backend-url/i, err)
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_dispatch_cli_as_job_rejects_combination_with_detach
+    setup = temp_env
+    with_env(setup[:env]) do
+      _out, err = invoke("dispatch", "demo", "A", "--as-job",
+                         "--host", "http://example.com", "--token", "tok",
+                         "--backend-url", "https://backend.example.com", "--detach")
+      refute_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+      assert_match(/as-job/i, err)
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Raw TCP stub mirroring architect_jobs_cli_test.rb's start_stub, extended to drain
+  # a Content-Length body so a real POST /jobs JSON body can be captured and asserted.
+  def start_json_post_stub(status:, body:)
+    tcp_server = TCPServer.new("127.0.0.1", 0)
+    port = tcp_server.addr[1]
+    captured = {}
+
+    server_thread = Thread.new do
+      client = tcp_server.accept
+      request_line = client.gets
+      method, path, = request_line.split(" ")
+      headers = {}
+      while (line = client.gets) && !line.chomp.empty?
+        key, value = line.chomp.split(": ", 2)
+        headers[key.downcase] = value
+      end
+      request_body = (len = headers["content-length"]&.to_i) && len > 0 ? client.read(len) : ""
+      captured.merge!(method: method, path: path, headers: headers, body: request_body)
+
+      payload = JSON.generate(body)
+      client.write("HTTP/1.1 #{status} X\r\ncontent-type: application/json\r\ncontent-length: #{payload.bytesize}\r\nconnection: close\r\n\r\n#{payload}")
+    rescue
+      # ignore connection errors
+    ensure
+      client&.close
+      tcp_server.close
+    end
+
+    [port, captured, server_thread]
+  end
+
+  # AC2: `--as-job` composes the full job spec (prompt/workspace/environment/harness/
+  # provenance) and POSTs it to /jobs with Bearer auth, printing the job id + watch hint.
+  def test_dispatch_cli_as_job_composes_and_posts_spec
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        # realpath: macOS's /var → /private/var symlink means the ArchitectProject
+        # (Pathname built from the store's resolved cwd) reports /private/var paths
+        # even though space_path itself is the pre-resolved /var form.
+        real_space_path = File.realpath(space_path.to_s)
+        build_dir = File.join(real_space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "as-job prompt\n")
+
+        port, captured, server_thread = start_json_post_stub(status: 201, body: { id: 55, status: "pending" })
+
+        out, err = invoke("dispatch", "demo", "A", "--as-job",
+                          "--host", "http://127.0.0.1:#{port}",
+                          "--token", "secret-token",
+                          "--backend-url", "https://backend.example.com")
+
+        server_thread.join(5)
+
+        assert_empty err
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/Job:\s+55/, out)
+        assert_match(%r{architect jobs watch 55 --host http://127\.0\.0\.1:#{port} --token secret-token}, out)
+
+        assert_equal "POST",  captured[:method]
+        assert_equal "/jobs", captured[:path]
+        assert_equal "Bearer secret-token", captured[:headers]["authorization"]
+
+        posted = JSON.parse(captured[:body])
+        assert_equal "as-job prompt\n", posted["prompt"]
+        assert_equal File.join(real_space_path, "build", "I01-demo-A", "wt"), posted["workspace"]["dir"]
+        assert_equal ["git"], posted["environment"]["deps"]
+        assert_equal true,    posted["environment"]["permissions"]["network"]
+        mounts = posted["environment"]["permissions"]["mounts"]
+        assert_includes mounts, "#{build_dir}:#{build_dir}"
+        repo_dir = File.join(real_space_path, "repos", "my-repo")
+        assert_includes mounts, "#{repo_dir}:#{repo_dir}"
+        assert_equal "unused-for-keyless-backends", posted["environment"]["env"]["ANTHROPIC_API_KEY"]
+        assert_equal "claude", posted["harness"]["type"]
+        assert_equal "https://backend.example.com", posted["harness"]["backend"]["base_url"]
+        refute posted["harness"].key?("model"), "model must be omitted when --job-model is not given"
+        refute_includes posted["harness"]["args"], "-p"
+        refute_includes posted["harness"]["args"], "--model"
+        assert_equal({ "space" => "test-space", "iteration" => "demo", "lane" => "A" }, posted["provenance"])
+
+        yaml = YAML.load_file(File.join(space_path.to_s, "space.yaml"))
+        lane = yaml.dig("project", "iterations", 0, "lanes", 0)
+        assert_equal 55, lane["job_id"]
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Without --as-job, dispatch's local streaming path is unaffected — the new options
+  # are simply absent from the call, exercising the existing byte-identical branch.
+  def test_dispatch_cli_without_as_job_flag_runs_local_path_unchanged
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake = File.join(setup[:root], "fake_claude_no_job")
+    File.write(fake, <<~RUBY)
+      #!/usr/bin/env ruby
+      $stdout.puts "argv=" + ARGV.inspect
+      $stdout.flush
+      exit 0
+    RUBY
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "local prompt\n")
+
+        out, err = invoke("dispatch", "demo", "A")
+
+        assert_empty err
+        assert_match(/Builder exited with status 0/, out)
+        assert_path_exists File.join(build_dir, "run.jsonl")
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   # ── gate: PASS/FAIL rendering and exit-code signalling ────────────────────
 
   def test_gate_command_reports_pass_and_exits_zero

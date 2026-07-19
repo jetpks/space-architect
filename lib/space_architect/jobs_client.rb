@@ -29,6 +29,23 @@ module Space::Architect
       get_json("/jobs/#{id}")
     end
 
+    # POST /jobs — submits a job spec (harness/prompt/environment) and returns the
+    # created job's integer id. Raises Space::Core::Error on any failure, modeled on
+    # RunCreator#create (same 20x-status + integer-id checks).
+    def create(spec)
+      Sync do
+        with_client do |c|
+          response = c.post("/jobs", headers: headers, body: JSON.generate(spec))
+          parsed   = parse_json(response, "POST /jobs", expected_status: 201)
+          id       = parsed["id"]
+          raise Space::Core::Error, "POST /jobs: missing or non-integer id in response: #{parsed.inspect[0, 200]}" \
+            unless id.is_a?(Integer)
+
+          id
+        end
+      end
+    end
+
     # POST /jobs/:id/cancel — returns {"id"=>.., "status"=>"canceled"}.
     def cancel(id)
       Sync do
@@ -94,10 +111,10 @@ module Space::Architect
       ]
     end
 
-    def parse_json(response, what)
+    def parse_json(response, what, expected_status: 200)
       status = response.status
       body   = response.read || ""
-      raise Space::Core::Error, "#{what} failed (#{status}): #{body[0, 200]}" unless status == 200
+      raise Space::Core::Error, "#{what} failed (#{status}): #{body[0, 200]}" unless status == expected_status
 
       JSON.parse(body)
     end

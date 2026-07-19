@@ -173,7 +173,62 @@ class JobsClientTest < Space::ArchitectTest
     end
   end
 
-  # (i) wait_for_run_id polls show until run_id is present, using the
+  # (i-a) POST /jobs with Bearer auth + a JSON body returns the created job's id.
+  def test_create_posts_job_spec_with_auth_and_returns_id
+    Sync do
+      spec = { "prompt" => "do the thing", "harness" => { "type" => "claude" } }
+      client, server_task = mock_client do |request|
+        assert_equal "POST",                request.method
+        assert_equal "/jobs",               request.path
+        assert_equal "Bearer secret-token", request.headers["authorization"]
+        body = JSON.parse(request.body.read)
+        assert_equal spec, body
+        Protocol::HTTP::Response[201, [["content-type", "application/json"]],
+                                 [JSON.generate({ id: 7, status: "pending" })]]
+      end
+
+      id = Space::Architect::JobsClient.new("http://localhost", "secret-token", client: client).create(spec)
+
+      assert_equal 7, id
+
+      client.close
+      server_task.stop
+    end
+  end
+
+  # (i-b) Non-201 response raises Space::Core::Error.
+  def test_create_raises_on_non_201_response
+    Sync do
+      client, server_task = mock_client do |_request|
+        Protocol::HTTP::Response[422, [["content-type", "application/json"]],
+                                 [JSON.generate({ error: "invalid mount(s)" })]]
+      end
+
+      creator = Space::Architect::JobsClient.new("http://localhost", "tok", client: client)
+      assert_raises(Space::Core::Error) { creator.create({}) }
+
+      client.close
+      server_task.stop
+    end
+  end
+
+  # (i-c) 201 with a missing/non-integer id raises Space::Core::Error.
+  def test_create_raises_on_non_integer_id_in_201_body
+    Sync do
+      client, server_task = mock_client do |_request|
+        Protocol::HTTP::Response[201, [["content-type", "application/json"]],
+                                 [JSON.generate({ id: "not-an-int" })]]
+      end
+
+      creator = Space::Architect::JobsClient.new("http://localhost", "tok", client: client)
+      assert_raises(Space::Core::Error) { creator.create({}) }
+
+      client.close
+      server_task.stop
+    end
+  end
+
+  # (j) wait_for_run_id polls show until run_id is present, using the
   # injected (near-zero) interval so the test doesn't sleep real seconds.
   def test_wait_for_run_id_polls_until_present
     Sync do
@@ -196,7 +251,7 @@ class JobsClientTest < Space::ArchitectTest
     end
   end
 
-  # (j) wait_for_run_id raises Space::Core::Error once the poll bound (attempts)
+  # (k) wait_for_run_id raises Space::Core::Error once the poll bound (attempts)
   # is exceeded without a run_id ever appearing.
   def test_wait_for_run_id_raises_after_bound_exceeded
     Sync do
