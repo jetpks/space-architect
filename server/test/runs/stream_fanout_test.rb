@@ -212,4 +212,97 @@ class StreamFanoutTest < Minitest::Test
       end
     end
   end
+
+  # Production passes ONE shared Async::Redis::Client instance to every StreamFanout
+  # (config/providers/redis.rb registers a singleton; actions/runs/stream.rb injects it
+  # into every StreamFanout.for call). `with_two_redis_clients` above gives each fanout
+  # its own dedicated client/pool, which never reproduces pool-sharing defects. These two
+  # tests instead share ONE client across multiple fanouts, like production does.
+  def with_shared_redis_client
+    Sync do
+      shared_redis = Async::Redis::Client.new(redis_endpoint)
+      test_redis   = Async::Redis::Client.new(redis_endpoint)
+      begin
+        yield shared_redis, test_redis
+      ensure
+        shared_redis.close
+        test_redis.close
+      end
+    end
+  end
+
+  # AC2(a): a subscriber established before an XADD receives that entry, riding the same
+  # shared client production uses (previously only exercised via dedicated per-fanout
+  # clients above, or via catch-up/resume paths in runs_test.rb).
+  def test_subscriber_established_before_xadd_receives_entry_on_shared_client
+    run = Factory[:run, user_id: @user.id, status: 0]
+    key = Space::Server::Runs::StreamKey.for(run.id)
+
+    with_shared_redis_client do |shared_redis, test_redis|
+      test_redis.del(key)
+      fanout = Space::Server::Runs::StreamFanout.for(run.id, shared_redis)
+      queue = fanout.subscribe
+
+      Async do
+        sleep XREAD_SETTLE_SECONDS
+        test_redis.xadd(key, "*", "type", "text_delta", "data", '{"text":"hi"}')
+      end
+
+      item = queue.pop(timeout: 5)
+      refute_nil item, "Expected queue to receive an entry within 5s (subscriber established before XADD)"
+    ensure
+      fanout&.unsubscribe(queue) if queue
+      Space::Server::Runs::StreamFanout.stop(run.id)
+    end
+  end
+
+  # AC2(b): after a prior subscriber's fanout loop is stopped mid-XREAD BLOCK (the
+  # disconnect path — subscribe, let the loop block with nothing ever written, then
+  # unsubscribe before any entry arrives), a NEW fanout for a DIFFERENT run, riding the
+  # SAME shared client, must still receive its own XADD promptly.
+  #
+  # Pre-fix: StreamFanout#start runs its XREAD BLOCK loop on the shared `@redis`. Stopping
+  # the task mid-`read_response` unwinds through async-pool's `acquire { }` block, which
+  # `release`s the connection back into the shared pool looking healthy — but Redis still
+  # owes it a response for the abandoned blocking XREAD. The next fanout's `acquire` draws
+  # that same connection and its own XREAD queues forever behind a block that never
+  # returns (see stream_fanout.rb's `start` and the CLIENT LIST `qbuf` smoking gun this
+  # iteration's grounds describe).
+  def test_poisoned_connection_does_not_starve_a_different_runs_fanout
+    poisoned_run = Factory[:run, user_id: @user.id, status: 0]
+    fresh_run    = Factory[:run, user_id: @user.id, status: 0]
+    poisoned_key = Space::Server::Runs::StreamKey.for(poisoned_run.id)
+    fresh_key    = Space::Server::Runs::StreamKey.for(fresh_run.id)
+
+    with_shared_redis_client do |shared_redis, test_redis|
+      test_redis.del(poisoned_key)
+      test_redis.del(fresh_key)
+
+      # Poison: subscribe with nothing ever written, let the XREAD BLOCK register with
+      # Redis, then abandon it mid-block — simulates a client disconnecting before any
+      # data arrives (the exact path StreamFanout#unsubscribe/#stop takes on every SSE
+      # client disconnect).
+      poisoned_fanout = Space::Server::Runs::StreamFanout.for(poisoned_run.id, shared_redis)
+      poisoned_queue = poisoned_fanout.subscribe
+      sleep XREAD_SETTLE_SECONDS
+      poisoned_fanout.unsubscribe(poisoned_queue)
+      Async::Task.current.yield
+
+      # A different run's fanout, riding the same shared client, must still work.
+      fresh_fanout = Space::Server::Runs::StreamFanout.for(fresh_run.id, shared_redis)
+      fresh_queue = fresh_fanout.subscribe
+
+      Async do
+        sleep XREAD_SETTLE_SECONDS
+        test_redis.xadd(fresh_key, "*", "type", "text_delta", "data", '{"text":"fresh"}')
+      end
+
+      item = fresh_queue.pop(timeout: 5)
+      refute_nil item, "A new run's fanout must not be starved by a prior poisoned shared-pool connection"
+    ensure
+      fresh_fanout&.unsubscribe(fresh_queue) if fresh_queue
+      Space::Server::Runs::StreamFanout.stop(poisoned_run.id)
+      Space::Server::Runs::StreamFanout.stop(fresh_run.id)
+    end
+  end
 end
