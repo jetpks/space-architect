@@ -56,19 +56,21 @@ class ExecutorTest < Minitest::Test
   # --- fakes (the executor's designed injection seams) ---
 
   class FakeSpawner
-    attr_reader :argvs, :envs
+    attr_reader :argvs, :envs, :cidfiles
 
     def initialize(*handles)
-      @handles = handles
-      @argvs   = []
-      @envs    = []
+      @handles  = handles
+      @argvs    = []
+      @envs     = []
+      @cidfiles = []
     end
 
     def calls = @argvs.length
 
-    def call(argv, env:)
+    def call(argv, env:, cidfile: nil)
       @argvs << argv
       @envs << env
+      @cidfiles << cidfile
       @handles.shift
     end
   end
@@ -267,7 +269,7 @@ class ExecutorTest < Minitest::Test
       build_executor(redis: redis, spawner: spawner).tick
 
       argv = spawner.argvs.first
-      assert_equal %w[container run --rm], argv.first(3)
+      assert_equal %w[container run --rm --cidfile], argv.first(4)
       assert_equal "none", argv[argv.index("--network") + 1]
       assert_equal "/data:/data:ro", argv[argv.index("-v") + 1]
       assert argv.index("img:abc123") < argv.index("claude"), "image tag must precede the harness command"
@@ -404,6 +406,23 @@ class ExecutorTest < Minitest::Test
       build_executor(redis: redis, spawner: spawner).tick
       assert_equal "failed", jobs_repo.by_pk(job.id).status
       assert_equal 0, spawner.calls
+    end
+  end
+
+  # The stop path acts on the container by ID (I09 P5): the same cidfile must
+  # reach both the argv (`--cidfile <path>`) and the spawner seam.
+  def test_cidfile_threads_through_argv_and_spawner
+    make_job
+    spawner = FakeSpawner.new(FakeHandle.new)
+
+    with_redis do |redis|
+      build_executor(redis: redis, spawner: spawner).tick
+
+      argv    = spawner.argvs.first
+      cidfile = spawner.cidfiles.first
+      refute_nil cidfile
+      assert_equal cidfile, argv[argv.index("--cidfile") + 1]
+      refute File.exist?(cidfile), "cidfile must be cleaned up after the run"
     end
   end
 
