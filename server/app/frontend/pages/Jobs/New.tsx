@@ -26,7 +26,7 @@ const INITIAL_DATA: FormData = {
   base_url: '',
   api_key_ref: '',
   args: [],
-  env: [],
+  env: [['ANTHROPIC_API_KEY', 'unused-for-keyless-backends']],
   secrets: [],
   deps: [],
   network: false,
@@ -118,15 +118,21 @@ export default function New() {
           error={form.errors.args}
         />
 
-        <PairField
-          label="Environment variables"
-          rows={form.data.env}
-          onChange={(env) => form.setData('env', env)}
-          keyPlaceholder="NAME"
-          valuePlaceholder="value"
-          addLabel="Add variable"
-          error={form.errors.env}
-        />
+        <div className="space-y-1">
+          <PairField
+            label="Environment variables"
+            rows={form.data.env}
+            onChange={(env) => form.setData('env', env)}
+            keyPlaceholder="NAME"
+            valuePlaceholder="value"
+            addLabel="Add variable"
+            error={form.errors.env}
+          />
+          <p className="text-sm text-muted-foreground">
+            The claude CLI refuses to start without ANTHROPIC_API_KEY set; keyless backends (the
+            gateway) ignore it.
+          </p>
+        </div>
 
         <PairField
           label="Secrets"
