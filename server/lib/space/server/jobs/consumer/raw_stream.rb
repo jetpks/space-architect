@@ -1,13 +1,15 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "../stream_key"
 
 module Space
   module Server
     module Jobs
       class Consumer
         # IO-shaped reader over an executor raw stream (wire contract: key
-        # job:<job_id>:raw, XADD fields type + data, type = out | err | exit).
+        # job:<job_id>:raw owned by Jobs::StreamKey, XADD fields type + data,
+        # type = out | err | exit).
         #
         # #gets returns the next harness stdout line (an `out` payload) and nil
         # at EOF — the terminal `exit` frame, or a quiet stream once the
@@ -22,7 +24,7 @@ module Space
 
           def initialize(redis, job_id, abandoned: -> { false })
             @redis     = redis
-            @key       = "job:#{job_id}:raw"
+            @key       = StreamKey.for(job_id)
             @abandoned = abandoned
             @last_id   = "0"
             @buffer    = []

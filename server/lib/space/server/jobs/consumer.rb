@@ -4,7 +4,6 @@ require "async"
 require_relative "../runs/ingest"
 require_relative "../runs/persistor"
 require_relative "consumer/raw_stream"
-require_relative "consumer/sourced_persistor"
 
 module Space
   module Server
@@ -71,8 +70,8 @@ module Space
           @runs_repo.update(run.id, status: 1, updated_at: Time.now) if run.pending?
 
           raw       = RawStream.new(@redis, job.id, abandoned: -> { producer_gone?(job.id) })
-          persistor = SourcedPersistor.new(Runs::Persistor.new(@conversations_repo, @messages_repo), source: SOURCE)
-          result    = Runs::Ingest.new(@redis, persistor: persistor).call(run, raw)
+          persistor = Runs::Persistor.new(@conversations_repo, @messages_repo)
+          result    = Runs::Ingest.new(@redis, persistor: persistor, source: SOURCE).call(run, raw)
           exit_code = raw.drain_to_exit
 
           final = result[:status] == :complete && exit_code == 0 ? 2 : 3

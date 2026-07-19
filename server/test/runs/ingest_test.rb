@@ -164,6 +164,28 @@ class IngestTest < Minitest::Test
     end
   end
 
+  def test_ingest_with_source_passes_it_through_to_the_conversation
+    run = Factory[:run, user_id: @user.id, status: 0]
+    with_redis do |redis|
+      conversations_repo = Space::Server::App["repos.conversations_repo"]
+      messages_repo      = Space::Server::App["repos.messages_repo"]
+      persistor = Space::Server::Runs::Persistor.new(conversations_repo, messages_repo)
+      Space::Server::Runs::Ingest.new(redis, persistor: persistor, source: "job").call(run, StringIO.new(FIXTURE))
+      assert_equal "job", conversations_repo.by_pk(persistor.conversation_id).source
+    end
+  end
+
+  def test_ingest_without_source_keeps_persistor_default
+    run = Factory[:run, user_id: @user.id, status: 0]
+    with_redis do |redis|
+      conversations_repo = Space::Server::App["repos.conversations_repo"]
+      messages_repo      = Space::Server::App["repos.messages_repo"]
+      persistor = Space::Server::Runs::Persistor.new(conversations_repo, messages_repo)
+      Space::Server::Runs::Ingest.new(redis, persistor: persistor).call(run, StringIO.new(FIXTURE))
+      assert_equal "architect_dispatch", conversations_repo.by_pk(persistor.conversation_id).source
+    end
+  end
+
   def test_ingest_without_persistor_still_works
     run = Factory[:run, user_id: @user.id, status: 0]
     with_redis do |redis|

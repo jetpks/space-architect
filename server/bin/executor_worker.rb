@@ -12,12 +12,16 @@
 
 require "hanami/boot"
 require "async"
+require "open3"
 
 executor = Space::Server::Jobs::Executor.new(
   jobs_repo: Space::Server::App["repos.jobs_repo"],
   runs_repo: Space::Server::App["repos.runs_repo"],
   redis:     Space::Server::App["redis"],
-  env_image: Space::Server::Jobs::EnvImage.new
+  env_image: Space::Server::Jobs::EnvImage.new(
+    spawn:      Open3.method(:capture2e),
+    base_image: ENV.fetch("JOB_ENV_BASE_IMAGE", Space::Server::Jobs::EnvImage::DEFAULT_BASE_IMAGE)
+  )
 )
 
 Console.logger.info(self, "Executor worker starting (poll interval=#{Space::Server::Jobs::Executor::DEFAULT_INTERVAL}s)")
