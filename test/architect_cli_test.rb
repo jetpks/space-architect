@@ -640,11 +640,24 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  def test_dispatch_cli_harness_pi_with_no_model_raises
+  # AC6: dispatch --harness pi with no --model no longer raises — it resolves to
+  # pi's per-harness sensible default.
+  def test_dispatch_cli_harness_pi_with_no_model_resolves_to_default
     setup = temp_env
     env = setup.fetch(:env)
 
-    with_env(env) do
+    fake_pi = File.join(setup[:root], "fake_pi")
+    File.write(fake_pi, <<~RUBY)
+      #!/usr/bin/env ruby
+      require "json"
+      $stdout.puts JSON.generate({type: "session", version: 3, id: "fake-session", cwd: Dir.pwd})
+      $stdout.puts "argv=" + ARGV.inspect
+      $stdin.gets
+      exit 0
+    RUBY
+    File.chmod(0o755, fake_pi)
+
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake_pi)) do
       invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
@@ -658,10 +671,12 @@ class ArchitectCLITest < Space::ArchitectTest
         FileUtils.mkdir_p(build_dir)
         File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
 
-        _out, err = invoke("dispatch", "demo", "A", "--harness", "pi")
+        out, err = invoke("dispatch", "demo", "A", "--harness", "pi")
 
-        refute_empty err
-        assert_match(/--harness pi/, err)
+        assert_empty err
+        assert_match(/Builder exited with status 0/, out)
+        log = File.read(File.join(build_dir, "run.jsonl"))
+        assert_includes log, "qwen3-27b-optiq"
       end
     end
   ensure
@@ -1122,6 +1137,49 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # I12 AC5 (status-wrong-harness-model regression): after a dispatch with a
+  # harness/model override, `architect status` shows the OVERRIDDEN values, not
+  # the worktree_add-time values.
+  def test_status_shows_dispatch_stamped_harness_and_model
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake_pi = File.join(setup[:root], "fake_pi")
+    File.write(fake_pi, <<~RUBY)
+      #!/usr/bin/env ruby
+      require "json"
+      $stdout.puts JSON.generate({type: "session", version: 3, id: "fake-session", cwd: Dir.pwd})
+      $stdin.gets
+      exit 0
+    RUBY
+    File.chmod(0o755, fake_pi)
+
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake_pi)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        invoke("dispatch", "demo", "A", "--harness", "pi", "--model", "qwen3-27b-optiq")
+
+        out, err = invoke("status")
+        assert_empty err
+        assert_includes out, "·pi·qwen3-27b-optiq"
+        refute_includes out, "·claude-code·claude-sonnet-5"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   # AC6 control: worktree add without effort → CLI passes effort: nil → no effort key in yaml
   def test_worktree_add_cli_without_effort_produces_no_effort_key
     setup = temp_env
@@ -1203,11 +1261,11 @@ class ArchitectCLITest < Space::ArchitectTest
         v01_line = out.lines.find { |l| l.include?("v01") && l.include?("discarded") }
         refute_nil v01_line, "expected a table row for v01 with discarded status"
 
-        # nil-model lane's Model cell reads (default)
-        assert_includes v01_line, "(default)"
+        # claude-code lane with no --model resolves to the per-harness sensible default
+        assert_includes v01_line, "claude-sonnet-5"
 
         # lane with no effort renders - in the Effort cell (between Model and Status)
-        assert_match(/\(default\)\s+-\s+discarded/, v01_line)
+        assert_match(/claude-sonnet-5\s+-\s+discarded/, v01_line)
 
         # exit code 0
         assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code

@@ -76,7 +76,7 @@ class DispatcherTest < Space::ArchitectTest
 
     assert File.exist?(File.join(build_dir, "run.jsonl")), "run.jsonl must exist"
     refute log.strip.empty?, "run.jsonl must be non-empty"
-    assert_includes log, "claude-sonnet-4-6"
+    assert_includes log, "claude-sonnet-5"
     assert_includes log, "stream-json"
     assert_includes log, "acceptEdits"
     assert_includes log, "Bash(git commit"
@@ -248,14 +248,56 @@ class DispatcherTest < Space::ArchitectTest
     FileUtils.rm_rf(root)
   end
 
-  def test_footgun_guard_raises_when_pi_dispatch_uses_default_model
+  # AC6: pi dispatch with no --model no longer raises — the lane's stored (claude-code)
+  # model is dropped on a harness override, and the per-harness default is used instead.
+  def test_pi_dispatch_with_no_model_resolves_to_per_harness_default
     root = Dir.mktmpdir("dispatcher-pi-guard-test")
-    _space_dir, project, _fake, _build_dir = setup_space_with_worktree(root)
+    fake_pi = File.join(root, "fake_pi")
+    File.write(fake_pi, FAKE_PI_SCRIPT)
+    File.chmod(0o755, fake_pi)
 
-    err = assert_raises(Space::Core::Error) do
-      project.dispatch("demo", "A", harness: "pi")
+    _space_dir, project, _fake, build_dir = setup_space_with_worktree(root)
+
+    res = nil
+    with_env("ARCHITECT_PI_BIN" => fake_pi) do
+      res = project.dispatch("demo", "A", harness: "pi")
     end
-    assert_match(/--harness pi/, err.message)
+    log = File.read(File.join(build_dir, "run.jsonl"))
+
+    assert_equal 0, res[:exit_code]
+    assert_includes log, "qwen3-27b-optiq"
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  # I12 AC3/AC4: dispatch --harness pi --model <x> on a lane whose stored harness/model
+  # differ resolves to <x>/pi for the run and stamps those resolved values (plus
+  # dispatched_at) back onto the lane entry.
+  def test_dispatch_with_harness_and_model_override_stamps_lane_entry
+    root = Dir.mktmpdir("dispatcher-stamp-test")
+    fake_pi = File.join(root, "fake_pi")
+    File.write(fake_pi, FAKE_PI_SCRIPT)
+    File.chmod(0o755, fake_pi)
+
+    space_dir, project, _fake, build_dir = setup_space_with_worktree(root)
+
+    before_yml = YAML.safe_load(File.read(File.join(space_dir, "space.yaml")), aliases: false)
+    lane_before = before_yml.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal "claude-code",     lane_before["harness"]
+    assert_equal "claude-sonnet-5", lane_before["model"]
+    assert_nil lane_before["dispatched_at"]
+
+    with_env("ARCHITECT_PI_BIN" => fake_pi) do
+      project.dispatch("demo", "A", harness: "pi", model: "qwen3-27b-optiq")
+    end
+    log = File.read(File.join(build_dir, "run.jsonl"))
+    assert_includes log, "qwen3-27b-optiq"
+
+    after_yml = YAML.safe_load(File.read(File.join(space_dir, "space.yaml")), aliases: false)
+    lane_after = after_yml.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal "pi",              lane_after["harness"]
+    assert_equal "qwen3-27b-optiq", lane_after["model"]
+    refute_nil lane_after["dispatched_at"]
   ensure
     FileUtils.rm_rf(root)
   end
