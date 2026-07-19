@@ -341,7 +341,7 @@ module Space::Architect
         desc "Write a section of the iteration file and commit it (one call)"
         phase 11, "Spec"
         argument :iteration, required: true,  desc: "Iteration name"
-        argument :section,   required: true,  desc: "Section: grounds, specification, prompt, verdict"
+        argument :section,   required: true,  desc: "Section: grounds, specification, acceptance-criteria, prompt, verdict"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :from,   default: nil, desc: "Read the section body from this file"
         option   :body,   default: nil, desc: "Inline section body (one-liners)"

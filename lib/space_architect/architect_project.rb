@@ -20,13 +20,13 @@ module Space::Architect
     FROZEN_BOUNDARY = /^## Builder Prompt/
 
     # Sections the architect writes (and the CLI commits) via `architect section`.
-    # Acceptance Criteria is intentionally absent — it is set by `architect freeze`,
-    # the one code path that creates the freeze commit. Builder Report has its own
-    # command (`architect evidence`) because it is transcribed verbatim from scratch.
+    # Builder Report has its own command (`architect evidence`) because it is
+    # transcribed verbatim from scratch.
     # `frozen: true` sections live above the freeze boundary and are refused once frozen.
     SECTIONS = {
       "grounds" => { heading: "## Grounds", message: "grounds", prefix: "grounds", frozen: true },
       "specification" => { heading: "## Specification", message: "specification", prefix: "spec", frozen: true },
+      "acceptance-criteria" => { heading: "## Acceptance Criteria", message: "acceptance criteria", prefix: "ac", frozen: true },
       "prompt" => { heading: "## Builder Prompt", message: "dispatched", prefix: "prompt", frozen: false },
       "verdict" => { heading: "## Verdict", message: "verdict", prefix: "verdict", frozen: false }
     }.freeze
@@ -208,6 +208,9 @@ module Space::Architect
         b
       end
 
+      git_run("-C", space.path.to_s, "commit", "-m",
+        compose_message("I#{nn} freeze:", "I#{nn}: record freeze sha", message), "--", Space::Core::Space::METADATA_FILE)
+
       sha
     end
 
@@ -232,14 +235,14 @@ module Space::Architect
 
     # Write one section of the iteration file and commit it with the canonical
     # per-section message, in one call. Refuses to write a frozen section
-    # (Grounds/Specification) once the iteration is frozen. Acceptance Criteria is
-    # NOT writable here (use freeze); Builder Report is not here (use evidence).
+    # (Grounds/Specification/Acceptance Criteria) once the iteration is frozen.
+    # Builder Report is not here (use evidence).
     def write_section!(iteration, section, body:, append: false, lane: nil, message: nil)
       spec = SECTIONS[section]
       unless spec
         raise Space::Core::Error,
           "Unknown section '#{section}' — one of: #{SECTIONS.keys.join(', ')}. " \
-          "(Acceptance Criteria is set by `architect freeze`; Builder Report by `architect evidence`.)"
+          "(Builder Report is written by `architect evidence`.)"
       end
 
       entry = slice_entry(iteration)
@@ -254,7 +257,9 @@ module Space::Architect
       end
 
       block = lane ? "### #{lane}\n\n#{body.strip}" : body.strip
-      path.write(replace_section_body(path.read, spec[:heading], block, append: append))
+      new_text = replace_section_body(path.read, spec[:heading], block, append: append)
+      lint_gates!(new_text) if section == "acceptance-criteria"
+      path.write(new_text)
 
       nn = format("%02d", entry["ordinal"] || 0)
       _o, _e, cst = git_capture("-C", space.path.to_s, "commit", "-m",
