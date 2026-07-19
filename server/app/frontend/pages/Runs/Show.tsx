@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Head } from '@inertiajs/react'
 import AppLayout from '@/layouts/AppLayout'
 import Message from '@/components/Message'
@@ -26,7 +26,21 @@ function toLegacyMessage(msg: LiveMessage, index: number): MessageType {
 export default function Show({ run }: Props) {
   const [state, setState] = useState(initialState)
 
-  useEffect(() => {
+  // Tracks the live SSE connection across reconnects (mount + refocus) so a
+  // re-sync can always tear down whatever is currently open before starting
+  // the next one — never two subscriptions alive at once.
+  const esRef = useRef<EventSource | null>(null)
+  // Mirrors `state` for the visibilitychange handler below, which closes over
+  // a stale `state` otherwise (it's registered once, not on every state change).
+  const stateRef = useRef(state)
+  stateRef.current = state
+
+  const connect = useCallback(() => {
+    esRef.current?.close()
+    // Fresh run state: a reconnect replays the run from the top (Redis backlog
+    // or db_replay), so stale accumulated messages must not linger underneath it.
+    setState(initialState)
+
     let done = false
     const es = new EventSource(`/runs/${run.id}/stream`)
 
@@ -48,11 +62,28 @@ export default function Show({ run }: Props) {
       if (done) es.close()
     }
 
-    return () => {
-      done = true
-      es.close()
-    }
+    esRef.current = es
   }, [run.id])
+
+  useEffect(() => {
+    connect()
+    return () => esRef.current?.close()
+  }, [connect])
+
+  // A backgrounded tab's EventSource can die silently, leaving stale painted
+  // "live" state with no subscription and no recovery short of a manual
+  // reload. On refocus, re-sync automatically — unless the run already
+  // finished, in which case there's nothing left to stream.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return
+      if (stateRef.current.status === 'complete') return
+      connect()
+    }
+
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [connect])
 
   const messages = mergedMessages(state)
 

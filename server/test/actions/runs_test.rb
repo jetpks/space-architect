@@ -449,4 +449,60 @@ class RunsActionTest < Minitest::Test
       Space::Server::Runs::StreamFanout.stop(run.id)
     end
   end
+
+  # AC2 seam test: db_replay must not emit ids that alias real stream positions.
+  # Seeds one real Redis entry with no run_complete marker (a partial tail), so
+  # the response streams it via XRANGE (a real id) then falls through to
+  # db_replay for the rest. The client's Last-Event-ID after consuming this
+  # response is therefore the real entry's id — db_replay emits no id: fields
+  # of its own, so it never advances past it. Reconnecting with that id must
+  # not re-deliver the real Redis entry (the alternation loop this iteration
+  # fixes: a fabricated db_replay id like "0-1" sorts below every real,
+  # timestamp-based stream id, so `XRANGE ((0-1` against the real stream
+  # replays it in full).
+  def test_stream_db_replay_omits_ids_so_reconnect_does_not_replay_redis_stream
+    sign_in(@owner)
+    conversations_repo = Space::Server::App["repos.conversations_repo"]
+    messages_repo      = Space::Server::App["repos.messages_repo"]
+
+    conv = conversations_repo.create(
+      user_id: @owner.id, status: 0, published: false,
+      created_at: Time.now, updated_at: Time.now
+    )
+    messages_repo.create(
+      conversation_id: conv.id, role: "assistant",
+      content: [{ "type" => "text", "text" => "hello from db" }],
+      position: 0, published: false,
+      created_at: Time.now, updated_at: Time.now
+    )
+
+    run = Factory[:run, user_id: @owner.id, status: 2, conversation_id: conv.id]
+
+    Sync do
+      redis_client = Async::Redis::Client.new(redis_endpoint)
+      key = Space::Server::Runs::StreamKey.for(run.id)
+      redis_client.del(key)
+      real_id = redis_client.xadd(key, "*", "type", "text_delta", "data", '{"seq":"real-tail"}')
+
+      _, _, body = get_stream("/runs/#{run.id}/stream")
+      chunks = collect_sse_chunks(body, timeout: 5)
+      text = chunks.join
+
+      id_lines = text.lines.select { |l| l.start_with?("id:") }
+      assert_equal 1, id_lines.size, "only the real Redis entry may carry an id: field"
+      assert_includes id_lines.first, real_id
+
+      # Reconnect with the client's post-db_replay Last-Event-ID — must not
+      # receive a duplicate full replay of the real Redis entry.
+      _, _, body2 = get_stream("/runs/#{run.id}/stream", extra_env: { "HTTP_LAST_EVENT_ID" => real_id })
+      chunks2 = collect_sse_chunks(body2, timeout: 5)
+      text2 = chunks2.join
+
+      refute_match(/seq.*real-tail/, text2)
+      assert_match "hello from db", text2
+    ensure
+      redis_client&.close
+      Space::Server::Runs::StreamFanout.stop(run.id)
+    end
+  end
 end
