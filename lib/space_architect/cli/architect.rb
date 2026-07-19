@@ -324,49 +324,81 @@ module Space::Architect
         option   :push_url,   default: nil,   desc: "HTTP endpoint for streaming push (POST body to this URL)"
         option   :push_token, default: nil,   desc: "Bearer token for push endpoint authorization"
         option   :push_host,  default: nil,   desc: "Base URL of the ingest server; the CLI creates a run via POST <host>/runs and streams to /runs/<id>/ingest (requires --push-token)"
+        option   :as_job,     type: :boolean, default: false, desc: "Submit the run as a job to the space-server's queue instead of running locally (sandboxed executor; requires --host/--token/--backend-url)"
+        option   :host,        default: nil, desc: "Base URL of the space-server (required with --as-job)"
+        option   :token,       default: nil, desc: "Bearer token for authorization (required with --as-job)"
+        option   :backend_url, default: nil, desc: "Base URL of the harness backend the sandboxed job talks to (required with --as-job)"
+        option   :job_model,   default: nil, desc: "Model pinned for the sandboxed job's harness — distinct from --model, which is meaningless against a non-Anthropic backend"
+        option   :api_key_ref, default: nil, desc: "op:// reference resolved into ANTHROPIC_API_KEY server-side (--as-job only; omit for keyless backends)"
 
         def call(iteration:, lane:, space: nil, prompt: nil, model: nil,
                  max_turns: "200", harness: nil, effort: nil, thinking: nil, reasoning: nil,
                  force_effort: nil, force_thinking: nil, force_reasoning: nil, quiet: false, detach: false,
-                 timeout: "14400", push_url: nil, push_token: nil, push_host: nil, **opts)
+                 timeout: "14400", push_url: nil, push_token: nil, push_host: nil,
+                 as_job: false, host: nil, token: nil, backend_url: nil, job_model: nil, api_key_ref: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             level = resolve_thinking_alias(effort: effort, thinking: thinking, reasoning: reasoning)
             forced_level = resolve_force_thinking_alias(force_effort: force_effort,
               force_thinking: force_thinking, force_reasoning: force_reasoning)
 
+            if as_job
+              Jobs.require_credentials!(host, token)
+              raise Space::Core::Error, "--backend-url is required with --as-job" unless backend_url
+              raise Space::Core::Error, "--as-job cannot be combined with --push-url/--push-token/--push-host/--detach" \
+                if push_url || push_token || push_host || detach
+            end
+
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              kwargs = { max_turns: max_turns.to_i, detach: detach }
-              kwargs[:prompt]     = prompt          if prompt
-              kwargs[:model]      = model           if model
-              kwargs[:harness]    = harness         if harness
-              kwargs[:effort]     = forced_level || level if forced_level || level
-              kwargs[:force]      = true            if forced_level
-              kwargs[:quiet]      = true             if quiet
-              kwargs[:timeout]    = timeout.to_i    unless detach
-              kwargs[:push_url]   = push_url        if push_url
-              kwargs[:push_token] = push_token      if push_token
-              kwargs[:push_host]  = push_host       if push_host
-              res = project.dispatch(iteration, lane, **kwargs)
-              terminal.say "Prompt:  #{prompt} → #{terminal.path(res[:prompt_copied])}" if res[:prompt_copied]
-              if detach
-                terminal.say "PID:     #{res[:pid]}"
-                terminal.say "Run log: #{terminal.path(res[:run_log])}"
-                terminal.say "Report:  #{terminal.path(res[:report])}"
-                terminal.say "Dispatched detached — poll #{terminal.path(res[:report])} for completion"
+
+              if as_job
+                kwargs = { host: host, token: token, backend_url: backend_url, max_turns: max_turns.to_i }
+                kwargs[:prompt]      = prompt          if prompt
+                kwargs[:model]       = model           if model
+                kwargs[:harness]     = harness         if harness
+                kwargs[:effort]      = forced_level || level if forced_level || level
+                kwargs[:force]       = true            if forced_level
+                kwargs[:quiet]       = true             if quiet
+                kwargs[:job_model]   = job_model       if job_model
+                kwargs[:api_key_ref] = api_key_ref     if api_key_ref
+                res = project.dispatch_as_job(iteration, lane, **kwargs)
+                terminal.say "Prompt:  #{prompt} → #{terminal.path(res[:prompt_copied])}" if res[:prompt_copied]
+                terminal.say "Job:     #{res[:job_id]}"
+                terminal.say "Watch:   architect jobs watch #{res[:job_id]} --host #{host} --token #{token}"
                 CLI.record_outcome(Outcome.new(exit_code: 0))
-              elsif res[:timed_out]
-                terminal.say "Run log: #{terminal.path(res[:run_log])}"
-                terminal.say "Report:  #{terminal.path(res[:report])}"
-                terminal.say "Builder TIMED OUT after #{timeout}s — process group killed. Re-dispatch (lanes are cheap)."
-                CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
               else
-                terminal.say "Run log: #{terminal.path(res[:run_log])}"
-                terminal.say "Report:  #{terminal.path(res[:report])}"
-                terminal.say "Ingest URL:  #{res[:push_url]}" if res[:push_url]
-                terminal.say "Builder exited with status #{res[:exit_code]}"
-                CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
+                kwargs = { max_turns: max_turns.to_i, detach: detach }
+                kwargs[:prompt]     = prompt          if prompt
+                kwargs[:model]      = model           if model
+                kwargs[:harness]    = harness         if harness
+                kwargs[:effort]     = forced_level || level if forced_level || level
+                kwargs[:force]      = true            if forced_level
+                kwargs[:quiet]      = true             if quiet
+                kwargs[:timeout]    = timeout.to_i    unless detach
+                kwargs[:push_url]   = push_url        if push_url
+                kwargs[:push_token] = push_token      if push_token
+                kwargs[:push_host]  = push_host       if push_host
+                res = project.dispatch(iteration, lane, **kwargs)
+                terminal.say "Prompt:  #{prompt} → #{terminal.path(res[:prompt_copied])}" if res[:prompt_copied]
+                if detach
+                  terminal.say "PID:     #{res[:pid]}"
+                  terminal.say "Run log: #{terminal.path(res[:run_log])}"
+                  terminal.say "Report:  #{terminal.path(res[:report])}"
+                  terminal.say "Dispatched detached — poll #{terminal.path(res[:report])} for completion"
+                  CLI.record_outcome(Outcome.new(exit_code: 0))
+                elsif res[:timed_out]
+                  terminal.say "Run log: #{terminal.path(res[:run_log])}"
+                  terminal.say "Report:  #{terminal.path(res[:report])}"
+                  terminal.say "Builder TIMED OUT after #{timeout}s — process group killed. Re-dispatch (lanes are cheap)."
+                  CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
+                else
+                  terminal.say "Run log: #{terminal.path(res[:run_log])}"
+                  terminal.say "Report:  #{terminal.path(res[:report])}"
+                  terminal.say "Ingest URL:  #{res[:push_url]}" if res[:push_url]
+                  terminal.say "Builder exited with status #{res[:exit_code]}"
+                  CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
+                end
               end
             end
           end

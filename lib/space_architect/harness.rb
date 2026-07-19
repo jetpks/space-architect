@@ -188,6 +188,23 @@ module Space::Architect
         pid
       end
 
+      # The builder flag set independent of prompt delivery, --model, and the
+      # --output-format/--verbose pair — a sandboxed `dispatch --as-job` executor
+      # supplies -p/the prompt/--model/--output-format itself (see the space-server's
+      # SandboxArgv#build), so JobsClient spec composition reuses this verbatim
+      # instead of duplicating a second flag list (DRY).
+      def builder_args
+        args = [
+          "--permission-mode", "acceptEdits",
+          "--allowedTools", @allowed_tools,
+          "--include-partial-messages",
+          "--max-turns", @max_turns.to_s
+        ]
+        args += ["--disallowedTools", @disallowed_tools] unless @disallowed_tools.to_s.empty?
+        args += ["--effort", @effort] if @effort
+        args
+      end
+
       private
 
       # Read the run log's stream-json init event and print exactly one bounded liveness
@@ -227,19 +244,7 @@ module Space::Architect
       end
 
       def argv
-        args = [
-          @bin, "-p",
-          "--model", @model,
-          "--permission-mode", "acceptEdits",
-          "--allowedTools", @allowed_tools,
-          "--output-format", "stream-json",
-          "--verbose",
-          "--include-partial-messages",
-          "--max-turns", @max_turns.to_s
-        ]
-        args += ["--disallowedTools", @disallowed_tools] unless @disallowed_tools.to_s.empty?
-        args += ["--effort", @effort] if @effort
-        args
+        [@bin, "-p", "--model", @model, "--output-format", "stream-json", "--verbose"] + builder_args
       end
 
       def start_tee(r, log, push_url:, push_token:, push_client:, err: $stderr)

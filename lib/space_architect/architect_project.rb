@@ -841,20 +841,8 @@ module Space::Architect
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
       lane_entry = ensure_lane_materialized(iteration, lane)
 
-      model, suffix_level = Harness.parse_model_suffix(model)
-      resolved_harness, resolved_model = resolve_harness_model(harness, model,
-        stored_harness: lane_entry["harness"], stored_model: lane_entry["model"])
-
-      resolved_effort =
-        if effort
-          Harness.validate_thinking_level!(effort) unless force
-          effort
-        elsif suffix_level
-          err.puts "thinking: model suffix ':#{suffix_level}' parsed from --model → level=#{suffix_level} (model stripped to '#{model}')"
-          suffix_level
-        else
-          lane_entry["effort"]
-        end
+      resolved_harness, resolved_model, resolved_effort =
+        resolve_dispatch_harness(lane_entry, model: model, harness: harness, effort: effort, force: force, err: err)
 
       raise Space::Core::Error, "--push-host is only supported with the claude-code harness" \
         if push_host && resolved_harness != "claude-code"
@@ -870,17 +858,7 @@ module Space::Architect
 
       # --prompt: the caller authors the lane prompt anywhere (a fresh scratch file)
       # and the CLI owns the canonical copy — byte-for-byte, like variant_add.
-      if prompt
-        src = Pathname.new(prompt)
-        raise Space::Core::Error, "prompt file not found: #{src}" unless src.exist?
-        File.open(prompt_path, "wb") { |f| f.write(File.binread(src)) }
-      end
-
-      raise Space::Core::Error, "prompt.md not found: #{prompt_path}" unless prompt_path.exist?
-
-      prompt_content = prompt_path.read.strip
-      raise Space::Core::Error, "Write this lane's prompt to #{prompt_path} before dispatching." \
-        if prompt_content.empty? || prompt_content == PROMPT_STUB.strip
+      copy_and_validate_prompt!(prompt, prompt_path)
 
       bin = resolved_harness == "claude-code" ? claude_bin : opencode_bin
       harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns, bin: bin,
@@ -939,6 +917,66 @@ module Space::Architect
         result[:push_url]       = push_url       if push_url
         result
       end
+    end
+
+    # Submit the lane's builder run as a job to the space-server's queue instead of
+    # running it locally: the sandboxed executor mounts the lane worktree + the repo
+    # checkout at their identical host absolute paths (so the worktree's gitdir
+    # pointer resolves) and runs the harness itself — no local run.jsonl, the
+    # transcript lives server-side. jobs_client: is the injectable seam (mirrors
+    # dispatch's run_creator:).
+    def dispatch_as_job(iteration, lane, host:, token:, backend_url:, model: nil, harness: nil,
+                        max_turns: 200, effort: nil, force: false, quiet: false,
+                        job_model: nil, api_key_ref: nil, prompt: nil, jobs_client: nil, now: Time.now)
+      err = quiet ? File.open(File::NULL, "w") : $stderr
+
+      entry = slice_entry(iteration)
+      lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
+      raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
+      lane_entry = ensure_lane_materialized(iteration, lane)
+
+      resolved_harness, resolved_model, resolved_effort =
+        resolve_dispatch_harness(lane_entry, model: model, harness: harness, effort: effort, force: force, err: err)
+      raise Space::Core::Error, "--as-job only supports the claude-code harness (lane '#{lane}' resolves to '#{resolved_harness}')" \
+        unless resolved_harness == "claude-code"
+
+      id = iteration_id(entry)
+      wt_path = space.path.join(lane_entry["worktree"] || "build/#{id}-#{lane}/wt")
+      raise Space::Core::Error, "Worktree directory does not exist: #{wt_path}" unless wt_path.exist?
+
+      build_dir   = space.path.join("build", "#{id}-#{lane}")
+      prompt_path = build_dir.join("prompt.md")
+      copy_and_validate_prompt!(prompt, prompt_path)
+
+      repo_path   = space.path.join("repos", lane_entry["repo"])
+      harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
+                                                  effort: resolved_effort, force: force, err: err)
+
+      spec = job_spec(iteration: iteration, lane: lane, wt_path: wt_path, build_dir: build_dir,
+        repo_path: repo_path, prompt_content: prompt_path.read, backend_url: backend_url,
+        job_model: job_model, api_key_ref: api_key_ref, harness_args: harness_obj.builder_args)
+
+      client = jobs_client || JobsClient.new(host, token)
+      job_id = client.create(spec)
+
+      # Dispatch bookkeeping, mirroring the local path's dispatched_at stamp: a
+      # re-dispatch overwrites the prior job_id, so `architect status` always
+      # reflects the last dispatch regardless of mode.
+      update_architect_block do |b|
+        (b["iterations"] || []).each do |s|
+          next unless s["name"] == iteration
+          (s["lanes"] || []).each do |l|
+            next unless l["name"] == lane
+            l["dispatched_at"] = now.iso8601
+            l["job_id"]        = job_id
+          end
+        end
+        b
+      end
+
+      result = { job_id: job_id, spec: spec }
+      result[:prompt_copied] = prompt_path if prompt
+      result
     end
 
     private
@@ -1085,6 +1123,75 @@ module Space::Architect
       stored_model = nil unless stored_harness.nil? || stored_harness.to_s == resolved_harness
       resolved_model = model || stored_model || defaults["model"] || Harness.default_model_for(resolved_harness)
       [resolved_harness, resolved_model]
+    end
+
+    # --prompt: the caller authors the lane prompt anywhere (a fresh scratch file) and
+    # the CLI owns the canonical copy — byte-for-byte, like variant_add. Shared by
+    # dispatch and dispatch_as_job so both refuse the same empty/stub prompt.
+    def copy_and_validate_prompt!(prompt, prompt_path)
+      if prompt
+        src = Pathname.new(prompt)
+        raise Space::Core::Error, "prompt file not found: #{src}" unless src.exist?
+        File.open(prompt_path, "wb") { |f| f.write(File.binread(src)) }
+      end
+
+      raise Space::Core::Error, "prompt.md not found: #{prompt_path}" unless prompt_path.exist?
+
+      prompt_content = prompt_path.read.strip
+      raise Space::Core::Error, "Write this lane's prompt to #{prompt_path} before dispatching." \
+        if prompt_content.empty? || prompt_content == PROMPT_STUB.strip
+    end
+
+    # Resolve harness/model/effort for a dispatch (local or --as-job), shared so the
+    # two dispatch paths can never drift on precedence or thinking-level translation.
+    def resolve_dispatch_harness(lane_entry, model:, harness:, effort:, force:, err:)
+      model, suffix_level = Harness.parse_model_suffix(model)
+      resolved_harness, resolved_model = resolve_harness_model(harness, model,
+        stored_harness: lane_entry["harness"], stored_model: lane_entry["model"])
+
+      resolved_effort =
+        if effort
+          Harness.validate_thinking_level!(effort) unless force
+          effort
+        elsif suffix_level
+          err.puts "thinking: model suffix ':#{suffix_level}' parsed from --model → level=#{suffix_level} (model stripped to '#{model}')"
+          suffix_level
+        else
+          lane_entry["effort"]
+        end
+
+      [resolved_harness, resolved_model, resolved_effort]
+    end
+
+    # Compose a dispatch --as-job spec per the space-server's job contract: prompt +
+    # workspace.dir (the lane worktree) + environment (deps/network/mounts/env or
+    # secrets) + harness (claude/backend/args) + provenance. mounts are src:dst with
+    # src == dst — the sandboxed executor requires the lane worktree AND the repo
+    # checkout mounted at their identical host absolute paths for the worktree's
+    # gitdir pointer to resolve.
+    def job_spec(iteration:, lane:, wt_path:, build_dir:, repo_path:, prompt_content:, backend_url:,
+                job_model:, api_key_ref:, harness_args:)
+      harness = { "type" => "claude", "backend" => { "base_url" => backend_url }, "args" => harness_args }
+      harness["model"] = job_model if job_model
+      harness["backend"]["api_key_ref"] = api_key_ref if api_key_ref
+
+      environment = {
+        "env"  => api_key_ref ? {} : { "ANTHROPIC_API_KEY" => "unused-for-keyless-backends" },
+        "deps" => ["git"],
+        "permissions" => {
+          "network" => true,
+          "mounts"  => ["#{build_dir}:#{build_dir}", "#{repo_path}:#{repo_path}"]
+        }
+      }
+      environment["secrets"] = [{ "ref" => api_key_ref, "name" => "ANTHROPIC_API_KEY" }] if api_key_ref
+
+      {
+        "prompt"      => prompt_content,
+        "workspace"   => { "dir" => wt_path.to_s },
+        "environment" => environment,
+        "harness"     => harness,
+        "provenance"  => { "space" => Space::Core::Slugger.slug(space.title), "iteration" => iteration, "lane" => lane }
+      }
     end
 
     def recorded_lane_fields(lane_entry)
