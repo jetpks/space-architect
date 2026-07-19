@@ -194,6 +194,8 @@ CREATE TABLE public.jobs (
     run_id bigint,
     created_at timestamp with time zone NOT NULL,
     updated_at timestamp with time zone NOT NULL,
+    leased_until timestamp with time zone,
+    attempts integer DEFAULT 0 NOT NULL,
     CONSTRAINT jobs_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'canceled'::text])))
 );
 
@@ -538,6 +540,20 @@ CREATE INDEX index_jobs_on_user_id ON public.jobs USING btree (user_id);
 
 
 --
+-- Name: index_jobs_queued_on_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_jobs_queued_on_created_at ON public.jobs USING btree (created_at) WHERE (status = 'queued'::text);
+
+
+--
+-- Name: index_jobs_running_on_leased_until; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_jobs_running_on_leased_until ON public.jobs USING btree (leased_until) WHERE (status = 'running'::text);
+
+
+--
 -- Name: index_messages_on_conversation_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -765,4 +781,5 @@ INSERT INTO schema_migrations (filename) VALUES
 ('20260628000000_add_occurred_at_to_runs_and_iterations.rb'),
 ('20260629000000_add_utc_offset_columns.rb'),
 ('20260630000000_add_harness_model_to_runs.rb'),
-('20260701000000_create_jobs.rb');
+('20260701000000_create_jobs.rb'),
+('20260718000000_add_lease_to_jobs.rb');
