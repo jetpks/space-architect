@@ -622,7 +622,6 @@ module Space::Architect
 
       id = iteration_id(entry)
       wt_path   = space.path.join("build", "#{id}-#{lane}", "wt")
-      build_dir = space.path.join("build", "#{id}-#{lane}")
       FileUtils.mkdir_p(wt_path.dirname)
 
       base_ref = base || "HEAD"
