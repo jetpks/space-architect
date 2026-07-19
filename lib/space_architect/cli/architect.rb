@@ -338,13 +338,14 @@ module Space::Architect
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :base,      default: nil,    desc: "Base ref override (default: project/<slug> HEAD if it exists, else the repo's default branch)"
         option   :lane,      default: nil,    desc: "Provision only this lane (default: all declared lanes)"
+        option   :force,     type: :boolean, default: false, desc: "Clear and re-create a stale (unregistered) worktree directory"
 
-        def call(iteration:, space: nil, base: nil, lane: nil, **opts)
+        def call(iteration:, space: nil, base: nil, lane: nil, force: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              results = project.provision(iteration, base: base, lane: lane)
+              results = project.provision(iteration, base: base, lane: lane, force: force)
               if results.empty?
                 terminal.say "No declared lanes to provision for '#{iteration}'"
               else
@@ -602,15 +603,16 @@ module Space::Architect
           option   :model,     default: nil,           desc: "Model (required for opencode)"
           option   :effort,    default: nil,           desc: "Reasoning effort (opencode only; sets reasoningEffort in the model config)"
           option   :touch,     default: nil,           desc: "Comma-separated file globs the lane may touch (records its touch_set for in-bounds + merge checks)"
+          option   :force,     type: :boolean, default: false, desc: "Clear and re-create a stale (unregistered) worktree directory"
 
-          def call(repo:, iteration:, lane:, base: nil, harness: "claude-code", model: nil, effort: nil, touch: nil, **opts)
+          def call(repo:, iteration:, lane:, base: nil, harness: "claude-code", model: nil, effort: nil, touch: nil, force: false, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find) do |sp|
                 project = ArchitectProject.new(space: sp)
                 touch_set = touch ? touch.split(",").map(&:strip).reject(&:empty?) : nil
                 result = project.worktree_add(repo, iteration, lane, base: base,
-                                             harness: harness, model: model, effort: effort, touch: touch_set)
+                                             harness: harness, model: model, effort: effort, touch: touch_set, force: force)
                 terminal.say "Worktree: #{terminal.path(result[:worktree])}"
                 terminal.say "Base SHA: #{result[:base_sha]}"
                 CLI.record_outcome(Outcome.new(exit_code: 0))

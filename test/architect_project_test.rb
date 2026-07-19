@@ -3112,6 +3112,186 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # ── I07: worktree_add --force / provision --force / worktree add --force ──────
+
+  # AC1(a): force: true clears a stale (unregistered) dir and creates a registered worktree.
+  def test_worktree_force_clears_stale_dir_and_creates_registered_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+    File.write(File.join(stray_dir, "stale.txt"), "leftover\n")
+
+    result = project.worktree_add("my-repo", "my-slice", "lane-a", force: true)
+
+    assert_path_exists result[:worktree].to_s
+    refute File.exist?(File.join(stray_dir, "stale.txt")), "stale file must be gone after force clear"
+    repo_path = Pathname.new(File.join(dir, "repos", "my-repo"))
+    assert project.send(:worktree_registered?, repo_path, result[:worktree]),
+      "worktree must be registered after force add"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1(b): no force → raises the existing error on stale dir (with --force hint).
+  def test_worktree_force_raises_without_force_on_stale_dir
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+
+    err = assert_raises(Space::Core::Error) do
+      project.worktree_add("my-repo", "my-slice", "lane-a")
+    end
+    assert_match(/exists but is not a registered git worktree/, err.message)
+    assert_match(/resolve manually/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1(c): force: true on an already-registered worktree → idempotent skip, no rm -rf.
+  def test_worktree_force_skips_already_registered_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    sentinel = File.join(dir, "build", "I01-my-slice-lane-a", "wt", "sentinel.txt")
+    File.write(sentinel, "keep me\n")
+
+    project.worktree_add("my-repo", "my-slice", "lane-a", force: true)
+
+    assert File.exist?(sentinel), "sentinel must survive — registered worktree must not be rm -rf'd by --force"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2(a): provision --force recovers a stale lane worktree (returns created: true).
+  def test_provision_force_recovers_stale_lane_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    project.freeze!("my-slice")
+
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+
+    results = project.provision("my-slice", force: true)
+    assert_equal 1, results.length
+    assert results[0][:created], "force provision must create the worktree (created: true)"
+    assert_path_exists results[0][:worktree].to_s
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2(b): provision without --force raises on a stale lane worktree.
+  def test_provision_force_raises_without_force_on_stale_lane
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    project.freeze!("my-slice")
+
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+
+    err = assert_raises(Space::Core::Error) { project.provision("my-slice") }
+    assert_match(/exists but is not a registered git worktree/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: worktree add --force (CLI) recovers a stale worktree.
+  def test_worktree_add_force_cli_recovers_stale_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+
+    Dir.chdir(dir) do
+      out, _err = invoke("worktree", "add", "my-repo", "my-slice", "lane-a", "--force")
+      assert_match(/Worktree:/, out)
+    end
+
+    wt_path = Pathname.new(File.join(dir, "build", "I01-my-slice-lane-a", "wt"))
+    repo_path = Pathname.new(File.join(dir, "repos", "my-repo"))
+    assert_path_exists wt_path.to_s
+    assert project.send(:worktree_registered?, repo_path, wt_path),
+      "worktree must be registered after CLI --force add"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: ensure_lane_materialized stays non-force — a stale dir still raises.
+  def test_ensure_lane_not_force_raises_on_stale_dir
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    project.freeze!("my-slice")
+
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+
+    err = assert_raises(Space::Core::Error) do
+      project.send(:ensure_lane_materialized, "my-slice", "lane-a")
+    end
+    assert_match(/exists but is not a registered git worktree/, err.message)
+    assert_path_exists stray_dir, "stale dir must NOT be removed — ensure_lane_materialized is non-force"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # AC3(b): merge_commit_mode — conductor mode treats canonical conductor commits as non-builder
   def test_merge_commit_mode_conductor_passes_canonical_commit
     dir = Dir.mktmpdir("architect-project-test")
