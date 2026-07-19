@@ -1,0 +1,8 @@
+FROM <%= base_image %>
+<% if deps.any? -%>
+
+RUN apt-get update -qq \
+ && apt-get install -y --no-install-recommends \
+      <%= deps.join(" \\\n      ") %> \
+ && rm -rf /var/lib/apt/lists/*
+<% end -%>
