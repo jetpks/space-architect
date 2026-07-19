@@ -36,33 +36,48 @@ class JobsActionTest < Minitest::Test
     }
   end
 
-  # --- POST /jobs — AC1/AC3: auth -------------------------------------------
-
-  def test_create_anon_returns_401
-    status, _, body = post("/jobs", params: valid_params)
-    assert_equal 401, status
-    assert parse_json(body).key?("error")
+  # Follows a redirect to /jobs/new and returns props.errors — the house pattern from
+  # conversations_test.rb's contract-failure assertions.
+  def errors_after(bad_params)
+    sign_in(@owner)
+    status, headers, _ = post("/jobs", params: bad_params)
+    assert_equal 302, status
+    assert_equal "/jobs/new", headers["location"]
+    redirect_cookie = headers["set-cookie"]&.split(";")&.first
+    _, _, body = inertia_get("/jobs/new", cookie: redirect_cookie)
+    parse_json(body).dig("props", "errors")
   end
 
-  # --- POST /jobs — AC1: valid spec -> 201 + persisted row -----------------
+  # --- POST /jobs — AC1: browser/Inertia flow, anon --------------------------
 
-  def test_create_valid_spec_returns_201_queued
+  def test_create_anon_redirects_with_flash
+    status, headers, _ = post("/jobs", params: valid_params)
+    assert_equal 302, status
+    assert_equal "/", headers["location"]
+    flash = flash_from_redirect(headers)
+    assert_equal "Please sign in to continue.", flash["alert"]
+  end
+
+  # --- POST /jobs — AC1: browser/Inertia flow, valid spec --------------------
+
+  def test_create_valid_spec_redirects_to_job_with_flash
     sign_in(@owner)
-    status, headers, body = post("/jobs", params: valid_params)
-    assert_equal 201, status
-    assert_equal "application/json; charset=utf-8", headers["content-type"]
-    data = parse_json(body)
-    assert data.key?("id")
-    assert_equal "queued", data["status"]
+    status, headers, _ = post("/jobs", params: valid_params)
+    assert_equal 302, status
+    job = @jobs_repo.by_user(@owner.id).first
+    refute_nil job
+    assert_equal "/jobs/#{job.id}", headers["location"]
+    assert_equal "queued", job.status
+    flash = flash_from_redirect(headers)
+    assert_equal "Job queued.", flash["notice"]
   end
 
   def test_create_persists_row_with_validated_spec
     sign_in(@owner)
-    _, _, body = post("/jobs", params: valid_params)
-    job = @jobs_repo.by_pk(parse_json(body)["id"])
+    post("/jobs", params: valid_params)
+    job = @jobs_repo.by_user(@owner.id).first
     refute_nil job
     assert_equal @owner.id, job.user_id
-    assert_equal "queued", job.status
     assert_equal "claude",  job.spec.dig("harness", "type")
     assert_equal "do the thing", job.spec["prompt"]
     assert_equal ["op://vault/item2"], job.spec.dig("environment", "secrets").map { |s| s["ref"] }
@@ -79,50 +94,31 @@ class JobsActionTest < Minitest::Test
       prompt: "hi",
       environment: { deps: ["git"] }
     }
-    _, _, body = post("/jobs", params: minimal)
-    job = @jobs_repo.by_pk(parse_json(body)["id"])
+    post("/jobs", params: minimal)
+    job = @jobs_repo.by_user(@owner.id).first
     assert_equal({}, job.spec.dig("environment", "env"))
     assert_equal [], job.spec.dig("environment", "secrets")
     assert_equal ["git"], job.spec.dig("environment", "deps")
     assert_equal({ "network" => false, "mounts" => [] }, job.spec.dig("environment", "permissions"))
   end
 
-  # --- POST /jobs — AC2: invalid spec -> 422 --------------------------------
+  # --- POST /jobs — AC1: contract failure redirects with per-field errors ----
 
-  def test_create_missing_prompt_returns_422
-    sign_in(@owner)
-    bad = valid_params.reject { |k, _| k == :prompt }
-    status, _, body = post("/jobs", params: bad)
-    assert_equal 422, status
-    errors = parse_json(body)["errors"]
+  def test_create_missing_prompt_names_field
+    errors = errors_after(valid_params.reject { |k, _| k == :prompt })
     assert errors["prompt"]
   end
 
-  def test_create_unknown_harness_type_returns_422
-    sign_in(@owner)
-    bad = valid_params.merge(harness: valid_params[:harness].merge(type: "gpt4"))
-    status, _, body = post("/jobs", params: bad)
-    assert_equal 422, status
-    errors = parse_json(body)["errors"]
-    assert errors.dig("harness", "type")
-  end
-
-  def test_create_non_http_base_url_returns_422
-    sign_in(@owner)
+  def test_create_non_http_base_url_names_field
     bad = valid_params.merge(harness: valid_params[:harness].merge(backend: { base_url: "not-a-url" }))
-    status, _, body = post("/jobs", params: bad)
-    assert_equal 422, status
-    errors = parse_json(body)["errors"]
-    assert errors.dig("harness", "backend", "base_url")
+    errors = errors_after(bad)
+    assert errors["base_url"]
   end
 
-  def test_create_secret_ref_not_op_returns_422
-    sign_in(@owner)
+  def test_create_secret_ref_not_op_names_field
     bad = valid_params.merge(environment: { secrets: [{ ref: "not-op", name: "X" }] })
-    status, _, body = post("/jobs", params: bad)
-    assert_equal 422, status
-    errors = parse_json(body)["errors"]
-    assert errors.dig("environment", "secrets")
+    errors = errors_after(bad)
+    assert errors["secrets"]
   end
 
   def test_create_invalid_spec_does_not_persist_a_row
@@ -132,7 +128,7 @@ class JobsActionTest < Minitest::Test
     assert_equal before, @jobs_repo.by_user(@owner.id).size
   end
 
-  # --- POST /jobs — AC3: ingest-token bearer bypasses CSRF ------------------
+  # --- POST /jobs — AC2: Bearer form-encoded, byte-compatible ---------------
 
   def with_token_settings(token: TOKEN, user_id: nil)
     user_id ||= @owner.id
@@ -156,6 +152,32 @@ class JobsActionTest < Minitest::Test
     with_token_settings do
       status, _, _ = post("/jobs", params: valid_params, bearer: "wrong-token")
       assert_equal 401, status
+    end
+  end
+
+  # --- POST /jobs — AC2: Bearer JSON body (BodyParser registration) ---------
+
+  def test_bearer_json_body_create_returns_201
+    with_token_settings do
+      status, headers, body = post_raw("/jobs", body: JSON.generate(valid_params),
+                                        content_type: "application/json", bearer: TOKEN)
+      assert_equal 201, status
+      assert_equal "application/json; charset=utf-8", headers["content-type"]
+      data = parse_json(body)
+      job = @jobs_repo.by_pk(data["id"])
+      assert_equal "queued", data["status"]
+      assert_equal "do the thing", job.spec["prompt"]
+    end
+  end
+
+  def test_bearer_json_env_non_string_value_returns_422
+    with_token_settings do
+      bad = valid_params.merge(environment: valid_params[:environment].merge(env: { FOO: 123 }))
+      status, _, body = post_raw("/jobs", body: JSON.generate(bad),
+                                  content_type: "application/json", bearer: TOKEN)
+      assert_equal 422, status
+      errors = parse_json(body)["errors"]
+      assert errors.dig("environment", "env", "FOO")
     end
   end
 

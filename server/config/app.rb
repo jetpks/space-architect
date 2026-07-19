@@ -102,6 +102,21 @@ module Space
       config.middleware.use HostRedirect
       config.middleware.use IngestBodyPassthrough
 
+      # JSON request bodies (Jobs::Create's browser/Bearer POST /jobs — I10). Hanami
+      # already auto-appends a form+json Hanami::Middleware::BodyParser at the very end
+      # of the stack (Hanami::Config#use_body_parser_middleware, unconditional whenever
+      # hanami-router + hanami-controller are bundled — verified in hanami-2.3.2's
+      # config.rb), so JSON parsing technically works without this line. It's registered
+      # explicitly anyway so the JSON contract is legible here rather than resting on
+      # that implicit default, and so its position relative to IngestBodyPassthrough is
+      # pinned rather than incidental. Placed AFTER IngestBodyPassthrough: that
+      # middleware pre-sets ROUTER_PARSED_BODY for /runs/:id/ingest, and BodyParser's
+      # own `call` short-circuits whenever that key is already present — so the ingest
+      # stream is skipped by construction, not by content-type (application/x-ndjson)
+      # alone. :json only — multipart form-data (Conversations upload) keeps relying on
+      # Hanami's own default registration.
+      config.middleware.use :body_parser, :json
+
       # Dev-only: the Vite dev server (port 3036) serves ES modules cross-origin and injects an
       # inline React-refresh preamble — both blocked by the default `script-src 'self'` CSP, which
       # renders a blank page. Relax script/connect/style to the dev server (+ inline/eval for HMR)

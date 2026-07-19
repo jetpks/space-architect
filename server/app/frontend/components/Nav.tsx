@@ -33,6 +33,10 @@ export default function Nav() {
           {current_user ? (
             <>
               <Button asChild variant="ghost" size="sm">
+                <Link href="/jobs">Jobs</Link>
+              </Button>
+
+              <Button asChild variant="ghost" size="sm">
                 <Link href="/conversations/new">
                   <Upload className="size-4" /> Upload
                 </Link>

@@ -24,6 +24,12 @@ module Space
           jobs.where(user_id: user_id).to_a
         end
 
+        # Index scope: a user's own jobs, newest first, capped at 100 (I10 — no
+        # pagination yet).
+        def list_for_user(user_id, limit: 100)
+          jobs.where(user_id: user_id).order(Sequel.desc(:created_at)).limit(limit).to_a
+        end
+
         LEASE_SECONDS = 60
         MAX_ATTEMPTS  = 3
 

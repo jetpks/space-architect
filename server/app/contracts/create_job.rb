@@ -41,6 +41,19 @@ module Space
             end
           end
         end
+
+        # environment.env values become shell env vars, so every value must be a
+        # string (JSON lets a caller send a number/bool/null/object). Keys arrive
+        # pre-symbolized by Hanami::Router::Params.deep_symbolize regardless of
+        # transport (form-encoded or JSON), so only values are checked here; dry-schema
+        # has no Hash[String, String] map type for params (Types::Hash.map raises
+        # NotImplementedError inside dry-schema's params DSL — Map types aren't
+        # supported there), hence the plain rule instead of a tighter schema type.
+        rule(environment: :env) do
+          value.each do |k, v|
+            key([:environment, :env, k]).failure("must be a string") unless v.is_a?(String)
+          end
+        end
       end
     end
   end

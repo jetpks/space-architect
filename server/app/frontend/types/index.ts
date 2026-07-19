@@ -152,6 +152,42 @@ export type RunListItem = {
   created_at: string
 }
 
+export type JobListItem = {
+  id: number
+  status: string
+  model: string
+  created_at: string
+  run_id: number | null
+}
+
+// The v1 job spec surface (see app/contracts/create_job.rb). environment.files is
+// omitted by design — no UI for it yet.
+export type JobSpec = {
+  harness: {
+    type: string
+    model: string
+    backend: { base_url: string; api_key_ref?: string | null }
+    args?: string[]
+  }
+  prompt: string
+  environment: {
+    env?: Record<string, string>
+    secrets?: { ref: string; name: string }[]
+    deps?: string[]
+    permissions?: { network?: boolean; mounts?: string[] }
+  }
+}
+
+export type JobDetail = {
+  id: number
+  status: string
+  attempts: number
+  run_id: number | null
+  spec: JobSpec
+  created_at: string
+  updated_at: string
+}
+
 // An access grant on a conversation: a GitHub user, or every member of a
 // GitHub organization. Serialized only to the owner.
 export type Share = {
