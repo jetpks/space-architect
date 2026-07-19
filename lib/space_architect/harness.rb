@@ -10,7 +10,19 @@ require "uri"
 
 module Space::Architect
   module Harness
-    CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-6"
+    CLAUDE_DEFAULT_MODEL = "claude-sonnet-5"
+
+    # Per-harness sensible default model, used when neither an explicit --model
+    # nor a space.yaml project.model is given.
+    DEFAULT_MODELS = {
+      "claude-code" => CLAUDE_DEFAULT_MODEL,
+      "pi"          => "qwen3-27b-optiq",
+      "opencode"    => "fireworks-ai/accounts/fireworks/models/glm-5p2"
+    }.freeze
+
+    def self.default_model_for(harness_name)
+      DEFAULT_MODELS[harness_name.to_s]
+    end
 
     # The normalized internal thinking vocabulary — pi's fullest set. Every alias
     # (--effort/--thinking/--reasoning) is normalized to a member of this array;
@@ -58,21 +70,9 @@ module Space::Architect
       when "claude-code"
         ClaudeCodeHarness.new(model: model, max_turns: max_turns, bin: bin, effort: translated)
       when "opencode"
-        if model == CLAUDE_DEFAULT_MODEL
-          raise Space::Core::Error,
-            "Pass --model when using --harness opencode (the claude-sonnet-4-6 default " \
-            "is a Claude model ID and will not work with opencode — " \
-            "try e.g. fireworks-ai/accounts/fireworks/models/glm-5p2)"
-        end
         raise Space::Core::Error, "config_dir is required for opencode harness" unless config_dir
         OpenCodeHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir, effort: translated)
       when "pi"
-        if model == CLAUDE_DEFAULT_MODEL
-          raise Space::Core::Error,
-            "Pass --model when using --harness pi " \
-            "(#{CLAUDE_DEFAULT_MODEL} is a Claude model ID, not valid for pi — " \
-            "try e.g. openrouter/qwen/qwen3-27b-optiq or local-inference/qwen3-27b-optiq)"
-        end
         raise Space::Core::Error, "config_dir is required for pi harness" unless config_dir
         PiHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir, effort: translated)
       else

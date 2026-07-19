@@ -149,8 +149,9 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # AC5: worktree_add raises footgun error for opencode without a valid model
-  def test_worktree_add_footgun_raises_for_opencode_without_model
+  # AC6: worktree_add no longer raises for opencode/pi without a model — nil model
+  # resolves to the per-harness sensible default instead.
+  def test_worktree_add_nil_model_resolves_to_per_harness_default
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
@@ -159,18 +160,90 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
 
-    # nil model raises, and error names --model
-    err = assert_raises(Space::Core::Error) do
-      project.worktree_add("my-repo", "my-slice", "lane-bad", harness: "opencode")
-    end
-    assert_match(/--model/, err.message)
+    project.worktree_add("my-repo", "my-slice", "lane-oc", harness: "opencode")
+    project.worktree_add("my-repo", "my-slice", "lane-pi", harness: "pi")
 
-    # claude default model also raises
-    assert_raises(Space::Core::Error) do
-      project.worktree_add("my-repo", "my-slice", "lane-bad",
-                           harness: "opencode",
-                           model: Space::Architect::Harness::CLAUDE_DEFAULT_MODEL)
-    end
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lanes = yml.dig("project", "iterations", 0, "lanes")
+    lane_oc = lanes.find { |l| l["name"] == "lane-oc" }
+    lane_pi = lanes.find { |l| l["name"] == "lane-pi" }
+
+    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", lane_oc["model"]
+    assert_equal "qwen3-27b-optiq", lane_pi["model"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I12 AC2: worktree_add with no flags and no space.yaml project defaults resolves
+  # to claude-code/claude-sonnet-5
+  def test_worktree_add_no_flags_resolves_to_claude_code_default
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lane = yml.dig("project", "iterations", 0, "lanes", 0)
+
+    assert_equal "claude-code", lane["harness"]
+    assert_equal "claude-sonnet-5", lane["model"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I12 AC7: space.yaml project.harness/project.model sit between the CLI flag and
+  # the per-harness default — worktree_add with no flags resolves to them.
+  def test_worktree_add_no_flags_resolves_to_space_yaml_project_defaults
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    space.data["project"] ||= {}
+    space.data["project"]["harness"] = "pi"
+    space.data["project"]["model"]   = "qwen3-27b-optiq"
+    space.save
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lane = yml.dig("project", "iterations", 0, "lanes", 0)
+
+    assert_equal "pi", lane["harness"]
+    assert_equal "qwen3-27b-optiq", lane["model"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I12 AC2/AC7: an explicit CLI flag wins over a space.yaml project default
+  def test_worktree_add_explicit_flag_overrides_space_yaml_project_default
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    space.data["project"] ||= {}
+    space.data["project"]["harness"] = "pi"
+    space.data["project"]["model"]   = "qwen3-27b-optiq"
+    space.save
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a",
+                         harness: "opencode",
+                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2")
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lane = yml.dig("project", "iterations", 0, "lanes", 0)
+
+    assert_equal "opencode", lane["harness"]
+    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", lane["model"]
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -223,7 +296,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     assert_equal true, v01["variant"]
     assert_equal "claude-code", v01["harness"]
-    assert_nil   v01["model"]
+    assert_equal "claude-sonnet-5", v01["model"]
     assert_equal "my-repo", v01["repo"]
     assert v01["base_sha"]
     assert v01["worktree"]
@@ -296,8 +369,9 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # AC5: footgun fires for opencode+nil model; no lane or worktree left behind
-  def test_variant_add_inherits_footgun_guard
+  # AC6: variant_add with opencode+nil model no longer raises — the per-harness
+  # sensible default flows through worktree_add
+  def test_variant_add_resolves_nil_model_to_per_harness_default
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
@@ -306,21 +380,13 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
 
-    err = assert_raises(Space::Core::Error) do
-      project.variant_add("my-repo", "my-slice", [["opencode", nil]])
-    end
-    assert_match(/--model/, err.message)
+    project.variant_add("my-repo", "my-slice", [["opencode", nil]])
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     lanes = yml.dig("project", "iterations", 0, "lanes") || []
-    assert_empty lanes, "no lane entry should be persisted after footgun raise"
-
-    repo_path = File.join(dir, "repos", "my-repo")
-    v01_branch = File.join(repo_path, ".git", "refs", "heads", "lane", "I01-my-slice-v01")
-    refute_path_exists v01_branch, "no branch should be created after footgun raise"
-
-    v01_wt = File.join(dir, "build", "I01-my-slice-v01", "wt")
-    refute_path_exists v01_wt, "no worktree should be created after footgun raise"
+    v01 = lanes.find { |l| l["name"] == "v01" }
+    refute_nil v01, "expected v01 lane to be persisted"
+    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", v01["model"]
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -595,7 +661,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     assert_equal "v01",               v01[:name]
     assert_equal "claude-code",       v01[:harness]
-    assert_nil                       v01[:model]
+    assert_equal "claude-sonnet-5",   v01[:model]
     assert_nil                       v01[:effort]
     assert v01[:base_sha]
     assert_nil                       v01[:integration_branch]

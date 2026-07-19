@@ -174,7 +174,7 @@ module Space::Architect
                   lane_list = s["lanes"] || []
                   lanes_str = lane_list.map do |l|
                     h = l["harness"] || "claude-code"
-                    m = l["model"]   || Harness::CLAUDE_DEFAULT_MODEL
+                    m = l["model"]   || Harness.default_model_for(h)
                     eff = l["effort"] ? "·#{l['effort']}" : ""
                     "#{l['name']}(#{l['repo']}·#{h}·#{m}#{eff})"
                   end.join(", ")
@@ -308,7 +308,7 @@ module Space::Architect
         argument :lane,      required: true,  desc: "Lane name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :prompt,    default: nil,    desc: "Read the lane prompt from this file (copied byte-for-byte to build/<id>-<lane>/prompt.md)"
-        option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's model, else the reference default claude-sonnet-4-6). Any provider/tier; pin a full id, not a floating alias"
+        option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's stored model, else space.yaml project.model, else the per-harness sensible default). Any provider/tier; pin a full id, not a floating alias"
         option   :max_turns, default: "200",  desc: "Max turns for the builder"
         option   :harness,   default: nil,    desc: "Harness override (claude-code, opencode, pi)"
         option   :effort,    default: nil,    desc: "Thinking/reasoning effort level — alias for --thinking/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
@@ -640,8 +640,8 @@ module Space::Architect
           argument :iteration, required: true, desc: "Iteration name"
           argument :lane,      required: true, desc: "Lane name"
           option   :base,      default: nil,          desc: "Base ref (default: HEAD of repo)"
-          option   :harness,   default: "claude-code", desc: "Harness (claude-code, opencode, pi)"
-          option   :model,     default: nil,           desc: "Model (required for opencode); a trailing :<level> suffix (e.g. foo:high) is parsed into --effort"
+          option   :harness,   default: nil,          desc: "Harness (claude-code, opencode, pi; default: space.yaml project.harness, else claude-code)"
+          option   :model,     default: nil,           desc: "Model; a trailing :<level> suffix (e.g. foo:high) is parsed into --effort (default: space.yaml project.model, else the per-harness sensible default)"
           option   :effort,    default: nil,           desc: "Thinking/reasoning effort level — alias for --thinking/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness at dispatch time"
           option   :thinking,  default: nil,           desc: "Thinking/reasoning effort level — alias for --effort/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness at dispatch time"
           option   :reasoning, default: nil,           desc: "Thinking/reasoning effort level — alias for --effort/--thinking (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness at dispatch time"
@@ -649,7 +649,7 @@ module Space::Architect
           option   :touch,     default: nil,           desc: "Comma-separated file globs the lane may touch (records its touch_set for in-bounds + merge checks)"
           option   :force,     type: :boolean, default: false, desc: "Clear and re-create a stale (unregistered) worktree directory"
 
-          def call(repo:, iteration:, lane:, base: nil, harness: "claude-code", model: nil,
+          def call(repo:, iteration:, lane:, base: nil, harness: nil, model: nil,
                    effort: nil, thinking: nil, reasoning: nil, quiet: false, touch: nil, force: false, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do

@@ -603,26 +603,14 @@ module Space::Architect
       repos.map { |r| sync_one_repo(r["name"]) }
     end
 
-    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false,
+    def worktree_add(repo, iteration, lane, base: nil, harness: nil, model: nil, variant: false,
                      effort: nil, touch: nil, force: false, err: $stderr)
       model, suffix_level = Harness.parse_model_suffix(model)
-      resolved_level = effort || suffix_level
+      harness, model = resolve_harness_model(harness, model)
+      resolved_level = effort || suffix_level || project_defaults["effort"]
       Harness.validate_thinking_level!(resolved_level)
       if effort.nil? && suffix_level
         err.puts "thinking: model suffix ':#{suffix_level}' parsed from lane model → level=#{suffix_level} (model stripped)"
-      end
-
-      if harness.to_s == "opencode" && (model.nil? || model == Harness::CLAUDE_DEFAULT_MODEL)
-        raise Space::Core::Error,
-          "Pass --model when using --harness opencode " \
-          "(#{Harness::CLAUDE_DEFAULT_MODEL} is a Claude model ID, not valid for opencode — " \
-          "try e.g. fireworks-ai/accounts/fireworks/models/glm-5p2)"
-      end
-      if harness.to_s == "pi" && (model.nil? || model == Harness::CLAUDE_DEFAULT_MODEL)
-        raise Space::Core::Error,
-          "Pass --model when using --harness pi " \
-          "(#{Harness::CLAUDE_DEFAULT_MODEL} is a Claude model ID, not valid for pi — " \
-          "try e.g. openrouter/qwen/qwen3-27b-optiq or local-inference/qwen3-27b-optiq)"
       end
 
       entry = slice_entry(iteration)
@@ -853,9 +841,9 @@ module Space::Architect
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
       lane_entry = ensure_lane_materialized(iteration, lane)
 
-      resolved_harness  = harness || lane_entry["harness"] || "claude-code"
       model, suffix_level = Harness.parse_model_suffix(model)
-      resolved_model    = model || lane_entry["model"] || Harness::CLAUDE_DEFAULT_MODEL
+      resolved_harness, resolved_model = resolve_harness_model(harness, model,
+        stored_harness: lane_entry["harness"], stored_model: lane_entry["model"])
 
       resolved_effort =
         if effort
@@ -898,15 +886,20 @@ module Space::Architect
       harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns, bin: bin,
                                                   config_dir: build_dir, effort: resolved_effort, force: force, err: err)
 
-      # Stamp launch time onto the lane entry: after every preflight validation has passed
-      # (a dispatch that raises above records nothing) and before the blocking run or a
-      # detached dispatch returns. A re-dispatch overwrites the prior value.
+      # Stamp launch time and the resolved harness/model/effort onto the lane entry:
+      # after every preflight validation has passed (a dispatch that raises above
+      # records nothing) and before the blocking run or a detached dispatch returns.
+      # A re-dispatch overwrites the prior values, so `architect status` always reads
+      # what actually ran on the last dispatch.
       update_architect_block do |b|
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
           (s["lanes"] || []).each do |l|
             next unless l["name"] == lane
             l["dispatched_at"] = now.iso8601
+            l["harness"]       = resolved_harness
+            l["model"]         = resolved_model
+            l["effort"]        = resolved_effort if resolved_effort
           end
         end
         b
@@ -1073,6 +1066,27 @@ module Space::Architect
     # The lane's declared harness/model/variant/effort, as worktree_add kwargs — so a
     # re-materialize preserves them instead of merging back to defaults. touch_set is
     # deliberately omitted: worktree_add leaves it untouched, so it already survives.
+    # The space.yaml project block's optional harness/model/effort defaults (empty
+    # hash when the block or the keys are absent).
+    def project_defaults
+      space.data["project"] || {}
+    end
+
+    # Resolve harness + model by precedence: explicit value > (dispatch only) the
+    # lane's stored value > space.yaml project.harness/project.model > the
+    # per-harness sensible default (model only, keyed on the resolved harness).
+    # Shared by worktree_add and dispatch so both read the same defaults. A stored
+    # model is only honored when its stored harness still matches the resolved
+    # harness — a dispatch-time harness override drops the old harness's stored
+    # model instead of leaking it into the new harness's run.
+    def resolve_harness_model(harness, model, stored_harness: nil, stored_model: nil)
+      defaults = project_defaults
+      resolved_harness = (harness || stored_harness || defaults["harness"] || "claude-code").to_s
+      stored_model = nil unless stored_harness.nil? || stored_harness.to_s == resolved_harness
+      resolved_model = model || stored_model || defaults["model"] || Harness.default_model_for(resolved_harness)
+      [resolved_harness, resolved_model]
+    end
+
     def recorded_lane_fields(lane_entry)
       {
         harness: lane_entry["harness"] || "claude-code",
