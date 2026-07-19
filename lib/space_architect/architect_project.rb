@@ -552,7 +552,43 @@ module Space::Architect
         parts << "=== #{rel} ===\n\n#{iter_path.read}"
       end
 
+      space.repos.each do |repo|
+        name      = repo["name"]
+        repo_path = space.path.join("repos", name).to_s
+        next unless Dir.exist?(repo_path)
+
+        branch_out, _, branch_st = git_capture("-C", repo_path, "symbolic-ref", "--short", "HEAD")
+        next unless branch_st.success?
+        branch = branch_out.strip
+
+        git_capture("-C", repo_path, "fetch", "origin")
+
+        count_out, _, count_st = git_capture("-C", repo_path, "rev-list", "--left-right", "--count",
+          "#{branch}...origin/#{branch}")
+        next unless count_st.success?
+
+        behind = count_out.strip.split[1].to_i
+        if behind > 0
+          parts << "WARNING: repos/#{name} local #{branch} is #{behind} commits behind " \
+            "origin/#{branch} — run `architect sync #{name}`"
+        end
+      rescue
+        # tolerate fetch or comparison failures silently
+      end
+
       parts.join("\n")
+    end
+
+    # Sync tracked repo clones with their remotes (fast-forward only).
+    # Returns an array of result hashes: { repo:, status:, message: }.
+    # With no repo_name, syncs every tracked repo; with a name, syncs only that one.
+    def sync_repos(repo_name: nil)
+      repos = space.repos
+      if repo_name
+        repos = repos.select { |r| r["name"] == repo_name }
+        raise Space::Core::Error, "repo '#{repo_name}' not tracked in this space" if repos.empty?
+      end
+      repos.map { |r| sync_one_repo(r["name"]) }
     end
 
     def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false, effort: nil, touch: nil)
@@ -1265,6 +1301,45 @@ module Space::Architect
 
     def git_capture(*args)
       Open3.capture3("git", *args)
+    end
+
+    def sync_one_repo(name)
+      repo_path = space.path.join("repos", name).to_s
+
+      dirty_out, _, _ = git_capture("-C", repo_path, "status", "--porcelain")
+      return { repo: name, status: :dirty, message: "#{name}: dirty working tree — skipping" } if dirty_out.strip.length > 0
+
+      branch_out, _, branch_st = git_capture("-C", repo_path, "symbolic-ref", "--short", "HEAD")
+      unless branch_st.success?
+        return { repo: name, status: :error, message: "#{name}: detached HEAD — skipping" }
+      end
+      branch = branch_out.strip
+
+      _, fetch_err, fetch_st = git_capture("-C", repo_path, "fetch", "origin")
+      unless fetch_st.success?
+        return { repo: name, status: :error, message: "#{name}: fetch failed — #{fetch_err.strip}" }
+      end
+
+      count_out, _, count_st = git_capture("-C", repo_path, "rev-list", "--left-right", "--count",
+        "#{branch}...origin/#{branch}")
+      unless count_st.success?
+        return { repo: name, status: :error, message: "#{name}: could not compare with origin/#{branch}" }
+      end
+
+      ahead, behind = count_out.strip.split.map(&:to_i)
+      return { repo: name, status: :up_to_date, message: "#{name}: up to date" } if behind == 0
+
+      if ahead > 0
+        return { repo: name, status: :diverged,
+          message: "#{name}: behind #{behind}, diverged #{ahead} — not fast-forwardable, resolve manually" }
+      end
+
+      _, ff_err, ff_st = git_capture("-C", repo_path, "merge", "--ff-only", "origin/#{branch}")
+      if ff_st.success?
+        { repo: name, status: :fast_forwarded, message: "#{name}: fast-forwarded #{behind} commits" }
+      else
+        { repo: name, status: :ff_failed, message: "#{name}: merge --ff-only failed — #{ff_err.strip}" }
+      end
     end
 
     def branch_exists?(repo_path, branch)

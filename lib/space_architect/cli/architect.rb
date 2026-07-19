@@ -174,6 +174,25 @@ module Space::Architect
         end
       end
 
+      class Sync < BaseCommand
+        desc "Sync tracked repo clones with their remotes (fast-forward only, no rebase/reset)"
+        phase 53, "Project"
+        argument :repo,  required: false, desc: "Repo name to sync (default: all tracked repos)"
+        argument :space, required: false, desc: "Space identifier (default: $PWD)"
+
+        def call(repo: nil, space: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              results = project.sync_repos(repo_name: repo)
+              results.each { |r| terminal.say r[:message] }
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+      end
+
       class Freeze < BaseCommand
         desc "Freeze the iteration's frozen region (Grounds/Specification/Acceptance Criteria) and record the freeze SHA"
         phase 12, "Spec"
@@ -761,6 +780,7 @@ Space::Architect::CLI::Registry.register "init",   Space::Architect::CLI::Archit
 Space::Architect::CLI::Registry.register "ground", Space::Architect::CLI::Architect::Ground
 Space::Architect::CLI::Registry.register "new",    Space::Architect::CLI::Architect::New
 Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Architect::Status
+Space::Architect::CLI::Registry.register "sync",   Space::Architect::CLI::Architect::Sync
 Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
 Space::Architect::CLI::Registry.register "verify", Space::Architect::CLI::Architect::Verify
 Space::Architect::CLI::Registry.register "provision", Space::Architect::CLI::Architect::Provision
