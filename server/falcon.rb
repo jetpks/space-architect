@@ -38,7 +38,10 @@ service "architect.executor-worker" do
 
   service_class { Space::Server::Services::ExecutorWorkerService }
 
-  count 1
+  # Each process runs jobs strictly serially (Executor#run polls, claims, and
+  # executes one at a time) — concurrency is process count, not fibers within
+  # one process. JOB_EXECUTOR_COUNT raises that process count.
+  count Integer(ENV.fetch("JOB_EXECUTOR_COUNT", 1))
 end
 
 # Consumer-worker service: a single managed child process that drains executor

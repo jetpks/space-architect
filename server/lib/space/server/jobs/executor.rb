@@ -17,12 +17,13 @@ module Space
       # requeues it (capped by attempts). A job that RAN and exited nonzero is
       # failed, never retried. Fibers all the way down; no threads.
       class Executor
-        DEFAULT_INTERVAL      = 2
-        DEFAULT_LEASE_SECONDS = 60
-        DEFAULT_MAX_ATTEMPTS  = 3
-        DEFAULT_TIMEOUT       = 3600
-        DEFAULT_STOP_GRACE    = 10
-        ENV_BUILD_EXIT_CODE   = 1
+        DEFAULT_INTERVAL       = 2
+        DEFAULT_LEASE_SECONDS  = 60
+        DEFAULT_MAX_ATTEMPTS   = 3
+        DEFAULT_TIMEOUT        = 3600
+        DEFAULT_STOP_GRACE     = 10
+        ENV_BUILD_EXIT_CODE    = 1
+        FAILURE_EVIDENCE_BYTES = 64 * 1024  # cap durable evidence at 64 KiB (keep the tail)
 
         def initialize(jobs_repo:, runs_repo:, redis:, env_image:,
                        secret_resolver: SecretResolver.new, spawner: ProcessSpawner.new,
@@ -80,6 +81,8 @@ module Space
         end
 
         def create_run(job)
+          supersede_stranded_run(job.run_id) if job.run_id
+
           now = Time.now
           run = @runs_repo.create(
             user_id:    job.user_id,
@@ -93,6 +96,15 @@ module Space
           run
         end
 
+        # Kill-recovery bookkeeping (I09 D6): a job claimed with a run_id
+        # already attached means a previous attempt crashed mid-run and was
+        # swept back to queued (BRIEF §8.6) — that run would otherwise stay
+        # stranded at pending/live forever. Mark it failed; forensics keeps
+        # its conversation (and any partial messages) linked untouched.
+        def supersede_stranded_run(run_id)
+          @runs_repo.update(run_id, status: 3, updated_at: Time.now)  # 3 = failed
+        end
+
         # The cidfile lets the stop path signal the container itself — client
         # signals never stop it under Apple `container` 1.0.0 (I09 P5).
         def run_sandbox(job, image_tag, stream)
@@ -104,11 +116,23 @@ module Space
         end
 
         # No sandbox ran: leave the evidence (build log / rejection reason) on
-        # the raw stream as err lines, terminate the stream, fail the job.
+        # the raw stream as err lines, terminate the stream, persist the same
+        # evidence on the job row (I07 D2 — the raw stream self-evicts after
+        # StreamKey::TTL_SECONDS, long before anyone debugging a failure looks),
+        # then fail the job.
         def fail_before_spawn(job, evidence, stream)
           evidence.to_s.each_line { |line| stream.err(line.chomp) }
           stream.exit(ENV_BUILD_EXIT_CODE)
+          @jobs_repo.update(job.id, failure_evidence: bounded_evidence(evidence.to_s))
           @jobs_repo.mark_failed(job.id)
+        end
+
+        # Keep only the last FAILURE_EVIDENCE_BYTES bytes — enough to see the
+        # actual error, bounded so a runaway build log can't bloat the jobs table.
+        def bounded_evidence(text)
+          return text if text.bytesize <= FAILURE_EVIDENCE_BYTES
+
+          text.byteslice(text.bytesize - FAILURE_EVIDENCE_BYTES, FAILURE_EVIDENCE_BYTES)
         end
 
         def spawn_and_relay(job, argv, stream, cidfile)

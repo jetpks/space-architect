@@ -128,4 +128,16 @@ class EnvImageTest < Minitest::Test
     Space::Server::Jobs::EnvImage.new(spawn: spawn, base_image: "alpine:3.20").call(env)
     assert_match(/\AFROM alpine:3.20/, spawn.dockerfiles.first)
   end
+
+  def test_changed_base_image_changes_tag
+    tag_a = Space::Server::Jobs::EnvImage.new(spawn: FakeSpawn.new(exists: true)).call(env).value!
+    tag_b = Space::Server::Jobs::EnvImage.new(spawn: FakeSpawn.new(exists: true), base_image: "alpine:3.20").call(env).value!
+    refute_equal tag_a, tag_b
+  end
+
+  def test_same_base_image_keeps_tag_stable
+    tag_a = Space::Server::Jobs::EnvImage.new(spawn: FakeSpawn.new(exists: true), base_image: "alpine:3.20").call(env).value!
+    tag_b = Space::Server::Jobs::EnvImage.new(spawn: FakeSpawn.new(exists: true), base_image: "alpine:3.20").call(env).value!
+    assert_equal tag_a, tag_b
+  end
 end
