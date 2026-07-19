@@ -25,12 +25,12 @@ module Space
 
         # Creates a conversation owned by the run's user and returns it.
         # Must be called before process.
-        def setup(run)
+        def setup(run, source: "architect_dispatch")
           conv = @conversations_repo.create(
             user_id:    run.user_id,
             status:     0,
             published:  false,
-            source:     "architect_dispatch",
+            source:     source,
             created_at: Time.now,
             updated_at: Time.now
           )
