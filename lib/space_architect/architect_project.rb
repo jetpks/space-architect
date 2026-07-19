@@ -158,7 +158,8 @@ module Space::Architect
     # Freeze the iteration: the iteration file must carry a "## Acceptance Criteria" section. Commits
     # any pending changes to the iteration file and records HEAD as freeze_sha. If
     # already frozen, refuses when the frozen region has changed since.
-    def freeze!(iteration, warnings: nil, message: nil)
+    # With force: true, re-freezes a changed frozen region if no lane is dispatched yet.
+    def freeze!(iteration, warnings: nil, message: nil, force: false)
       entry = slice_entry(iteration)
       rel = entry["file"]
       path = space.path.join(rel)
@@ -174,11 +175,17 @@ module Space::Architect
       if entry["freeze_sha"]
         sha = entry["freeze_sha"]
         if frozen_region_changed?(sha, rel)
-          raise Space::Core::Error,
-            "Frozen sections of #{rel} changed since freeze #{sha[0, 8]} — " \
-            "refusing to re-freeze. Restore them to their frozen state or use a new iteration."
+          if force
+            dispatched_guard!(entry)
+            # fall through to commit path to re-freeze with new sha
+          else
+            raise Space::Core::Error,
+              "Frozen sections of #{rel} changed since freeze #{sha[0, 8]} — " \
+              "refusing to re-freeze. Restore them to their frozen state or use a new iteration."
+          end
+        else
+          return sha
         end
-        return sha
       end
 
       files = [rel]
@@ -236,8 +243,9 @@ module Space::Architect
     # Write one section of the iteration file and commit it with the canonical
     # per-section message, in one call. Refuses to write a frozen section
     # (Grounds/Specification/Acceptance Criteria) once the iteration is frozen.
+    # With force: true, writes a frozen section if no lane is dispatched yet.
     # Builder Report is not here (use evidence).
-    def write_section!(iteration, section, body:, append: false, lane: nil, message: nil)
+    def write_section!(iteration, section, body:, append: false, lane: nil, message: nil, force: false)
       spec = SECTIONS[section]
       unless spec
         raise Space::Core::Error,
@@ -251,9 +259,13 @@ module Space::Architect
       raise Space::Core::Error, "#{rel} does not exist — run `architect new #{iteration}` first" unless path.exist?
 
       if spec[:frozen] && entry["freeze_sha"]
-        raise Space::Core::Error,
-          "#{spec[:heading]} is frozen for #{iteration} (freeze #{entry["freeze_sha"][0, 8]}) — " \
-          "frozen sections are read-only after the freeze commit. Open a new iteration to change the contract."
+        if force
+          dispatched_guard!(entry)
+        else
+          raise Space::Core::Error,
+            "#{spec[:heading]} is frozen for #{iteration} (freeze #{entry["freeze_sha"][0, 8]}) — " \
+            "frozen sections are read-only after the freeze commit. Open a new iteration to change the contract."
+        end
       end
 
       block = lane ? "### #{lane}\n\n#{body.strip}" : body.strip
@@ -1256,6 +1268,17 @@ module Space::Architect
       result = GateLint.call(gates)
       return if result.success?
       raise Space::Core::Error, "ill-formed gates block:\n#{result.failure.join("\n")}"
+    end
+
+    # Raises if any lane in the entry has been dispatched (dispatched_at or integrate_sha set).
+    # Used by freeze! and write_section! --force to prevent rewriting frozen content after a
+    # builder has run (moving freeze_sha post-dispatch breaks the AC cardinal invariant).
+    def dispatched_guard!(entry)
+      lane = (entry["lanes"] || []).find { |l| l["dispatched_at"] || l["integrate_sha"] }
+      return unless lane
+      raise Space::Core::Error,
+        "Lane '#{lane["name"]}' is already dispatched — cannot re-freeze or write frozen sections " \
+        "after dispatch (a builder has run against the frozen AC; rewriting it breaks the cardinal invariant)."
     end
 
     def staged_changes?

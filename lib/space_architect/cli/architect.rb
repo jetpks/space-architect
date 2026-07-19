@@ -198,15 +198,16 @@ module Space::Architect
         phase 12, "Spec"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option   :force, type: :boolean, default: false, desc: "Re-freeze even if the frozen region changed (pre-dispatch only)"
         commit_message_options
 
-        def call(iteration:, space: nil, message: nil, message_from: nil, **opts)
+        def call(iteration:, space: nil, message: nil, message_from: nil, force: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
               warnings = []
-              sha = project.freeze!(iteration, warnings: warnings,
+              sha = project.freeze!(iteration, warnings: warnings, force: force,
                 message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Frozen #{iteration} at #{sha}"
               warnings.each { |w| terminal.say "Warning: #{w}" }
@@ -369,16 +370,17 @@ module Space::Architect
         option   :stdin,  type: :boolean, default: false, desc: "Read the section body from stdin"
         option   :append, type: :boolean, default: false, desc: "Append a ### <lane> subsection instead of replacing"
         option   :lane,   default: nil, desc: "Lane name for an appended ### subsection"
+        option   :force,  type: :boolean, default: false, desc: "Write a frozen section (pre-dispatch only)"
         commit_message_options
 
         def call(iteration:, section:, space: nil, from: nil, body: nil, stdin: false, append: false, lane: nil,
-                 message: nil, message_from: nil, **opts)
+                 message: nil, message_from: nil, force: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             content = read_body(from: from, body: body, stdin: stdin, what: "section body")
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              res = project.write_section!(iteration, section, body: content, append: append, lane: lane,
+              res = project.write_section!(iteration, section, body: content, append: append, lane: lane, force: force,
                 message: read_commit_message(message: message, message_from: message_from))
               if res[:committed]
                 terminal.say "Committed #{res[:heading]} → #{res[:sha][0, 8]}"
@@ -446,17 +448,19 @@ module Space::Architect
       class Merge < BaseCommand
         desc "Integrate ONE judged-passing lane (merges --no-ff; runs no gates, makes no verdict)"
         phase 41, "Land"
-        argument :iteration, required: true,  desc: "Iteration name"
-        argument :lane,      required: true,  desc: "Lane name (architect-judged passing)"
-        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        argument :iteration,   required: true,  desc: "Iteration name"
+        argument :lane,        required: true,  desc: "Lane name (architect-judged passing)"
+        argument :space,       required: false, desc: "Space identifier (default: $PWD)"
+        option   :into,        required: false, desc: "Merge into this branch instead of the slug-derived project/<slug> default"
+        option   :commit_mode, default: nil,    desc: "Commit mode override (strict|conductor); overrides space.yaml commit_mode for this run"
         commit_message_options
 
-        def call(iteration:, lane:, space: nil, message: nil, message_from: nil, **opts)
+        def call(iteration:, lane:, space: nil, message: nil, message_from: nil, into: nil, commit_mode: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              r = project.merge_lane!(iteration, lane,
+              r = project.merge_lane!(iteration, lane, into: into, commit_mode: commit_mode,
                 message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Merged #{lane} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
               terminal.say r[:diffstat] unless r[:diffstat].empty?

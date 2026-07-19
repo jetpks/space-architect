@@ -2941,4 +2941,206 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
     FileUtils.rm_rf(origin_dir)
   end
+
+  # ── I06: freeze --force, section --force, merge --into / --commit-mode ───────
+
+  # AC1(a): freeze_force — re-freezes changed frozen region pre-dispatch and updates freeze_sha
+  def test_freeze_force_refreezes_changed_frozen_region_pre_dispatch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    freeze_sha_1 = project.freeze!("my-slice")
+
+    # Amend the frozen region (Grounds is above ## Builder Prompt)
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    File.write(slice, text.sub("## Grounds", "## Grounds\n\nAmended grounds for re-freeze."))
+
+    freeze_sha_2 = project.freeze!("my-slice", force: true)
+
+    refute_equal freeze_sha_1, freeze_sha_2, "force re-freeze must produce a new sha"
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    assert_equal freeze_sha_2, yml.dig("project", "iterations", 0, "freeze_sha"),
+      "space.yaml must record the new freeze_sha after force re-freeze"
+
+    status, = Open3.capture3("git", "-C", dir, "status", "--porcelain")
+    assert_equal "", status.strip, "workspace must be clean after force re-freeze"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1(b): freeze_force — refuses post-dispatch (dispatched_at set)
+  def test_freeze_force_refuses_if_lane_dispatched
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    project.freeze!("my-slice")
+
+    # Simulate dispatch
+    space.data.dig("project", "iterations").find { |s| s["name"] == "my-slice" }
+      .dig("lanes").find { |l| l["name"] == "lane-a" }["dispatched_at"] = "2026-01-01T00:00:00Z"
+
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    File.write(slice, text.sub("## Grounds", "## Grounds\n\nTamper attempt."))
+
+    err = assert_raises(Space::Core::Error) do
+      project.freeze!("my-slice", force: true)
+    end
+    assert_match(/lane-a/, err.message)
+    assert_match(/dispatched/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1(c): freeze_force — without --force, changed frozen region still raises (existing behavior)
+  def test_freeze_force_without_flag_refuses_changed_region
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    File.write(slice, text.sub("## Grounds", "## Grounds\n\nChanged."))
+
+    err = assert_raises(Space::Core::Error) do
+      project.freeze!("my-slice")
+    end
+    assert_match(/refusing to re-freeze/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2(a): section_force — writes a frozen section pre-dispatch
+  def test_section_force_writes_frozen_section_pre_dispatch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+
+    res = project.write_section!("my-slice", "specification", body: "Amended spec.", force: true)
+    assert res[:committed]
+
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    assert_match(/Amended spec\./, text)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2(b): section_force — refuses post-dispatch (integrate_sha set)
+  def test_section_force_refuses_if_lane_dispatched
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    project.freeze!("my-slice")
+
+    # Simulate post-integrate via integrate_sha
+    space.data.dig("project", "iterations").find { |s| s["name"] == "my-slice" }
+      .dig("lanes").find { |l| l["name"] == "lane-a" }["integrate_sha"] = "abc123def456"
+
+    err = assert_raises(Space::Core::Error) do
+      project.write_section!("my-slice", "specification", body: "Tampered spec.", force: true)
+    end
+    assert_match(/lane-a/, err.message)
+    assert_match(/dispatched/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2(c): section_force — without --force, frozen section still raises (existing behavior)
+  def test_section_force_without_flag_refuses_frozen_section
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+
+    err = assert_raises(Space::Core::Error) do
+      project.write_section!("my-slice", "specification", body: "Tampered spec.")
+    end
+    assert_match(/frozen/i, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3(a): merge_into — merges into the named branch instead of project/<slug>
+  def test_merge_into_uses_named_branch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "feature.rb"), "def feature; end\n")
+
+    r = project.merge_lane!("my-slice", "lane-a", into: "custom/target-branch")
+
+    assert_equal "custom/target-branch", r[:integration_branch]
+
+    repo = File.join(dir, "repos", "my-repo")
+    assert_path_exists File.join(repo, ".git", "refs", "heads", "custom", "target-branch"),
+      "custom/target-branch must exist in the repo after merge"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3(b): merge_commit_mode — conductor mode treats canonical conductor commits as non-builder
+  def test_merge_commit_mode_conductor_passes_canonical_commit
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+
+    # Make a canonical conductor commit
+    File.write(File.join(wt, "work.rb"), "x = 1\n")
+    system("git", "-C", wt, "add", "work.rb", out: File::NULL, err: File::NULL)
+    system("git", "-C", wt, "commit", "-q", "-m", "I01-my-slice-lane-a: builder output")
+
+    # Without conductor mode this raises "builder commits"
+    File.write(File.join(wt, "more.rb"), "y = 2\n")
+    err = assert_raises(Space::Core::Error) { project.merge_lane!("my-slice", "lane-a") }
+    assert_match(/builder commits/i, err.message)
+
+    # With conductor mode the canonical commit is excluded; merge succeeds
+    r = project.merge_lane!("my-slice", "lane-a", commit_mode: "conductor")
+    assert_equal false, r[:gates_run]
+    assert_match(/\Aproject\//, r[:integration_branch])
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end
