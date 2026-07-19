@@ -799,6 +799,66 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # acceptance-criteria is now a first-class section target:
+  # (a) well-formed AC + gates block writes and commits; (b) malformed gates block raises
+  # before writing/committing.
+  def test_write_section_authors_acceptance_criteria
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    # (a) well-formed AC with a gates block writes and commits
+    ac_body = <<~BODY
+      The seam holds end-to-end.
+
+      ```gates
+      - id: g1
+        ac: AC1
+        cmd: "true"
+        expect:
+          exit_code: 0
+      ```
+    BODY
+
+    res = project.write_section!("my-slice", "acceptance-criteria", body: ac_body)
+    assert res[:committed]
+    assert_match(/\A[0-9a-f]{40}\z/, res[:sha])
+
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    assert_match(/The seam holds end-to-end/, text)
+    assert_match(/^## Acceptance Criteria/, text)
+
+    msg, = Open3.capture3("git", "-C", dir, "log", "-1", "--format=%s")
+    assert_equal "I01: acceptance criteria", msg.strip
+
+    # (b) malformed gates block raises before writing/committing
+    text_before = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    head_before, = Open3.capture3("git", "-C", dir, "rev-parse", "HEAD")
+
+    err = assert_raises(Space::Core::Error) do
+      project.write_section!("my-slice", "acceptance-criteria", body: <<~BAD)
+        Malformed gates follow.
+
+        ```gates
+        - id: g1
+          ac: AC1
+          cmd: "true"
+          expect: {}
+        ```
+      BAD
+    end
+    assert_match(/ill-formed/i, err.message)
+
+    assert_equal text_before, File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    head_after, = Open3.capture3("git", "-C", dir, "rev-parse", "HEAD")
+    assert_equal head_before.strip, head_after.strip
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # transcribe_evidence! copies the scratch report VERBATIM — even when it contains
   # its own "## " headings and markdown tables — and surfaces the STATUS line.
   def test_transcribe_evidence_is_verbatim_even_with_hashes_and_tables
@@ -2024,6 +2084,41 @@ class ArchitectProjectTest < Space::ArchitectTest
     err = assert_raises(Space::Core::Error) { project.freeze!("my-slice") }
     assert_match(/ill-formed lanes block/, err.message)
     assert_match(/missing 'repo'/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # freeze! commits space.yaml after update_architect_block so the workspace is clean:
+  # (a) git status --porcelain is empty; (b) freeze_sha in space.yaml equals the freeze
+  # commit (iteration file), not HEAD (the metadata commit).
+  def test_freeze_commits_space_yaml
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    # Dirty the iteration file so the freeze produces a distinct first commit
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    File.write(slice, File.read(slice) + "\nAC1 — the seam holds.\n")
+
+    freeze_sha = project.freeze!("my-slice")
+
+    # (a) space.yaml committed — no dirty working tree
+    status, = Open3.capture3("git", "-C", dir, "status", "--porcelain")
+    assert_equal "", status.strip
+
+    # (b) freeze_sha in space.yaml equals the freeze commit (touching the iteration file),
+    # not HEAD (the metadata commit)
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    recorded = yml.dig("project", "iterations", 0, "freeze_sha")
+    assert_equal freeze_sha, recorded
+
+    iter_commit, = Open3.capture3("git", "-C", dir, "log", "--format=%H", "--", "architecture/I01-my-slice.md")
+    head, = Open3.capture3("git", "-C", dir, "rev-parse", "HEAD")
+    assert_equal iter_commit.lines.first.strip, recorded
+    refute_equal head.strip, recorded
   ensure
     FileUtils.rm_rf(dir)
   end
