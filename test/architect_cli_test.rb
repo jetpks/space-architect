@@ -593,6 +593,120 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # ── I09: pi harness ───────────────────────────────────────────────────────
+
+  def test_dispatch_cli_runs_fake_pi_and_writes_session_dir_to_run_jsonl
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake = File.join(setup[:root], "fake_pi")
+    File.write(fake, <<~RUBY)
+      #!/usr/bin/env ruby
+      require "json"
+      a = ARGV; c = Dir.pwd; s = $stdin.gets
+      $stdout.puts JSON.generate({type: "session", version: 3, id: "fake-session", cwd: c})
+      $stdout.puts "argv=" + a.inspect
+      $stdout.flush
+      exit 0
+    RUBY
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A", "--harness", "pi", "--model", "openrouter/test-model")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out, err = invoke("dispatch", "demo", "A")
+
+        assert_empty err
+        assert_match(/Builder exited with status 0/, out)
+        log = File.read(File.join(build_dir, "run.jsonl"))
+        assert_includes log, "--session-dir"
+        assert_includes log, build_dir
+        assert_includes log, "\"type\":\"session\""
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_dispatch_cli_harness_pi_with_no_model_raises
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        _out, err = invoke("dispatch", "demo", "A", "--harness", "pi")
+
+        refute_empty err
+        assert_match(/--harness pi/, err)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_dispatch_cli_effort_with_harness_pi_raises
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A", "--harness", "pi", "--model", "openrouter/test-model")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        _out, err = invoke("dispatch", "demo", "A", "--effort", "high")
+
+        refute_empty err
+        assert_match(/opencode-only/, err)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_dispatch_help_lists_pi_harness
+    out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    assert_includes out, "claude-code, opencode, pi"
+  end
+
+  def test_worktree_add_help_lists_pi_harness
+    out = IO.popen(["bundle", "exec", "architect", "worktree", "add", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    assert_includes out, "claude-code, opencode, pi"
+  end
+
   # ── dispatch --prompt: authored anywhere, copied to the canonical path ───────
 
   def test_dispatch_cli_prompt_flag_copies_and_announces
