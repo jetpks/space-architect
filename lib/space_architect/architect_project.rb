@@ -603,7 +603,7 @@ module Space::Architect
       repos.map { |r| sync_one_repo(r["name"]) }
     end
 
-    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false, effort: nil, touch: nil)
+    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false, effort: nil, touch: nil, force: false)
       if harness.to_s == "opencode" && (model.nil? || model == Harness::CLAUDE_DEFAULT_MODEL)
         raise Space::Core::Error,
           "Pass --model when using --harness opencode " \
@@ -632,11 +632,15 @@ module Space::Architect
 
       branch = "lane/#{id}-#{lane}"
 
-      # Guard: an existing directory that is not a registered worktree is ambiguous — refuse.
+      # Guard: an existing directory that is not a registered worktree is ambiguous.
       if wt_path.exist? && !worktree_registered?(repo_path, wt_path)
-        raise Space::Core::Error,
-          "#{wt_path} exists but is not a registered git worktree of #{repo} — " \
-          "resolve manually before re-running worktree_add"
+        if force
+          FileUtils.rm_rf(wt_path)
+        else
+          raise Space::Core::Error,
+            "#{wt_path} exists but is not a registered git worktree of #{repo} — " \
+            "resolve manually before re-running worktree_add, or re-run with --force to clear and re-create it"
+        end
       end
 
       # Skip git worktree add when the branch and worktree already exist (idempotent re-run).
@@ -793,7 +797,7 @@ module Space::Architect
     # record worktree/base_sha/integration_branch. Idempotent — an already-materialized
     # lane is skipped, not re-created. Refuses until the iteration is frozen, because
     # declarations are not authoritative until then.
-    def provision(iteration, base: nil, lane: nil)
+    def provision(iteration, base: nil, lane: nil, force: false)
       entry = slice_entry(iteration)
       raise Space::Core::Error,
         "Iteration '#{iteration}' is not frozen — freeze before provisioning (declarations are not authoritative until frozen)." \
@@ -811,7 +815,7 @@ module Space::Architect
           { lane: name, worktree: wt_path, base_sha: l["base_sha"], created: false }
         else
           result = worktree_add(l["repo"], iteration, name, base: resolve_lane_base(l["repo"], base),
-                                **recorded_lane_fields(l))
+                                force: force, **recorded_lane_fields(l))
           { lane: name, worktree: result[:worktree], base_sha: result[:base_sha], created: true }
         end
       end
