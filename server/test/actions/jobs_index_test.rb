@@ -87,6 +87,30 @@ class JobsIndexTest < Minitest::Test
     end
   end
 
+  # --- provenance (I16) -------------------------------------------------
+
+  def test_index_job_shape_omits_provenance_when_absent
+    Factory[:job, user_id: @owner.id]
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs")
+    entry = parse_json(body).dig("props", "jobs").first
+    refute entry.key?("provenance")
+  end
+
+  def test_index_job_shape_includes_provenance_when_present
+    spec = {
+      "harness" => { "type" => "claude", "model" => "sonnet", "backend" => { "base_url" => "https://api.example.com" } },
+      "prompt" => "do the thing",
+      "environment" => { "env" => {}, "secrets" => [], "deps" => [], "permissions" => { "network" => false, "mounts" => [] } },
+      "provenance" => { "space" => "s1", "iteration" => "I16", "lane" => "server" }
+    }
+    job = Factory[:job, user_id: @owner.id, spec: spec]
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs")
+    entry = parse_json(body).dig("props", "jobs").find { |j| j["id"] == job.id }
+    assert_equal({ "space" => "s1", "iteration" => "I16", "lane" => "server" }, entry["provenance"])
+  end
+
   def test_index_bearer_job_shape
     job = Factory[:job, user_id: @owner.id]
     with_token_settings(user_id: @owner.id) do

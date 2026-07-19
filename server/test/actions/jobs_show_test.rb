@@ -99,6 +99,24 @@ class JobsShowTest < Minitest::Test
     end
   end
 
+  # --- provenance (I16) -------------------------------------------------
+  # Show already renders the full spec column — provenance rides along once
+  # the contract accepts it, no action-layer change needed.
+
+  def test_show_owner_inertia_props_include_provenance_when_present
+    spec = {
+      "harness" => { "type" => "claude", "model" => "sonnet", "backend" => { "base_url" => "https://api.example.com" } },
+      "prompt" => "do the thing",
+      "environment" => {},
+      "provenance" => { "space" => "s1", "iteration" => "I16", "lane" => "server" }
+    }
+    job = Factory[:job, user_id: @owner.id, run_id: nil, spec: spec]
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs/#{job.id}")
+    props = parse_json(body).dig("props", "job")
+    assert_equal({ "space" => "s1", "iteration" => "I16", "lane" => "server" }, props.dig("spec", "provenance"))
+  end
+
   def test_show_bearer_owner_returns_200_with_job_json
     job = Factory[:job, user_id: @owner.id]
     with_token_settings(user_id: @owner.id) do

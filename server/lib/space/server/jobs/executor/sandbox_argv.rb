@@ -28,6 +28,7 @@ module Space
             environment = spec["environment"] || {}
             permissions = environment["permissions"] || {}
             mounts      = permissions["mounts"] || []
+            workdir     = spec.dig("workspace", "dir")
 
             invalid = mounts.reject { |m| valid_mount?(m) }
             return Failure("invalid mount(s): #{invalid.join(', ')}") unless invalid.empty?
@@ -38,6 +39,7 @@ module Space
             secret_names(environment, backend).each { |name| argv << "-e" << name }
             argv << "--network" << "none" unless permissions["network"]
             mounts.each { |m| argv << "-v" << m }
+            argv << "--workdir" << workdir if workdir
             argv << image_tag
             argv << "claude" << "-p" << spec["prompt"]
             argv << "--model" << harness["model"] if harness["model"]

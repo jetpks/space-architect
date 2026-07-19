@@ -34,13 +34,15 @@ module Space
 
           def job_list(user)
             jobs_repo.list_for_user(user.id).map do |job|
-              {
+              entry = {
                 id: job.id,
                 status: job.status,
                 model: job.spec.dig("harness", "model"),
                 created_at: job.created_at.iso8601,
                 run_id: job.run_id
               }
+              provenance = job.spec["provenance"]
+              provenance ? entry.merge(provenance: provenance) : entry
             end
           end
         end

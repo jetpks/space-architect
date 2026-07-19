@@ -40,6 +40,14 @@ module Space
               optional(:mounts).value(Types::Array.of(Types::String).default([].freeze))
             end
           end
+          optional(:workspace).hash do
+            required(:dir).filled(:string)
+          end
+          optional(:provenance).hash do
+            required(:space).filled(:string)
+            required(:iteration).filled(:string)
+            required(:lane).filled(:string)
+          end
         end
 
         # environment.env values become shell env vars, so every value must be a
@@ -53,6 +61,17 @@ module Space
           value.each do |k, v|
             key([:environment, :env, k]).failure("must be a string") unless v.is_a?(String)
           end
+        end
+
+        # workspace.dir shares mounts' absolute/non-escaping posture
+        # (SandboxArgv.valid_mount?) — rejected at submission rather than left to
+        # fail at execution.
+        rule(workspace: :dir) do
+          key.failure("must be an absolute path") if key? && !absolute_path?(value)
+        end
+
+        def absolute_path?(path)
+          path.start_with?("/") && !path.split("/").include?("..")
         end
       end
     end

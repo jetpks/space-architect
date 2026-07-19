@@ -104,4 +104,49 @@ class CreateJobContractTest < Minitest::Test
     assert r.success?
     refute r.to_h.key?(:evil)
   end
+
+  # --- workspace / provenance (I16) -------------------------------------
+
+  def test_workspace_dir_absolute_path_succeeds
+    r = contract.call(valid_spec.merge(workspace: { dir: "/repo/worktree" }))
+    assert r.success?, r.errors.to_h.inspect
+    assert_equal "/repo/worktree", r.to_h.dig(:workspace, :dir)
+  end
+
+  def test_workspace_dir_relative_path_rejected
+    r = contract.call(valid_spec.merge(workspace: { dir: "repo/worktree" }))
+    assert r.failure?
+    assert r.errors.to_h.dig(:workspace, :dir)
+  end
+
+  def test_workspace_dir_dot_dot_rejected
+    r = contract.call(valid_spec.merge(workspace: { dir: "/repo/../etc" }))
+    assert r.failure?
+    assert r.errors.to_h.dig(:workspace, :dir)
+  end
+
+  def test_provenance_full_triple_succeeds
+    r = contract.call(valid_spec.merge(provenance: { space: "s1", iteration: "I16", lane: "server" }))
+    assert r.success?, r.errors.to_h.inspect
+    assert_equal({ space: "s1", iteration: "I16", lane: "server" }, r.to_h[:provenance])
+  end
+
+  def test_provenance_missing_field_rejected
+    r = contract.call(valid_spec.merge(provenance: { space: "s1", iteration: "I16" }))
+    assert r.failure?
+    assert r.errors.to_h.dig(:provenance, :lane)
+  end
+
+  def test_provenance_empty_field_rejected
+    r = contract.call(valid_spec.merge(provenance: { space: "s1", iteration: "", lane: "server" }))
+    assert r.failure?
+    assert r.errors.to_h.dig(:provenance, :iteration)
+  end
+
+  def test_spec_without_workspace_or_provenance_still_valid
+    r = contract.call(valid_spec)
+    assert r.success?, r.errors.to_h.inspect
+    refute r.to_h.key?(:workspace)
+    refute r.to_h.key?(:provenance)
+  end
 end
