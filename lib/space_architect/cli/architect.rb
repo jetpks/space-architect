@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "../jobs_client"
 
 module Space::Architect
   module CLI
@@ -821,6 +822,92 @@ module Space::Architect
           end
         end
       end
+
+      module Jobs
+        # dry-cli 1.4.1 only enforces `required: true` on argument, not on
+        # option (Dry::CLI::Parser#parse_required_params only ever consults
+        # command.required_arguments) — a missing --host/--token would
+        # otherwise surface as a raw ArgumentError from the **opts keyword
+        # splat, uncaught by handle_errors. Every subcommand below validates
+        # explicitly so the failure is a clean Space::Core::Error instead.
+        def self.require_credentials!(host, token)
+          raise Space::Core::Error, "--host is required" unless host
+          raise Space::Core::Error, "--token is required" unless token
+        end
+
+        class List < BaseCommand
+          desc "List jobs for the authenticated user (owner-scoped, newest-first)"
+          option :host,  required: true, desc: "Base URL of the space-server"
+          option :token, required: true, desc: "Bearer token for authorization"
+
+          def call(host: nil, token: nil, **opts)
+            setup_terminal(**opts.slice(:color, :colors))
+            handle_errors do
+              Jobs.require_credentials!(host, token)
+              jobs = JobsClient.new(host, token).list
+              if jobs.empty?
+                terminal.say "No jobs"
+              else
+                rows = jobs.map { |j| [j["id"], j["status"], j["run_id"], j["created_at"]] }
+                terminal.say terminal.table(%w[ID Status RunID CreatedAt], rows)
+              end
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+
+        class Show < BaseCommand
+          desc "Show a job's full JSON"
+          argument :id, required: true, desc: "Job id"
+          option   :host,  required: true, desc: "Base URL of the space-server"
+          option   :token, required: true, desc: "Bearer token for authorization"
+
+          def call(id:, host: nil, token: nil, **opts)
+            setup_terminal(**opts.slice(:color, :colors))
+            handle_errors do
+              Jobs.require_credentials!(host, token)
+              job = JobsClient.new(host, token).show(id)
+              terminal.say JSON.pretty_generate(job)
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+
+        class Cancel < BaseCommand
+          desc "Cancel a job"
+          argument :id, required: true, desc: "Job id"
+          option   :host,  required: true, desc: "Base URL of the space-server"
+          option   :token, required: true, desc: "Bearer token for authorization"
+
+          def call(id:, host: nil, token: nil, **opts)
+            setup_terminal(**opts.slice(:color, :colors))
+            handle_errors do
+              Jobs.require_credentials!(host, token)
+              result = JobsClient.new(host, token).cancel(id)
+              terminal.say JSON.pretty_generate(result)
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+
+        class Watch < BaseCommand
+          desc "Resolve a job's run and stream its live events (SSE) until run_complete"
+          argument :id, required: true, desc: "Job id"
+          option   :host,  required: true, desc: "Base URL of the space-server"
+          option   :token, required: true, desc: "Bearer token for authorization"
+
+          def call(id:, host: nil, token: nil, **opts)
+            setup_terminal(**opts.slice(:color, :colors))
+            handle_errors do
+              Jobs.require_credentials!(host, token)
+              client = JobsClient.new(host, token)
+              run_id = client.wait_for_run_id(id)
+              client.stream(run_id) { |data| terminal.say data }
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+      end
     end
   end
 end
@@ -853,6 +940,12 @@ Space::Architect::CLI::Registry.register "worktree" do |wt|
   wt.register "add",    Space::Architect::CLI::Architect::Worktree::Add
   wt.register "remove", Space::Architect::CLI::Architect::Worktree::Remove
   wt.register "list",   Space::Architect::CLI::Architect::Worktree::List
+end
+Space::Architect::CLI::Registry.register "jobs" do |j|
+  j.register "list",   Space::Architect::CLI::Architect::Jobs::List
+  j.register "show",   Space::Architect::CLI::Architect::Jobs::Show
+  j.register "watch",  Space::Architect::CLI::Architect::Jobs::Watch
+  j.register "cancel", Space::Architect::CLI::Architect::Jobs::Cancel
 end
 Space::Architect::CLI::Registry.register "variant" do |v|
   v.register "add",     Space::Architect::CLI::Architect::Variant::Add
