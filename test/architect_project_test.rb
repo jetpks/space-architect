@@ -792,6 +792,69 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # AC1/AC2: a body that redundantly repeats its own "## Heading" as the first line
+  # has that line stripped, so writing the section is idempotent — no duplicate heading.
+  def test_write_section_strips_redundant_leading_heading_and_is_idempotent
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    project.write_section!("my-slice", "grounds", body: "## Grounds\n\nX")
+    once = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    assert_equal 1, once.scan(/^## Grounds$/).length
+    assert_match(/^X$/, once)
+
+    project.write_section!("my-slice", "grounds", body: "## Grounds\n\nX")
+    twice = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    assert_equal 1, twice.scan(/^## Grounds$/).length
+    assert_equal once, twice
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: the strip is narrow — only a leading line equal to the TARGET heading is
+  # stripped. A "### fix" lane sub-heading (Builder Prompt --append --lane pattern)
+  # and a wrong-section "## Verdict" line (user content, not a heading dup) both
+  # survive untouched.
+  def test_replace_section_body_leading_heading_strip_is_narrow
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    project = Space::Architect::ArchitectProject.new(space: space)
+
+    text = "## Builder Prompt\n\n<!-- placeholder -->\n\n## Builder Report\n"
+    out = project.send(:replace_section_body, text, "## Builder Prompt", "### fix\n\nbody", append: true)
+    assert_match(/^### fix\n\nbody$/, out[/^## Builder Prompt\n\n.*?(?=\n^## )/m])
+
+    text = "## Grounds\n\n<!-- placeholder -->\n\n## Specification\n"
+    out = project.send(:replace_section_body, text, "## Grounds", "## Verdict\n\nX", append: false)
+    assert_match(/^## Verdict\n\nX$/, out[/^## Grounds\n\n.*?(?=\n^## )/m])
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: a body that is only the heading strips to empty, which placeholder_body?
+  # treats as a placeholder — write_section! replaces it cleanly, no raise.
+  def test_write_section_heading_only_body_strips_to_placeholder
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    res = project.write_section!("my-slice", "grounds", body: "## Grounds")
+    assert res[:committed]
+
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    assert_equal 1, text.scan(/^## Grounds$/).length
+    assert_match(/^## Grounds\n\n*## Specification/, text)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # acceptance-criteria is now a first-class section target:
   # (a) well-formed AC + gates block writes and commits; (b) malformed gates block raises
   # before writing/committing.

@@ -1190,7 +1190,10 @@ module Space::Architect
 
     # Replace (or, with append:, extend) the body of a "## Heading" section, leaving
     # every other section byte-untouched. Append replaces a placeholder body (only a
-    # template comment) the first time, then stacks subsections after it.
+    # template comment) the first time, then stacks subsections after it. A supplied
+    # block that redundantly repeats the section's own heading as its first line (the
+    # natural way to author a complete section) has that leading line stripped first,
+    # so writing the same section twice never accumulates a duplicate heading.
     def replace_section_body(text, heading, new_block, append:)
       lines = text.lines
       start = lines.index { |l| l.chomp == heading }
@@ -1199,11 +1202,14 @@ module Space::Architect
       finish = ((start + 1)...lines.length).find { |i| KNOWN_HEADINGS.include?(lines[i].chomp) } || lines.length
       body = lines[(start + 1)...finish].join
 
+      first, rest = new_block.strip.split("\n", 2)
+      block = first == heading ? rest.to_s.strip : new_block.strip
+
       new_body =
         if append && !placeholder_body?(body)
-          "#{body.strip}\n\n#{new_block.strip}"
+          "#{body.strip}\n\n#{block}"
         else
-          new_block.strip
+          block
         end
 
       prefix = lines[0..start].join.rstrip
