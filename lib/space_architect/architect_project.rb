@@ -347,7 +347,7 @@ module Space::Architect
     # the lane branch, then merge --no-ff into the repo's lane/<id> integration branch.
     # Runs NO gates and makes NO pass/fail decision. Refuses a mechanically-failing lane
     # (builder commits / out-of-bounds) and aborts cleanly on a merge conflict.
-    def merge_lane!(iteration, lane, message: nil, commit_mode: nil)
+    def merge_lane!(iteration, lane, message: nil, commit_mode: nil, into: nil)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
@@ -368,7 +368,7 @@ module Space::Architect
       raise Space::Core::Error, "Worktree directory does not exist: #{wt_path}" unless wt_path.exist?
       base_sha = lane_entry["base_sha"]
       lane_branch = "lane/#{id}-#{lane}"
-      integration_branch = project_integration_branch
+      integration_branch = into || project_integration_branch
 
       status_out, = git_capture("-C", wt_path.to_s, "status", "--porcelain")
       raise Space::Core::Error, "Lane '#{lane}' worktree has no changes to integrate." if status_out.strip.empty?
@@ -390,9 +390,22 @@ module Space::Architect
       unless mst.success?
         conflicts, = git_capture("-C", repo_path.to_s, "diff", "--name-only", "--diff-filter=U")
         git_capture("-C", repo_path.to_s, "merge", "--abort")
-        raise Space::Core::Error,
-          "Merge conflict integrating lane '#{lane}' (#{conflicts.split.join(", ")}) — the lane plan was " \
-          "not disjoint = a spec defect. Kill the conflicting lane and re-spec; do not hand-resolve. #{merr.strip}"
+        conflict_files = conflicts.split
+        lane_touch_set = lane_entry["touch_set"] || []
+        fnm = File::FNM_PATHNAME | File::FNM_EXTGLOB
+        outside = conflict_files.reject do |f|
+          lane_touch_set.any? { |g| File.fnmatch(g, f, fnm) || (g.end_with?("/**") && File.fnmatch("#{g}/*", f, fnm)) }
+        end
+        if !lane_touch_set.empty? && outside.empty?
+          raise Space::Core::Error,
+            "Merge conflict integrating lane '#{lane}' (#{conflict_files.join(", ")}) — the lane plan was " \
+            "not disjoint = a spec defect. Kill the conflicting lane and re-spec; do not hand-resolve. #{merr.strip}"
+        else
+          raise Space::Core::Error,
+            "Merge conflict integrating lane '#{lane}' (#{conflict_files.join(", ")}) — conflicting files " \
+            "are outside the lane's touch set; this looks like a branch mismatch: the lane is being merged " \
+            "into '#{integration_branch}'. Use --into <branch> to target the correct branch. #{merr.strip}"
+        end
       end
 
       merge_sha, = git_capture("-C", repo_path.to_s, "rev-parse", "HEAD")
@@ -419,14 +432,14 @@ module Space::Architect
     # first conflict (a disjointness defect). Never decides which lanes pass. With no
     # lanes and teardown: true, tears down every lane recorded for the iteration instead
     # (the second, teardown-only call in the loop's integrate-then-teardown rhythm).
-    def integrate!(iteration, lanes: nil, teardown: false, message: nil, commit_mode: nil)
+    def integrate!(iteration, lanes: nil, teardown: false, message: nil, commit_mode: nil, into: nil)
       lanes = Array(lanes)
       return teardown_lanes!(iteration, slice_entry(iteration)["lanes"] || []) if lanes.empty? && teardown
       raise Space::Core::Error, "No lanes given to integrate" if lanes.empty?
 
       merged = []
       lanes.each do |lane|
-        merged << merge_lane!(iteration, lane, message: message, commit_mode: commit_mode)
+        merged << merge_lane!(iteration, lane, message: message, commit_mode: commit_mode, into: into)
       rescue Space::Core::Error => e
         done = merged.map { |m| m[:lane] }.join(", ")
         raise Space::Core::Error, "Integrated #{done.empty? ? "(none)" : done} then stopped at '#{lane}': #{e.message}"
