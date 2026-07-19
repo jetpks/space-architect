@@ -47,6 +47,10 @@ module Space
       get  "/runs/:id/stream",  to: "runs.stream"
       get  "/runs/:id",         to: "runs.show"
 
+      # Jobs (inference-job queue enqueue API — I06)
+      post "/jobs",     to: "jobs.create"
+      get  "/jobs/:id", to: "jobs.show"
+
       # Spaces
       get "/spaces",                    to: "spaces.index"
       get "/spaces/:id",                to: "spaces.show"

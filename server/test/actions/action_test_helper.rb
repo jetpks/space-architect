@@ -115,7 +115,7 @@ module ActionTestHelper
     conn = Space::Server::App["db.gateway"].connection
     Faker::Internet.unique.clear
     Faker::Number.unique.clear
-    [:artifacts, :iterations, :annotations, :conversation_shares, :messages, :conversations, :runs, :spaces, :users].each { |t| conn[t].delete }
+    [:artifacts, :iterations, :annotations, :conversation_shares, :messages, :conversations, :jobs, :runs, :spaces, :users].each { |t| conn[t].delete }
   end
 
   # Establish a signed-in session via the real OmniAuth callback stack.
@@ -192,11 +192,18 @@ module ActionTestHelper
   def flatten_params(hash, prefix = nil)
     hash.flat_map do |key, value|
       full_key = prefix ? "#{prefix}[#{key}]" : key.to_s
-      if value.is_a?(Hash)
-        flatten_params(value, full_key)
-      else
-        [[full_key, value.to_s]]
-      end
+      flatten_value(full_key, value)
+    end
+  end
+
+  # Rack's bracket-array convention: repeated `key[]` entries (interleaved per
+  # element, in field order) group back into an Array on the server — see
+  # Rack::Utils.parse_nested_query.
+  def flatten_value(full_key, value)
+    case value
+    when Hash  then flatten_params(value, full_key)
+    when Array then value.flat_map { |item| flatten_value("#{full_key}[]", item) }
+    else [[full_key, value.to_s]]
     end
   end
 end
