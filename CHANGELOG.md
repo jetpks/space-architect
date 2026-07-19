@@ -5,6 +5,120 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.2.0] - 2026-07-19
+
+### Added
+
+- **`pi` harness (`PiHarness`)** — `pi -p --mode json --model <m> --session-dir
+  <build_dir> --no-approve` as a first-class dispatch harness alongside
+  claude-code and opencode. The session dir is redirected into the lane's
+  `build/` dir via `--session-dir` so nothing leaks to
+  `~/.pi/agent/sessions/`. `when "pi"` factory branch; `dispatch`/
+  `worktree_add` recognize `pi`; CLI descs updated to include `pi`. opencode
+  and claude-code paths byte-for-byte unchanged (I09).
+- **Unified `--effort` / `--thinking` / `--reasoning` knob** — three aliases
+  for one thinking-level setting, normalized to
+  `off, minimal, low, medium, high, xhigh, max`. Per-harness
+  `translate_thinking`: claude `--effort` (low/medium/high/xhigh/max,
+  off→omit, minimal→low); opencode `reasoningEffort` (low/medium/high,
+  xhigh/max→high, off/minimal→omit); pi `--thinking` passthrough (pi's
+  `thinkingLevelMap` clamps, architect doesn't). `--force-{effort,thinking,reasoning}`
+  (dispatch-only) skips the clamp and passes the literal — binary rejection is
+  final. `--quiet` threads a null `err:` sink. A trailing `:level` model-suffix
+  (e.g. `foo:high`) is parsed and translated across all harnesses
+  (explicit > suffix > stored) (I10).
+- **Per-harness sensible model defaults** via `Harness.default_model_for`:
+  `claude-code → claude-sonnet-5`, `pi → qwen3-27b-optiq`,
+  `opencode → fireworks-ai/accounts/fireworks/models/glm-5p2`. The constant
+  `CLAUDE_DEFAULT_MODEL` keeps its name (to avoid a `research/supervisor.rb`
+  ripple) but its value is now `claude-sonnet-5` (I12).
+- **`space.yaml` project defaults** — `project.harness` / `project.model` /
+  `project.effort` (all optional) may be declared in `space.yaml` and sit
+  between the CLI flag and the per-harness default in the resolution chain.
+  Pin a project's harness/model/effort once instead of per command; the user
+  authors them in `space.yaml` directly (no new CLI setter) (I12).
+- **Dispatch stamp** (fixes the `status`-wrong-harness-model bug): `dispatch`
+  now stamps the resolved `harness`/`model`/`effort` onto the lane entry
+  alongside `dispatched_at`, so `architect status` reads what actually ran on
+  the last dispatch — not the `worktree_add`-time values or the global default
+  (I12).
+
+### Changed
+
+- **Shared `resolve_harness_model` helper** DRY across `worktree_add` and
+  `dispatch`. Precedence: explicit CLI flag > lane entry's stored value >
+  `space.yaml` project default > per-harness sensible default. A stored model
+  is only honored when the stored harness still matches the resolved harness,
+  so a `--harness` override drops the old harness's model instead of leaking it
+  (I12).
+- **Section-write idempotence** — `replace_section_body` now strips a leading
+  line equal to the target `## <Heading>` from the supplied body before
+  writing. Makes `architect section <it> <sec>` idempotent: `--from
+  <file-with-heading>` and `--from <body-only>` produce byte-identical output;
+  running it twice never accumulates a duplicate heading. Narrow — only the
+  target heading, so `### fix` sub-headings and wrong-section headings survive
+  (I11).
+
+### Removed
+
+- The `worktree_add` opencode/pi nil-model guards and the factory opencode/pi
+  `model == CLAUDE_DEFAULT_MODEL` guards — per-harness defaults cover nil, and
+  an explicit `--model claude-sonnet-5 --harness pi` is a valid deliberate
+  choice (via openrouter/anthropic routing); the binary rejects an invalid
+  model. Stale "Pass --model" tests rewritten to assert default-resolution
+  (I12).
+
+## [5.1.0] - 2026-07-19
+
+### Added
+
+- **`architect integrate --into <branch>`** — merge a lane into a named branch
+  instead of the slug-derived `project/<slug>` default (#47). Outside-touch-set
+  conflict message gains an `--into` hint; inside-touch conflict keeps "spec
+  defect".
+- **Conductor commit-mode** — `commit_mode: conductor` in `space.yaml` plus a
+  `--commit-mode` CLI flag on `verify`/`integrate`: canonical conductor commits
+  are classified as non-builder in the lane mechanical check, with canonical
+  message-shape matching (#55).
+- **`architect sync` subcommand** (`--ff-only`, per-repo status) plus a
+  `ground` stale-repo WARNING with behind count and `--into` hint. **No
+  auto-sync** — the operator runs `sync` (#49).
+- **`architect freeze --force` / `section --force`** — re-freeze an iteration
+  whose frozen region changed since the last freeze, or write a frozen section
+  after the freeze (pre-dispatch amend paths). Both refuse if any lane has
+  `dispatched_at` OR `integrate_sha` — moving `freeze_sha` or rewriting a frozen
+  section after a builder has run against the AC breaks the cardinal invariant
+  (AC freeze before results exist; judging quotes the freeze commit). The guard
+  names the offending lane and the reason.
+- **`architect merge --into <branch>` / `--commit-mode <mode>`** — wires the
+  existing `merge_lane!` `into:`/`commit_mode:` kwargs through the `Merge` CLI,
+  matching `Integrate`'s surface.
+- **`architect provision --force` / `worktree add --force`** — `worktree_add`
+  gains a `force: false` kwarg. When a worktree dir exists but is unknown to git
+  (stale, e.g. left by an aborted provision), `force: true` clears it via
+  `FileUtils.rm_rf` and re-creates; without `force` it still raises with a
+  `--force` hint so a genuine git-tracked dir is never silently destroyed.
+  `ensure_lane_materialized` (the auto-recovery path) stays non-force —
+  auto-recovery never silently `rm -rf`s; only an explicit operator `--force`.
+
+### Changed
+
+- **`dir/**` in-bounds touch glob is now recursive** — matches
+  `Dir.glob('**/**')` semantics; single-star `*` stays non-recursive.
+  Deep-globbed files inside a lane's declared touch set are in-bounds; outside
+  is still a spec defect (#52, #54).
+- **`dispatched_at` recorded in `space.yaml` at dispatch time** (#18).
+
+### Fixed
+
+- **Canonical `section`/`freeze` commit message shape** — per-section commits
+  and the freeze commit carry the correct canonical prefix and body.
+- **`space run --help` steers to the `--` separator** — a quoted multi-word
+  command otherwise arrives as one argv token → opaque in-guest failure; the
+  desc/argument/example now show the `--` form, with a subprocess test (#28).
+- **Dropped a load-time "assigned but unused variable" warning** — `build_dir`
+  in `worktree_add` was computed but never read.
+
 ## [5.0.0] - 2026-07-06
 
 ### Added
