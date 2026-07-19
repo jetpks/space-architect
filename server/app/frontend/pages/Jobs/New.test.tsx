@@ -109,4 +109,37 @@ describe('Jobs/New', () => {
     expect(payload.environment.secrets).toEqual([{ ref: 'op://vault/item', name: 'API_KEY' }])
     expect(payload.environment.permissions).toEqual({ network: false, mounts: [] })
   })
+
+  it('defaults to an ANTHROPIC_API_KEY env row with a non-empty placeholder', () => {
+    formData = { ...formData, env: [['ANTHROPIC_API_KEY', 'unused-for-keyless-backends']] }
+    render(<New />)
+    const field = screen.getByText('Environment variables').closest('div')!
+    expect(within(field).getByDisplayValue('ANTHROPIC_API_KEY')).not.toBeNull()
+    expect(within(field).getByDisplayValue('unused-for-keyless-backends')).not.toBeNull()
+  })
+
+  it('explains why the ANTHROPIC_API_KEY row exists', () => {
+    render(<New />)
+    expect(
+      screen.getByText(/claude CLI refuses to start without ANTHROPIC_API_KEY/),
+    ).not.toBeNull()
+  })
+
+  it('an untouched form transforms to a payload containing the default env var', () => {
+    formData = { ...formData, env: [['ANTHROPIC_API_KEY', 'unused-for-keyless-backends']] }
+    const { container } = render(<New />)
+    fireEvent.submit(container.querySelector('form')!)
+
+    const transformer = transform.mock.calls[0][0]
+    const payload = transformer(formData)
+    expect(payload.environment.env).toEqual({ ANTHROPIC_API_KEY: 'unused-for-keyless-backends' })
+  })
+
+  it('the default ANTHROPIC_API_KEY row is removable via the existing remove control', () => {
+    formData = { ...formData, env: [['ANTHROPIC_API_KEY', 'unused-for-keyless-backends']] }
+    render(<New />)
+    const field = screen.getByText('Environment variables').closest('div')!
+    fireEvent.click(within(field).getByRole('button', { name: 'Remove' }))
+    expect(setData).toHaveBeenCalledWith('env', [])
+  })
 })
