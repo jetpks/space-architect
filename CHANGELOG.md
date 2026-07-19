@@ -5,6 +5,57 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.0] - 2026-07-19
+
+### Added
+
+- **`architect integrate --into <branch>`** — merge a lane into a named branch
+  instead of the slug-derived `project/<slug>` default (#47). Outside-touch-set
+  conflict message gains an `--into` hint; inside-touch conflict keeps "spec
+  defect".
+- **Conductor commit-mode** — `commit_mode: conductor` in `space.yaml` plus a
+  `--commit-mode` CLI flag on `verify`/`integrate`: canonical conductor commits
+  are classified as non-builder in the lane mechanical check, with canonical
+  message-shape matching (#55).
+- **`architect sync` subcommand** (`--ff-only`, per-repo status) plus a
+  `ground` stale-repo WARNING with behind count and `--into` hint. **No
+  auto-sync** — the operator runs `sync` (#49).
+- **`architect freeze --force` / `section --force`** — re-freeze an iteration
+  whose frozen region changed since the last freeze, or write a frozen section
+  after the freeze (pre-dispatch amend paths). Both refuse if any lane has
+  `dispatched_at` OR `integrate_sha` — moving `freeze_sha` or rewriting a frozen
+  section after a builder has run against the AC breaks the cardinal invariant
+  (AC freeze before results exist; judging quotes the freeze commit). The guard
+  names the offending lane and the reason.
+- **`architect merge --into <branch>` / `--commit-mode <mode>`** — wires the
+  existing `merge_lane!` `into:`/`commit_mode:` kwargs through the `Merge` CLI,
+  matching `Integrate`'s surface.
+- **`architect provision --force` / `worktree add --force`** — `worktree_add`
+  gains a `force: false` kwarg. When a worktree dir exists but is unknown to git
+  (stale, e.g. left by an aborted provision), `force: true` clears it via
+  `FileUtils.rm_rf` and re-creates; without `force` it still raises with a
+  `--force` hint so a genuine git-tracked dir is never silently destroyed.
+  `ensure_lane_materialized` (the auto-recovery path) stays non-force —
+  auto-recovery never silently `rm -rf`s; only an explicit operator `--force`.
+
+### Changed
+
+- **`dir/**` in-bounds touch glob is now recursive** — matches
+  `Dir.glob('**/**')` semantics; single-star `*` stays non-recursive.
+  Deep-globbed files inside a lane's declared touch set are in-bounds; outside
+  is still a spec defect (#52, #54).
+- **`dispatched_at` recorded in `space.yaml` at dispatch time** (#18).
+
+### Fixed
+
+- **Canonical `section`/`freeze` commit message shape** — per-section commits
+  and the freeze commit carry the correct canonical prefix and body.
+- **`space run --help` steers to the `--` separator** — a quoted multi-word
+  command otherwise arrives as one argv token → opaque in-guest failure; the
+  desc/argument/example now show the `--` form, with a subprocess test (#28).
+- **Dropped a load-time "assigned but unused variable" warning** — `build_dir`
+  in `worktree_add` was computed but never read.
+
 ## [5.0.0] - 2026-07-06
 
 ### Added
