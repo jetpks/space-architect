@@ -7,7 +7,10 @@ import type { JobDetail } from '@/types'
 import { timeLabel } from '@/pages/Spaces/helpers'
 import { STATUS_VARIANT } from './helpers'
 
-type Props = { job: JobDetail }
+// spec.provenance isn't in the shared JobSpec type yet — declared locally
+// here rather than widening app/frontend/types/index.ts.
+type Provenance = { space: string; iteration: string; lane: string }
+type Props = { job: JobDetail & { spec: JobDetail['spec'] & { provenance?: Provenance } } }
 
 const ACTIVE_STATUSES = new Set(['queued', 'running'])
 const POLL_MS = 2500
@@ -27,7 +30,14 @@ export default function Show({ job }: Props) {
       <Head title={`Job #${job.id}`} />
 
       <header className="mb-4 flex items-center justify-between border-b border-border pb-4">
-        <h1 className="text-2xl font-bold">Job #{job.id}</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Job #{job.id}</h1>
+          {job.spec.provenance && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {job.spec.provenance.space} · {job.spec.provenance.iteration} · {job.spec.provenance.lane}
+            </p>
+          )}
+        </div>
         <Badge variant={STATUS_VARIANT[job.status] ?? 'outline'}>{job.status}</Badge>
       </header>
 

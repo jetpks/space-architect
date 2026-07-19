@@ -73,4 +73,15 @@ describe('Jobs/Show', () => {
     vi.advanceTimersByTime(10000)
     expect(reload).not.toHaveBeenCalled()
   })
+
+  it('renders the loop identity line when provenance is present', () => {
+    const job = { ...JOB, spec: { ...JOB.spec, provenance: { space: 's1', iteration: 'I16', lane: 'server' } } }
+    const { container } = render(<Show job={job} />)
+    expect(container.textContent).toContain('s1 · I16 · server')
+  })
+
+  it('renders no loop identity line when provenance is absent', () => {
+    const { container } = render(<Show job={JOB} />)
+    expect(container.querySelector('header p')).toBeNull()
+  })
 })
