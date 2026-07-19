@@ -97,7 +97,7 @@ class HarnessTest < Space::ArchitectTest
     log = File.read(File.join(build_dir, "run.jsonl"))
 
     assert_equal 0, res[:exit_code]
-    assert_includes log, "claude-sonnet-4-6"
+    assert_includes log, "claude-sonnet-5"
     assert_includes log, "stream-json"
     assert_includes log, "acceptEdits"
     assert_includes log, "Bash(git commit"
@@ -112,6 +112,29 @@ class HarnessTest < Space::ArchitectTest
     harness = Space::Architect::Harness.for("claude-code",
                                           model: "claude-sonnet-4-6", max_turns: 10, bin: "/fake")
     assert_instance_of Space::Architect::Harness::ClaudeCodeHarness, harness
+  end
+
+  # ── AC1: per-harness sensible defaults ────────────────────────────────────
+
+  def test_default_model_for_claude_code
+    assert_equal "claude-sonnet-5", Space::Architect::Harness.default_model_for("claude-code")
+  end
+
+  def test_default_model_for_pi
+    assert_equal "qwen3-27b-optiq", Space::Architect::Harness.default_model_for("pi")
+  end
+
+  def test_default_model_for_opencode
+    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2",
+      Space::Architect::Harness.default_model_for("opencode")
+  end
+
+  def test_default_model_for_unknown_harness_is_nil
+    assert_nil Space::Architect::Harness.default_model_for("bogus")
+  end
+
+  def test_claude_default_model_constant_value
+    assert_equal "claude-sonnet-5", Space::Architect::Harness::CLAUDE_DEFAULT_MODEL
   end
 
   # ── OpenCodeHarness unit tests ────────────────────────────────────────────
@@ -236,8 +259,9 @@ class HarnessTest < Space::ArchitectTest
     FileUtils.rm_rf(root)
   end
 
-  # AC4: explicit dispatch-time model overrides without mutating the persisted lane entry
-  def test_dispatch_override_does_not_mutate_lane_entry
+  # AC4: explicit dispatch-time model overrides are stamped onto the persisted lane
+  # entry, so `architect status` reflects what actually ran on the last dispatch.
+  def test_dispatch_override_stamps_lane_entry
     root = Dir.mktmpdir("harness-test")
     space_dir, project, _fake_claude, fake_oc, _build_dir = setup_space(root)
 
@@ -256,25 +280,30 @@ class HarnessTest < Space::ArchitectTest
     assert_includes log, "override-model"
     refute_includes log, "original-model"
 
-    # Lane entry on disk is unchanged — original model survives
+    # Lane entry on disk is stamped with the resolved (override) model
     yml = YAML.safe_load(File.read(File.join(space_dir, "space.yaml")), aliases: false)
     iterations = yml.dig("project", "iterations") || []
     demo = iterations.find { |i| i["name"] == "demo" }
     lane_c = (demo["lanes"] || []).find { |l| l["name"] == "C" }
-    assert_equal "original-model", lane_c["model"]
+    assert_equal "override-model", lane_c["model"]
   ensure
     FileUtils.rm_rf(root)
   end
 
   # ── Footgun guard ─────────────────────────────────────────────────────────
 
-  def test_footgun_guard_raises_when_opencode_with_default_model
+  # AC6: opencode dispatch with no --model no longer raises — the lane's stored
+  # (claude-code) model is dropped on a harness override, and the per-harness
+  # default is used instead.
+  def test_opencode_dispatch_with_no_model_resolves_to_per_harness_default
     root = Dir.mktmpdir("harness-test")
-    _space_dir, project, _fake_claude, _fake_oc, _build_dir = setup_space(root)
+    _space_dir, project, _fake_claude, fake_oc, build_dir = setup_space(root)
 
-    assert_raises(Space::Core::Error) do
-      project.dispatch("demo", "A", harness: "opencode")
-    end
+    res = project.dispatch("demo", "A", harness: "opencode", opencode_bin: fake_oc)
+    log = File.read(File.join(build_dir, "run.jsonl"))
+
+    assert_equal 0, res[:exit_code]
+    assert_includes log, "fireworks-ai/accounts/fireworks/models/glm-5p2"
   ensure
     FileUtils.rm_rf(root)
   end
@@ -467,25 +496,28 @@ class HarnessTest < Space::ArchitectTest
       cfg.dig("provider", "fireworks-ai", "models",
               "accounts/fireworks/models/glm-5p2", "options", "reasoningEffort")
 
-    # Lane entry on disk still has "high" — no mutation
+    # AC4: lane entry on disk is stamped with the resolved (override) effort
     yml = YAML.safe_load(File.read(File.join(space_dir, "space.yaml")), aliases: false)
     demo = yml.dig("project", "iterations").find { |i| i["name"] == "demo" }
     lane_f = (demo["lanes"] || []).find { |l| l["name"] == "F" }
-    assert_equal "high", lane_f["effort"]
+    assert_equal "low", lane_f["effort"]
   ensure
     ENV.delete("ARGV_RECORD_FILE")
     FileUtils.rm_rf(root)
   end
 
-  # Footgun: claude-code + effort raises with opencode-only / reasoningEffort message.
-  def test_harness_for_raises_for_claude_code_with_effort
-    err = assert_raises(Space::Core::Error) do
-      Space::Architect::Harness.for("claude-code",
-                                  model: "claude-sonnet-4-6", max_turns: 10,
-                                  bin: "/fake", effort: "high")
-    end
-    assert_match(/opencode-only/, err.message)
-    assert_match(/reasoningEffort/, err.message)
+  # I10: claude-code + effort no longer raises — it translates to --effort.
+  def test_harness_for_claude_code_with_effort_dispatches_with_effort_flag
+    root = Dir.mktmpdir("harness-test")
+    _space_dir, project, fake_claude, _fake_oc, build_dir = setup_space(root)
+
+    project.dispatch("demo", "A", claude_bin: fake_claude, effort: "high")
+    log = File.read(File.join(build_dir, "run.jsonl"))
+
+    assert_includes log, "--effort"
+    assert_includes log, "\"high\""
+  ensure
+    FileUtils.rm_rf(root)
   end
 
   # ── run_detached: ClaudeCodeHarness ──────────────────────────────────────────

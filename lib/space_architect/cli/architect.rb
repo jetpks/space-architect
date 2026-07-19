@@ -31,7 +31,13 @@ module Space::Architect
       # Authored-content intake shared by section/verdict/brief: a file, an
       # inline flag, or stdin — canonical files are only ever written by the CLI.
       def read_body(from: nil, body: nil, stdin: false, what: "section body")
-        return File.read(from) if from
+        if from
+          begin
+            return File.read(from)
+          rescue Errno::ENOENT
+            raise Space::Core::Error, "file for --from not found: #{from}; provide the #{what} via --from <file>, --body <text>, or --stdin"
+          end
+        end
         return body if body
         return $stdin.read if stdin
 
@@ -41,9 +47,31 @@ module Space::Architect
       # Commit-message intake for commit_message_options: --message-from wins
       # over -m/--message; nil means the command's canonical default message.
       def read_commit_message(message: nil, message_from: nil)
-        return File.read(message_from) if message_from
+        if message_from
+          begin
+            return File.read(message_from)
+          rescue Errno::ENOENT
+            raise Space::Core::Error, "file for --message-from not found: #{message_from}"
+          end
+        end
 
         message
+      end
+
+      # --effort/--thinking/--reasoning are three aliases for one thinking-level knob.
+      # At most one may be passed per invocation.
+      def resolve_thinking_alias(effort:, thinking:, reasoning:)
+        given = { effort: effort, thinking: thinking, reasoning: reasoning }.compact
+        raise Space::Core::Error, "pass only one of --effort/--thinking/--reasoning" if given.size > 1
+        given.values.first
+      end
+
+      # --force-effort/--force-thinking/--force-reasoning are three aliases for the
+      # force escape hatch. At most one may be passed per invocation.
+      def resolve_force_thinking_alias(force_effort:, force_thinking:, force_reasoning:)
+        given = { force_effort: force_effort, force_thinking: force_thinking, force_reasoning: force_reasoning }.compact
+        raise Space::Core::Error, "pass only one of --force-effort/--force-thinking/--force-reasoning" if given.size > 1
+        given.values.first
       end
     end
 
@@ -146,7 +174,7 @@ module Space::Architect
                   lane_list = s["lanes"] || []
                   lanes_str = lane_list.map do |l|
                     h = l["harness"] || "claude-code"
-                    m = l["model"]   || Harness::CLAUDE_DEFAULT_MODEL
+                    m = l["model"]   || Harness.default_model_for(h)
                     eff = l["effort"] ? "·#{l['effort']}" : ""
                     "#{l['name']}(#{l['repo']}·#{h}·#{m}#{eff})"
                   end.join(", ")
@@ -280,10 +308,16 @@ module Space::Architect
         argument :lane,      required: true,  desc: "Lane name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :prompt,    default: nil,    desc: "Read the lane prompt from this file (copied byte-for-byte to build/<id>-<lane>/prompt.md)"
-        option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's model, else the reference default claude-sonnet-4-6). Any provider/tier; pin a full id, not a floating alias"
+        option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's stored model, else space.yaml project.model, else the per-harness sensible default). Any provider/tier; pin a full id, not a floating alias"
         option   :max_turns, default: "200",  desc: "Max turns for the builder"
-        option   :harness,   default: nil,    desc: "Harness override (claude-code, opencode)"
-        option   :effort,    default: nil,    desc: "Reasoning effort override (opencode only; sets reasoningEffort in the model config)"
+        option   :harness,   default: nil,    desc: "Harness override (claude-code, opencode, pi)"
+        option   :effort,    default: nil,    desc: "Thinking/reasoning effort level — alias for --thinking/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
+        option   :thinking,  default: nil,    desc: "Thinking/reasoning effort level — alias for --effort/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
+        option   :reasoning, default: nil,    desc: "Thinking/reasoning effort level — alias for --effort/--thinking (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
+        option   :force_effort,    default: nil, desc: "Force the literal level onto the harness flag, skipping architect's clamp — alias for --force-thinking/--force-reasoning (dispatch only; the binary's rejection is final)"
+        option   :force_thinking,  default: nil, desc: "Force the literal level onto the harness flag, skipping architect's clamp — alias for --force-effort/--force-reasoning (dispatch only; the binary's rejection is final)"
+        option   :force_reasoning, default: nil, desc: "Force the literal level onto the harness flag, skipping architect's clamp — alias for --force-effort/--force-thinking (dispatch only; the binary's rejection is final)"
+        option   :quiet,    type: :boolean, default: false, desc: "Suppress thinking-translation and harness run-time warn lines (liveness/push) on $stderr for this dispatch"
         option   :detach,    type: :boolean, default: false, desc: "Detach the builder process (returns immediately with PID; poll report for completion)"
         option   :timeout,   default: "14400", desc: "Wall-clock timeout in seconds (0 disables; default 4h); foreground only"
         option   :push_url,   default: nil,   desc: "HTTP endpoint for streaming push (POST body to this URL)"
@@ -291,17 +325,24 @@ module Space::Architect
         option   :push_host,  default: nil,   desc: "Base URL of the ingest server; the CLI creates a run via POST <host>/runs and streams to /runs/<id>/ingest (requires --push-token)"
 
         def call(iteration:, lane:, space: nil, prompt: nil, model: nil,
-                 max_turns: "200", harness: nil, effort: nil, detach: false,
+                 max_turns: "200", harness: nil, effort: nil, thinking: nil, reasoning: nil,
+                 force_effort: nil, force_thinking: nil, force_reasoning: nil, quiet: false, detach: false,
                  timeout: "14400", push_url: nil, push_token: nil, push_host: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
+            level = resolve_thinking_alias(effort: effort, thinking: thinking, reasoning: reasoning)
+            forced_level = resolve_force_thinking_alias(force_effort: force_effort,
+              force_thinking: force_thinking, force_reasoning: force_reasoning)
+
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
               kwargs = { max_turns: max_turns.to_i, detach: detach }
               kwargs[:prompt]     = prompt          if prompt
               kwargs[:model]      = model           if model
               kwargs[:harness]    = harness         if harness
-              kwargs[:effort]     = effort          if effort
+              kwargs[:effort]     = forced_level || level if forced_level || level
+              kwargs[:force]      = true            if forced_level
+              kwargs[:quiet]      = true             if quiet
               kwargs[:timeout]    = timeout.to_i    unless detach
               kwargs[:push_url]   = push_url        if push_url
               kwargs[:push_token] = push_token      if push_token
@@ -599,20 +640,26 @@ module Space::Architect
           argument :iteration, required: true, desc: "Iteration name"
           argument :lane,      required: true, desc: "Lane name"
           option   :base,      default: nil,          desc: "Base ref (default: HEAD of repo)"
-          option   :harness,   default: "claude-code", desc: "Harness (claude-code, opencode)"
-          option   :model,     default: nil,           desc: "Model (required for opencode)"
-          option   :effort,    default: nil,           desc: "Reasoning effort (opencode only; sets reasoningEffort in the model config)"
+          option   :harness,   default: nil,          desc: "Harness (claude-code, opencode, pi; default: space.yaml project.harness, else claude-code)"
+          option   :model,     default: nil,           desc: "Model; a trailing :<level> suffix (e.g. foo:high) is parsed into --effort (default: space.yaml project.model, else the per-harness sensible default)"
+          option   :effort,    default: nil,           desc: "Thinking/reasoning effort level — alias for --thinking/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness at dispatch time"
+          option   :thinking,  default: nil,           desc: "Thinking/reasoning effort level — alias for --effort/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness at dispatch time"
+          option   :reasoning, default: nil,           desc: "Thinking/reasoning effort level — alias for --effort/--thinking (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness at dispatch time"
+          option   :quiet,     type: :boolean, default: false, desc: "Suppress the thinking-translation inform line on $stderr"
           option   :touch,     default: nil,           desc: "Comma-separated file globs the lane may touch (records its touch_set for in-bounds + merge checks)"
           option   :force,     type: :boolean, default: false, desc: "Clear and re-create a stale (unregistered) worktree directory"
 
-          def call(repo:, iteration:, lane:, base: nil, harness: "claude-code", model: nil, effort: nil, touch: nil, force: false, **opts)
+          def call(repo:, iteration:, lane:, base: nil, harness: nil, model: nil,
+                   effort: nil, thinking: nil, reasoning: nil, quiet: false, touch: nil, force: false, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
+              level = resolve_thinking_alias(effort: effort, thinking: thinking, reasoning: reasoning)
               render(store.find) do |sp|
                 project = ArchitectProject.new(space: sp)
                 touch_set = touch ? touch.split(",").map(&:strip).reject(&:empty?) : nil
-                result = project.worktree_add(repo, iteration, lane, base: base,
-                                             harness: harness, model: model, effort: effort, touch: touch_set, force: force)
+                err = quiet ? File.open(File::NULL, "w") : $stderr
+                result = project.worktree_add(repo, iteration, lane, base: base, harness: harness, model: model,
+                                             effort: level, touch: touch_set, force: force, err: err)
                 terminal.say "Worktree: #{terminal.path(result[:worktree])}"
                 terminal.say "Base SHA: #{result[:base_sha]}"
                 CLI.record_outcome(Outcome.new(exit_code: 0))

@@ -2,6 +2,7 @@
 
 require_relative "test_helper"
 require "yaml"
+require "json"
 require "pastel"
 
 class ArchitectCLITest < Space::ArchitectTest
@@ -593,6 +594,270 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # ── I09: pi harness ───────────────────────────────────────────────────────
+
+  def test_dispatch_cli_runs_fake_pi_and_writes_session_dir_to_run_jsonl
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake = File.join(setup[:root], "fake_pi")
+    File.write(fake, <<~RUBY)
+      #!/usr/bin/env ruby
+      require "json"
+      a = ARGV; c = Dir.pwd; s = $stdin.gets
+      $stdout.puts JSON.generate({type: "session", version: 3, id: "fake-session", cwd: c})
+      $stdout.puts "argv=" + a.inspect
+      $stdout.flush
+      exit 0
+    RUBY
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A", "--harness", "pi", "--model", "openrouter/test-model")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out, err = invoke("dispatch", "demo", "A")
+
+        assert_empty err
+        assert_match(/Builder exited with status 0/, out)
+        log = File.read(File.join(build_dir, "run.jsonl"))
+        assert_includes log, "--session-dir"
+        assert_includes log, build_dir
+        assert_includes log, "\"type\":\"session\""
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC6: dispatch --harness pi with no --model no longer raises — it resolves to
+  # pi's per-harness sensible default.
+  def test_dispatch_cli_harness_pi_with_no_model_resolves_to_default
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake_pi = File.join(setup[:root], "fake_pi")
+    File.write(fake_pi, <<~RUBY)
+      #!/usr/bin/env ruby
+      require "json"
+      $stdout.puts JSON.generate({type: "session", version: 3, id: "fake-session", cwd: Dir.pwd})
+      $stdout.puts "argv=" + ARGV.inspect
+      $stdin.gets
+      exit 0
+    RUBY
+    File.chmod(0o755, fake_pi)
+
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake_pi)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out, err = invoke("dispatch", "demo", "A", "--harness", "pi")
+
+        assert_empty err
+        assert_match(/Builder exited with status 0/, out)
+        log = File.read(File.join(build_dir, "run.jsonl"))
+        assert_includes log, "qwen3-27b-optiq"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # I10: --effort with --harness pi no longer raises — it dispatches with --thinking.
+  def test_dispatch_cli_effort_with_harness_pi_passes_thinking_flag
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake_pi = File.join(setup[:root], "fake_pi")
+    File.write(fake_pi, "#!/usr/bin/env ruby\nFile.write(ENV['ARGV_RECORD_FILE'], ARGV.join(\"\\x00\"))\n$stdin.read\nexit 0\n")
+    File.chmod(0o755, fake_pi)
+    argv_file = File.join(setup[:root], "recorded_argv")
+
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake_pi, "ARGV_RECORD_FILE" => argv_file)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A", "--harness", "pi", "--model", "openrouter/test-model")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out, err = invoke("dispatch", "demo", "A", "--effort", "high")
+
+        assert_empty err
+        assert_match(/Builder exited with status 0/, out)
+        recorded = File.read(argv_file).split("\x00")
+        assert_includes recorded, "--thinking"
+        assert_includes recorded, "high"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_dispatch_help_lists_pi_harness
+    out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    assert_includes out, "claude-code, opencode, pi"
+  end
+
+  def test_worktree_add_help_lists_pi_harness
+    out = IO.popen(["bundle", "exec", "architect", "worktree", "add", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    assert_includes out, "claude-code, opencode, pi"
+  end
+
+  # ── I10: unified thinking knob — three aliases, force escape hatch, --quiet ──
+
+  def test_dispatch_help_lists_three_thinking_aliases_and_force_and_quiet
+    out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    refute_match(/opencode only/, out)
+    assert_includes out, "--effort"
+    assert_includes out, "--thinking"
+    assert_includes out, "--reasoning"
+    assert_includes out, "--force-effort"
+    assert_includes out, "--force-thinking"
+    assert_includes out, "--force-reasoning"
+    assert_includes out, "quiet"
+  end
+
+  def test_worktree_add_help_lists_three_thinking_aliases_and_quiet_but_no_force
+    out = IO.popen(["bundle", "exec", "architect", "worktree", "add", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    assert_includes out, "--effort"
+    assert_includes out, "--thinking"
+    assert_includes out, "--reasoning"
+    assert_includes out, "quiet"
+    refute_includes out, "--force-effort"
+  end
+
+  def test_dispatch_cli_multiple_thinking_aliases_raises
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        _out, err = invoke("dispatch", "demo", "A", "--effort", "high", "--thinking", "low")
+
+        refute_empty err
+        assert_match(/pass only one of --effort\/--thinking\/--reasoning/, err)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_worktree_add_cli_unknown_thinking_level_raises
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        _out, err = invoke("worktree", "add", "my-repo", "demo", "A", "--effort", "turbo")
+
+        refute_empty err
+        assert_match(/unknown thinking level 'turbo'/, err)
+        assert_match(/off, minimal, low, medium, high, xhigh, max/, err)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_dispatch_cli_force_effort_bypasses_clamp_and_informs
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake = File.join(setup[:root], "fake_opencode")
+    File.write(fake, "#!/usr/bin/env ruby\n$stdin.read\nexit 0\n")
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_OPENCODE_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A",
+               "--harness", "opencode", "--model", "fireworks-ai/accounts/fireworks/models/glm-5p2")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        original_stderr = $stderr
+        captured = StringIO.new
+        $stderr = captured
+        begin
+          invoke("dispatch", "demo", "A", "--force-effort", "xhigh")
+        ensure
+          $stderr = original_stderr
+        end
+
+        assert_match(/thinking: force --effort=xhigh \(unmodified, may be rejected\)/, captured.string)
+        cfg = JSON.parse(File.read(File.join(build_dir, "opencode.json")))
+        assert_equal "xhigh",
+          cfg.dig("provider", "fireworks-ai", "models", "accounts/fireworks/models/glm-5p2", "options", "reasoningEffort")
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # dry-cli exits the process on an unrecognized option, so this must run out-of-process.
+  def test_worktree_add_does_not_accept_force_effort_flag
+    out = IO.popen(["bundle", "exec", "architect", "worktree", "add", "my-repo", "demo", "A",
+                     "--force-effort", "high"], err: [:child, :out]) { |f| f.read }
+    status = $?
+    refute status.success?, "worktree add must reject --force-effort: #{out}"
+  end
+
   # ── dispatch --prompt: authored anywhere, copied to the canonical path ───────
 
   def test_dispatch_cli_prompt_flag_copies_and_announces
@@ -872,6 +1137,49 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # I12 AC5 (status-wrong-harness-model regression): after a dispatch with a
+  # harness/model override, `architect status` shows the OVERRIDDEN values, not
+  # the worktree_add-time values.
+  def test_status_shows_dispatch_stamped_harness_and_model
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake_pi = File.join(setup[:root], "fake_pi")
+    File.write(fake_pi, <<~RUBY)
+      #!/usr/bin/env ruby
+      require "json"
+      $stdout.puts JSON.generate({type: "session", version: 3, id: "fake-session", cwd: Dir.pwd})
+      $stdin.gets
+      exit 0
+    RUBY
+    File.chmod(0o755, fake_pi)
+
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake_pi)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        invoke("dispatch", "demo", "A", "--harness", "pi", "--model", "qwen3-27b-optiq")
+
+        out, err = invoke("status")
+        assert_empty err
+        assert_includes out, "·pi·qwen3-27b-optiq"
+        refute_includes out, "·claude-code·claude-sonnet-5"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   # AC6 control: worktree add without effort → CLI passes effort: nil → no effort key in yaml
   def test_worktree_add_cli_without_effort_produces_no_effort_key
     setup = temp_env
@@ -953,11 +1261,11 @@ class ArchitectCLITest < Space::ArchitectTest
         v01_line = out.lines.find { |l| l.include?("v01") && l.include?("discarded") }
         refute_nil v01_line, "expected a table row for v01 with discarded status"
 
-        # nil-model lane's Model cell reads (default)
-        assert_includes v01_line, "(default)"
+        # claude-code lane with no --model resolves to the per-harness sensible default
+        assert_includes v01_line, "claude-sonnet-5"
 
         # lane with no effort renders - in the Effort cell (between Model and Status)
-        assert_match(/\(default\)\s+-\s+discarded/, v01_line)
+        assert_match(/claude-sonnet-5\s+-\s+discarded/, v01_line)
 
         # exit code 0
         assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
@@ -1598,6 +1906,61 @@ class ArchitectCLITest < Space::ArchitectTest
 
         out2, = invoke("provision", "slice-1")
         assert_match(/already present/, out2)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # I08: --from pointing at a nonexistent file must raise Space::Core::Error,
+  # not Errno::ENOENT — so handle_errors surfaces a clean one-line message.
+  def test_section_cli_from_missing_file_gives_clean_error
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+
+        _out, err = invoke("section", "s1", "specification", "--from", "tmp/no-such-file.md")
+
+        assert_match(/file for --from not found/, err)
+        assert_match(/no-such-file/, err)
+        assert_match(/--body|--stdin/, err)
+        refute_match(/Errno::ENOENT/, err)
+        refute_match(/trace/, err)
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # I08: --message-from pointing at a nonexistent file must raise
+  # Space::Core::Error, not Errno::ENOENT.
+  def test_section_cli_message_from_missing_file_gives_clean_error
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+
+        _out, err = invoke("section", "s1", "specification", "--body", "test", "--message-from", "tmp/no-msg.md")
+
+        assert_match(/file for --message-from not found/, err)
+        assert_match(/no-msg/, err)
+        refute_match(/Errno::ENOENT/, err)
+        refute_match(/trace/, err)
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
       end
     end
   ensure

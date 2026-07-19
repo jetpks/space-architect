@@ -603,17 +603,14 @@ module Space::Architect
       repos.map { |r| sync_one_repo(r["name"]) }
     end
 
-    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false, effort: nil, touch: nil, force: false)
-      if harness.to_s == "opencode" && (model.nil? || model == Harness::CLAUDE_DEFAULT_MODEL)
-        raise Space::Core::Error,
-          "Pass --model when using --harness opencode " \
-          "(#{Harness::CLAUDE_DEFAULT_MODEL} is a Claude model ID, not valid for opencode — " \
-          "try e.g. fireworks-ai/accounts/fireworks/models/glm-5p2)"
-      end
-      if effort && harness.to_s != "opencode"
-        raise Space::Core::Error,
-          "effort is opencode-only (sets opencode reasoningEffort) — " \
-          "set effort only on opencode lanes (harness: opencode)"
+    def worktree_add(repo, iteration, lane, base: nil, harness: nil, model: nil, variant: false,
+                     effort: nil, touch: nil, force: false, err: $stderr)
+      model, suffix_level = Harness.parse_model_suffix(model)
+      harness, model = resolve_harness_model(harness, model)
+      resolved_level = effort || suffix_level || project_defaults["effort"]
+      Harness.validate_thinking_level!(resolved_level)
+      if effort.nil? && suffix_level
+        err.puts "thinking: model suffix ':#{suffix_level}' parsed from lane model → level=#{suffix_level} (model stripped)"
       end
 
       entry = slice_entry(iteration)
@@ -663,7 +660,7 @@ module Space::Architect
         "model" => model,
         "variant" => variant
       }
-      new_fields["effort"]    = effort         if effort
+      new_fields["effort"]    = resolved_level if resolved_level
       new_fields["touch_set"] = Array(touch)   if touch && !Array(touch).empty?
 
       update_architect_block do |b|
@@ -829,22 +826,35 @@ module Space::Architect
     end
 
     def dispatch(iteration, lane, model: nil, max_turns: 200,
-                 claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, detach: false,
-                 push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
+                 claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, force: false, quiet: false,
+                 detach: false, push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
                  push_client: nil, timeout: nil, prompt: nil, now: Time.now)
       raise Space::Core::Error, "Specify --push-host or --push-url, not both" if push_host && push_url
       raise Space::Core::Error, "--push-host requires --push-token"           if push_host && !push_token
       raise Space::Core::Error, "--detach cannot be combined with --push-url or --push-host" \
         if detach && (push_url || push_host)
 
+      err = quiet ? File.open(File::NULL, "w") : $stderr
+
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
       lane_entry = ensure_lane_materialized(iteration, lane)
 
-      resolved_harness = harness || lane_entry["harness"] || "claude-code"
-      resolved_model   = model   || lane_entry["model"]   || Harness::CLAUDE_DEFAULT_MODEL
-      resolved_effort  = effort  || lane_entry["effort"]
+      model, suffix_level = Harness.parse_model_suffix(model)
+      resolved_harness, resolved_model = resolve_harness_model(harness, model,
+        stored_harness: lane_entry["harness"], stored_model: lane_entry["model"])
+
+      resolved_effort =
+        if effort
+          Harness.validate_thinking_level!(effort) unless force
+          effort
+        elsif suffix_level
+          err.puts "thinking: model suffix ':#{suffix_level}' parsed from --model → level=#{suffix_level} (model stripped to '#{model}')"
+          suffix_level
+        else
+          lane_entry["effort"]
+        end
 
       raise Space::Core::Error, "--push-host is only supported with the claude-code harness" \
         if push_host && resolved_harness != "claude-code"
@@ -873,18 +883,23 @@ module Space::Architect
         if prompt_content.empty? || prompt_content == PROMPT_STUB.strip
 
       bin = resolved_harness == "claude-code" ? claude_bin : opencode_bin
-      harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
-                                                  bin: bin, config_dir: build_dir, effort: resolved_effort)
+      harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns, bin: bin,
+                                                  config_dir: build_dir, effort: resolved_effort, force: force, err: err)
 
-      # Stamp launch time onto the lane entry: after every preflight validation has passed
-      # (a dispatch that raises above records nothing) and before the blocking run or a
-      # detached dispatch returns. A re-dispatch overwrites the prior value.
+      # Stamp launch time and the resolved harness/model/effort onto the lane entry:
+      # after every preflight validation has passed (a dispatch that raises above
+      # records nothing) and before the blocking run or a detached dispatch returns.
+      # A re-dispatch overwrites the prior values, so `architect status` always reads
+      # what actually ran on the last dispatch.
       update_architect_block do |b|
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
           (s["lanes"] || []).each do |l|
             next unless l["name"] == lane
             l["dispatched_at"] = now.iso8601
+            l["harness"]       = resolved_harness
+            l["model"]         = resolved_model
+            l["effort"]        = resolved_effort if resolved_effort
           end
         end
         b
@@ -913,6 +928,7 @@ module Space::Architect
           run_kwargs[:push_url]    = push_url    if push_url
           run_kwargs[:push_token]  = push_token  if push_token
           run_kwargs[:push_client] = push_client if push_client
+          run_kwargs[:err]         = err         if quiet
         end
         exit_code = harness_obj.run(**run_kwargs)
 
@@ -1050,6 +1066,27 @@ module Space::Architect
     # The lane's declared harness/model/variant/effort, as worktree_add kwargs — so a
     # re-materialize preserves them instead of merging back to defaults. touch_set is
     # deliberately omitted: worktree_add leaves it untouched, so it already survives.
+    # The space.yaml project block's optional harness/model/effort defaults (empty
+    # hash when the block or the keys are absent).
+    def project_defaults
+      space.data["project"] || {}
+    end
+
+    # Resolve harness + model by precedence: explicit value > (dispatch only) the
+    # lane's stored value > space.yaml project.harness/project.model > the
+    # per-harness sensible default (model only, keyed on the resolved harness).
+    # Shared by worktree_add and dispatch so both read the same defaults. A stored
+    # model is only honored when its stored harness still matches the resolved
+    # harness — a dispatch-time harness override drops the old harness's stored
+    # model instead of leaking it into the new harness's run.
+    def resolve_harness_model(harness, model, stored_harness: nil, stored_model: nil)
+      defaults = project_defaults
+      resolved_harness = (harness || stored_harness || defaults["harness"] || "claude-code").to_s
+      stored_model = nil unless stored_harness.nil? || stored_harness.to_s == resolved_harness
+      resolved_model = model || stored_model || defaults["model"] || Harness.default_model_for(resolved_harness)
+      [resolved_harness, resolved_model]
+    end
+
     def recorded_lane_fields(lane_entry)
       {
         harness: lane_entry["harness"] || "claude-code",
@@ -1167,7 +1204,10 @@ module Space::Architect
 
     # Replace (or, with append:, extend) the body of a "## Heading" section, leaving
     # every other section byte-untouched. Append replaces a placeholder body (only a
-    # template comment) the first time, then stacks subsections after it.
+    # template comment) the first time, then stacks subsections after it. A supplied
+    # block that redundantly repeats the section's own heading as its first line (the
+    # natural way to author a complete section) has that leading line stripped first,
+    # so writing the same section twice never accumulates a duplicate heading.
     def replace_section_body(text, heading, new_block, append:)
       lines = text.lines
       start = lines.index { |l| l.chomp == heading }
@@ -1176,11 +1216,14 @@ module Space::Architect
       finish = ((start + 1)...lines.length).find { |i| KNOWN_HEADINGS.include?(lines[i].chomp) } || lines.length
       body = lines[(start + 1)...finish].join
 
+      first, rest = new_block.strip.split("\n", 2)
+      block = first == heading ? rest.to_s.strip : new_block.strip
+
       new_body =
         if append && !placeholder_body?(body)
-          "#{body.strip}\n\n#{new_block.strip}"
+          "#{body.strip}\n\n#{block}"
         else
-          new_block.strip
+          block
         end
 
       prefix = lines[0..start].join.rstrip
