@@ -206,15 +206,17 @@ module Space::Architect
       class Verify < BaseCommand
         desc "Post-flight mechanical lane checks — frozen-untouched, no builder commits, report exists, in-bounds (reports only, no judgment)"
         phase 30, "Judge"
-        argument :iteration, required: true, desc: "Iteration name"
-        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        argument :iteration,   required: true,  desc: "Iteration name"
+        argument :space,       required: false, desc: "Space identifier (default: $PWD)"
+        option   :commit_mode, default: nil,    desc: "Commit mode override (strict|conductor); overrides space.yaml commit_mode for this run"
 
-        def call(iteration:, space: nil, **opts)
+        def call(iteration:, space: nil, commit_mode: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              results = project.verify(iteration)
+              terminal.say "Effective commit_mode: #{commit_mode}" if commit_mode
+              results = project.verify(iteration, commit_mode: commit_mode)
 
               if results.empty?
                 terminal.say "No lanes recorded for iteration '#{iteration}'"
@@ -449,13 +451,14 @@ module Space::Architect
       class Integrate < BaseCommand
         desc "Integrate the architect-supplied set of passing lanes, in order (stops on conflict)"
         phase 40, "Land"
-        argument :iteration, required: true,  desc: "Iteration name"
-        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-        option   :lanes,     required: false, desc: "Comma-separated passing lane names (you decide the set)"
-        option   :teardown,  type: :boolean, default: false, desc: "Remove worktrees + delete lane branches after merge"
+        argument :iteration,   required: true,  desc: "Iteration name"
+        argument :space,       required: false, desc: "Space identifier (default: $PWD)"
+        option   :lanes,       required: false, desc: "Comma-separated passing lane names (you decide the set)"
+        option   :teardown,    type: :boolean, default: false, desc: "Remove worktrees + delete lane branches after merge"
+        option   :commit_mode, default: nil,    desc: "Commit mode override (strict|conductor); overrides space.yaml commit_mode for this run"
         commit_message_options
 
-        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, **opts)
+        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, commit_mode: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
@@ -465,7 +468,8 @@ module Space::Architect
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
               results = project.integrate!(iteration, lanes: lane_names, teardown: teardown,
-                message: read_commit_message(message: message, message_from: message_from))
+                message: read_commit_message(message: message, message_from: message_from),
+                commit_mode: commit_mode)
               if lane_names.empty?
                 if results.empty?
                   terminal.say "Nothing to tear down for #{iteration}"

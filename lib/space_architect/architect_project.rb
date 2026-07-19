@@ -347,13 +347,13 @@ module Space::Architect
     # the lane branch, then merge --no-ff into the repo's lane/<id> integration branch.
     # Runs NO gates and makes NO pass/fail decision. Refuses a mechanically-failing lane
     # (builder commits / out-of-bounds) and aborts cleanly on a merge conflict.
-    def merge_lane!(iteration, lane, message: nil)
+    def merge_lane!(iteration, lane, message: nil, commit_mode: nil)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
       lane_entry = ensure_lane_materialized(iteration, lane)
 
-      checks = lane_mechanical_checks(entry, lane_entry)
+      checks = lane_mechanical_checks(entry, lane_entry, commit_mode: commit_mode)
       if checks[:no_builder_commits] == false
         raise Space::Core::Error, "Lane '#{lane}' has builder commits — the worktree is tampered (hard rule 7). Reset and re-dispatch; do not merge."
       end
@@ -419,14 +419,14 @@ module Space::Architect
     # first conflict (a disjointness defect). Never decides which lanes pass. With no
     # lanes and teardown: true, tears down every lane recorded for the iteration instead
     # (the second, teardown-only call in the loop's integrate-then-teardown rhythm).
-    def integrate!(iteration, lanes: nil, teardown: false, message: nil)
+    def integrate!(iteration, lanes: nil, teardown: false, message: nil, commit_mode: nil)
       lanes = Array(lanes)
       return teardown_lanes!(iteration, slice_entry(iteration)["lanes"] || []) if lanes.empty? && teardown
       raise Space::Core::Error, "No lanes given to integrate" if lanes.empty?
 
       merged = []
       lanes.each do |lane|
-        merged << merge_lane!(iteration, lane, message: message)
+        merged << merge_lane!(iteration, lane, message: message, commit_mode: commit_mode)
       rescue Space::Core::Error => e
         done = merged.map { |m| m[:lane] }.join(", ")
         raise Space::Core::Error, "Integrated #{done.empty? ? "(none)" : done} then stopped at '#{lane}': #{e.message}"
@@ -756,11 +756,11 @@ module Space::Architect
       end
     end
 
-    def verify(iteration)
+    def verify(iteration, commit_mode: nil)
       entry = slice_entry(iteration)
       (entry["lanes"] || []).map do |lane|
         ensure_lane_materialized(iteration, lane["name"])
-        { lane: lane["name"], repo: lane["repo"], checks: lane_mechanical_checks(entry, lane) }
+        { lane: lane["name"], repo: lane["repo"], checks: lane_mechanical_checks(entry, lane, commit_mode: commit_mode) }
       end
     end
 
@@ -1035,7 +1035,7 @@ module Space::Architect
 
     # The four per-lane post-flight checks, shared by `verify` (reports) and
     # `merge_lane!` (refuses on failure) so the two can never drift.
-    def lane_mechanical_checks(entry, lane)
+    def lane_mechanical_checks(entry, lane, commit_mode: nil)
       freeze_sha = entry["freeze_sha"]
       rel = entry["file"]
       lane_name = lane["name"]
@@ -1048,12 +1048,21 @@ module Space::Architect
       # (a) frozen sections of the iteration file untouched since freeze
       checks[:frozen_untouched] = (!frozen_region_changed?(freeze_sha, rel) if freeze_sha && rel)
 
-      # (b) no builder commits in the worktree (the architect's integrate commit is excluded)
-      log_out, = git_capture("-C", wt_path.to_s, "log", "--format=%H", "#{base_sha}..")
-      commit_shas = log_out.strip.split("\n").map(&:strip).reject(&:empty?)
+      # (b) no builder commits in the worktree (the architect's integrate commit is excluded;
+      #     in conductor mode, canonical conductor commits are also excluded)
+      effective_commit_mode = commit_mode || space.data.dig("project", "commit_mode") || "strict"
+      log_out, = git_capture("-C", wt_path.to_s, "log", "--format=%H%x09%s", "#{base_sha}..")
+      commit_entries = log_out.strip.split("\n").filter_map do |line|
+        sha, subject = line.strip.split("\t", 2)
+        { sha: sha, subject: subject.to_s } unless sha.nil? || sha.empty?
+      end
       recorded_integrate = lane["integrate_sha"]&.strip
-      builder_shas = recorded_integrate ? commit_shas.reject { |s| s == recorded_integrate } : commit_shas
-      checks[:no_builder_commits] = builder_shas.empty?
+      canonical_conductor = "#{iteration_id(entry)}-#{lane_name}: builder output"
+      builder_commits = commit_entries.reject do |c|
+        c[:sha] == recorded_integrate ||
+          (effective_commit_mode == "conductor" && c[:subject] == canonical_conductor)
+      end
+      checks[:no_builder_commits] = builder_commits.empty?
 
       # (c) builder's scratch report exists and is non-empty
       report = space.path.join("build", "#{iteration_id(entry)}-#{lane_name}", "report.md")
