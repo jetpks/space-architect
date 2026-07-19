@@ -41,7 +41,13 @@ service "architect.executor-worker" do
   # Each process runs jobs strictly serially (Executor#run polls, claims, and
   # executes one at a time) — concurrency is process count, not fibers within
   # one process. JOB_EXECUTOR_COUNT raises that process count.
-  count Integer(ENV.fetch("JOB_EXECUTOR_COUNT", 1))
+  #
+  # Block form is required: the DSL's Builder (Environment::Builder < BasicObject,
+  # async-service environment.rb) has no Kernel, so a bare `Integer(...)` call here
+  # would resolve via Builder#method_missing instead of Kernel#Integer at DSL-eval
+  # time, silently returning the Symbol :Integer instead of raising. A block is
+  # deferred until the evaluator (a real Object, with Kernel) calls it.
+  count { Integer(ENV.fetch("JOB_EXECUTOR_COUNT", 1)) }
 end
 
 # Consumer-worker service: a single managed child process that drains executor
