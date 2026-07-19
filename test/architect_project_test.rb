@@ -521,8 +521,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # AC4(a): effort on a claude-code lane raises and writes nothing
-  def test_worktree_add_footgun_raises_for_effort_on_claude_code
+  # I10: effort on a claude-code lane no longer raises — it stores the normalized level.
+  def test_worktree_add_allows_effort_on_claude_code
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
@@ -530,18 +530,11 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-ok", harness: "claude-code", effort: "high")
 
-    err = assert_raises(Space::Core::Error) do
-      project.worktree_add("my-repo", "my-slice", "lane-bad",
-                           harness: "claude-code", effort: "high")
-    end
-    assert_match(/opencode-only/, err.message)
-    assert_match(/reasoningEffort/, err.message)
-
-    # Nothing persisted after the raise
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
-    lanes = yml.dig("project", "iterations", 0, "lanes") || []
-    assert_empty lanes, "no lane should be written after footgun raise"
+    lane = yml.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal "high", lane["effort"]
   ensure
     FileUtils.rm_rf(dir)
   end
