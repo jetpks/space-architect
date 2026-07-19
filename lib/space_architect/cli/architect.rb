@@ -456,9 +456,10 @@ module Space::Architect
         option   :lanes,       required: false, desc: "Comma-separated passing lane names (you decide the set)"
         option   :teardown,    type: :boolean, default: false, desc: "Remove worktrees + delete lane branches after merge"
         option   :commit_mode, default: nil,    desc: "Commit mode override (strict|conductor); overrides space.yaml commit_mode for this run"
+        option   :into,        required: false, desc: "Merge into this branch instead of the slug-derived project/<slug> default"
         commit_message_options
 
-        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, commit_mode: nil, **opts)
+        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, commit_mode: nil, into: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
@@ -469,7 +470,7 @@ module Space::Architect
               project = ArchitectProject.new(space: sp)
               results = project.integrate!(iteration, lanes: lane_names, teardown: teardown,
                 message: read_commit_message(message: message, message_from: message_from),
-                commit_mode: commit_mode)
+                commit_mode: commit_mode, into: into)
               if lane_names.empty?
                 if results.empty?
                   terminal.say "Nothing to tear down for #{iteration}"

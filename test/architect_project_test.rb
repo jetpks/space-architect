@@ -2695,4 +2695,106 @@ class ArchitectProjectTest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(dir)
   end
+
+  # AC1: --into <branch> merges into the named branch (creates if absent, checks out if present)
+  # and records it in space.yaml's integration_branch field.
+  def test_merge_lane_into_branch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    repo = File.join(dir, "repos", "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    # (a) branch absent — must be created off base_sha
+    project.new_iteration!("s1")
+    project.freeze!("s1")
+    project.worktree_add("my-repo", "s1", "lane-a")
+    File.write(File.join(dir, "build", "I01-s1-lane-a", "wt", "feature.rb"), "def f; end\n")
+
+    r = project.merge_lane!("s1", "lane-a", into: "my-target")
+    assert_equal "my-target", r[:integration_branch]
+    assert_equal false, r[:gates_run]
+
+    branch_parts = "my-target".split("/")
+    assert_path_exists File.join(repo, ".git", "refs", "heads", *branch_parts),
+      "into branch must be created in the repo"
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    assert_equal "my-target", yml.dig("project", "iterations", 0, "lanes", 0, "integration_branch"),
+      "lane integration_branch must be recorded in space.yaml"
+
+    # (b) branch already exists — must be checked out and merged into
+    project.new_iteration!("s2")
+    project.freeze!("s2")
+    project.worktree_add("my-repo", "s2", "lane-b")
+    File.write(File.join(dir, "build", "I02-s2-lane-b", "wt", "feature2.rb"), "def f2; end\n")
+
+    r2 = project.merge_lane!("s2", "lane-b", into: "my-target")
+    assert_equal "my-target", r2[:integration_branch]
+
+    log, = Open3.capture3("git", "-C", repo, "log", "my-target", "--format=%s")
+    assert_match(/Merge lane\/I01-s1-lane-a/, log)
+    assert_match(/Merge lane\/I02-s2-lane-b/, log)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2: conflict outside touch_set → branch-mismatch error mentioning --into / target branch.
+  # AC2: conflict inside touch_set → "spec defect" error preserved.
+  def test_merge_lane_conflict_message_outside_touch_set
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    repo = File.join(dir, "repos", "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    # (outside touch_set) — lane has no touch_set; conflict on other.rb → branch-mismatch
+    project.new_iteration!("s1")
+    project.freeze!("s1")
+    project.worktree_add("my-repo", "s1", "lane-a")
+
+    base_sha, = Open3.capture3("git", "-C", repo, "rev-parse", "HEAD")
+    base_sha = base_sha.strip
+
+    # pre-create integration branch with other.rb at version "ib"
+    system("git", "-C", repo, "checkout", "-b", "conflict-ib", base_sha, out: File::NULL, err: File::NULL)
+    File.write(File.join(repo, "other.rb"), "def other; :ib; end\n")
+    system("git", "-C", repo, "add", "other.rb", out: File::NULL, err: File::NULL)
+    system("git", "-C", repo, "commit", "-q", "-m", "ib baseline")
+    system("git", "-C", repo, "checkout", "-", out: File::NULL, err: File::NULL)
+
+    # lane writes other.rb at version "lane"
+    File.write(File.join(dir, "build", "I01-s1-lane-a", "wt", "other.rb"), "def other; :lane; end\n")
+
+    err = assert_raises(Space::Core::Error) { project.merge_lane!("s1", "lane-a", into: "conflict-ib") }
+    assert_match(/--into/, err.message, "outside-touch-set conflict must mention --into")
+    assert_match(/conflict-ib/, err.message, "outside-touch-set conflict must name the target branch")
+    refute_match(/spec defect/, err.message, "outside-touch-set conflict must NOT say 'spec defect'")
+
+    # (inside touch_set) — lane touch_set covers the conflicting file → spec defect
+    project.new_iteration!("s2")
+    project.freeze!("s2")
+    project.worktree_add("my-repo", "s2", "lane-b", touch: ["feature.rb"])
+
+    base_sha2, = Open3.capture3("git", "-C", repo, "rev-parse", "HEAD")
+    base_sha2 = base_sha2.strip
+
+    system("git", "-C", repo, "checkout", "-b", "conflict-ib2", base_sha2, out: File::NULL, err: File::NULL)
+    File.write(File.join(repo, "feature.rb"), "def feature; :ib; end\n")
+    system("git", "-C", repo, "add", "feature.rb", out: File::NULL, err: File::NULL)
+    system("git", "-C", repo, "commit", "-q", "-m", "ib2 baseline")
+    system("git", "-C", repo, "checkout", "-", out: File::NULL, err: File::NULL)
+
+    File.write(File.join(dir, "build", "I02-s2-lane-b", "wt", "feature.rb"), "def feature; :lane; end\n")
+
+    err2 = assert_raises(Space::Core::Error) { project.merge_lane!("s2", "lane-b", into: "conflict-ib2") }
+    assert_match(/spec defect/, err2.message, "inside-touch-set conflict must say 'spec defect'")
+    refute_match(/--into/, err2.message, "inside-touch-set conflict must NOT mention --into")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
 end
