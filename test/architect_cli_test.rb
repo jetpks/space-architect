@@ -2,6 +2,7 @@
 
 require_relative "test_helper"
 require "yaml"
+require "json"
 require "pastel"
 
 class ArchitectCLITest < Space::ArchitectTest
@@ -667,11 +668,17 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  def test_dispatch_cli_effort_with_harness_pi_raises
+  # I10: --effort with --harness pi no longer raises — it dispatches with --thinking.
+  def test_dispatch_cli_effort_with_harness_pi_passes_thinking_flag
     setup = temp_env
     env = setup.fetch(:env)
 
-    with_env(env) do
+    fake_pi = File.join(setup[:root], "fake_pi")
+    File.write(fake_pi, "#!/usr/bin/env ruby\nFile.write(ENV['ARGV_RECORD_FILE'], ARGV.join(\"\\x00\"))\n$stdin.read\nexit 0\n")
+    File.chmod(0o755, fake_pi)
+    argv_file = File.join(setup[:root], "recorded_argv")
+
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake_pi, "ARGV_RECORD_FILE" => argv_file)) do
       invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
@@ -685,10 +692,13 @@ class ArchitectCLITest < Space::ArchitectTest
         FileUtils.mkdir_p(build_dir)
         File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
 
-        _out, err = invoke("dispatch", "demo", "A", "--effort", "high")
+        out, err = invoke("dispatch", "demo", "A", "--effort", "high")
 
-        refute_empty err
-        assert_match(/opencode-only/, err)
+        assert_empty err
+        assert_match(/Builder exited with status 0/, out)
+        recorded = File.read(argv_file).split("\x00")
+        assert_includes recorded, "--thinking"
+        assert_includes recorded, "high"
       end
     end
   ensure
@@ -705,6 +715,132 @@ class ArchitectCLITest < Space::ArchitectTest
     out = IO.popen(["bundle", "exec", "architect", "worktree", "add", "--help"],
                    err: [:child, :out]) { |f| f.read }
     assert_includes out, "claude-code, opencode, pi"
+  end
+
+  # ── I10: unified thinking knob — three aliases, force escape hatch, --quiet ──
+
+  def test_dispatch_help_lists_three_thinking_aliases_and_force_and_quiet
+    out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    refute_match(/opencode only/, out)
+    assert_includes out, "--effort"
+    assert_includes out, "--thinking"
+    assert_includes out, "--reasoning"
+    assert_includes out, "--force-effort"
+    assert_includes out, "--force-thinking"
+    assert_includes out, "--force-reasoning"
+    assert_includes out, "quiet"
+  end
+
+  def test_worktree_add_help_lists_three_thinking_aliases_and_quiet_but_no_force
+    out = IO.popen(["bundle", "exec", "architect", "worktree", "add", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    assert_includes out, "--effort"
+    assert_includes out, "--thinking"
+    assert_includes out, "--reasoning"
+    assert_includes out, "quiet"
+    refute_includes out, "--force-effort"
+  end
+
+  def test_dispatch_cli_multiple_thinking_aliases_raises
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        _out, err = invoke("dispatch", "demo", "A", "--effort", "high", "--thinking", "low")
+
+        refute_empty err
+        assert_match(/pass only one of --effort\/--thinking\/--reasoning/, err)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_worktree_add_cli_unknown_thinking_level_raises
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        _out, err = invoke("worktree", "add", "my-repo", "demo", "A", "--effort", "turbo")
+
+        refute_empty err
+        assert_match(/unknown thinking level 'turbo'/, err)
+        assert_match(/off, minimal, low, medium, high, xhigh, max/, err)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_dispatch_cli_force_effort_bypasses_clamp_and_informs
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake = File.join(setup[:root], "fake_opencode")
+    File.write(fake, "#!/usr/bin/env ruby\n$stdin.read\nexit 0\n")
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_OPENCODE_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A",
+               "--harness", "opencode", "--model", "fireworks-ai/accounts/fireworks/models/glm-5p2")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        original_stderr = $stderr
+        captured = StringIO.new
+        $stderr = captured
+        begin
+          invoke("dispatch", "demo", "A", "--force-effort", "xhigh")
+        ensure
+          $stderr = original_stderr
+        end
+
+        assert_match(/thinking: force --effort=xhigh \(unmodified, may be rejected\)/, captured.string)
+        cfg = JSON.parse(File.read(File.join(build_dir, "opencode.json")))
+        assert_equal "xhigh",
+          cfg.dig("provider", "fireworks-ai", "models", "accounts/fireworks/models/glm-5p2", "options", "reasoningEffort")
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # dry-cli exits the process on an unrecognized option, so this must run out-of-process.
+  def test_worktree_add_does_not_accept_force_effort_flag
+    out = IO.popen(["bundle", "exec", "architect", "worktree", "add", "my-repo", "demo", "A",
+                     "--force-effort", "high"], err: [:child, :out]) { |f| f.read }
+    status = $?
+    refute status.success?, "worktree add must reject --force-effort: #{out}"
   end
 
   # ── dispatch --prompt: authored anywhere, copied to the canonical path ───────

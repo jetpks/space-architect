@@ -12,17 +12,51 @@ module Space::Architect
   module Harness
     CLAUDE_DEFAULT_MODEL = "claude-sonnet-4-6"
 
-    # Factory keyed by harness name.
+    # The normalized internal thinking vocabulary — pi's fullest set. Every alias
+    # (--effort/--thinking/--reasoning) is normalized to a member of this array;
+    # each harness then translates + clamps down to its own flag's vocabulary.
+    THINKING_LEVELS = %w[off minimal low medium high xhigh max].freeze
+
+    def self.validate_thinking_level!(level)
+      return if level.nil? || THINKING_LEVELS.include?(level)
+      raise Space::Core::Error,
+        "unknown thinking level '#{level}' — valid: #{THINKING_LEVELS.join(', ')}"
+    end
+
+    # Split a "model:level" id into [model, level] (level nil, model unchanged if no
+    # suffix). Only a trailing segment that is a member of THINKING_LEVELS is treated
+    # as a suffix — a model id containing a literal colon for another reason is left alone.
+    def self.parse_model_suffix(model)
+      return [model, nil] unless model
+      base, _, suffix = model.rpartition(":")
+      return [model, nil] if base.empty? || !THINKING_LEVELS.include?(suffix)
+      [base, suffix]
+    end
+
+    # Per-harness translate + clamp: input a normalized level (or nil) and whether the
+    # caller forced it (skips clamping — the literal is passed through unmodified).
+    # Returns [translated_level_or_nil, inform_line_or_nil].
+    def self.translate_thinking(harness, level, force: false)
+      case harness.to_s
+      when "claude-code" then ClaudeCodeHarness.translate_thinking(level, force: force)
+      when "opencode"    then OpenCodeHarness.translate_thinking(level, force: force)
+      when "pi"          then PiHarness.translate_thinking(level, force: force)
+      else nil
+      end
+    end
+
+    # Factory keyed by harness name. Translates + clamps the normalized `effort`
+    # level to the harness's own vocabulary, printing one inform line to `err`
+    # (default $stderr; thread a null writer to suppress) when it clamps/strips.
+    # With force: true, the literal `effort` value is passed through unmodified.
     # For opencode: config_dir is required (build/<id>-<lane> dir outside the worktree).
-    def self.for(name, model:, max_turns:, bin: nil, config_dir: nil, effort: nil)
+    def self.for(name, model:, max_turns:, bin: nil, config_dir: nil, effort: nil, force: false, err: $stderr)
+      translated, inform = translate_thinking(name, effort, force: force)
+      err.puts(inform) if inform
+
       case name.to_s
       when "claude-code"
-        if effort
-          raise Space::Core::Error,
-            "effort is opencode-only (sets opencode reasoningEffort) — " \
-            "claude-code effort is set via the prompt"
-        end
-        ClaudeCodeHarness.new(model: model, max_turns: max_turns, bin: bin)
+        ClaudeCodeHarness.new(model: model, max_turns: max_turns, bin: bin, effort: translated)
       when "opencode"
         if model == CLAUDE_DEFAULT_MODEL
           raise Space::Core::Error,
@@ -31,13 +65,8 @@ module Space::Architect
             "try e.g. fireworks-ai/accounts/fireworks/models/glm-5p2)"
         end
         raise Space::Core::Error, "config_dir is required for opencode harness" unless config_dir
-        OpenCodeHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir, effort: effort)
+        OpenCodeHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir, effort: translated)
       when "pi"
-        if effort
-          raise Space::Core::Error,
-            "effort is opencode-only (sets opencode reasoningEffort) — " \
-            "pi uses --thinking, not yet wired to the harness"
-        end
         if model == CLAUDE_DEFAULT_MODEL
           raise Space::Core::Error,
             "Pass --model when using --harness pi " \
@@ -45,7 +74,7 @@ module Space::Architect
             "try e.g. openrouter/qwen/qwen3-27b-optiq or local-inference/qwen3-27b-optiq)"
         end
         raise Space::Core::Error, "config_dir is required for pi harness" unless config_dir
-        PiHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir)
+        PiHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir, effort: translated)
       else
         raise Space::Core::Error, "Unknown harness '#{name}' — valid values: claude-code, opencode, pi"
       end
@@ -59,11 +88,27 @@ module Space::Architect
         "Bash(git branch:*)"
       ].join(",")
 
-      def initialize(model:, max_turns:, bin: nil,
+      # claude-code's --effort accepts low/medium/high/xhigh/max; it has no off level
+      # (stripped — omit --effort) and no minimal level (clamped to low).
+      ACCEPTED_LEVELS = %w[low medium high xhigh max].freeze
+      CLAMP_MAP = { "minimal" => "low" }.freeze
+
+      def self.translate_thinking(level, force: false)
+        return [nil, nil] if level.nil?
+        return [level, "thinking: force --effort=#{level} (unmodified, may be rejected)"] if force
+        return [level, nil] if ACCEPTED_LEVELS.include?(level)
+        return [nil, "thinking: off → claude-code (no --effort; claude-code has no off level)"] if level == "off"
+
+        clamped = CLAMP_MAP.fetch(level)
+        [clamped, "thinking: #{level} → claude-code #{clamped} (clamped; claude-code has no #{level} level)"]
+      end
+
+      def initialize(model:, max_turns:, bin: nil, effort: nil,
                      allowed_tools: ALLOWED_TOOLS, disallowed_tools: DISALLOWED_TOOLS)
         @model            = model
         @max_turns        = max_turns
         @bin              = bin || ENV.fetch("ARCHITECT_CLAUDE_BIN", "claude")
+        @effort           = effort
         @allowed_tools    = allowed_tools
         @disallowed_tools = disallowed_tools
       end
@@ -193,6 +238,7 @@ module Space::Architect
           "--max-turns", @max_turns.to_s
         ]
         args += ["--disallowedTools", @disallowed_tools] unless @disallowed_tools.to_s.empty?
+        args += ["--effort", @effort] if @effort
         args
       end
 
@@ -251,6 +297,23 @@ module Space::Architect
     end
 
     class OpenCodeHarness
+      # opencode's reasoningEffort accepts only low/medium/high; off/minimal are
+      # stripped (omit reasoningEffort) and xhigh/max are clamped down to high.
+      ACCEPTED_LEVELS = %w[low medium high].freeze
+      CLAMP_MAP = { "xhigh" => "high", "max" => "high" }.freeze
+
+      def self.translate_thinking(level, force: false)
+        return [nil, nil] if level.nil?
+        return [level, "thinking: force --effort=#{level} (unmodified, may be rejected)"] if force
+        return [level, nil] if ACCEPTED_LEVELS.include?(level)
+
+        if (clamped = CLAMP_MAP[level])
+          [clamped, "thinking: #{level} → opencode #{clamped} (clamped; opencode accepts low/medium/high)"]
+        else
+          [nil, "thinking: #{level} → opencode (omitting reasoningEffort; opencode has no #{level} level)"]
+        end
+      end
+
       def initialize(model:, max_turns:, bin: nil, config_dir:, effort: nil)
         @model      = model
         @max_turns  = max_turns
@@ -366,13 +429,22 @@ module Space::Architect
     class PiHarness
       TIMEOUT_EXIT_CODE = 124
 
+      # pi's --thinking accepts the full normalized vocabulary unchanged — pi's own
+      # per-model thinkingLevelMap clamps further; architect does not clamp for pi.
+      def self.translate_thinking(level, force: false)
+        return [nil, nil] if level.nil?
+        return [level, "thinking: force --effort=#{level} (unmodified, may be rejected)"] if force
+        [level, nil]
+      end
+
       # max_turns is accepted for interface parity with the other harnesses but is
       # intentionally absent from argv — pi has no turn cap; the wall-clock timeout
       # (below) is the only bound on a run.
-      def initialize(model:, max_turns:, bin: nil, config_dir:)
+      def initialize(model:, max_turns:, bin: nil, config_dir:, effort: nil)
         @model      = model
         @bin        = bin || ENV.fetch("ARCHITECT_PI_BIN", "pi")
         @config_dir = Pathname.new(config_dir)
+        @effort     = effort
       end
 
       def run(prompt_path:, run_log_path:, chdir:, timeout: nil, **)
@@ -427,7 +499,9 @@ module Space::Architect
       private
 
       def argv
-        [@bin, "-p", "--mode", "json", "--model", @model, "--session-dir", @config_dir.to_s, "--no-approve"]
+        args = [@bin, "-p", "--mode", "json", "--model", @model, "--session-dir", @config_dir.to_s, "--no-approve"]
+        args += ["--thinking", @effort] if @effort
+        args
       end
     end
   end

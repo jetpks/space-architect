@@ -260,20 +260,24 @@ class DispatcherTest < Space::ArchitectTest
     FileUtils.rm_rf(root)
   end
 
-  def test_footgun_guard_raises_when_pi_dispatch_combined_with_effort
-    root = Dir.mktmpdir("dispatcher-pi-effort-guard-test")
+  # I10: pi dispatch + effort no longer raises — it translates to --thinking (full level, unclamped).
+  def test_pi_dispatch_combined_with_effort_passes_thinking_flag
+    root = Dir.mktmpdir("dispatcher-pi-effort-test")
     fake_pi = File.join(root, "fake_pi")
     File.write(fake_pi, FAKE_PI_SCRIPT)
     File.chmod(0o755, fake_pi)
 
-    _space_dir, project, _build_dir = setup_space_with_pi_worktree(root)
+    _space_dir, project, build_dir = setup_space_with_pi_worktree(root)
 
-    err = assert_raises(Space::Core::Error) do
-      with_env("ARCHITECT_PI_BIN" => fake_pi) do
-        project.dispatch("demo", "A", effort: "high")
-      end
+    res = nil
+    with_env("ARCHITECT_PI_BIN" => fake_pi) do
+      res = project.dispatch("demo", "A", effort: "high")
     end
-    assert_match(/opencode-only/, err.message)
+    log = File.read(File.join(build_dir, "run.jsonl"))
+
+    assert_equal 0, res[:exit_code]
+    assert_includes log, "--thinking"
+    assert_includes log, "\"high\""
   ensure
     FileUtils.rm_rf(root)
   end
@@ -289,5 +293,164 @@ class DispatcherTest < Space::ArchitectTest
       Space::Architect::Harness.for("bogus", model: "x", max_turns: 1, config_dir: Dir.mktmpdir)
     end
     assert_match(/claude-code, opencode, pi/, err.message)
+  end
+
+  # ── I10: unified thinking knob — translate, clamp, strip, force, quiet ─────
+
+  def test_thinking_levels_constant_is_pi_fullest_vocabulary
+    assert_equal %w[off minimal low medium high xhigh max], Space::Architect::Harness::THINKING_LEVELS
+  end
+
+  def test_validate_thinking_level_raises_for_unknown_level
+    err = assert_raises(Space::Core::Error) do
+      Space::Architect::Harness.validate_thinking_level!("turbo")
+    end
+    assert_match(/unknown thinking level 'turbo'/, err.message)
+    assert_match(/off, minimal, low, medium, high, xhigh, max/, err.message)
+  end
+
+  def test_worktree_add_unknown_effort_level_raises
+    root = Dir.mktmpdir("dispatcher-unknown-level-test")
+    _space_dir, project, _fake, _build_dir = setup_space_with_worktree(root)
+
+    err = assert_raises(Space::Core::Error) do
+      project.worktree_add("my-repo", "demo", "B", effort: "turbo")
+    end
+    assert_match(/unknown thinking level 'turbo'/, err.message)
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  def test_opencode_clamps_xhigh_to_high_and_informs
+    err_sink = StringIO.new
+    harness = Space::Architect::Harness.for("opencode",
+      model: "fireworks-ai/accounts/fireworks/models/glm-5p2", max_turns: 10,
+      config_dir: Dir.mktmpdir, effort: "xhigh", err: err_sink)
+
+    assert_equal "high",
+      harness.builder_config.dig("provider", "fireworks-ai", "models",
+        "accounts/fireworks/models/glm-5p2", "options", "reasoningEffort")
+    assert_match(/thinking: xhigh .* high/, err_sink.string)
+  end
+
+  def test_claude_code_strips_off_and_informs
+    err_sink = StringIO.new
+    harness = Space::Architect::Harness.for("claude-code",
+      model: "claude-sonnet-4-6", max_turns: 10, bin: "/fake", effort: "off", err: err_sink)
+
+    refute_includes harness.send(:argv), "--effort"
+    assert_match(/thinking: off/, err_sink.string)
+  end
+
+  def test_pi_passes_full_level_unclamped_with_no_inform
+    err_sink = StringIO.new
+    harness = Space::Architect::Harness.for("pi",
+      model: "openrouter/test-model", max_turns: 10, config_dir: Dir.mktmpdir,
+      effort: "xhigh", err: err_sink)
+
+    assert_includes harness.send(:argv), "xhigh"
+    assert_empty err_sink.string, "pi must not emit a clamp inform — pi's own thinkingLevelMap clamps"
+  end
+
+  def test_force_passes_literal_value_unmodified_and_informs
+    err_sink = StringIO.new
+    harness = Space::Architect::Harness.for("opencode",
+      model: "fireworks-ai/accounts/fireworks/models/glm-5p2", max_turns: 10,
+      config_dir: Dir.mktmpdir, effort: "xhigh", force: true, err: err_sink)
+
+    assert_equal "xhigh",
+      harness.builder_config.dig("provider", "fireworks-ai", "models",
+        "accounts/fireworks/models/glm-5p2", "options", "reasoningEffort")
+    assert_match(/thinking: force --effort=xhigh \(unmodified, may be rejected\)/, err_sink.string)
+  end
+
+  def test_no_level_path_is_byte_for_byte_original_for_all_three_harnesses
+    claude = Space::Architect::Harness.for("claude-code", model: "claude-sonnet-4-6", max_turns: 10, bin: "/fake")
+    refute_includes claude.send(:argv), "--effort"
+
+    opencode = Space::Architect::Harness.for("opencode",
+      model: "fireworks-ai/accounts/fireworks/models/glm-5p2", max_turns: 10, config_dir: Dir.mktmpdir)
+    refute opencode.builder_config.key?("provider")
+
+    pi = Space::Architect::Harness.for("pi", model: "openrouter/test-model", max_turns: 10, config_dir: Dir.mktmpdir)
+    refute_includes pi.send(:argv), "--thinking"
+  end
+
+  def test_dispatch_quiet_suppresses_thinking_inform
+    root = Dir.mktmpdir("dispatcher-quiet-test")
+    _space_dir, project, fake, _build_dir = setup_space_with_worktree(root)
+
+    original_stderr = $stderr
+    captured = StringIO.new
+    $stderr = captured
+    begin
+      res = project.dispatch("demo", "A", claude_bin: fake, effort: "off", quiet: true)
+      assert_equal 0, res[:exit_code]
+    ensure
+      $stderr = original_stderr
+    end
+    assert_empty captured.string, "quiet must suppress the thinking inform line"
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  def test_dispatch_without_quiet_emits_thinking_inform_to_stderr
+    root = Dir.mktmpdir("dispatcher-noquiet-test")
+    _space_dir, project, fake, _build_dir = setup_space_with_worktree(root)
+
+    original_stderr = $stderr
+    captured = StringIO.new
+    $stderr = captured
+    begin
+      project.dispatch("demo", "A", claude_bin: fake, effort: "off")
+    ensure
+      $stderr = original_stderr
+    end
+    assert_match(/thinking: off/, captured.string)
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  def test_model_suffix_parsed_for_opencode_and_stripped
+    root = Dir.mktmpdir("dispatcher-suffix-test")
+    _space_dir, project, _fake, _build_dir = setup_space_with_worktree(root)
+
+    project.worktree_add("my-repo", "demo", "S", harness: "opencode",
+      model: "fireworks-ai/accounts/fireworks/models/glm-5p2:high")
+
+    yaml = YAML.load_file(File.join(root, "space", "space.yaml"))
+    lane = yaml.dig("project", "iterations", 0, "lanes").find { |l| l["name"] == "S" }
+    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", lane["model"]
+    assert_equal "high", lane["effort"]
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  def test_model_suffix_parsed_for_pi_and_stripped
+    root = Dir.mktmpdir("dispatcher-suffix-pi-test")
+    _space_dir, project, _fake, _build_dir = setup_space_with_worktree(root)
+
+    project.worktree_add("my-repo", "demo", "S", harness: "pi", model: "openrouter/test-model:high")
+
+    yaml = YAML.load_file(File.join(root, "space", "space.yaml"))
+    lane = yaml.dig("project", "iterations", 0, "lanes").find { |l| l["name"] == "S" }
+    assert_equal "openrouter/test-model", lane["model"]
+    assert_equal "high", lane["effort"]
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  def test_explicit_effort_flag_overrides_model_suffix
+    root = Dir.mktmpdir("dispatcher-suffix-override-test")
+    _space_dir, project, _fake, _build_dir = setup_space_with_worktree(root)
+
+    project.worktree_add("my-repo", "demo", "S", harness: "pi",
+      model: "openrouter/test-model:high", effort: "low")
+
+    yaml = YAML.load_file(File.join(root, "space", "space.yaml"))
+    lane = yaml.dig("project", "iterations", 0, "lanes").find { |l| l["name"] == "S" }
+    assert_equal "low", lane["effort"]
+  ensure
+    FileUtils.rm_rf(root)
   end
 end

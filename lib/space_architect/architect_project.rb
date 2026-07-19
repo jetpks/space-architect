@@ -603,7 +603,15 @@ module Space::Architect
       repos.map { |r| sync_one_repo(r["name"]) }
     end
 
-    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false, effort: nil, touch: nil, force: false)
+    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false,
+                     effort: nil, touch: nil, force: false, err: $stderr)
+      model, suffix_level = Harness.parse_model_suffix(model)
+      resolved_level = effort || suffix_level
+      Harness.validate_thinking_level!(resolved_level)
+      if effort.nil? && suffix_level
+        err.puts "thinking: model suffix ':#{suffix_level}' parsed from lane model → level=#{suffix_level} (model stripped)"
+      end
+
       if harness.to_s == "opencode" && (model.nil? || model == Harness::CLAUDE_DEFAULT_MODEL)
         raise Space::Core::Error,
           "Pass --model when using --harness opencode " \
@@ -615,11 +623,6 @@ module Space::Architect
           "Pass --model when using --harness pi " \
           "(#{Harness::CLAUDE_DEFAULT_MODEL} is a Claude model ID, not valid for pi — " \
           "try e.g. openrouter/qwen/qwen3-27b-optiq or local-inference/qwen3-27b-optiq)"
-      end
-      if effort && harness.to_s != "opencode"
-        raise Space::Core::Error,
-          "effort is opencode-only (sets opencode reasoningEffort) — " \
-          "set effort only on opencode lanes (harness: opencode)"
       end
 
       entry = slice_entry(iteration)
@@ -669,7 +672,7 @@ module Space::Architect
         "model" => model,
         "variant" => variant
       }
-      new_fields["effort"]    = effort         if effort
+      new_fields["effort"]    = resolved_level if resolved_level
       new_fields["touch_set"] = Array(touch)   if touch && !Array(touch).empty?
 
       update_architect_block do |b|
@@ -835,22 +838,35 @@ module Space::Architect
     end
 
     def dispatch(iteration, lane, model: nil, max_turns: 200,
-                 claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, detach: false,
-                 push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
+                 claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, force: false, quiet: false,
+                 detach: false, push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
                  push_client: nil, timeout: nil, prompt: nil, now: Time.now)
       raise Space::Core::Error, "Specify --push-host or --push-url, not both" if push_host && push_url
       raise Space::Core::Error, "--push-host requires --push-token"           if push_host && !push_token
       raise Space::Core::Error, "--detach cannot be combined with --push-url or --push-host" \
         if detach && (push_url || push_host)
 
+      err = quiet ? File.open(File::NULL, "w") : $stderr
+
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
       lane_entry = ensure_lane_materialized(iteration, lane)
 
-      resolved_harness = harness || lane_entry["harness"] || "claude-code"
-      resolved_model   = model   || lane_entry["model"]   || Harness::CLAUDE_DEFAULT_MODEL
-      resolved_effort  = effort  || lane_entry["effort"]
+      resolved_harness  = harness || lane_entry["harness"] || "claude-code"
+      model, suffix_level = Harness.parse_model_suffix(model)
+      resolved_model    = model || lane_entry["model"] || Harness::CLAUDE_DEFAULT_MODEL
+
+      resolved_effort =
+        if effort
+          Harness.validate_thinking_level!(effort) unless force
+          effort
+        elsif suffix_level
+          err.puts "thinking: model suffix ':#{suffix_level}' parsed from --model → level=#{suffix_level} (model stripped to '#{model}')"
+          suffix_level
+        else
+          lane_entry["effort"]
+        end
 
       raise Space::Core::Error, "--push-host is only supported with the claude-code harness" \
         if push_host && resolved_harness != "claude-code"
@@ -879,8 +895,8 @@ module Space::Architect
         if prompt_content.empty? || prompt_content == PROMPT_STUB.strip
 
       bin = resolved_harness == "claude-code" ? claude_bin : opencode_bin
-      harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
-                                                  bin: bin, config_dir: build_dir, effort: resolved_effort)
+      harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns, bin: bin,
+                                                  config_dir: build_dir, effort: resolved_effort, force: force, err: err)
 
       # Stamp launch time onto the lane entry: after every preflight validation has passed
       # (a dispatch that raises above records nothing) and before the blocking run or a
@@ -919,6 +935,7 @@ module Space::Architect
           run_kwargs[:push_url]    = push_url    if push_url
           run_kwargs[:push_token]  = push_token  if push_token
           run_kwargs[:push_client] = push_client if push_client
+          run_kwargs[:err]         = err         if quiet
         end
         exit_code = harness_obj.run(**run_kwargs)
 

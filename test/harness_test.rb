@@ -477,15 +477,18 @@ class HarnessTest < Space::ArchitectTest
     FileUtils.rm_rf(root)
   end
 
-  # Footgun: claude-code + effort raises with opencode-only / reasoningEffort message.
-  def test_harness_for_raises_for_claude_code_with_effort
-    err = assert_raises(Space::Core::Error) do
-      Space::Architect::Harness.for("claude-code",
-                                  model: "claude-sonnet-4-6", max_turns: 10,
-                                  bin: "/fake", effort: "high")
-    end
-    assert_match(/opencode-only/, err.message)
-    assert_match(/reasoningEffort/, err.message)
+  # I10: claude-code + effort no longer raises — it translates to --effort.
+  def test_harness_for_claude_code_with_effort_dispatches_with_effort_flag
+    root = Dir.mktmpdir("harness-test")
+    _space_dir, project, fake_claude, _fake_oc, build_dir = setup_space(root)
+
+    project.dispatch("demo", "A", claude_bin: fake_claude, effort: "high")
+    log = File.read(File.join(build_dir, "run.jsonl"))
+
+    assert_includes log, "--effort"
+    assert_includes log, "\"high\""
+  ensure
+    FileUtils.rm_rf(root)
   end
 
   # ── run_detached: ClaudeCodeHarness ──────────────────────────────────────────
