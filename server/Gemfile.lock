@@ -370,7 +370,7 @@ GEM
       console (~> 1.0)
     sequel (5.105.0)
       bigdecimal
-    shrine (3.8.0)
+    shrine (3.9.0)
       content_disposition (~> 1.0)
       down (~> 5.1)
     snaky_hash (2.0.6)
@@ -433,7 +433,7 @@ DEPENDENCIES
   rom-factory (= 0.13.0)
   rom-sql (= 3.7.0)
   sequel (= 5.105.0)
-  shrine (= 3.8.0)
+  shrine (= 3.9.0)
   vite-hanami!
 
 CHECKSUMS
@@ -558,7 +558,7 @@ CHECKSUMS
   rom-sql (3.7.0) sha256=56ba0714603d72d7ab5ad3247b6526d04ae83b6fcc807f4a1fa953cd7a65a639
   samovar (2.4.2) sha256=4626ef3d8297cb29dc83a17b562ba52e81116d53fcb7b32096bc453926c3e9ae
   sequel (5.105.0) sha256=4191d5e5d011b7229ff8a3401ca6beac047c4d35b1ec6703376513b4b25b2e67
-  shrine (3.8.0) sha256=658cc1fe1c5ec836a6c10bace7f214313e7d878acea09b6b658fe15fa19ea109
+  shrine (3.9.0) sha256=3ccc2dd1cff89efc034449675f6524017084485b8b387059d68b4f303c848aa7
   snaky_hash (2.0.6) sha256=3663cae48cdef582b517025cf8a39d8789996eaf0b4ed89e2f0624836505654a
   string-format (0.2.0) sha256=bc981c14116b061f12134549f32fa2d61a17b5a35dd6fd36596c21722a789af6
   stringio (3.2.0) sha256=c37cb2e58b4ffbd33fe5cd948c05934af997b36e0b6ca6fdf43afa234cf222e1
