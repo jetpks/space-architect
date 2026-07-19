@@ -12,6 +12,8 @@ module Space
         # the harness backend (base_url / api_key_ref / model / args) is applied
         # the same way, backend winning any environment.env name collision.
         # Mounts must be absolute and non-escaping or the job is rejected.
+        # A cidfile records the container ID so the stop path can act on the
+        # container itself — client signals don't stop it (I09 P5).
         class SandboxArgv
           extend Dry::Monads[:result]
 
@@ -20,7 +22,7 @@ module Space
           API_KEY_ENV  = "ANTHROPIC_API_KEY"
 
           # => Success(argv) | Failure(reason)
-          def self.build(spec, image_tag)
+          def self.build(spec, image_tag, cidfile: nil)
             harness     = spec["harness"] || {}
             backend     = harness["backend"] || {}
             environment = spec["environment"] || {}
@@ -31,6 +33,7 @@ module Space
             return Failure("invalid mount(s): #{invalid.join(', ')}") unless invalid.empty?
 
             argv = ["container", "run", "--rm"]
+            argv << "--cidfile" << cidfile if cidfile
             env_pairs(environment, backend).each { |k, v| argv << "-e" << "#{k}=#{v}" }
             secret_names(environment, backend).each { |name| argv << "-e" << name }
             argv << "--network" << "none" unless permissions["network"]

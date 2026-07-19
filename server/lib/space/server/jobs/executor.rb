@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "securerandom"
+require "tmpdir"
 require_relative "executor/raw_stream"
 require_relative "executor/sandbox_argv"
 require_relative "executor/secret_resolver"
@@ -91,9 +93,12 @@ module Space
           run
         end
 
+        # The cidfile lets the stop path signal the container itself — client
+        # signals never stop it under Apple `container` 1.0.0 (I09 P5).
         def run_sandbox(job, image_tag, stream)
-          SandboxArgv.build(job.spec, image_tag).either(
-            ->(argv) { spawn_and_relay(job, argv, stream) },
+          cidfile = File.join(Dir.tmpdir, "space-job-#{job.id}-#{SecureRandom.hex(4)}.cid")
+          SandboxArgv.build(job.spec, image_tag, cidfile: cidfile).either(
+            ->(argv) { spawn_and_relay(job, argv, stream, cidfile) },
             ->(reason) { fail_before_spawn(job, reason, stream) }
           )
         end
@@ -106,12 +111,14 @@ module Space
           @jobs_repo.mark_failed(job.id)
         end
 
-        def spawn_and_relay(job, argv, stream)
+        def spawn_and_relay(job, argv, stream, cidfile)
           secrets = @secret_resolver.call(secret_refs(job.spec))
-          handle  = @spawner.call(argv, env: secrets)
+          handle  = @spawner.call(argv, env: secrets, cidfile: cidfile)
           code    = supervise(job, handle, stream)
           stream.exit(code)
           code.zero? ? @jobs_repo.mark_succeeded(job.id) : @jobs_repo.mark_failed(job.id)
+        ensure
+          File.delete(cidfile) if File.exist?(cidfile)
         end
 
         # environment.secrets plus the backend api-key ref (when present),
