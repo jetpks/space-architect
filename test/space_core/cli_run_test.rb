@@ -19,6 +19,19 @@ class CLIRunTest < Space::ArchitectTest
     assert_match(/\brun\b/, out.string, "architect space --help should list the run command")
   end
 
+  # `space run --help` must steer users to the `--` separator: a quoted multi-word
+  # command arrives as one argv token and fails opaquely in-guest (#28).
+  # dry-cli calls exit() for --help, so exercise it via subprocess (same pattern as
+  # test_space_status_help_flags_show_help_and_exit_zero in cli_test.rb).
+  def test_run_help_steers_to_dashdash_separator
+    out = IO.popen(["bundle", "exec", "space", "run", "--help"], err: [:child, :out]) { |f| f.read }
+    status = $?.exitstatus
+
+    assert_equal 0, status, "space run --help must exit 0"
+    assert_match(/`--`/, out, "run --help should mention the `--` separator")
+    assert_match(/^  space run -- /, out, "run --help should show a `--` example in the Examples section")
+  end
+
   # Drives Run#call all the way to the exec tail — the help tests never enter #call,
   # so they cannot catch a command that builds no argv (e.g. an unresolved constant).
   # Kernel.exec is the one irreducible side effect (it replaces the process), so it is
