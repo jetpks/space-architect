@@ -20,13 +20,13 @@ module Space::Architect
     FROZEN_BOUNDARY = /^## Builder Prompt/
 
     # Sections the architect writes (and the CLI commits) via `architect section`.
-    # Acceptance Criteria is intentionally absent — it is set by `architect freeze`,
-    # the one code path that creates the freeze commit. Builder Report has its own
-    # command (`architect evidence`) because it is transcribed verbatim from scratch.
+    # Builder Report has its own command (`architect evidence`) because it is
+    # transcribed verbatim from scratch.
     # `frozen: true` sections live above the freeze boundary and are refused once frozen.
     SECTIONS = {
       "grounds" => { heading: "## Grounds", message: "grounds", prefix: "grounds", frozen: true },
       "specification" => { heading: "## Specification", message: "specification", prefix: "spec", frozen: true },
+      "acceptance-criteria" => { heading: "## Acceptance Criteria", message: "acceptance criteria", prefix: "ac", frozen: true },
       "prompt" => { heading: "## Builder Prompt", message: "dispatched", prefix: "prompt", frozen: false },
       "verdict" => { heading: "## Verdict", message: "verdict", prefix: "verdict", frozen: false }
     }.freeze
@@ -158,7 +158,8 @@ module Space::Architect
     # Freeze the iteration: the iteration file must carry a "## Acceptance Criteria" section. Commits
     # any pending changes to the iteration file and records HEAD as freeze_sha. If
     # already frozen, refuses when the frozen region has changed since.
-    def freeze!(iteration, warnings: nil, message: nil)
+    # With force: true, re-freezes a changed frozen region if no lane is dispatched yet.
+    def freeze!(iteration, warnings: nil, message: nil, force: false)
       entry = slice_entry(iteration)
       rel = entry["file"]
       path = space.path.join(rel)
@@ -174,11 +175,17 @@ module Space::Architect
       if entry["freeze_sha"]
         sha = entry["freeze_sha"]
         if frozen_region_changed?(sha, rel)
-          raise Space::Core::Error,
-            "Frozen sections of #{rel} changed since freeze #{sha[0, 8]} — " \
-            "refusing to re-freeze. Restore them to their frozen state or use a new iteration."
+          if force
+            dispatched_guard!(entry)
+            # fall through to commit path to re-freeze with new sha
+          else
+            raise Space::Core::Error,
+              "Frozen sections of #{rel} changed since freeze #{sha[0, 8]} — " \
+              "refusing to re-freeze. Restore them to their frozen state or use a new iteration."
+          end
+        else
+          return sha
         end
-        return sha
       end
 
       files = [rel]
@@ -208,6 +215,9 @@ module Space::Architect
         b
       end
 
+      git_run("-C", space.path.to_s, "commit", "-m",
+        compose_message("I#{nn} freeze:", "I#{nn}: record freeze sha", message), "--", Space::Core::Space::METADATA_FILE)
+
       sha
     end
 
@@ -232,14 +242,15 @@ module Space::Architect
 
     # Write one section of the iteration file and commit it with the canonical
     # per-section message, in one call. Refuses to write a frozen section
-    # (Grounds/Specification) once the iteration is frozen. Acceptance Criteria is
-    # NOT writable here (use freeze); Builder Report is not here (use evidence).
-    def write_section!(iteration, section, body:, append: false, lane: nil, message: nil)
+    # (Grounds/Specification/Acceptance Criteria) once the iteration is frozen.
+    # With force: true, writes a frozen section if no lane is dispatched yet.
+    # Builder Report is not here (use evidence).
+    def write_section!(iteration, section, body:, append: false, lane: nil, message: nil, force: false)
       spec = SECTIONS[section]
       unless spec
         raise Space::Core::Error,
           "Unknown section '#{section}' — one of: #{SECTIONS.keys.join(', ')}. " \
-          "(Acceptance Criteria is set by `architect freeze`; Builder Report by `architect evidence`.)"
+          "(Builder Report is written by `architect evidence`.)"
       end
 
       entry = slice_entry(iteration)
@@ -248,13 +259,19 @@ module Space::Architect
       raise Space::Core::Error, "#{rel} does not exist — run `architect new #{iteration}` first" unless path.exist?
 
       if spec[:frozen] && entry["freeze_sha"]
-        raise Space::Core::Error,
-          "#{spec[:heading]} is frozen for #{iteration} (freeze #{entry["freeze_sha"][0, 8]}) — " \
-          "frozen sections are read-only after the freeze commit. Open a new iteration to change the contract."
+        if force
+          dispatched_guard!(entry)
+        else
+          raise Space::Core::Error,
+            "#{spec[:heading]} is frozen for #{iteration} (freeze #{entry["freeze_sha"][0, 8]}) — " \
+            "frozen sections are read-only after the freeze commit. Open a new iteration to change the contract."
+        end
       end
 
       block = lane ? "### #{lane}\n\n#{body.strip}" : body.strip
-      path.write(replace_section_body(path.read, spec[:heading], block, append: append))
+      new_text = replace_section_body(path.read, spec[:heading], block, append: append)
+      lint_gates!(new_text) if section == "acceptance-criteria"
+      path.write(new_text)
 
       nn = format("%02d", entry["ordinal"] || 0)
       _o, _e, cst = git_capture("-C", space.path.to_s, "commit", "-m",
@@ -342,13 +359,13 @@ module Space::Architect
     # the lane branch, then merge --no-ff into the repo's lane/<id> integration branch.
     # Runs NO gates and makes NO pass/fail decision. Refuses a mechanically-failing lane
     # (builder commits / out-of-bounds) and aborts cleanly on a merge conflict.
-    def merge_lane!(iteration, lane, message: nil)
+    def merge_lane!(iteration, lane, message: nil, commit_mode: nil, into: nil)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
       lane_entry = ensure_lane_materialized(iteration, lane)
 
-      checks = lane_mechanical_checks(entry, lane_entry)
+      checks = lane_mechanical_checks(entry, lane_entry, commit_mode: commit_mode)
       if checks[:no_builder_commits] == false
         raise Space::Core::Error, "Lane '#{lane}' has builder commits — the worktree is tampered (hard rule 7). Reset and re-dispatch; do not merge."
       end
@@ -363,7 +380,7 @@ module Space::Architect
       raise Space::Core::Error, "Worktree directory does not exist: #{wt_path}" unless wt_path.exist?
       base_sha = lane_entry["base_sha"]
       lane_branch = "lane/#{id}-#{lane}"
-      integration_branch = project_integration_branch
+      integration_branch = into || project_integration_branch
 
       status_out, = git_capture("-C", wt_path.to_s, "status", "--porcelain")
       raise Space::Core::Error, "Lane '#{lane}' worktree has no changes to integrate." if status_out.strip.empty?
@@ -385,9 +402,22 @@ module Space::Architect
       unless mst.success?
         conflicts, = git_capture("-C", repo_path.to_s, "diff", "--name-only", "--diff-filter=U")
         git_capture("-C", repo_path.to_s, "merge", "--abort")
-        raise Space::Core::Error,
-          "Merge conflict integrating lane '#{lane}' (#{conflicts.split.join(", ")}) — the lane plan was " \
-          "not disjoint = a spec defect. Kill the conflicting lane and re-spec; do not hand-resolve. #{merr.strip}"
+        conflict_files = conflicts.split
+        lane_touch_set = lane_entry["touch_set"] || []
+        fnm = File::FNM_PATHNAME | File::FNM_EXTGLOB
+        outside = conflict_files.reject do |f|
+          lane_touch_set.any? { |g| File.fnmatch(g, f, fnm) || (g.end_with?("/**") && File.fnmatch("#{g}/*", f, fnm)) }
+        end
+        if !lane_touch_set.empty? && outside.empty?
+          raise Space::Core::Error,
+            "Merge conflict integrating lane '#{lane}' (#{conflict_files.join(", ")}) — the lane plan was " \
+            "not disjoint = a spec defect. Kill the conflicting lane and re-spec; do not hand-resolve. #{merr.strip}"
+        else
+          raise Space::Core::Error,
+            "Merge conflict integrating lane '#{lane}' (#{conflict_files.join(", ")}) — conflicting files " \
+            "are outside the lane's touch set; this looks like a branch mismatch: the lane is being merged " \
+            "into '#{integration_branch}'. Use --into <branch> to target the correct branch. #{merr.strip}"
+        end
       end
 
       merge_sha, = git_capture("-C", repo_path.to_s, "rev-parse", "HEAD")
@@ -414,14 +444,14 @@ module Space::Architect
     # first conflict (a disjointness defect). Never decides which lanes pass. With no
     # lanes and teardown: true, tears down every lane recorded for the iteration instead
     # (the second, teardown-only call in the loop's integrate-then-teardown rhythm).
-    def integrate!(iteration, lanes: nil, teardown: false, message: nil)
+    def integrate!(iteration, lanes: nil, teardown: false, message: nil, commit_mode: nil, into: nil)
       lanes = Array(lanes)
       return teardown_lanes!(iteration, slice_entry(iteration)["lanes"] || []) if lanes.empty? && teardown
       raise Space::Core::Error, "No lanes given to integrate" if lanes.empty?
 
       merged = []
       lanes.each do |lane|
-        merged << merge_lane!(iteration, lane, message: message)
+        merged << merge_lane!(iteration, lane, message: message, commit_mode: commit_mode, into: into)
       rescue Space::Core::Error => e
         done = merged.map { |m| m[:lane] }.join(", ")
         raise Space::Core::Error, "Integrated #{done.empty? ? "(none)" : done} then stopped at '#{lane}': #{e.message}"
@@ -534,10 +564,46 @@ module Space::Architect
         parts << "=== #{rel} ===\n\n#{iter_path.read}"
       end
 
+      space.repos.each do |repo|
+        name      = repo["name"]
+        repo_path = space.path.join("repos", name).to_s
+        next unless Dir.exist?(repo_path)
+
+        branch_out, _, branch_st = git_capture("-C", repo_path, "symbolic-ref", "--short", "HEAD")
+        next unless branch_st.success?
+        branch = branch_out.strip
+
+        git_capture("-C", repo_path, "fetch", "origin")
+
+        count_out, _, count_st = git_capture("-C", repo_path, "rev-list", "--left-right", "--count",
+          "#{branch}...origin/#{branch}")
+        next unless count_st.success?
+
+        behind = count_out.strip.split[1].to_i
+        if behind > 0
+          parts << "WARNING: repos/#{name} local #{branch} is #{behind} commits behind " \
+            "origin/#{branch} — run `architect sync #{name}`"
+        end
+      rescue
+        # tolerate fetch or comparison failures silently
+      end
+
       parts.join("\n")
     end
 
-    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false, effort: nil, touch: nil)
+    # Sync tracked repo clones with their remotes (fast-forward only).
+    # Returns an array of result hashes: { repo:, status:, message: }.
+    # With no repo_name, syncs every tracked repo; with a name, syncs only that one.
+    def sync_repos(repo_name: nil)
+      repos = space.repos
+      if repo_name
+        repos = repos.select { |r| r["name"] == repo_name }
+        raise Space::Core::Error, "repo '#{repo_name}' not tracked in this space" if repos.empty?
+      end
+      repos.map { |r| sync_one_repo(r["name"]) }
+    end
+
+    def worktree_add(repo, iteration, lane, base: nil, harness: "claude-code", model: nil, variant: false, effort: nil, touch: nil, force: false)
       if harness.to_s == "opencode" && (model.nil? || model == Harness::CLAUDE_DEFAULT_MODEL)
         raise Space::Core::Error,
           "Pass --model when using --harness opencode " \
@@ -556,7 +622,6 @@ module Space::Architect
 
       id = iteration_id(entry)
       wt_path   = space.path.join("build", "#{id}-#{lane}", "wt")
-      build_dir = space.path.join("build", "#{id}-#{lane}")
       FileUtils.mkdir_p(wt_path.dirname)
 
       base_ref = base || "HEAD"
@@ -566,11 +631,15 @@ module Space::Architect
 
       branch = "lane/#{id}-#{lane}"
 
-      # Guard: an existing directory that is not a registered worktree is ambiguous — refuse.
+      # Guard: an existing directory that is not a registered worktree is ambiguous.
       if wt_path.exist? && !worktree_registered?(repo_path, wt_path)
-        raise Space::Core::Error,
-          "#{wt_path} exists but is not a registered git worktree of #{repo} — " \
-          "resolve manually before re-running worktree_add"
+        if force
+          FileUtils.rm_rf(wt_path)
+        else
+          raise Space::Core::Error,
+            "#{wt_path} exists but is not a registered git worktree of #{repo} — " \
+            "resolve manually before re-running worktree_add, or re-run with --force to clear and re-create it"
+        end
       end
 
       # Skip git worktree add when the branch and worktree already exist (idempotent re-run).
@@ -727,7 +796,7 @@ module Space::Architect
     # record worktree/base_sha/integration_branch. Idempotent — an already-materialized
     # lane is skipped, not re-created. Refuses until the iteration is frozen, because
     # declarations are not authoritative until then.
-    def provision(iteration, base: nil, lane: nil)
+    def provision(iteration, base: nil, lane: nil, force: false)
       entry = slice_entry(iteration)
       raise Space::Core::Error,
         "Iteration '#{iteration}' is not frozen — freeze before provisioning (declarations are not authoritative until frozen)." \
@@ -745,17 +814,17 @@ module Space::Architect
           { lane: name, worktree: wt_path, base_sha: l["base_sha"], created: false }
         else
           result = worktree_add(l["repo"], iteration, name, base: resolve_lane_base(l["repo"], base),
-                                **recorded_lane_fields(l))
+                                force: force, **recorded_lane_fields(l))
           { lane: name, worktree: result[:worktree], base_sha: result[:base_sha], created: true }
         end
       end
     end
 
-    def verify(iteration)
+    def verify(iteration, commit_mode: nil)
       entry = slice_entry(iteration)
       (entry["lanes"] || []).map do |lane|
         ensure_lane_materialized(iteration, lane["name"])
-        { lane: lane["name"], repo: lane["repo"], checks: lane_mechanical_checks(entry, lane) }
+        { lane: lane["name"], repo: lane["repo"], checks: lane_mechanical_checks(entry, lane, commit_mode: commit_mode) }
       end
     end
 
@@ -1030,7 +1099,7 @@ module Space::Architect
 
     # The four per-lane post-flight checks, shared by `verify` (reports) and
     # `merge_lane!` (refuses on failure) so the two can never drift.
-    def lane_mechanical_checks(entry, lane)
+    def lane_mechanical_checks(entry, lane, commit_mode: nil)
       freeze_sha = entry["freeze_sha"]
       rel = entry["file"]
       lane_name = lane["name"]
@@ -1043,12 +1112,21 @@ module Space::Architect
       # (a) frozen sections of the iteration file untouched since freeze
       checks[:frozen_untouched] = (!frozen_region_changed?(freeze_sha, rel) if freeze_sha && rel)
 
-      # (b) no builder commits in the worktree (the architect's integrate commit is excluded)
-      log_out, = git_capture("-C", wt_path.to_s, "log", "--format=%H", "#{base_sha}..")
-      commit_shas = log_out.strip.split("\n").map(&:strip).reject(&:empty?)
+      # (b) no builder commits in the worktree (the architect's integrate commit is excluded;
+      #     in conductor mode, canonical conductor commits are also excluded)
+      effective_commit_mode = commit_mode || space.data.dig("project", "commit_mode") || "strict"
+      log_out, = git_capture("-C", wt_path.to_s, "log", "--format=%H%x09%s", "#{base_sha}..")
+      commit_entries = log_out.strip.split("\n").filter_map do |line|
+        sha, subject = line.strip.split("\t", 2)
+        { sha: sha, subject: subject.to_s } unless sha.nil? || sha.empty?
+      end
       recorded_integrate = lane["integrate_sha"]&.strip
-      builder_shas = recorded_integrate ? commit_shas.reject { |s| s == recorded_integrate } : commit_shas
-      checks[:no_builder_commits] = builder_shas.empty?
+      canonical_conductor = "#{iteration_id(entry)}-#{lane_name}: builder output"
+      builder_commits = commit_entries.reject do |c|
+        c[:sha] == recorded_integrate ||
+          (effective_commit_mode == "conductor" && c[:subject] == canonical_conductor)
+      end
+      checks[:no_builder_commits] = builder_commits.empty?
 
       # (c) builder's scratch report exists and is non-empty
       report = space.path.join("build", "#{iteration_id(entry)}-#{lane_name}", "report.md")
@@ -1076,7 +1154,12 @@ module Space::Architect
           changed << orig if orig && !orig.empty?
         end
         fnm = File::FNM_PATHNAME | File::FNM_EXTGLOB
-        changed.all? { |f| touch_set.any? { |g| File.fnmatch(g, f, fnm) } }
+        changed.all? do |f|
+          touch_set.any? do |g|
+            File.fnmatch(g, f, fnm) ||
+              (g.end_with?("/**") && File.fnmatch("#{g}/*", f, fnm))
+          end
+        end
       end
 
       checks
@@ -1190,6 +1273,17 @@ module Space::Architect
       raise Space::Core::Error, "ill-formed gates block:\n#{result.failure.join("\n")}"
     end
 
+    # Raises if any lane in the entry has been dispatched (dispatched_at or integrate_sha set).
+    # Used by freeze! and write_section! --force to prevent rewriting frozen content after a
+    # builder has run (moving freeze_sha post-dispatch breaks the AC cardinal invariant).
+    def dispatched_guard!(entry)
+      lane = (entry["lanes"] || []).find { |l| l["dispatched_at"] || l["integrate_sha"] }
+      return unless lane
+      raise Space::Core::Error,
+        "Lane '#{lane["name"]}' is already dispatched — cannot re-freeze or write frozen sections " \
+        "after dispatch (a builder has run against the frozen AC; rewriting it breaks the cardinal invariant)."
+    end
+
     def staged_changes?
       _o, _e, st = git_capture("-C", space.path.to_s, "diff", "--cached", "--quiet")
       !st.success? # --quiet exits non-zero when there are staged differences
@@ -1233,6 +1327,45 @@ module Space::Architect
 
     def git_capture(*args)
       Open3.capture3("git", *args)
+    end
+
+    def sync_one_repo(name)
+      repo_path = space.path.join("repos", name).to_s
+
+      dirty_out, _, _ = git_capture("-C", repo_path, "status", "--porcelain")
+      return { repo: name, status: :dirty, message: "#{name}: dirty working tree — skipping" } if dirty_out.strip.length > 0
+
+      branch_out, _, branch_st = git_capture("-C", repo_path, "symbolic-ref", "--short", "HEAD")
+      unless branch_st.success?
+        return { repo: name, status: :error, message: "#{name}: detached HEAD — skipping" }
+      end
+      branch = branch_out.strip
+
+      _, fetch_err, fetch_st = git_capture("-C", repo_path, "fetch", "origin")
+      unless fetch_st.success?
+        return { repo: name, status: :error, message: "#{name}: fetch failed — #{fetch_err.strip}" }
+      end
+
+      count_out, _, count_st = git_capture("-C", repo_path, "rev-list", "--left-right", "--count",
+        "#{branch}...origin/#{branch}")
+      unless count_st.success?
+        return { repo: name, status: :error, message: "#{name}: could not compare with origin/#{branch}" }
+      end
+
+      ahead, behind = count_out.strip.split.map(&:to_i)
+      return { repo: name, status: :up_to_date, message: "#{name}: up to date" } if behind == 0
+
+      if ahead > 0
+        return { repo: name, status: :diverged,
+          message: "#{name}: behind #{behind}, diverged #{ahead} — not fast-forwardable, resolve manually" }
+      end
+
+      _, ff_err, ff_st = git_capture("-C", repo_path, "merge", "--ff-only", "origin/#{branch}")
+      if ff_st.success?
+        { repo: name, status: :fast_forwarded, message: "#{name}: fast-forwarded #{behind} commits" }
+      else
+        { repo: name, status: :ff_failed, message: "#{name}: merge --ff-only failed — #{ff_err.strip}" }
+      end
     end
 
     def branch_exists?(repo_path, branch)

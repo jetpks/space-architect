@@ -5,11 +5,12 @@ require_relative "../oci_runner"
 
 module Space::Core::CLI
 class Run < BaseCommand
-  desc "Run the packed OCI image for the current space (auth injected at runtime)"
+  desc "Run the packed OCI image for the current space (auth injected at runtime). Pass a command and its arguments after `--` so they forward as separate argv tokens"
 
-  argument :command, type: :array, required: false, desc: "Command to run in the container (default: login shell)"
+  argument :command, type: :array, required: false, desc: "Command to run in the container (default: login shell). Use `--` to pass a command with arguments, e.g. `space run -- hermes -z \"hello\"`"
   option :tty, type: :boolean, default: nil, desc: "Force interactive TTY (default: auto-detect)"
   option :env, type: :array, desc: "Host env var to forward into the container (repeatable; adds to run.env)"
+  example "-- hermes -z \"What is 17 plus 4?\"   # `--` forwards the command and its args as separate tokens (a quoted multi-word command arrives as one token and fails in-guest)"
 
   def call(command: [], tty: nil, env: [], **opts)
     setup_terminal(**opts.slice(:color, :colors))

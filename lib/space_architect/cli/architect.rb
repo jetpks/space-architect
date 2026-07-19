@@ -174,20 +174,40 @@ module Space::Architect
         end
       end
 
+      class Sync < BaseCommand
+        desc "Sync tracked repo clones with their remotes (fast-forward only, no rebase/reset)"
+        phase 53, "Project"
+        argument :repo,  required: false, desc: "Repo name to sync (default: all tracked repos)"
+        argument :space, required: false, desc: "Space identifier (default: $PWD)"
+
+        def call(repo: nil, space: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              results = project.sync_repos(repo_name: repo)
+              results.each { |r| terminal.say r[:message] }
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+      end
+
       class Freeze < BaseCommand
         desc "Freeze the iteration's frozen region (Grounds/Specification/Acceptance Criteria) and record the freeze SHA"
         phase 12, "Spec"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option   :force, type: :boolean, default: false, desc: "Re-freeze even if the frozen region changed (pre-dispatch only)"
         commit_message_options
 
-        def call(iteration:, space: nil, message: nil, message_from: nil, **opts)
+        def call(iteration:, space: nil, message: nil, message_from: nil, force: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
               warnings = []
-              sha = project.freeze!(iteration, warnings: warnings,
+              sha = project.freeze!(iteration, warnings: warnings, force: force,
                 message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Frozen #{iteration} at #{sha}"
               warnings.each { |w| terminal.say "Warning: #{w}" }
@@ -206,15 +226,17 @@ module Space::Architect
       class Verify < BaseCommand
         desc "Post-flight mechanical lane checks — frozen-untouched, no builder commits, report exists, in-bounds (reports only, no judgment)"
         phase 30, "Judge"
-        argument :iteration, required: true, desc: "Iteration name"
-        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        argument :iteration,   required: true,  desc: "Iteration name"
+        argument :space,       required: false, desc: "Space identifier (default: $PWD)"
+        option   :commit_mode, default: nil,    desc: "Commit mode override (strict|conductor); overrides space.yaml commit_mode for this run"
 
-        def call(iteration:, space: nil, **opts)
+        def call(iteration:, space: nil, commit_mode: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              results = project.verify(iteration)
+              terminal.say "Effective commit_mode: #{commit_mode}" if commit_mode
+              results = project.verify(iteration, commit_mode: commit_mode)
 
               if results.empty?
                 terminal.say "No lanes recorded for iteration '#{iteration}'"
@@ -316,13 +338,14 @@ module Space::Architect
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :base,      default: nil,    desc: "Base ref override (default: project/<slug> HEAD if it exists, else the repo's default branch)"
         option   :lane,      default: nil,    desc: "Provision only this lane (default: all declared lanes)"
+        option   :force,     type: :boolean, default: false, desc: "Clear and re-create a stale (unregistered) worktree directory"
 
-        def call(iteration:, space: nil, base: nil, lane: nil, **opts)
+        def call(iteration:, space: nil, base: nil, lane: nil, force: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              results = project.provision(iteration, base: base, lane: lane)
+              results = project.provision(iteration, base: base, lane: lane, force: force)
               if results.empty?
                 terminal.say "No declared lanes to provision for '#{iteration}'"
               else
@@ -341,23 +364,24 @@ module Space::Architect
         desc "Write a section of the iteration file and commit it (one call)"
         phase 11, "Spec"
         argument :iteration, required: true,  desc: "Iteration name"
-        argument :section,   required: true,  desc: "Section: grounds, specification, prompt, verdict"
+        argument :section,   required: true,  desc: "Section: grounds, specification, acceptance-criteria, prompt, verdict"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :from,   default: nil, desc: "Read the section body from this file"
         option   :body,   default: nil, desc: "Inline section body (one-liners)"
         option   :stdin,  type: :boolean, default: false, desc: "Read the section body from stdin"
         option   :append, type: :boolean, default: false, desc: "Append a ### <lane> subsection instead of replacing"
         option   :lane,   default: nil, desc: "Lane name for an appended ### subsection"
+        option   :force,  type: :boolean, default: false, desc: "Write a frozen section (pre-dispatch only)"
         commit_message_options
 
         def call(iteration:, section:, space: nil, from: nil, body: nil, stdin: false, append: false, lane: nil,
-                 message: nil, message_from: nil, **opts)
+                 message: nil, message_from: nil, force: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             content = read_body(from: from, body: body, stdin: stdin, what: "section body")
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              res = project.write_section!(iteration, section, body: content, append: append, lane: lane,
+              res = project.write_section!(iteration, section, body: content, append: append, lane: lane, force: force,
                 message: read_commit_message(message: message, message_from: message_from))
               if res[:committed]
                 terminal.say "Committed #{res[:heading]} → #{res[:sha][0, 8]}"
@@ -425,17 +449,19 @@ module Space::Architect
       class Merge < BaseCommand
         desc "Integrate ONE judged-passing lane (merges --no-ff; runs no gates, makes no verdict)"
         phase 41, "Land"
-        argument :iteration, required: true,  desc: "Iteration name"
-        argument :lane,      required: true,  desc: "Lane name (architect-judged passing)"
-        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        argument :iteration,   required: true,  desc: "Iteration name"
+        argument :lane,        required: true,  desc: "Lane name (architect-judged passing)"
+        argument :space,       required: false, desc: "Space identifier (default: $PWD)"
+        option   :into,        required: false, desc: "Merge into this branch instead of the slug-derived project/<slug> default"
+        option   :commit_mode, default: nil,    desc: "Commit mode override (strict|conductor); overrides space.yaml commit_mode for this run"
         commit_message_options
 
-        def call(iteration:, lane:, space: nil, message: nil, message_from: nil, **opts)
+        def call(iteration:, lane:, space: nil, message: nil, message_from: nil, into: nil, commit_mode: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
-              r = project.merge_lane!(iteration, lane,
+              r = project.merge_lane!(iteration, lane, into: into, commit_mode: commit_mode,
                 message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Merged #{lane} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
               terminal.say r[:diffstat] unless r[:diffstat].empty?
@@ -449,13 +475,15 @@ module Space::Architect
       class Integrate < BaseCommand
         desc "Integrate the architect-supplied set of passing lanes, in order (stops on conflict)"
         phase 40, "Land"
-        argument :iteration, required: true,  desc: "Iteration name"
-        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-        option   :lanes,     required: false, desc: "Comma-separated passing lane names (you decide the set)"
-        option   :teardown,  type: :boolean, default: false, desc: "Remove worktrees + delete lane branches after merge"
+        argument :iteration,   required: true,  desc: "Iteration name"
+        argument :space,       required: false, desc: "Space identifier (default: $PWD)"
+        option   :lanes,       required: false, desc: "Comma-separated passing lane names (you decide the set)"
+        option   :teardown,    type: :boolean, default: false, desc: "Remove worktrees + delete lane branches after merge"
+        option   :commit_mode, default: nil,    desc: "Commit mode override (strict|conductor); overrides space.yaml commit_mode for this run"
+        option   :into,        required: false, desc: "Merge into this branch instead of the slug-derived project/<slug> default"
         commit_message_options
 
-        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, **opts)
+        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, commit_mode: nil, into: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
@@ -465,7 +493,8 @@ module Space::Architect
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
               results = project.integrate!(iteration, lanes: lane_names, teardown: teardown,
-                message: read_commit_message(message: message, message_from: message_from))
+                message: read_commit_message(message: message, message_from: message_from),
+                commit_mode: commit_mode, into: into)
               if lane_names.empty?
                 if results.empty?
                   terminal.say "Nothing to tear down for #{iteration}"
@@ -574,15 +603,16 @@ module Space::Architect
           option   :model,     default: nil,           desc: "Model (required for opencode)"
           option   :effort,    default: nil,           desc: "Reasoning effort (opencode only; sets reasoningEffort in the model config)"
           option   :touch,     default: nil,           desc: "Comma-separated file globs the lane may touch (records its touch_set for in-bounds + merge checks)"
+          option   :force,     type: :boolean, default: false, desc: "Clear and re-create a stale (unregistered) worktree directory"
 
-          def call(repo:, iteration:, lane:, base: nil, harness: "claude-code", model: nil, effort: nil, touch: nil, **opts)
+          def call(repo:, iteration:, lane:, base: nil, harness: "claude-code", model: nil, effort: nil, touch: nil, force: false, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find) do |sp|
                 project = ArchitectProject.new(space: sp)
                 touch_set = touch ? touch.split(",").map(&:strip).reject(&:empty?) : nil
                 result = project.worktree_add(repo, iteration, lane, base: base,
-                                             harness: harness, model: model, effort: effort, touch: touch_set)
+                                             harness: harness, model: model, effort: effort, touch: touch_set, force: force)
                 terminal.say "Worktree: #{terminal.path(result[:worktree])}"
                 terminal.say "Base SHA: #{result[:base_sha]}"
                 CLI.record_outcome(Outcome.new(exit_code: 0))
@@ -756,6 +786,7 @@ Space::Architect::CLI::Registry.register "init",   Space::Architect::CLI::Archit
 Space::Architect::CLI::Registry.register "ground", Space::Architect::CLI::Architect::Ground
 Space::Architect::CLI::Registry.register "new",    Space::Architect::CLI::Architect::New
 Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Architect::Status
+Space::Architect::CLI::Registry.register "sync",   Space::Architect::CLI::Architect::Sync
 Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
 Space::Architect::CLI::Registry.register "verify", Space::Architect::CLI::Architect::Verify
 Space::Architect::CLI::Registry.register "provision", Space::Architect::CLI::Architect::Provision

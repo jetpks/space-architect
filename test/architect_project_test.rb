@@ -799,6 +799,66 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # acceptance-criteria is now a first-class section target:
+  # (a) well-formed AC + gates block writes and commits; (b) malformed gates block raises
+  # before writing/committing.
+  def test_write_section_authors_acceptance_criteria
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    # (a) well-formed AC with a gates block writes and commits
+    ac_body = <<~BODY
+      The seam holds end-to-end.
+
+      ```gates
+      - id: g1
+        ac: AC1
+        cmd: "true"
+        expect:
+          exit_code: 0
+      ```
+    BODY
+
+    res = project.write_section!("my-slice", "acceptance-criteria", body: ac_body)
+    assert res[:committed]
+    assert_match(/\A[0-9a-f]{40}\z/, res[:sha])
+
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    assert_match(/The seam holds end-to-end/, text)
+    assert_match(/^## Acceptance Criteria/, text)
+
+    msg, = Open3.capture3("git", "-C", dir, "log", "-1", "--format=%s")
+    assert_equal "I01: acceptance criteria", msg.strip
+
+    # (b) malformed gates block raises before writing/committing
+    text_before = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    head_before, = Open3.capture3("git", "-C", dir, "rev-parse", "HEAD")
+
+    err = assert_raises(Space::Core::Error) do
+      project.write_section!("my-slice", "acceptance-criteria", body: <<~BAD)
+        Malformed gates follow.
+
+        ```gates
+        - id: g1
+          ac: AC1
+          cmd: "true"
+          expect: {}
+        ```
+      BAD
+    end
+    assert_match(/ill-formed/i, err.message)
+
+    assert_equal text_before, File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    head_after, = Open3.capture3("git", "-C", dir, "rev-parse", "HEAD")
+    assert_equal head_before.strip, head_after.strip
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # transcribe_evidence! copies the scratch report VERBATIM — even when it contains
   # its own "## " headings and markdown tables — and surfaces the STATUS line.
   def test_transcribe_evidence_is_verbatim_even_with_hashes_and_tables
@@ -898,6 +958,44 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # FNM_PATHNAME makes a trailing `dir/**` behave like a single `*` (direct children
+  # only), so modifying a pre-existing tracked file ≥2 dirs deep false-negatived the
+  # in-bounds check. The fix also checks the `dir/**/*` form, whose whole-component
+  # `**/` DOES cross `/` under FNM_PATHNAME — a sibling directory must still reject.
+  def test_in_bounds_deep_modify_under_dir_glob
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+
+    FileUtils.mkdir_p(File.join(repo_dir, "roles", "cilium", "tasks"))
+    File.write(File.join(repo_dir, "roles", "cilium", "tasks", "Debian.yaml"), "orig: true\n")
+    system("git", "-C", repo_dir, "add", "roles/cilium/tasks/Debian.yaml")
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "seed deep file")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["roles/cilium/**"])
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+
+    # Modify the pre-existing deep tracked file — in-bounds.
+    File.write(File.join(wt, "roles", "cilium", "tasks", "Debian.yaml"), "orig: false\n")
+    system("git", "-C", wt, "add", "roles/cilium/tasks/Debian.yaml")
+    checks = project.verify("my-slice").first[:checks]
+    assert_equal true, checks[:in_bounds], "roles/cilium/** must accept a modified roles/cilium/tasks/Debian.yaml"
+
+    # Stage a sibling dir's file — out-of-bounds detection must not be loosened.
+    FileUtils.mkdir_p(File.join(wt, "roles", "kubeadm"))
+    File.write(File.join(wt, "roles", "kubeadm", "x.yaml"), "x: 1\n")
+    system("git", "-C", wt, "add", "roles/kubeadm/x.yaml")
+    checks = project.verify("my-slice").first[:checks]
+    assert_equal false, checks[:in_bounds], "roles/cilium/** must not accept roles/kubeadm/x.yaml"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # merge_lane! refuses a lane whose worktree carries builder commits (tamper).
   def test_merge_lane_refuses_builder_commits
     dir = Dir.mktmpdir("architect-project-test")
@@ -983,6 +1081,77 @@ class ArchitectProjectTest < Space::ArchitectTest
     log, = Open3.capture3("git", "-C", repo, "log", r1[:integration_branch], "--format=%s")
     assert_match(/Merge lane\/I01-s1-lane-a/, log)
     assert_match(/Merge lane\/I02-s2-lane-b/, log)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1 + AC3: conductor mode accepts canonical conductor commits and still rejects
+  # non-canonical commits (tamper detection). Also covers CLI-flag override (AC3):
+  # passing commit_mode: "conductor" to project.verify without space.yaml commit_mode.
+  def test_verify_conductor_mode_accepts_canonical_conductor_commit
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "work.rb"), "x = 1\n")
+    system("git", "-C", wt, "add", "work.rb", out: File::NULL, err: File::NULL)
+    system("git", "-C", wt, "commit", "-q", "-m", "I01-my-slice-lane-a: builder output")
+
+    # AC3: CLI-flag override — no space.yaml commit_mode, param wins → canonical commit passes
+    results = project.verify("my-slice", commit_mode: "conductor")
+    lane_checks = results.find { |r| r[:lane] == "lane-a" }[:checks]
+    assert_equal true, lane_checks[:no_builder_commits],
+      "canonical conductor commit must not be flagged in conductor mode (CLI override)"
+
+    # AC1: space.yaml commit_mode: "conductor" — no CLI param → canonical commit passes
+    space.data["project"]["commit_mode"] = "conductor"
+    results2 = project.verify("my-slice")
+    lane_checks2 = results2.find { |r| r[:lane] == "lane-a" }[:checks]
+    assert_equal true, lane_checks2[:no_builder_commits],
+      "canonical conductor commit must not be flagged when commit_mode: conductor in space.yaml"
+
+    # Tamper detection: non-canonical commit IS still a builder commit even in conductor mode
+    File.write(File.join(wt, "work2.rb"), "y = 2\n")
+    system("git", "-C", wt, "add", "work2.rb", out: File::NULL, err: File::NULL)
+    system("git", "-C", wt, "commit", "-q", "-m", "rogue builder commit")
+    results3 = project.verify("my-slice", commit_mode: "conductor")
+    lane_checks3 = results3.find { |r| r[:lane] == "lane-a" }[:checks]
+    assert_equal false, lane_checks3[:no_builder_commits],
+      "non-canonical commit must still be flagged in conductor mode (tamper detection preserved)"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2: default (nil/strict) commit_mode rejects any commit beyond base_sha,
+  # including commits that happen to have a canonical conductor message shape.
+  def test_verify_strict_default_rejects_non_canonical_commit
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "work.rb"), "x = 1\n")
+    system("git", "-C", wt, "add", "work.rb", out: File::NULL, err: File::NULL)
+    # Even a canonically-shaped message is rejected in strict mode
+    system("git", "-C", wt, "commit", "-q", "-m", "I01-my-slice-lane-a: builder output")
+
+    results = project.verify("my-slice")
+    lane_checks = results.find { |r| r[:lane] == "lane-a" }[:checks]
+    assert_equal false, lane_checks[:no_builder_commits],
+      "strict mode (default) must reject any commit beyond base_sha"
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -1990,6 +2159,41 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # freeze! commits space.yaml after update_architect_block so the workspace is clean:
+  # (a) git status --porcelain is empty; (b) freeze_sha in space.yaml equals the freeze
+  # commit (iteration file), not HEAD (the metadata commit).
+  def test_freeze_commits_space_yaml
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    # Dirty the iteration file so the freeze produces a distinct first commit
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    File.write(slice, File.read(slice) + "\nAC1 — the seam holds.\n")
+
+    freeze_sha = project.freeze!("my-slice")
+
+    # (a) space.yaml committed — no dirty working tree
+    status, = Open3.capture3("git", "-C", dir, "status", "--porcelain")
+    assert_equal "", status.strip
+
+    # (b) freeze_sha in space.yaml equals the freeze commit (touching the iteration file),
+    # not HEAD (the metadata commit)
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    recorded = yml.dig("project", "iterations", 0, "freeze_sha")
+    assert_equal freeze_sha, recorded
+
+    iter_commit, = Open3.capture3("git", "-C", dir, "log", "--format=%H", "--", "architecture/I01-my-slice.md")
+    head, = Open3.capture3("git", "-C", dir, "rev-parse", "HEAD")
+    assert_equal iter_commit.lines.first.strip, recorded
+    refute_equal head.strip, recorded
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # AC2: provision materializes every declared lane (worktree + lane branch), is
   # idempotent, records base_sha, and refuses when the iteration is not frozen.
   def test_provision_materializes_declared_lanes_and_is_idempotent
@@ -2488,6 +2692,634 @@ class ArchitectProjectTest < Space::ArchitectTest
     repo = File.join(dir, "repos", "my-repo")
     log, = Open3.capture3("git", "-C", repo, "log", "lane/I01-my-slice-lane-a", "-2", "--format=%s")
     assert_includes log, "lane lane-a: add the feature seam"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1: --into <branch> merges into the named branch (creates if absent, checks out if present)
+  # and records it in space.yaml's integration_branch field.
+  def test_merge_lane_into_branch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    repo = File.join(dir, "repos", "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    # (a) branch absent — must be created off base_sha
+    project.new_iteration!("s1")
+    project.freeze!("s1")
+    project.worktree_add("my-repo", "s1", "lane-a")
+    File.write(File.join(dir, "build", "I01-s1-lane-a", "wt", "feature.rb"), "def f; end\n")
+
+    r = project.merge_lane!("s1", "lane-a", into: "my-target")
+    assert_equal "my-target", r[:integration_branch]
+    assert_equal false, r[:gates_run]
+
+    branch_parts = "my-target".split("/")
+    assert_path_exists File.join(repo, ".git", "refs", "heads", *branch_parts),
+      "into branch must be created in the repo"
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    assert_equal "my-target", yml.dig("project", "iterations", 0, "lanes", 0, "integration_branch"),
+      "lane integration_branch must be recorded in space.yaml"
+
+    # (b) branch already exists — must be checked out and merged into
+    project.new_iteration!("s2")
+    project.freeze!("s2")
+    project.worktree_add("my-repo", "s2", "lane-b")
+    File.write(File.join(dir, "build", "I02-s2-lane-b", "wt", "feature2.rb"), "def f2; end\n")
+
+    r2 = project.merge_lane!("s2", "lane-b", into: "my-target")
+    assert_equal "my-target", r2[:integration_branch]
+
+    log, = Open3.capture3("git", "-C", repo, "log", "my-target", "--format=%s")
+    assert_match(/Merge lane\/I01-s1-lane-a/, log)
+    assert_match(/Merge lane\/I02-s2-lane-b/, log)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2: conflict outside touch_set → branch-mismatch error mentioning --into / target branch.
+  # AC2: conflict inside touch_set → "spec defect" error preserved.
+  def test_merge_lane_conflict_message_outside_touch_set
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    repo = File.join(dir, "repos", "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    # (outside touch_set) — lane has no touch_set; conflict on other.rb → branch-mismatch
+    project.new_iteration!("s1")
+    project.freeze!("s1")
+    project.worktree_add("my-repo", "s1", "lane-a")
+
+    base_sha, = Open3.capture3("git", "-C", repo, "rev-parse", "HEAD")
+    base_sha = base_sha.strip
+
+    # pre-create integration branch with other.rb at version "ib"
+    system("git", "-C", repo, "checkout", "-b", "conflict-ib", base_sha, out: File::NULL, err: File::NULL)
+    File.write(File.join(repo, "other.rb"), "def other; :ib; end\n")
+    system("git", "-C", repo, "add", "other.rb", out: File::NULL, err: File::NULL)
+    system("git", "-C", repo, "commit", "-q", "-m", "ib baseline")
+    system("git", "-C", repo, "checkout", "-", out: File::NULL, err: File::NULL)
+
+    # lane writes other.rb at version "lane"
+    File.write(File.join(dir, "build", "I01-s1-lane-a", "wt", "other.rb"), "def other; :lane; end\n")
+
+    err = assert_raises(Space::Core::Error) { project.merge_lane!("s1", "lane-a", into: "conflict-ib") }
+    assert_match(/--into/, err.message, "outside-touch-set conflict must mention --into")
+    assert_match(/conflict-ib/, err.message, "outside-touch-set conflict must name the target branch")
+    refute_match(/spec defect/, err.message, "outside-touch-set conflict must NOT say 'spec defect'")
+
+    # (inside touch_set) — lane touch_set covers the conflicting file → spec defect
+    project.new_iteration!("s2")
+    project.freeze!("s2")
+    project.worktree_add("my-repo", "s2", "lane-b", touch: ["feature.rb"])
+
+    base_sha2, = Open3.capture3("git", "-C", repo, "rev-parse", "HEAD")
+    base_sha2 = base_sha2.strip
+
+    system("git", "-C", repo, "checkout", "-b", "conflict-ib2", base_sha2, out: File::NULL, err: File::NULL)
+    File.write(File.join(repo, "feature.rb"), "def feature; :ib; end\n")
+    system("git", "-C", repo, "add", "feature.rb", out: File::NULL, err: File::NULL)
+    system("git", "-C", repo, "commit", "-q", "-m", "ib2 baseline")
+    system("git", "-C", repo, "checkout", "-", out: File::NULL, err: File::NULL)
+
+    File.write(File.join(dir, "build", "I02-s2-lane-b", "wt", "feature.rb"), "def feature; :lane; end\n")
+
+    err2 = assert_raises(Space::Core::Error) { project.merge_lane!("s2", "lane-b", into: "conflict-ib2") }
+    assert_match(/spec defect/, err2.message, "inside-touch-set conflict must say 'spec defect'")
+    refute_match(/--into/, err2.message, "inside-touch-set conflict must NOT mention --into")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── I05: repo sync command + ground staleness warning ───────────────────────
+
+  # AC1: sync_repos fast-forwards a behind repo, reports up-to-date for current,
+  #      and refuses dirty/diverged repos without clobbering the ref.
+  def test_sync_fast_forwards_behind_repo
+    dir        = Dir.mktmpdir("architect-sync-test")
+    origin_dir = Dir.mktmpdir("architect-sync-origin-test")
+
+    # Set up local "origin"
+    system("git", "-C", origin_dir, "init", "-q", "-b", "main", exception: false) ||
+      system("git", "-C", origin_dir, "init", "-q")
+    system("git", "-C", origin_dir, "config", "user.name", "Test Builder")
+    system("git", "-C", origin_dir, "config", "user.email", "test@example.com")
+    File.write(File.join(origin_dir, "README.md"), "# origin\n")
+    system("git", "-C", origin_dir, "add", "README.md")
+    system("git", "-C", origin_dir, "commit", "-q", "-m", "init")
+
+    # Clone into repos/my-repo
+    space    = create_real_space(dir)
+    repo_dir = File.join(dir, "repos", "my-repo")
+    system("git", "clone", "-q", origin_dir, repo_dir)
+    system("git", "-C", repo_dir, "config", "user.name", "Test Builder")
+    system("git", "-C", repo_dir, "config", "user.email", "test@example.com")
+    space.data["repos"] = [{ "name" => "my-repo" }]
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+
+    # (b) up-to-date: local and origin in sync
+    results = project.sync_repos
+    assert_equal 1, results.size
+    assert_equal :up_to_date, results.first[:status]
+    assert_match(/up to date/, results.first[:message])
+
+    # (a) behind: add a commit to origin, then sync → fast-forwarded
+    File.write(File.join(origin_dir, "v2.txt"), "v2\n")
+    system("git", "-C", origin_dir, "add", "v2.txt")
+    system("git", "-C", origin_dir, "commit", "-q", "-m", "v2")
+
+    results = project.sync_repos
+    assert_equal 1, results.size
+    assert_equal :fast_forwarded, results.first[:status]
+    assert_match(/fast-forwarded 1 commit/, results.first[:message])
+
+    # Verify the local ref actually moved to match origin
+    local_sha,  = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    origin_sha, = Open3.capture3("git", "-C", origin_dir, "rev-parse", "HEAD")
+    assert_equal origin_sha.strip, local_sha.strip
+
+    # (c) dirty: stage a change, then try to sync — must be refused
+    File.write(File.join(origin_dir, "v3.txt"), "v3\n")
+    system("git", "-C", origin_dir, "add", "v3.txt")
+    system("git", "-C", origin_dir, "commit", "-q", "-m", "v3")
+
+    File.write(File.join(repo_dir, "staged.txt"), "staged\n")
+    system("git", "-C", repo_dir, "add", "staged.txt")
+
+    ref_before, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    results = project.sync_repos
+    assert_equal :dirty, results.first[:status]
+    ref_after, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    assert_equal ref_before.strip, ref_after.strip, "dirty: ref must be unchanged"
+
+    # Unstage + remove so we can continue
+    system("git", "-C", repo_dir, "reset", "--", "staged.txt", out: File::NULL, err: File::NULL)
+    File.delete(File.join(repo_dir, "staged.txt"))
+
+    # (c) diverged: make a local commit not on origin → non-fast-forwardable, must be refused
+    File.write(File.join(repo_dir, "local_only.txt"), "local\n")
+    system("git", "-C", repo_dir, "add", "local_only.txt")
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "local-only")
+
+    ref_before, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    results = project.sync_repos
+    assert_equal :diverged, results.first[:status]
+    assert_match(/not fast-forwardable/, results.first[:message])
+    ref_after, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    assert_equal ref_before.strip, ref_after.strip, "diverged: ref must be unchanged"
+
+    # (single-repo) sync with an explicit name syncs only that repo
+    results = project.sync_repos(repo_name: "my-repo")
+    assert_equal 1, results.size
+
+    # (single-repo) sync with an unknown name raises
+    assert_raises(Space::Core::Error) { project.sync_repos(repo_name: "no-such-repo") }
+  ensure
+    FileUtils.rm_rf(dir)
+    FileUtils.rm_rf(origin_dir)
+  end
+
+  # AC2: ground emits a staleness warning when a tracked repo is behind origin,
+  #      is silent when up-to-date, and preserves existing ordering + worktree guard.
+  def test_ground_warns_stale_repo
+    dir        = Dir.mktmpdir("architect-ground-warn-test")
+    origin_dir = Dir.mktmpdir("architect-ground-warn-origin-test")
+
+    # Set up local "origin"
+    system("git", "-C", origin_dir, "init", "-q", "-b", "main", exception: false) ||
+      system("git", "-C", origin_dir, "init", "-q")
+    system("git", "-C", origin_dir, "config", "user.name", "Test Builder")
+    system("git", "-C", origin_dir, "config", "user.email", "test@example.com")
+    File.write(File.join(origin_dir, "README.md"), "# origin\n")
+    system("git", "-C", origin_dir, "add", "README.md")
+    system("git", "-C", origin_dir, "commit", "-q", "-m", "init")
+
+    # Clone into repos/my-repo
+    space    = create_real_space(dir)
+    repo_dir = File.join(dir, "repos", "my-repo")
+    system("git", "clone", "-q", origin_dir, repo_dir)
+
+    # Track the repo in space
+    space.data["repos"] = [{ "name" => "my-repo" }]
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    # (b) up-to-date: no warning expected
+    result = project.ground(session_cwd: dir)
+    refute_match(/WARNING.*my-repo/, result, "no warning expected when repo is up-to-date")
+
+    # Add a commit to origin so local is now behind
+    File.write(File.join(origin_dir, "extra.txt"), "extra\n")
+    system("git", "-C", origin_dir, "add", "extra.txt")
+    system("git", "-C", origin_dir, "commit", "-q", "-m", "extra commit")
+
+    # (a) stale: warning expected
+    result = project.ground(session_cwd: dir)
+    assert_match(/WARNING: repos\/my-repo.*behind.*origin\//, result)
+    assert_match(/architect sync my-repo/, result)
+
+    # Worktree guard still intact: builder wt → empty
+    wt_cwd = File.join(dir, "build", "I01-some-slice-lane-a", "wt")
+    assert_equal "", project.ground(session_cwd: wt_cwd)
+
+    # Existing ordering intact: ARCHITECT.md before BRIEF.md
+    project.brief_new!
+    result2 = project.ground(session_cwd: dir)
+    architect_idx = result2.index("ARCHITECT.md")
+    brief_idx     = result2.index("BRIEF.md")
+    assert architect_idx < brief_idx, "ARCHITECT.md must precede BRIEF.md even with staleness warning"
+  ensure
+    FileUtils.rm_rf(dir)
+    FileUtils.rm_rf(origin_dir)
+  end
+
+  # ── I06: freeze --force, section --force, merge --into / --commit-mode ───────
+
+  # AC1(a): freeze_force — re-freezes changed frozen region pre-dispatch and updates freeze_sha
+  def test_freeze_force_refreezes_changed_frozen_region_pre_dispatch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    freeze_sha_1 = project.freeze!("my-slice")
+
+    # Amend the frozen region (Grounds is above ## Builder Prompt)
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    File.write(slice, text.sub("## Grounds", "## Grounds\n\nAmended grounds for re-freeze."))
+
+    freeze_sha_2 = project.freeze!("my-slice", force: true)
+
+    refute_equal freeze_sha_1, freeze_sha_2, "force re-freeze must produce a new sha"
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    assert_equal freeze_sha_2, yml.dig("project", "iterations", 0, "freeze_sha"),
+      "space.yaml must record the new freeze_sha after force re-freeze"
+
+    status, = Open3.capture3("git", "-C", dir, "status", "--porcelain")
+    assert_equal "", status.strip, "workspace must be clean after force re-freeze"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1(b): freeze_force — refuses post-dispatch (dispatched_at set)
+  def test_freeze_force_refuses_if_lane_dispatched
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    project.freeze!("my-slice")
+
+    # Simulate dispatch
+    space.data.dig("project", "iterations").find { |s| s["name"] == "my-slice" }
+      .dig("lanes").find { |l| l["name"] == "lane-a" }["dispatched_at"] = "2026-01-01T00:00:00Z"
+
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    File.write(slice, text.sub("## Grounds", "## Grounds\n\nTamper attempt."))
+
+    err = assert_raises(Space::Core::Error) do
+      project.freeze!("my-slice", force: true)
+    end
+    assert_match(/lane-a/, err.message)
+    assert_match(/dispatched/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1(c): freeze_force — without --force, changed frozen region still raises (existing behavior)
+  def test_freeze_force_without_flag_refuses_changed_region
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    File.write(slice, text.sub("## Grounds", "## Grounds\n\nChanged."))
+
+    err = assert_raises(Space::Core::Error) do
+      project.freeze!("my-slice")
+    end
+    assert_match(/refusing to re-freeze/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2(a): section_force — writes a frozen section pre-dispatch
+  def test_section_force_writes_frozen_section_pre_dispatch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+
+    res = project.write_section!("my-slice", "specification", body: "Amended spec.", force: true)
+    assert res[:committed]
+
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    assert_match(/Amended spec\./, text)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2(b): section_force — refuses post-dispatch (integrate_sha set)
+  def test_section_force_refuses_if_lane_dispatched
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    project.freeze!("my-slice")
+
+    # Simulate post-integrate via integrate_sha
+    space.data.dig("project", "iterations").find { |s| s["name"] == "my-slice" }
+      .dig("lanes").find { |l| l["name"] == "lane-a" }["integrate_sha"] = "abc123def456"
+
+    err = assert_raises(Space::Core::Error) do
+      project.write_section!("my-slice", "specification", body: "Tampered spec.", force: true)
+    end
+    assert_match(/lane-a/, err.message)
+    assert_match(/dispatched/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2(c): section_force — without --force, frozen section still raises (existing behavior)
+  def test_section_force_without_flag_refuses_frozen_section
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+
+    err = assert_raises(Space::Core::Error) do
+      project.write_section!("my-slice", "specification", body: "Tampered spec.")
+    end
+    assert_match(/frozen/i, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3(a): merge_into — merges into the named branch instead of project/<slug>
+  def test_merge_into_uses_named_branch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "feature.rb"), "def feature; end\n")
+
+    r = project.merge_lane!("my-slice", "lane-a", into: "custom/target-branch")
+
+    assert_equal "custom/target-branch", r[:integration_branch]
+
+    repo = File.join(dir, "repos", "my-repo")
+    assert_path_exists File.join(repo, ".git", "refs", "heads", "custom", "target-branch"),
+      "custom/target-branch must exist in the repo after merge"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── I07: worktree_add --force / provision --force / worktree add --force ──────
+
+  # AC1(a): force: true clears a stale (unregistered) dir and creates a registered worktree.
+  def test_worktree_force_clears_stale_dir_and_creates_registered_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+    File.write(File.join(stray_dir, "stale.txt"), "leftover\n")
+
+    result = project.worktree_add("my-repo", "my-slice", "lane-a", force: true)
+
+    assert_path_exists result[:worktree].to_s
+    refute File.exist?(File.join(stray_dir, "stale.txt")), "stale file must be gone after force clear"
+    repo_path = Pathname.new(File.join(dir, "repos", "my-repo"))
+    assert project.send(:worktree_registered?, repo_path, result[:worktree]),
+      "worktree must be registered after force add"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1(b): no force → raises the existing error on stale dir (with --force hint).
+  def test_worktree_force_raises_without_force_on_stale_dir
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+
+    err = assert_raises(Space::Core::Error) do
+      project.worktree_add("my-repo", "my-slice", "lane-a")
+    end
+    assert_match(/exists but is not a registered git worktree/, err.message)
+    assert_match(/resolve manually/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1(c): force: true on an already-registered worktree → idempotent skip, no rm -rf.
+  def test_worktree_force_skips_already_registered_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    sentinel = File.join(dir, "build", "I01-my-slice-lane-a", "wt", "sentinel.txt")
+    File.write(sentinel, "keep me\n")
+
+    project.worktree_add("my-repo", "my-slice", "lane-a", force: true)
+
+    assert File.exist?(sentinel), "sentinel must survive — registered worktree must not be rm -rf'd by --force"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2(a): provision --force recovers a stale lane worktree (returns created: true).
+  def test_provision_force_recovers_stale_lane_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    project.freeze!("my-slice")
+
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+
+    results = project.provision("my-slice", force: true)
+    assert_equal 1, results.length
+    assert results[0][:created], "force provision must create the worktree (created: true)"
+    assert_path_exists results[0][:worktree].to_s
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2(b): provision without --force raises on a stale lane worktree.
+  def test_provision_force_raises_without_force_on_stale_lane
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    project.freeze!("my-slice")
+
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+
+    err = assert_raises(Space::Core::Error) { project.provision("my-slice") }
+    assert_match(/exists but is not a registered git worktree/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: worktree add --force (CLI) recovers a stale worktree.
+  def test_worktree_add_force_cli_recovers_stale_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+
+    Dir.chdir(dir) do
+      out, _err = invoke("worktree", "add", "my-repo", "my-slice", "lane-a", "--force")
+      assert_match(/Worktree:/, out)
+    end
+
+    wt_path = Pathname.new(File.join(dir, "build", "I01-my-slice-lane-a", "wt"))
+    repo_path = Pathname.new(File.join(dir, "repos", "my-repo"))
+    assert_path_exists wt_path.to_s
+    assert project.send(:worktree_registered?, repo_path, wt_path),
+      "worktree must be registered after CLI --force add"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: ensure_lane_materialized stays non-force — a stale dir still raises.
+  def test_ensure_lane_not_force_raises_on_stale_dir
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    project.freeze!("my-slice")
+
+    stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(stray_dir)
+
+    err = assert_raises(Space::Core::Error) do
+      project.send(:ensure_lane_materialized, "my-slice", "lane-a")
+    end
+    assert_match(/exists but is not a registered git worktree/, err.message)
+    assert_path_exists stray_dir, "stale dir must NOT be removed — ensure_lane_materialized is non-force"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3(b): merge_commit_mode — conductor mode treats canonical conductor commits as non-builder
+  def test_merge_commit_mode_conductor_passes_canonical_commit
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+
+    # Make a canonical conductor commit
+    File.write(File.join(wt, "work.rb"), "x = 1\n")
+    system("git", "-C", wt, "add", "work.rb", out: File::NULL, err: File::NULL)
+    system("git", "-C", wt, "commit", "-q", "-m", "I01-my-slice-lane-a: builder output")
+
+    # Without conductor mode this raises "builder commits"
+    File.write(File.join(wt, "more.rb"), "y = 2\n")
+    err = assert_raises(Space::Core::Error) { project.merge_lane!("my-slice", "lane-a") }
+    assert_match(/builder commits/i, err.message)
+
+    # With conductor mode the canonical commit is excluded; merge succeeds
+    r = project.merge_lane!("my-slice", "lane-a", commit_mode: "conductor")
+    assert_equal false, r[:gates_run]
+    assert_match(/\Aproject\//, r[:integration_branch])
   ensure
     FileUtils.rm_rf(dir)
   end
