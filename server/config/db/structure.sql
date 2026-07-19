@@ -196,6 +196,7 @@ CREATE TABLE public.jobs (
     updated_at timestamp with time zone NOT NULL,
     leased_until timestamp with time zone,
     attempts integer DEFAULT 0 NOT NULL,
+    failure_evidence text,
     CONSTRAINT jobs_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'canceled'::text])))
 );
 
@@ -782,4 +783,5 @@ INSERT INTO schema_migrations (filename) VALUES
 ('20260629000000_add_utc_offset_columns.rb'),
 ('20260630000000_add_harness_model_to_runs.rb'),
 ('20260701000000_create_jobs.rb'),
-('20260718000000_add_lease_to_jobs.rb');
+('20260718000000_add_lease_to_jobs.rb'),
+('20260719000000_add_failure_evidence_to_jobs.rb');

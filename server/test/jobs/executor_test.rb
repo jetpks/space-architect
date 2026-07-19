@@ -241,6 +241,86 @@ class ExecutorTest < Minitest::Test
     end
   end
 
+  # --- durable failure evidence (I07 D2 / I11) ---
+
+  def test_env_build_failure_persists_evidence_on_the_job_row
+    job     = make_job
+    spawner = FakeSpawner.new(FakeHandle.new)
+
+    with_redis do |redis|
+      redis.del(key_for(job))
+      executor = build_executor(redis: redis, spawner: spawner,
+        env_image: ->(_environment) { Failure("no such base image\napt exploded") })
+      executor.tick
+
+      failed = jobs_repo.by_pk(job.id)
+      assert_equal "failed", failed.status
+      assert_equal "no such base image\napt exploded", failed.failure_evidence,
+        "the build log must be readable from the job row, not just the raw stream"
+    end
+  end
+
+  def test_env_build_failure_evidence_is_bounded_to_the_last_n_bytes
+    job     = make_job
+    spawner = FakeSpawner.new(FakeHandle.new)
+    huge    = "x" * (Space::Server::Jobs::Executor::FAILURE_EVIDENCE_BYTES + 500)
+
+    with_redis do |redis|
+      redis.del(key_for(job))
+      executor = build_executor(redis: redis, spawner: spawner, env_image: ->(_environment) { Failure(huge) })
+      executor.tick
+
+      stored = jobs_repo.by_pk(job.id).failure_evidence
+      assert_equal Space::Server::Jobs::Executor::FAILURE_EVIDENCE_BYTES, stored.bytesize
+      assert_equal huge[-10..], stored[-10..], "the tail (most recent output) must be kept, not the head"
+    end
+  end
+
+  # --- kill-recovery bookkeeping (I09 D6) ---
+
+  def test_reclaim_after_a_crash_supersedes_the_stranded_run_and_links_a_fresh_one
+    job          = make_job
+    conversation = Factory[:conversation, user_id: @user.id]
+    spawner      = FakeSpawner.new(FakeHandle.new(stdout: "ok\n", code: 0))
+
+    with_redis do |redis|
+      redis.del(key_for(job))
+
+      # Attempt 1: claim, create a run (mirrors Executor#create_run), link it.
+      claimed = jobs_repo.claim
+      run_a   = runs_repo.create(
+        user_id: @user.id, harness: "claude", model: "sonnet-5", status: 0,
+        conversation_id: conversation.id, created_at: Time.now, updated_at: Time.now
+      )
+      jobs_repo.update(claimed.id, run_id: run_a.id)
+
+      # Simulate the crash: the lease goes stale and sweep_stale requeues the
+      # job — run_a stays linked, stranded pending. This is the exact D6 shape.
+      jobs_repo.heartbeat(claimed.id, lease_seconds: -1)
+      jobs_repo.sweep_stale(max_attempts: 3)
+      assert_equal "queued", jobs_repo.by_pk(claimed.id).status
+
+      # Attempt 2: a normal claim + run picks the job back up.
+      build_executor(redis: redis, spawner: spawner).tick
+
+      finished = jobs_repo.by_pk(job.id)
+      assert_equal "succeeded", finished.status, "the re-executed job must reach a terminal status"
+      refute_equal run_a.id, finished.run_id, "the fresh attempt must link a new run"
+
+      superseded = runs_repo.by_pk(run_a.id)
+      assert superseded.failed?, "the stranded run must end terminal"
+      assert_equal conversation.id, superseded.conversation_id, "forensics: the old run's conversation is preserved"
+
+      # No run left over from the superseded attempt stays stranded pending/live;
+      # the freshly linked run legitimately starts pending (the consumer, not the
+      # executor, advances it — see test_happy_path_runs_job_and_relays_output_onto_raw_stream).
+      other_runs = runs_repo.by_user(@user.id).reject { |r| r.id == finished.run_id }
+      assert_equal [run_a.id], other_runs.map(&:id)
+      refute_includes other_runs.map(&:status), :pending
+      refute_includes other_runs.map(&:status), :live
+    end
+  end
+
   def test_secret_values_reach_child_env_but_never_argv
     make_job
     spawner = FakeSpawner.new(FakeHandle.new)

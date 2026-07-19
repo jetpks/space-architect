@@ -41,7 +41,8 @@ module Space
         # String keys), so every lookup below is key-type indifferent.
         def call(environment)
           deps = Array(lookup(environment, :deps))
-          tag  = tag_for(deps: deps, files_ref: lookup(environment, :files), env_keys: env_keys(environment))
+          tag  = tag_for(deps: deps, files_ref: lookup(environment, :files), env_keys: env_keys(environment),
+                          base_image: base_image)
 
           return Success(tag) if image_exists?(tag)
 
@@ -62,11 +63,13 @@ module Space
 
         # Canonical serialization is a JSON object over exactly the fields that
         # participate in the tag — deps in their given order, the files ref
-        # verbatim, env key NAMES sorted. JSON.generate on a Hash with a fixed key
-        # order is deterministic within one Ruby process, which is all a cache tag
+        # verbatim, env key NAMES sorted, and the base image (two jobs with
+        # identical deps/files/env but different base images must never share
+        # a cache entry). JSON.generate on a Hash with a fixed key order is
+        # deterministic within one Ruby process, which is all a cache tag
         # needs (it does not need to be stable across Ruby versions/GC layouts).
-        def tag_for(deps:, files_ref:, env_keys:)
-          canonical = JSON.generate({ deps: deps, files_ref: files_ref, env_keys: env_keys })
+        def tag_for(deps:, files_ref:, env_keys:, base_image:)
+          canonical = JSON.generate({ deps: deps, files_ref: files_ref, env_keys: env_keys, base_image: base_image })
           "space-job-env:#{Digest::SHA256.hexdigest(canonical)[0, 12]}"
         end
 
