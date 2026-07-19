@@ -1085,6 +1085,77 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # AC1 + AC3: conductor mode accepts canonical conductor commits and still rejects
+  # non-canonical commits (tamper detection). Also covers CLI-flag override (AC3):
+  # passing commit_mode: "conductor" to project.verify without space.yaml commit_mode.
+  def test_verify_conductor_mode_accepts_canonical_conductor_commit
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "work.rb"), "x = 1\n")
+    system("git", "-C", wt, "add", "work.rb", out: File::NULL, err: File::NULL)
+    system("git", "-C", wt, "commit", "-q", "-m", "I01-my-slice-lane-a: builder output")
+
+    # AC3: CLI-flag override — no space.yaml commit_mode, param wins → canonical commit passes
+    results = project.verify("my-slice", commit_mode: "conductor")
+    lane_checks = results.find { |r| r[:lane] == "lane-a" }[:checks]
+    assert_equal true, lane_checks[:no_builder_commits],
+      "canonical conductor commit must not be flagged in conductor mode (CLI override)"
+
+    # AC1: space.yaml commit_mode: "conductor" — no CLI param → canonical commit passes
+    space.data["project"]["commit_mode"] = "conductor"
+    results2 = project.verify("my-slice")
+    lane_checks2 = results2.find { |r| r[:lane] == "lane-a" }[:checks]
+    assert_equal true, lane_checks2[:no_builder_commits],
+      "canonical conductor commit must not be flagged when commit_mode: conductor in space.yaml"
+
+    # Tamper detection: non-canonical commit IS still a builder commit even in conductor mode
+    File.write(File.join(wt, "work2.rb"), "y = 2\n")
+    system("git", "-C", wt, "add", "work2.rb", out: File::NULL, err: File::NULL)
+    system("git", "-C", wt, "commit", "-q", "-m", "rogue builder commit")
+    results3 = project.verify("my-slice", commit_mode: "conductor")
+    lane_checks3 = results3.find { |r| r[:lane] == "lane-a" }[:checks]
+    assert_equal false, lane_checks3[:no_builder_commits],
+      "non-canonical commit must still be flagged in conductor mode (tamper detection preserved)"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2: default (nil/strict) commit_mode rejects any commit beyond base_sha,
+  # including commits that happen to have a canonical conductor message shape.
+  def test_verify_strict_default_rejects_non_canonical_commit
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "work.rb"), "x = 1\n")
+    system("git", "-C", wt, "add", "work.rb", out: File::NULL, err: File::NULL)
+    # Even a canonically-shaped message is rejected in strict mode
+    system("git", "-C", wt, "commit", "-q", "-m", "I01-my-slice-lane-a: builder output")
+
+    results = project.verify("my-slice")
+    lane_checks = results.find { |r| r[:lane] == "lane-a" }[:checks]
+    assert_equal false, lane_checks[:no_builder_commits],
+      "strict mode (default) must reject any commit beyond base_sha"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # run_gates reads the frozen gates block, executes each command, and attaches
   # a mechanical :status/:reason from GateEvaluator. Raw :stdout/:stderr/:exit_code
   # are preserved unchanged; verdict tokens (PASS/FAIL/INVALID) must NOT appear in
