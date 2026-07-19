@@ -31,7 +31,13 @@ module Space::Architect
       # Authored-content intake shared by section/verdict/brief: a file, an
       # inline flag, or stdin — canonical files are only ever written by the CLI.
       def read_body(from: nil, body: nil, stdin: false, what: "section body")
-        return File.read(from) if from
+        if from
+          begin
+            return File.read(from)
+          rescue Errno::ENOENT
+            raise Space::Core::Error, "file for --from not found: #{from}; provide the #{what} via --from <file>, --body <text>, or --stdin"
+          end
+        end
         return body if body
         return $stdin.read if stdin
 
@@ -41,7 +47,13 @@ module Space::Architect
       # Commit-message intake for commit_message_options: --message-from wins
       # over -m/--message; nil means the command's canonical default message.
       def read_commit_message(message: nil, message_from: nil)
-        return File.read(message_from) if message_from
+        if message_from
+          begin
+            return File.read(message_from)
+          rescue Errno::ENOENT
+            raise Space::Core::Error, "file for --message-from not found: #{message_from}"
+          end
+        end
 
         message
       end

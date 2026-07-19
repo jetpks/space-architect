@@ -1603,4 +1603,59 @@ class ArchitectCLITest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
+
+  # I08: --from pointing at a nonexistent file must raise Space::Core::Error,
+  # not Errno::ENOENT — so handle_errors surfaces a clean one-line message.
+  def test_section_cli_from_missing_file_gives_clean_error
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+
+        _out, err = invoke("section", "s1", "specification", "--from", "tmp/no-such-file.md")
+
+        assert_match(/file for --from not found/, err)
+        assert_match(/no-such-file/, err)
+        assert_match(/--body|--stdin/, err)
+        refute_match(/Errno::ENOENT/, err)
+        refute_match(/trace/, err)
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # I08: --message-from pointing at a nonexistent file must raise
+  # Space::Core::Error, not Errno::ENOENT.
+  def test_section_cli_message_from_missing_file_gives_clean_error
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+
+        _out, err = invoke("section", "s1", "specification", "--body", "test", "--message-from", "tmp/no-msg.md")
+
+        assert_match(/file for --message-from not found/, err)
+        assert_match(/no-msg/, err)
+        refute_match(/Errno::ENOENT/, err)
+        refute_match(/trace/, err)
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
 end
