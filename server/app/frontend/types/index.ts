@@ -160,22 +160,27 @@ export type JobListItem = {
   run_id: number | null
 }
 
-// The v1 job spec surface (see app/contracts/create_job.rb). environment.files is
-// omitted by design — no UI for it yet.
+export type HarnessSpec = {
+  type: string
+  model: string
+  backend: { base_url: string; api_key_ref?: string | null }
+  args?: string[]
+}
+
+export type EnvironmentSpec = {
+  env?: Record<string, string>
+  secrets?: { ref: string; name: string }[]
+  deps?: string[]
+  npm?: string[]
+  files?: { path: string; content_b64: string }[]
+  permissions?: { network?: boolean; mounts?: string[] }
+}
+
+// The v1 job spec surface (see app/contracts/create_job.rb).
 export type JobSpec = {
-  harness: {
-    type: string
-    model: string
-    backend: { base_url: string; api_key_ref?: string | null }
-    args?: string[]
-  }
+  harness: HarnessSpec
   prompt: string
-  environment: {
-    env?: Record<string, string>
-    secrets?: { ref: string; name: string }[]
-    deps?: string[]
-    permissions?: { network?: boolean; mounts?: string[] }
-  }
+  environment: EnvironmentSpec
 }
 
 export type JobDetail = {
@@ -186,6 +191,21 @@ export type JobDetail = {
   spec: JobSpec
   created_at: string
   updated_at: string
+}
+
+// A stored partial job spec (see app/contracts/create_profile.rb): harness +
+// environment, no prompt. Jobs/New prefills its form from one; it never
+// carries a prompt of its own.
+export type ProfileSpec = {
+  harness: HarnessSpec
+  environment: EnvironmentSpec
+}
+
+export type Profile = {
+  id: number
+  name: string
+  harness_type: string
+  spec: ProfileSpec
 }
 
 // An access grant on a conversation: a GitHub user, or every member of a

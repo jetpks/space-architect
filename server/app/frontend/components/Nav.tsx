@@ -37,6 +37,10 @@ export default function Nav() {
               </Button>
 
               <Button asChild variant="ghost" size="sm">
+                <Link href="/profiles">Profiles</Link>
+              </Button>
+
+              <Button asChild variant="ghost" size="sm">
                 <Link href="/conversations/new">
                   <Upload className="size-4" /> Upload
                 </Link>

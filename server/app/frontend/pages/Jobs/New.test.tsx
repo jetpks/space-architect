@@ -142,4 +142,116 @@ describe('Jobs/New', () => {
     fireEvent.click(within(field).getByRole('button', { name: 'Remove' }))
     expect(setData).toHaveBeenCalledWith('env', [])
   })
+
+  it('renders a harness type select defaulting to claude', () => {
+    render(<New />)
+    expect(screen.getByText('Harness type')).not.toBeNull()
+    const field = screen.getByText('Harness type').closest('div')!
+    expect(within(field).getByRole('combobox')).toHaveValue('claude')
+  })
+
+  it('renders npm and files fields', () => {
+    render(<New />)
+    expect(screen.getByText('npm packages')).not.toBeNull()
+    expect(screen.getByText('Files')).not.toBeNull()
+  })
+
+  it('adding a files row appends an empty path/content entry via setData', () => {
+    render(<New />)
+    const field = screen.getByText('Files').closest('div')!
+    fireEvent.click(within(field).getByRole('button', { name: 'Add file' }))
+    expect(setData).toHaveBeenCalledWith('files', [{ path: '', content: '' }])
+  })
+
+  it('submits npm and files under environment, base64-encoding file content', () => {
+    const { container } = render(<New />)
+    fireEvent.submit(container.querySelector('form')!)
+    const transformer = transform.mock.calls[0][0]
+    const payload = transformer({
+      ...formData,
+      npm: ['typescript', ''],
+      files: [{ path: '/workspace/.pi/config.toml', content: 'hello' }],
+    })
+    expect(payload.environment.npm).toEqual(['typescript'])
+    expect(payload.environment.files).toEqual([
+      { path: '/workspace/.pi/config.toml', content_b64: btoa('hello') },
+    ])
+  })
+
+  it('switching harness type to pi drives the submitted harness.type', () => {
+    const { container } = render(<New />)
+    fireEvent.submit(container.querySelector('form')!)
+    const transformer = transform.mock.calls[0][0]
+    const payload = transformer({ ...formData, harness_type: 'pi' })
+    expect(payload.harness.type).toBe('pi')
+  })
+
+  it('switching to pi removes the ANTHROPIC_API_KEY row only while it holds the seeded placeholder', () => {
+    formData = { ...formData, env: [['ANTHROPIC_API_KEY', 'unused-for-keyless-backends']] }
+    render(<New />)
+    const field = screen.getByText('Harness type').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: 'pi' } })
+    expect(setData).toHaveBeenCalledWith('env', [])
+    expect(setData).toHaveBeenCalledWith('harness_type', 'pi')
+  })
+
+  it('switching to pi never clobbers a user-edited ANTHROPIC_API_KEY value', () => {
+    formData = { ...formData, env: [['ANTHROPIC_API_KEY', 'sk-real-secret']] }
+    render(<New />)
+    const field = screen.getByText('Harness type').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: 'pi' } })
+    expect(setData).not.toHaveBeenCalledWith('env', [])
+    expect(setData).toHaveBeenCalledWith('harness_type', 'pi')
+  })
+
+  it('shows the pi-appropriate explanation when pi is selected', () => {
+    formData = { ...formData, harness_type: 'pi' }
+    render(<New />)
+    expect(screen.getByText(/executor injects no ANTHROPIC env for pi/)).not.toBeNull()
+  })
+
+  it('renders no profile selector when the profiles prop is empty', () => {
+    render(<New />)
+    expect(screen.queryByText('Load from profile')).toBeNull()
+  })
+
+  it('selecting a profile prefills the form from its spec', () => {
+    const profile = {
+      id: 1,
+      name: 'pi via gateway',
+      harness_type: 'pi',
+      spec: {
+        harness: {
+          type: 'pi',
+          model: 'gpt-5',
+          backend: { base_url: 'https://gateway.example.com', api_key_ref: 'op://vault/item' },
+          args: ['--flag'],
+        },
+        environment: {
+          env: { FOO: 'bar' },
+          secrets: [{ ref: 'op://vault/secret', name: 'SECRET' }],
+          deps: ['git'],
+          npm: ['typescript'],
+          files: [{ path: '/workspace/f.txt', content_b64: btoa('hi') }],
+          permissions: { network: true, mounts: ['/host:/container'] },
+        },
+      },
+    }
+    render(<New profiles={[profile]} />)
+    const field = screen.getByText('Load from profile').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: '1' } })
+
+    expect(setData).toHaveBeenCalledWith('harness_type', 'pi')
+    expect(setData).toHaveBeenCalledWith('harness_model', 'gpt-5')
+    expect(setData).toHaveBeenCalledWith('base_url', 'https://gateway.example.com')
+    expect(setData).toHaveBeenCalledWith('api_key_ref', 'op://vault/item')
+    expect(setData).toHaveBeenCalledWith('args', ['--flag'])
+    expect(setData).toHaveBeenCalledWith('env', [['FOO', 'bar']])
+    expect(setData).toHaveBeenCalledWith('secrets', [['op://vault/secret', 'SECRET']])
+    expect(setData).toHaveBeenCalledWith('deps', ['git'])
+    expect(setData).toHaveBeenCalledWith('npm', ['typescript'])
+    expect(setData).toHaveBeenCalledWith('files', [{ path: '/workspace/f.txt', content: 'hi' }])
+    expect(setData).toHaveBeenCalledWith('network', true)
+    expect(setData).toHaveBeenCalledWith('mounts', ['/host:/container'])
+  })
 })
