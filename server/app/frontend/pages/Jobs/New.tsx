@@ -7,8 +7,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import AppLayout from '@/layouts/AppLayout'
-import type { Profile } from '@/types'
+import { compatibleProviders, fetchProviderModels } from '@/lib/providers'
+import type { Profile, Provider } from '@/types'
 import { decodeBase64, encodeBase64 } from './helpers'
+
+const CUSTOM_BACKEND = 'custom'
 
 type FileRow = { path: string; content: string }
 
@@ -46,12 +49,34 @@ const INITIAL_DATA: FormData = {
   mounts: [],
 }
 
-type Props = { profiles?: Profile[] }
+type Props = { profiles?: Profile[]; providers?: Provider[] }
 
-export default function New({ profiles = [] }: Props) {
+export default function New({ profiles = [], providers = [] }: Props) {
   const form = useForm<FormData>(INITIAL_DATA)
   const [selectedProfileId, setSelectedProfileId] = useState('')
+  const [selectedProviderId, setSelectedProviderId] = useState(CUSTOM_BACKEND)
+  const [modelOptions, setModelOptions] = useState<string[]>([])
+  const [modelsError, setModelsError] = useState<string | null>(null)
   const harnessType = form.data.harness_type ?? 'claude'
+  const providerOptions = compatibleProviders(providers, harnessType)
+
+  function selectProvider(id: string) {
+    setSelectedProviderId(id)
+    setModelOptions([])
+    setModelsError(null)
+
+    const provider = providerOptions.find((p) => String(p.id) === id)
+    if (!provider) {
+      return
+    }
+    form.setData('base_url', provider.base_url)
+    form.setData('api_key_ref', provider.api_key_ref ?? '')
+
+    fetchProviderModels(provider.id).then(({ models, error }) => {
+      setModelOptions(models)
+      setModelsError(error)
+    })
+  }
 
   function onHarnessTypeChange(newType: string) {
     if (newType !== harnessType) {
@@ -63,6 +88,15 @@ export default function New({ profiles = [] }: Props) {
         form.setData('env', [...env, ANTHROPIC_ROW])
       }
       form.setData('harness_type', newType)
+
+      if (
+        selectedProviderId !== CUSTOM_BACKEND &&
+        !compatibleProviders(providers, newType).some((p) => String(p.id) === selectedProviderId)
+      ) {
+        setSelectedProviderId(CUSTOM_BACKEND)
+        setModelOptions([])
+        setModelsError(null)
+      }
     }
   }
 
@@ -71,6 +105,10 @@ export default function New({ profiles = [] }: Props) {
     const profile = profiles.find((p) => String(p.id) === id)
     if (!profile) return
     const spec = profile.spec
+
+    setSelectedProviderId(CUSTOM_BACKEND)
+    setModelOptions([])
+    setModelsError(null)
 
     form.setData('harness_type', profile.harness_type)
     form.setData('harness_model', spec.harness.model)
@@ -170,14 +208,51 @@ export default function New({ profiles = [] }: Props) {
           />
         </Field>
 
+        <Field label="Provider">
+          <select
+            value={selectedProviderId}
+            onChange={(e) => selectProvider(e.target.value)}
+            className={SELECT_CLASS}
+          >
+            <option value={CUSTOM_BACKEND}>Custom backend</option>
+            {providerOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Model" error={form.errors.harness_model}>
-            <Input
-              value={form.data.harness_model}
-              onChange={(e) => form.setData('harness_model', e.target.value)}
-              placeholder="claude-sonnet-5"
-              required
-            />
+            {modelOptions.length > 0 ? (
+              <select
+                value={form.data.harness_model}
+                onChange={(e) => form.setData('harness_model', e.target.value)}
+                className={SELECT_CLASS}
+              >
+                <option value="">Select a model…</option>
+                {modelOptions.map((model) => (
+                  <option key={model} value={model}>
+                    {model}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <>
+                <Input
+                  value={form.data.harness_model}
+                  onChange={(e) => form.setData('harness_model', e.target.value)}
+                  placeholder="claude-sonnet-5"
+                  required
+                />
+                {selectedProviderId !== CUSTOM_BACKEND && (
+                  <p className="text-sm text-muted-foreground">
+                    {modelsError ? 'Could not load models for this provider.' : 'No models available.'}
+                  </p>
+                )}
+              </>
+            )}
           </Field>
 
           <Field label="Backend base URL" error={form.errors.base_url}>
@@ -185,6 +260,7 @@ export default function New({ profiles = [] }: Props) {
               value={form.data.base_url}
               onChange={(e) => form.setData('base_url', e.target.value)}
               placeholder="https://api.example.com/v1"
+              readOnly={selectedProviderId !== CUSTOM_BACKEND}
               required
             />
           </Field>
@@ -195,6 +271,7 @@ export default function New({ profiles = [] }: Props) {
             value={form.data.api_key_ref}
             onChange={(e) => form.setData('api_key_ref', e.target.value)}
             placeholder="op://vault/item"
+            readOnly={selectedProviderId !== CUSTOM_BACKEND}
           />
         </Field>
 
