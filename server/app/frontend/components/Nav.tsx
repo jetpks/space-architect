@@ -41,6 +41,10 @@ export default function Nav() {
               </Button>
 
               <Button asChild variant="ghost" size="sm">
+                <Link href="/providers">Providers</Link>
+              </Button>
+
+              <Button asChild variant="ghost" size="sm">
                 <Link href="/conversations/new">
                   <Upload className="size-4" /> Upload
                 </Link>
