@@ -388,10 +388,10 @@ function AskUserQuestionCall({
                 return (
                   <li
                     key={j}
-                    className={`rounded px-2 py-1 text-sm ${selected ? 'bg-emerald-500/10' : ''}`}
+                    className={`rounded px-2 py-1 text-sm ${selected ? 'bg-accent/10' : ''}`}
                   >
                     <span
-                      className={`font-medium ${selected ? 'text-emerald-300' : 'text-primary'}`}
+                      className={`font-medium ${selected ? 'text-accent-foreground' : 'text-primary'}`}
                     >
                       {selected && '✓ '}
                       {o.label}
@@ -404,7 +404,7 @@ function AskUserQuestionCall({
               })}
             </ul>
             {answer && !matched && (
-              <div className="mt-2 text-sm font-medium text-emerald-300">✓ {answer}</div>
+              <div className="mt-2 text-sm font-medium text-accent-foreground">✓ {answer}</div>
             )}
           </div>
         )

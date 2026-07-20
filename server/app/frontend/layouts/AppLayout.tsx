@@ -18,12 +18,12 @@ export default function AppLayout({
       <Nav />
 
       {flash?.notice && (
-        <p className="mx-auto max-w-4xl px-6 pt-4 text-sm text-emerald-400">
+        <p className="mx-auto max-w-4xl px-6 pt-4 text-sm text-accent-foreground">
           {flash.notice}
         </p>
       )}
       {flash?.alert && (
-        <p className="mx-auto max-w-4xl px-6 pt-4 text-sm text-rose-400">{flash.alert}</p>
+        <p className="mx-auto max-w-4xl px-6 pt-4 text-sm text-destructive">{flash.alert}</p>
       )}
 
       <main className={`mx-auto ${mainClassName} px-6 py-6`}>{children}</main>
