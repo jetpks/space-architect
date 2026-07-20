@@ -64,6 +64,40 @@ const ANTHROPIC_PROVIDER: Provider = {
   flavors: ['anthropic'],
 }
 
+const OPENAI_PROVIDER: Provider = {
+  id: 2,
+  name: 'openrouter',
+  base_url: 'https://openrouter.ai/api/v1',
+  api_key_ref: null,
+  flavors: ['openai'],
+}
+
+const KEYED_OPENAI_PROVIDER: Provider = {
+  id: 3,
+  name: 'gateway',
+  base_url: 'https://gateway.example.com',
+  api_key_ref: 'op://vault/gateway',
+  flavors: ['openai'],
+}
+
+function stubFetch({
+  models = { models: [], error: null },
+  extension,
+}: {
+  models?: { models: string[]; error: string | null }
+  extension: { extension: { path: string; content: string; env_key: string | null } | null; error: string | null }
+}) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((url: string) => {
+      if (url.endsWith('/pi_extension')) {
+        return Promise.resolve({ ok: true, json: async () => extension })
+      }
+      return Promise.resolve({ ok: true, json: async () => models })
+    }),
+  )
+}
+
 describe('Profiles/New', () => {
   it('renders the profile form fields', () => {
     render(<New />)
@@ -184,5 +218,123 @@ describe('Profiles/New', () => {
     fireEvent.change(within(harnessField).getByRole('combobox'), { target: { value: 'pi' } })
 
     expect(within(providerField).getByRole('combobox')).toHaveValue('custom')
+  })
+
+  it('offers opencode as a harness type', () => {
+    render(<New />)
+    const field = screen.getByText('Harness type').closest('div')!
+    expect(within(field).getByText('opencode')).not.toBeNull()
+  })
+
+  it('filters provider options for opencode to the openai flavor', () => {
+    formData = { ...formData, harness_type: 'opencode' }
+    render(<New providers={[ANTHROPIC_PROVIDER, OPENAI_PROVIDER]} />)
+    const field = screen.getByText('Provider').closest('div')!
+    const select = within(field).getByRole('combobox')
+    expect(within(select).getByText('openrouter')).not.toBeNull()
+    expect(within(select).queryByText('anthropic-direct')).toBeNull()
+  })
+
+  it('selecting a provider under harness pi adds the generated extension as a files row', async () => {
+    stubFetch({
+      extension: {
+        extension: { path: '/root/.pi/agent/extensions/openrouter.ts', content: 'export default {}', env_key: null },
+        error: null,
+      },
+    })
+    formData = { ...formData, harness_type: 'pi', files: [] }
+    render(<New providers={[OPENAI_PROVIDER]} />)
+    const field = screen.getByText('Provider').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: '2' } })
+
+    expect(fetch).toHaveBeenCalledWith('/providers/2/pi_extension')
+    await waitFor(() => {
+      expect(setData).toHaveBeenCalledWith('files', [
+        { path: '/root/.pi/agent/extensions/openrouter.ts', content: 'export default {}' },
+      ])
+    })
+  })
+
+  it('adds a secrets row for a key-bearing provider under harness pi', async () => {
+    stubFetch({
+      extension: {
+        extension: {
+          path: '/root/.pi/agent/extensions/gateway.ts',
+          content: 'export default {}',
+          env_key: 'PI_PROVIDER_API_KEY',
+        },
+        error: null,
+      },
+    })
+    formData = { ...formData, harness_type: 'pi', files: [], secrets: [] }
+    render(<New providers={[KEYED_OPENAI_PROVIDER]} />)
+    const field = screen.getByText('Provider').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: '3' } })
+
+    await waitFor(() => {
+      expect(setData).toHaveBeenCalledWith('secrets', [['op://vault/gateway', 'PI_PROVIDER_API_KEY']])
+    })
+  })
+
+  it('a provider switch replaces the generated rows while leaving hand-added rows alone', async () => {
+    stubFetch({
+      extension: {
+        extension: { path: '/root/.pi/agent/extensions/openrouter.ts', content: 'v1', env_key: null },
+        error: null,
+      },
+    })
+    formData = {
+      ...formData,
+      harness_type: 'pi',
+      files: [{ path: '/workspace/hand-added.txt', content: 'mine' }],
+    }
+    render(<New providers={[OPENAI_PROVIDER, KEYED_OPENAI_PROVIDER]} />)
+    const field = screen.getByText('Provider').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: '2' } })
+
+    await waitFor(() => {
+      expect(setData).toHaveBeenCalledWith('files', [
+        { path: '/workspace/hand-added.txt', content: 'mine' },
+        { path: '/root/.pi/agent/extensions/openrouter.ts', content: 'v1' },
+      ])
+    })
+    setData.mockClear()
+
+    stubFetch({
+      extension: {
+        extension: { path: '/root/.pi/agent/extensions/gateway.ts', content: 'v2', env_key: null },
+        error: null,
+      },
+    })
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: '3' } })
+
+    await waitFor(() => {
+      expect(setData).toHaveBeenCalledWith('files', [
+        { path: '/workspace/hand-added.txt', content: 'mine' },
+        { path: '/root/.pi/agent/extensions/gateway.ts', content: 'v2' },
+      ])
+    })
+  })
+
+  it('an error response from pi_extension adds nothing and leaves the form usable', async () => {
+    stubFetch({ extension: { extension: null, error: 'timeout' } })
+    formData = { ...formData, harness_type: 'pi', files: [] }
+    render(<New providers={[OPENAI_PROVIDER]} />)
+    const field = screen.getByText('Provider').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: '2' } })
+
+    await waitFor(() => {
+      expect(screen.getByText(/Could not generate the pi extension/)).not.toBeNull()
+    })
+    expect(setData).not.toHaveBeenCalledWith('files', expect.arrayContaining([expect.objectContaining({ path: expect.stringContaining('extensions') })]))
+  })
+
+  it('selecting Custom backend adds nothing', () => {
+    formData = { ...formData, harness_type: 'pi', files: [] }
+    render(<New providers={[OPENAI_PROVIDER]} />)
+    const field = screen.getByText('Provider').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: 'custom' } })
+
+    expect(setData).not.toHaveBeenCalledWith('files', expect.anything())
   })
 })

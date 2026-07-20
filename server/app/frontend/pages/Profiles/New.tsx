@@ -7,13 +7,18 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import AppLayout from '@/layouts/AppLayout'
-import { compatibleProviders, fetchProviderModels } from '@/lib/providers'
+import { compatibleProviders, fetchPiExtension, fetchProviderModels } from '@/lib/providers'
 import type { Provider } from '@/types'
 import { encodeBase64 } from '@/pages/Jobs/helpers'
 
 const CUSTOM_BACKEND = 'custom'
 
 type FileRow = { path: string; content: string }
+
+// Tracks the currently auto-added pi extension files/secrets row so a provider
+// switch (or leaving harness pi) can remove exactly those rows without
+// touching anything the user added by hand.
+type GeneratedPi = { path: string; ref: string; envKey: string } | { path: string; ref: null; envKey: null }
 
 type FormData = {
   name: string
@@ -58,8 +63,45 @@ export default function New({ providers = [] }: Props) {
   const [selectedProviderId, setSelectedProviderId] = useState(CUSTOM_BACKEND)
   const [modelOptions, setModelOptions] = useState<string[]>([])
   const [modelsError, setModelsError] = useState<string | null>(null)
+  const [generatedPi, setGeneratedPi] = useState<GeneratedPi | null>(null)
+  const [piExtensionError, setPiExtensionError] = useState<string | null>(null)
   const harnessType = form.data.harness_type
   const providerOptions = compatibleProviders(providers, harnessType)
+
+  // Removes the previously auto-added files/secrets rows (if any), then, if
+  // newHarnessType is pi and providerId names a provider, fetches and adds
+  // its generated extension. Hand-added rows are never touched.
+  function syncPiExtension(newHarnessType: string, providerId: string) {
+    setPiExtensionError(null)
+    const stale = generatedPi
+    const files = stale ? form.data.files.filter((f) => f.path !== stale.path) : form.data.files
+    const secrets = stale?.ref
+      ? form.data.secrets.filter(([ref, name]) => !(ref === stale.ref && name === stale.envKey))
+      : form.data.secrets
+    if (stale) {
+      form.setData('files', files)
+      form.setData('secrets', secrets)
+      setGeneratedPi(null)
+    }
+
+    if (newHarnessType !== 'pi' || providerId === CUSTOM_BACKEND) return
+    const provider = providers.find((p) => String(p.id) === providerId)
+    if (!provider) return
+
+    fetchPiExtension(provider.id).then(({ extension, error }) => {
+      if (!extension) {
+        setPiExtensionError(error)
+        return
+      }
+      form.setData('files', [...files, { path: extension.path, content: extension.content }])
+      if (extension.env_key && provider.api_key_ref) {
+        form.setData('secrets', [...secrets, [provider.api_key_ref, extension.env_key]])
+        setGeneratedPi({ path: extension.path, ref: provider.api_key_ref, envKey: extension.env_key })
+      } else {
+        setGeneratedPi({ path: extension.path, ref: null, envKey: null })
+      }
+    })
+  }
 
   function selectProvider(id: string) {
     setSelectedProviderId(id)
@@ -68,6 +110,7 @@ export default function New({ providers = [] }: Props) {
 
     const provider = providerOptions.find((p) => String(p.id) === id)
     if (!provider) {
+      syncPiExtension(harnessType, CUSTOM_BACKEND)
       return
     }
     form.setData('base_url', provider.base_url)
@@ -77,18 +120,21 @@ export default function New({ providers = [] }: Props) {
       setModelOptions(models)
       setModelsError(error)
     })
+
+    syncPiExtension(harnessType, id)
   }
 
   function onHarnessTypeChange(newType: string) {
     form.setData('harness_type', newType)
-    if (
+    const stillCompatible =
       selectedProviderId !== CUSTOM_BACKEND &&
-      !compatibleProviders(providers, newType).some((p) => String(p.id) === selectedProviderId)
-    ) {
+      compatibleProviders(providers, newType).some((p) => String(p.id) === selectedProviderId)
+    if (!stillCompatible && selectedProviderId !== CUSTOM_BACKEND) {
       setSelectedProviderId(CUSTOM_BACKEND)
       setModelOptions([])
       setModelsError(null)
     }
+    syncPiExtension(newType, stillCompatible ? selectedProviderId : CUSTOM_BACKEND)
   }
 
   const selectedProvider = providerOptions.find((p) => String(p.id) === selectedProviderId)
@@ -156,6 +202,7 @@ export default function New({ providers = [] }: Props) {
           >
             <option value="claude">claude</option>
             <option value="pi">pi</option>
+            <option value="opencode">opencode</option>
           </select>
         </Field>
 
@@ -297,6 +344,11 @@ export default function New({ providers = [] }: Props) {
             Profiles store config only, never keys — secrets ride op:// refs above, not file
             content.
           </p>
+          {piExtensionError && (
+            <p className="text-sm text-muted-foreground">
+              Could not generate the pi extension for this provider: {piExtensionError}
+            </p>
+          )}
         </div>
 
         <Field label="Permissions" error={form.errors.network}>

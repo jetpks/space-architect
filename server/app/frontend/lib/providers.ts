@@ -1,4 +1,4 @@
-import type { Provider } from '@/types'
+import type { PiExtensionResponse, Provider } from '@/types'
 
 // A provider is usable by a harness only if it carries the flavor that
 // harness's backend protocol speaks — Claude's Anthropic-shaped API, pi and
@@ -28,5 +28,17 @@ export async function fetchProviderModels(id: number): Promise<ProviderModels> {
     return (await response.json()) as ProviderModels
   } catch {
     return { models: [], error: 'fetch_failed' }
+  }
+}
+
+// Wraps GET /providers/:id/pi_extension — the frozen {extension, error} shape
+// at HTTP 200 both ways. Never throws into React, mirroring fetchProviderModels.
+export async function fetchPiExtension(id: number): Promise<PiExtensionResponse> {
+  try {
+    const response = await fetch(`/providers/${id}/pi_extension`)
+    if (!response.ok) return { extension: null, error: 'fetch_failed' }
+    return (await response.json()) as PiExtensionResponse
+  } catch {
+    return { extension: null, error: 'fetch_failed' }
   }
 }

@@ -230,6 +230,21 @@ export type Provider = {
   flavors: string[]
 }
 
+// A pi extension file generated from a provider row + its live model list.
+// env_key is set only for key-bearing providers (see lib/providers fetchPiExtension).
+export type PiExtension = {
+  path: string
+  content: string
+  env_key: string | null
+}
+
+// Wraps GET /providers/:id/pi_extension — the frozen {extension, error} shape
+// at HTTP 200 both ways.
+export type PiExtensionResponse = {
+  extension: PiExtension | null
+  error: string | null
+}
+
 // An access grant on a conversation: a GitHub user, or every member of a
 // GitHub organization. Serialized only to the owner.
 export type Share = {
