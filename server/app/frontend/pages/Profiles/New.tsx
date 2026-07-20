@@ -24,8 +24,10 @@ type FormData = {
   args: string[]
   env: [string, string][]
   secrets: [string, string][]
-  deps: string[]
+  debs: string[]
   npm: string[]
+  gems: string[]
+  mise: string[]
   files: FileRow[]
   network: boolean
   mounts: string[]
@@ -40,8 +42,10 @@ const INITIAL_DATA: FormData = {
   args: [],
   env: [],
   secrets: [],
-  deps: [],
+  debs: [],
   npm: [],
+  gems: [],
+  mise: [],
   files: [],
   network: false,
   mounts: [],
@@ -109,8 +113,10 @@ export default function New({ providers = [] }: Props) {
           secrets: data.secrets
             .filter(([ref, name]) => ref.trim() !== '' && name.trim() !== '')
             .map(([ref, name]) => ({ ref, name })),
-          deps: data.deps.filter((d) => d.trim() !== ''),
+          debs: data.debs.filter((d) => d.trim() !== ''),
           npm: data.npm.filter((n) => n.trim() !== ''),
+          gems: data.gems.filter((g) => g.trim() !== ''),
+          mise: data.mise.filter((m) => m.trim() !== ''),
           files: data.files
             .filter((f) => f.path.trim() !== '')
             .map((f) => ({ path: f.path, content_b64: encodeBase64(f.content) })),
@@ -249,11 +255,11 @@ export default function New({ providers = [] }: Props) {
         />
 
         <ListField
-          label="Dependencies"
-          values={form.data.deps}
-          onChange={(deps) => form.setData('deps', deps)}
+          label="Debian packages"
+          values={form.data.debs}
+          onChange={(debs) => form.setData('debs', debs)}
           placeholder="git"
-          error={form.errors.deps}
+          error={form.errors.debs}
         />
 
         <ListField
@@ -262,6 +268,22 @@ export default function New({ providers = [] }: Props) {
           onChange={(npm) => form.setData('npm', npm)}
           placeholder="typescript"
           error={form.errors.npm}
+        />
+
+        <ListField
+          label="Ruby gems"
+          values={form.data.gems}
+          onChange={(gems) => form.setData('gems', gems)}
+          placeholder="rails"
+          error={form.errors.gems}
+        />
+
+        <ListField
+          label="mise tools (tool@version)"
+          values={form.data.mise}
+          onChange={(mise) => form.setData('mise', mise)}
+          placeholder="ruby@3.4"
+          error={form.errors.mise}
         />
 
         <div className="space-y-1">

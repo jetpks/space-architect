@@ -180,7 +180,10 @@ export type EnvironmentSpec = {
   env?: Record<string, string>
   secrets?: { ref: string; name: string }[]
   deps?: string[]
+  debs?: string[]
   npm?: string[]
+  gems?: string[]
+  mise?: string[]
   files?: { path: string; content_b64: string }[]
   permissions?: { network?: boolean; mounts?: string[] }
 }
