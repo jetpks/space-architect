@@ -6,3 +6,12 @@ RUN apt-get update -qq \
       <%= deps.join(" \\\n      ") %> \
  && rm -rf /var/lib/apt/lists/*
 <% end -%>
+<% if npm.any? -%>
+
+RUN npm install -g \
+      <%= npm.join(" \\\n      ") %>
+<% end -%>
+<% files.each_with_index do |f, i| -%>
+
+COPY files/<%= i %> <%= f[:path] %>
+<% end -%>

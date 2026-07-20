@@ -10,6 +10,7 @@ module Space
           "stop"          => :end_turn,
           "tool_use"      => :tool_use,
           "tool-calls"    => :tool_use,
+          "toolUse"       => :tool_use,
           "max_tokens"    => :max_tokens,
           "stop_sequence" => :stop_sequence
         }.freeze
@@ -17,6 +18,7 @@ module Space
         BLOCK_TYPES = {
           "text"     => :text,
           "tool_use" => :tool_use,
+          "toolCall" => :tool_use,
           "thinking" => :thinking
         }.freeze
 

@@ -18,7 +18,8 @@ class CreateJobContractTest < Minitest::Test
         env: { FOO: "bar" },
         secrets: [{ ref: "op://vault/item2", name: "API_KEY" }],
         deps: ["git"],
-        files: "sha256:abc",
+        npm: ["cowsay"],
+        files: [{ path: "/root/.pi/agent/extensions/local-inference.ts", content_b64: "Zm9v" }],
         permissions: { network: true, mounts: ["/tmp"] }
       }
     }
@@ -40,7 +41,8 @@ class CreateJobContractTest < Minitest::Test
     assert_equal({}, env[:env])
     assert_equal [], env[:secrets]
     assert_equal [], env[:deps]
-    refute env.key?(:files)
+    assert_equal [], env[:npm]
+    assert_equal [], env[:files]
   end
 
   def test_permissions_defaults_apply_when_permissions_hash_present
@@ -65,6 +67,12 @@ class CreateJobContractTest < Minitest::Test
     r = contract.call(valid_spec.merge(harness: valid_spec[:harness].merge(type: "gpt4")))
     assert r.failure?
     assert r.errors.to_h.dig(:harness, :type)
+  end
+
+  def test_accepts_pi_harness_type
+    r = contract.call(valid_spec.merge(harness: valid_spec[:harness].merge(type: "pi")))
+    assert r.success?, r.errors.to_h.inspect
+    assert_equal "pi", r.to_h.dig(:harness, :type)
   end
 
   def test_rejects_non_http_base_url
@@ -97,6 +105,56 @@ class CreateJobContractTest < Minitest::Test
     r = contract.call(valid_spec.merge(environment: { deps: ["git", ""] }))
     assert r.failure?
     assert r.errors.to_h.dig(:environment, :deps, 1)
+  end
+
+  # --- environment.npm ----------------------------------------------------
+
+  def test_accepts_npm_package_specs
+    r = contract.call(valid_spec.merge(environment: valid_spec[:environment].merge(npm: ["cowsay", "left-pad@1.3.0"])))
+    assert r.success?, r.errors.to_h.inspect
+    assert_equal ["cowsay", "left-pad@1.3.0"], r.to_h.dig(:environment, :npm)
+  end
+
+  def test_rejects_empty_npm_element
+    r = contract.call(valid_spec.merge(environment: valid_spec[:environment].merge(npm: ["cowsay", ""])))
+    assert r.failure?
+    assert r.errors.to_h.dig(:environment, :npm, 1)
+  end
+
+  # --- environment.files ---------------------------------------------------
+
+  def test_accepts_files_with_absolute_paths
+    files = [{ path: "/root/.pi/agent/extensions/local-inference.ts", content_b64: "Zm9v" }]
+    r = contract.call(valid_spec.merge(environment: valid_spec[:environment].merge(files: files)))
+    assert r.success?, r.errors.to_h.inspect
+    assert_equal files, r.to_h.dig(:environment, :files)
+  end
+
+  def test_rejects_relative_file_path
+    files = [{ path: "relative/path.ts", content_b64: "Zm9v" }]
+    r = contract.call(valid_spec.merge(environment: valid_spec[:environment].merge(files: files)))
+    assert r.failure?
+    assert r.errors.to_h.dig(:environment, :files, 0, :path)
+  end
+
+  def test_rejects_dot_dot_bearing_file_path
+    files = [{ path: "/root/../etc/passwd", content_b64: "Zm9v" }]
+    r = contract.call(valid_spec.merge(environment: valid_spec[:environment].merge(files: files)))
+    assert r.failure?
+    assert r.errors.to_h.dig(:environment, :files, 0, :path)
+  end
+
+  def test_rejects_empty_file_entry
+    r = contract.call(valid_spec.merge(environment: valid_spec[:environment].merge(files: [{ path: "", content_b64: "" }])))
+    assert r.failure?
+    assert r.errors.to_h.dig(:environment, :files, 0)
+  end
+
+  def test_rejects_file_entry_missing_content_b64
+    files = [{ path: "/root/.pi/agent/extensions/local-inference.ts" }]
+    r = contract.call(valid_spec.merge(environment: valid_spec[:environment].merge(files: files)))
+    assert r.failure?
+    assert r.errors.to_h.dig(:environment, :files, 0, :content_b64)
   end
 
   def test_unknown_top_level_keys_are_dropped

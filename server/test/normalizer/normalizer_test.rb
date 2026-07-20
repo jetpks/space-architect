@@ -35,4 +35,20 @@ class NormalizerTest < Minitest::Test
     record = JSON.parse(line)
     assert_equal Space::Server::Normalizer::Opencode, Space::Server::Normalizer.select(record)
   end
+
+  test "selects Pi for a session/version first line" do
+    assert_equal Space::Server::Normalizer::Pi,
+                 Space::Server::Normalizer.select("type" => "session", "version" => 3, "id" => "abc")
+  end
+
+  test "selects Pi for pi_streaming_session fixture's first line" do
+    line   = File.readlines(File.join(NORMALIZER_FIXTURE_DIR, "pi_streaming_session.jsonl"), chomp: true).first
+    record = JSON.parse(line)
+    assert_equal Space::Server::Normalizer::Pi, Space::Server::Normalizer.select(record)
+  end
+
+  test "a session-typed record without a version key still selects ClaudeCode" do
+    assert_equal Space::Server::Normalizer::ClaudeCode,
+                 Space::Server::Normalizer.select("type" => "session", "session_id" => "abc")
+  end
 end

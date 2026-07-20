@@ -7,7 +7,7 @@ module Space
   module Server
     module Contracts
       class CreateJob < Dry::Validation::Contract
-        HARNESS_TYPES    = %w[claude].freeze
+        HARNESS_TYPES    = %w[claude pi].freeze
         HTTP_URI_FORMAT  = URI::DEFAULT_PARSER.make_regexp(%w[http https]).freeze
         OP_REF_FORMAT    = /\Aop:\/\//.freeze
         ENV_NAME_FORMAT  = /\A[A-Za-z_][A-Za-z0-9_]*\z/.freeze
@@ -17,6 +17,14 @@ module Space
         SECRET_REF_TYPE = Types::Hash.schema(
           ref:  Types::String.constrained(format: OP_REF_FORMAT),
           name: Types::String.constrained(filled: true, format: ENV_NAME_FORMAT)
+        )
+
+        # Materialized into the env-image at build time (Jobs::EnvImage) — path
+        # absoluteness/non-escaping is checked by the same predicate as
+        # workspace.dir (see the environment.files rule below), not a format regex.
+        FILE_TYPE = Types::Hash.schema(
+          path:        Types::String.constrained(filled: true),
+          content_b64: Types::String.constrained(filled: true)
         )
 
         params do
@@ -34,7 +42,8 @@ module Space
             optional(:env).value(Types::Hash.default({}.freeze))
             optional(:secrets).value(Types::Array.of(SECRET_REF_TYPE).default([].freeze))
             optional(:deps).value(Types::Array.of(Types::String.constrained(filled: true)).default([].freeze))
-            optional(:files).maybe(:string, :filled?)
+            optional(:npm).value(Types::Array.of(Types::String.constrained(filled: true)).default([].freeze))
+            optional(:files).value(Types::Array.of(FILE_TYPE).default([].freeze))
             optional(:permissions).hash do
               optional(:network).value(Types::Params::Bool.default(false))
               optional(:mounts).value(Types::Array.of(Types::String).default([].freeze))
@@ -68,6 +77,14 @@ module Space
         # fail at execution.
         rule(workspace: :dir) do
           key.failure("must be an absolute path") if key? && !absolute_path?(value)
+        end
+
+        # Each file's materialized path shares the same absolute/non-escaping
+        # posture as workspace.dir and mounts.
+        rule(environment: :files) do
+          value.each_with_index do |file, index|
+            key([:environment, :files, index, :path]).failure("must be an absolute path") unless absolute_path?(file[:path])
+          end
         end
 
         def absolute_path?(path)
