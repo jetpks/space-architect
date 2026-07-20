@@ -25,6 +25,7 @@ module Space
 
         params do
           required(:name).filled(:string)
+          optional(:provider_id).maybe(:integer)
           required(:spec).hash do
             required(:harness).hash(&Shared::HarnessEnvironment::HARNESS_SCHEMA)
             required(:environment).hash(&Shared::HarnessEnvironment::ENVIRONMENT_SCHEMA)

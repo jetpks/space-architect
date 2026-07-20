@@ -260,7 +260,8 @@ CREATE TABLE public.profiles (
     harness_type text NOT NULL,
     spec jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone NOT NULL,
-    updated_at timestamp with time zone NOT NULL
+    updated_at timestamp with time zone NOT NULL,
+    provider_id bigint
 );
 
 
@@ -658,6 +659,13 @@ CREATE INDEX index_messages_on_published ON public.messages USING btree (publish
 
 
 --
+-- Name: index_profiles_on_provider_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_profiles_on_provider_id ON public.profiles USING btree (provider_id);
+
+
+--
 -- Name: index_profiles_on_user_id_and_name; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -816,6 +824,14 @@ ALTER TABLE ONLY public.messages
 
 
 --
+-- Name: profiles profiles_provider_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.profiles
+    ADD CONSTRAINT profiles_provider_id_fkey FOREIGN KEY (provider_id) REFERENCES public.providers(id) ON DELETE SET NULL;
+
+
+--
 -- Name: profiles profiles_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -891,4 +907,5 @@ INSERT INTO schema_migrations (filename) VALUES
 ('20260718000000_add_lease_to_jobs.rb'),
 ('20260719000000_add_failure_evidence_to_jobs.rb'),
 ('20260719010000_create_profiles.rb'),
-('20260719020000_create_providers.rb');
+('20260719020000_create_providers.rb'),
+('20260719030000_add_provider_id_to_profiles.rb');

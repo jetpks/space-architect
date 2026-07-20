@@ -7,7 +7,7 @@ module Space
     module Actions
       module Profiles
         class Create < Space::Server::Action
-          include Space::Server::Deps["repos.profiles_repo"]
+          include Space::Server::Deps["repos.profiles_repo", "repos.providers_repo"]
 
           CONTRACT = Contracts::CreateProfile.new
 
@@ -23,6 +23,7 @@ module Space
             args:          [:spec, :harness, :args],
             env:           [:spec, :environment, :env],
             secrets:       [:spec, :environment, :secrets],
+            provider_id:   [:provider_id],
             deps:          [:spec, :environment, :deps],
             npm:           [:spec, :environment, :npm],
             files:         [:spec, :environment, :files],
@@ -35,6 +36,12 @@ module Space
 
             result = CONTRACT.call(req.params.to_h)
             redirect_inertia(req, res, "/profiles/new", errors: field_errors(result.errors.to_h)) if result.failure?
+
+            provider_id = result.to_h[:provider_id]
+            if provider_id && providers_repo.by_id_for_user(provider_id, user.id).nil?
+              redirect_inertia(req, res, "/profiles/new",
+                                errors: { provider_id: "must be one of your providers" })
+            end
 
             profile = create_profile(user, result)
             res.flash["notice"] = "Profile created."
@@ -52,6 +59,7 @@ module Space
               name:         validated[:name],
               harness_type: spec.dig(:harness, :type),
               spec:         spec,
+              provider_id:  validated[:provider_id],
               created_at:   now,
               updated_at:   now
             )
