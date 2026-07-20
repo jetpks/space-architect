@@ -21,6 +21,14 @@ export REDIS_URL="{{ redis_url }}"
 export JOB_ENV_BASE_IMAGE="{{ job_env_base_image }}"
 export INGEST_TOKEN_REF="{{ ingest_token_ref }}"
 
+# The op service-account token lives at ~/.config/secret/op as a shell snippet
+# (`export OP_SERVICE_ACCOUNT_TOKEN=ops_...`, operator-placed, mode 0600). op
+# does not read it automatically, so source it before any `op read` — this also
+# carries the token to bin/serve's INGEST_TOKEN resolver below. launchd hands us
+# no login env, and a global `launchctl setenv` is lost on reboot, so we must
+# load it here or a rebooted host strands both secrets. Mirrors run-caddy.sh.
+source "{{ ansible_env.HOME }}/.config/secret/op"
+
 # SESSION_SECRET: op ref only, resolved fresh every boot — never written to
 # disk, logged, or templated into the plist (BRIEF §2.2 secret hygiene).
 SESSION_SECRET="$(op read '{{ session_secret_ref }}')"
