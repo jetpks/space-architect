@@ -6,6 +6,7 @@ import type { Run } from '@/types'
 
 vi.mock('@inertiajs/react', () => ({
   Head: (_props: { title?: string }) => null,
+  Link: ({ href, children }: { href: string; children?: ReactNode }) => <a href={href}>{children}</a>,
   usePage: () => ({ props: { current_user: null, flash: {} } }),
   useForm: () => ({
     data: {} as Record<string, string>,
@@ -59,7 +60,18 @@ function setVisibility(state: DocumentVisibilityState) {
   })
 }
 
-const RUN: Run = { id: 1, status: 'live', published: false }
+const RUN: Run = {
+  id: 1,
+  status: 'live',
+  published: false,
+  role: 'builder',
+  harness: 'claude',
+  model: 'qwen3-27b-optiq',
+  producer: null,
+  created_at: '2026-07-19T14:14:59Z',
+  updated_at: '2026-07-19T14:16:32Z',
+  job: null,
+}
 
 describe('Runs/Show', () => {
   beforeEach(() => {
@@ -84,6 +96,27 @@ describe('Runs/Show', () => {
     es.emit({ type: 'text_delta', block_id: '0', text: 'hello live' }, '1-3')
 
     expect(screen.queryByText('hello live')).not.toBeNull()
+  })
+
+  it('renders run metadata and the owner-only job prompt', () => {
+    const run: Run = {
+      ...RUN,
+      job: { id: 19, status: 'succeeded', prompt: 'Write six aphorisms' },
+    }
+    render(<Show run={run} />)
+
+    expect(screen.queryByText('claude')).not.toBeNull()
+    expect(screen.queryByText('qwen3-27b-optiq')).not.toBeNull()
+    expect(screen.queryByText('builder')).not.toBeNull()
+    expect(screen.queryByText('#19')).not.toBeNull()
+    expect(screen.queryByText('Write six aphorisms')).not.toBeNull()
+  })
+
+  it('omits the job row and prompt when job is null (non-owner or ingested run)', () => {
+    render(<Show run={RUN} />)
+
+    expect(screen.queryByText('Prompt')).toBeNull()
+    expect(screen.queryByText('Job')).toBeNull()
   })
 
   it('re-syncs on refocus while the run is live: closes the stale connection and opens a fresh one', () => {

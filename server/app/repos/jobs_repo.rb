@@ -24,6 +24,11 @@ module Space
           jobs.where(user_id: user_id).to_a
         end
 
+        # The job that produced a run, if any (runs made via ingest have none).
+        def by_run_id(run_id)
+          jobs.where(run_id: run_id).to_a.first
+        end
+
         # Index scope: a user's own jobs, newest first, capped at 100 (I10 — no
         # pagination yet).
         def list_for_user(user_id, limit: 100)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Head } from '@inertiajs/react'
+import { Head, Link } from '@inertiajs/react'
 import AppLayout from '@/layouts/AppLayout'
 import Message from '@/components/Message'
 import { buildToolResultIndex } from '@/lib/message-pairing'
@@ -102,6 +102,50 @@ export default function Show({ run }: Props) {
           {run.published && ' · published'}
           {state.status === 'live' && ' · streaming'}
         </p>
+
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-4">
+          {run.harness && (
+            <div>
+              <dt className="text-muted-foreground">Harness</dt>
+              <dd>{run.harness}</dd>
+            </div>
+          )}
+          {run.model && (
+            <div>
+              <dt className="text-muted-foreground">Model</dt>
+              <dd>{run.model}</dd>
+            </div>
+          )}
+          {run.role && (
+            <div>
+              <dt className="text-muted-foreground">Role</dt>
+              <dd>{run.role}</dd>
+            </div>
+          )}
+          {run.job && (
+            <div>
+              <dt className="text-muted-foreground">Job</dt>
+              <dd>
+                <Link href={`/jobs/${run.job.id}`} className="underline underline-offset-2">
+                  #{run.job.id}
+                </Link>
+                {' · '}
+                {run.job.status}
+              </dd>
+            </div>
+          )}
+        </dl>
+
+        {run.job && (
+          <details className="mt-3 text-sm">
+            <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+              Prompt
+            </summary>
+            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 text-xs">
+              {run.job.prompt}
+            </pre>
+          </details>
+        )}
       </header>
 
       {state.status === 'pending' && (
