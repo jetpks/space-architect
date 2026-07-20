@@ -37,7 +37,10 @@ beforeEach(() => {
     args: [],
     env: [],
     secrets: [],
-    deps: [],
+    debs: [],
+    npm: [],
+    gems: [],
+    mise: [],
     network: false,
     mounts: [],
   }
@@ -77,7 +80,7 @@ describe('Jobs/New', () => {
     expect(screen.getByText('Harness args')).not.toBeNull()
     expect(screen.getByText('Environment variables')).not.toBeNull()
     expect(screen.getByText('Secrets')).not.toBeNull()
-    expect(screen.getByText('Dependencies')).not.toBeNull()
+    expect(screen.getByText('Debian packages')).not.toBeNull()
     expect(screen.getByText('Allow network access')).not.toBeNull()
     expect(screen.getByText(/Mounts/)).not.toBeNull()
   })
@@ -251,8 +254,10 @@ describe('Jobs/New', () => {
         environment: {
           env: { FOO: 'bar' },
           secrets: [{ ref: 'op://vault/secret', name: 'SECRET' }],
-          deps: ['git'],
+          debs: ['git'],
           npm: ['typescript'],
+          gems: ['rails'],
+          mise: ['ruby@3.4'],
           files: [{ path: '/workspace/f.txt', content_b64: btoa('hi') }],
           permissions: { network: true, mounts: ['/host:/container'] },
         },
@@ -269,11 +274,42 @@ describe('Jobs/New', () => {
     expect(setData).toHaveBeenCalledWith('args', ['--flag'])
     expect(setData).toHaveBeenCalledWith('env', [['FOO', 'bar']])
     expect(setData).toHaveBeenCalledWith('secrets', [['op://vault/secret', 'SECRET']])
-    expect(setData).toHaveBeenCalledWith('deps', ['git'])
+    expect(setData).toHaveBeenCalledWith('debs', ['git'])
     expect(setData).toHaveBeenCalledWith('npm', ['typescript'])
+    expect(setData).toHaveBeenCalledWith('gems', ['rails'])
+    expect(setData).toHaveBeenCalledWith('mise', ['ruby@3.4'])
     expect(setData).toHaveBeenCalledWith('files', [{ path: '/workspace/f.txt', content: 'hi' }])
     expect(setData).toHaveBeenCalledWith('network', true)
     expect(setData).toHaveBeenCalledWith('mounts', ['/host:/container'])
+  })
+
+  it('prefills the debs field from an old-shape profile carrying deps instead of debs', () => {
+    const profile = {
+      id: 1,
+      name: 'legacy profile',
+      harness_type: 'claude',
+      spec: {
+        harness: {
+          type: 'claude',
+          model: 'claude-sonnet-5',
+          backend: { base_url: 'https://api.example.com' },
+          args: [],
+        },
+        environment: {
+          env: {},
+          secrets: [],
+          deps: ['git', 'curl'],
+          npm: [],
+          files: [],
+          permissions: {},
+        },
+      },
+    }
+    render(<New profiles={[profile]} />)
+    const field = screen.getByText('Load from profile').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: '1' } })
+
+    expect(setData).toHaveBeenCalledWith('debs', ['git', 'curl'])
   })
 
   it('renders only providers compatible with the current (claude) harness', () => {
@@ -394,11 +430,29 @@ describe('Jobs/New', () => {
       environment: {
         env: { FOO: 'bar' },
         secrets: [],
-        deps: [],
+        debs: [],
         npm: [],
+        gems: [],
+        mise: [],
         files: [],
         permissions: { network: false, mounts: [] },
       },
     })
+  })
+
+  it('submits debs/gems/mise under environment and never submits deps', () => {
+    const { container } = render(<New />)
+    fireEvent.submit(container.querySelector('form')!)
+    const transformer = transform.mock.calls[0][0]
+    const payload = transformer({
+      ...formData,
+      debs: ['git', ''],
+      gems: ['rails', ''],
+      mise: ['ruby@3.4', ''],
+    })
+    expect(payload.environment.debs).toEqual(['git'])
+    expect(payload.environment.gems).toEqual(['rails'])
+    expect(payload.environment.mise).toEqual(['ruby@3.4'])
+    expect(payload.environment).not.toHaveProperty('deps')
   })
 })

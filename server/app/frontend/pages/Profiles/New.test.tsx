@@ -38,8 +38,10 @@ beforeEach(() => {
     args: [],
     env: [],
     secrets: [],
-    deps: [],
+    debs: [],
     npm: [],
+    gems: [],
+    mise: [],
     files: [],
     network: false,
     mounts: [],
@@ -112,6 +114,23 @@ describe('Profiles/New', () => {
     expect(payload.spec.environment.files).toEqual([
       { path: '/workspace/f.txt', content_b64: btoa('hi') },
     ])
+  })
+
+  it('submits debs/gems/mise under spec.environment and never submits deps', () => {
+    const { container } = render(<New />)
+    fireEvent.submit(container.querySelector('form')!)
+    const transformer = transform.mock.calls[0][0]
+    const payload = transformer({
+      ...formData,
+      name: 'debian gems mise',
+      debs: ['git', ''],
+      gems: ['rails', ''],
+      mise: ['ruby@3.4', ''],
+    })
+    expect(payload.spec.environment.debs).toEqual(['git'])
+    expect(payload.spec.environment.gems).toEqual(['rails'])
+    expect(payload.spec.environment.mise).toEqual(['ruby@3.4'])
+    expect(payload.spec.environment).not.toHaveProperty('deps')
   })
 
   it('omits provider_id from the payload when Custom backend is selected', () => {
