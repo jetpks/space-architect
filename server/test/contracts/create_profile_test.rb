@@ -146,6 +146,61 @@ class CreateProfileContractTest < Minitest::Test
     assert r.errors.to_h.dig(:spec, :harness, :backend, :api_key_ref)
   end
 
+  # --- environment.debs / gems / mise (I24) --------------------------------
+
+  def test_accepts_debs_gems_mise_and_defaults_absent_keys
+    r = contract.call(
+      valid_params.merge(spec: valid_params[:spec].merge(
+        environment: valid_params[:spec][:environment].merge(debs: ["jq"], gems: ["rspec"], mise: ["ruby@3.3"])
+      ))
+    )
+    assert r.success?, r.errors.to_h.inspect
+    env = r.to_h.dig(:spec, :environment)
+    assert_equal ["jq"], env[:debs]
+    assert_equal ["rspec"], env[:gems]
+    assert_equal ["ruby@3.3"], env[:mise]
+  end
+
+  def test_debs_gems_mise_default_to_empty_array
+    r = contract.call(
+      name: "minimal",
+      spec: {
+        harness: { type: "claude", model: "sonnet", backend: { base_url: "https://api.example.com" } },
+        environment: {}
+      }
+    )
+    assert r.success?, r.errors.to_h.inspect
+    env = r.to_h.dig(:spec, :environment)
+    assert_equal [], env[:debs]
+    assert_equal [], env[:gems]
+    assert_equal [], env[:mise]
+  end
+
+  def test_rejects_empty_debs_element
+    r = contract.call(valid_params.merge(spec: valid_params[:spec].merge(environment: { debs: ["jq", ""] })))
+    assert r.failure?
+    assert r.errors.to_h.dig(:spec, :environment, :debs, 1)
+  end
+
+  def test_rejects_empty_gems_element
+    r = contract.call(valid_params.merge(spec: valid_params[:spec].merge(environment: { gems: ["rspec", ""] })))
+    assert r.failure?
+    assert r.errors.to_h.dig(:spec, :environment, :gems, 1)
+  end
+
+  def test_rejects_empty_mise_element
+    r = contract.call(valid_params.merge(spec: valid_params[:spec].merge(environment: { mise: ["ruby@3.3", ""] })))
+    assert r.failure?
+    assert r.errors.to_h.dig(:spec, :environment, :mise, 1)
+  end
+
+  def test_deps_alias_payload_still_validates_byte_identically
+    r = contract.call(valid_params)
+    assert r.success?, r.errors.to_h.inspect
+    assert_equal ["git"], r.to_h.dig(:spec, :environment, :deps)
+    assert_equal [], r.to_h.dig(:spec, :environment, :debs)
+  end
+
   def test_rejects_non_string_env_value
     r = contract.call(
       valid_params.merge(spec: valid_params[:spec].merge(environment: valid_params[:spec][:environment].merge(env: { FOO: 1 })))

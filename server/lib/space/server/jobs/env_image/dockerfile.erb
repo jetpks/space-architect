@@ -1,10 +1,23 @@
 FROM <%= base_image %>
-<% if deps.any? -%>
+<% if apt_debs.any? -%>
 
 RUN apt-get update -qq \
  && apt-get install -y --no-install-recommends \
-      <%= deps.join(" \\\n      ") %> \
+      <%= apt_debs.join(" \\\n      ") %> \
  && rm -rf /var/lib/apt/lists/*
+<% end -%>
+<% if mise.any? -%>
+
+RUN curl -fsSL https://mise.run | sh
+ENV PATH="/root/.local/bin:/root/.local/share/mise/shims:$PATH"
+RUN mise settings ruby.compile=false \
+ && mise use -g \
+      <%= mise.join(" \\\n      ") %>
+<% end -%>
+<% if gems.any? -%>
+
+RUN gem install --no-document \
+      <%= gems.join(" \\\n      ") %>
 <% end -%>
 <% if npm.any? -%>
 

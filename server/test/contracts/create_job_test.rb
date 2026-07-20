@@ -107,6 +107,54 @@ class CreateJobContractTest < Minitest::Test
     assert r.errors.to_h.dig(:environment, :deps, 1)
   end
 
+  # --- environment.debs / gems / mise (I24) --------------------------------
+
+  def test_accepts_debs_gems_mise_and_defaults_absent_keys
+    r = contract.call(valid_spec.merge(environment: valid_spec[:environment].merge(debs: ["jq"], gems: ["rspec"], mise: ["ruby@3.3"])))
+    assert r.success?, r.errors.to_h.inspect
+    assert_equal ["jq"], r.to_h.dig(:environment, :debs)
+    assert_equal ["rspec"], r.to_h.dig(:environment, :gems)
+    assert_equal ["ruby@3.3"], r.to_h.dig(:environment, :mise)
+  end
+
+  def test_debs_gems_mise_default_to_empty_array
+    r = contract.call(
+      harness: { type: "claude", model: "sonnet", backend: { base_url: "https://api.example.com" } },
+      prompt: "hi",
+      environment: {}
+    )
+    assert r.success?, r.errors.to_h.inspect
+    env = r.to_h[:environment]
+    assert_equal [], env[:debs]
+    assert_equal [], env[:gems]
+    assert_equal [], env[:mise]
+  end
+
+  def test_rejects_empty_debs_element
+    r = contract.call(valid_spec.merge(environment: { debs: ["jq", ""] }))
+    assert r.failure?
+    assert r.errors.to_h.dig(:environment, :debs, 1)
+  end
+
+  def test_rejects_empty_gems_element
+    r = contract.call(valid_spec.merge(environment: { gems: ["rspec", ""] }))
+    assert r.failure?
+    assert r.errors.to_h.dig(:environment, :gems, 1)
+  end
+
+  def test_rejects_empty_mise_element
+    r = contract.call(valid_spec.merge(environment: { mise: ["ruby@3.3", ""] }))
+    assert r.failure?
+    assert r.errors.to_h.dig(:environment, :mise, 1)
+  end
+
+  def test_deps_alias_payload_still_validates_byte_identically
+    r = contract.call(valid_spec)
+    assert r.success?, r.errors.to_h.inspect
+    assert_equal ["git"], r.to_h.dig(:environment, :deps)
+    assert_equal [], r.to_h.dig(:environment, :debs)
+  end
+
   # --- environment.npm ----------------------------------------------------
 
   def test_accepts_npm_package_specs

@@ -208,4 +208,125 @@ class EnvImageTest < Minitest::Test
     tag_b = image(FakeSpawn.new(exists: true)).call(env(npm: ["cowsay"], files: files)).value!
     assert_equal tag_a, tag_b
   end
+
+  # --- debs / deps alias -----------------------------------------------------
+
+  def test_deps_and_debs_yield_the_same_tag
+    tag_deps = image(FakeSpawn.new(exists: true)).call(env(deps: ["jq"])).value!
+    tag_debs = image(FakeSpawn.new(exists: true)).call(env.reject { |k, _| k == :deps }.merge(debs: ["jq"])).value!
+    assert_equal tag_deps, tag_debs
+  end
+
+  def test_deps_and_debs_are_merged_into_the_apt_layer
+    spawn = FakeSpawn.new(exists: false)
+    image(spawn).call(env(deps: ["git"]).merge(debs: ["jq"]))
+    dockerfile = spawn.dockerfiles.first
+    assert_match(/git/, dockerfile)
+    assert_match(/jq/, dockerfile)
+  end
+
+  def test_changed_debs_changes_tag
+    tag_a = image(FakeSpawn.new(exists: true)).call(env).value!
+    tag_b = image(FakeSpawn.new(exists: true)).call(env.merge(debs: ["jq"])).value!
+    refute_equal tag_a, tag_b
+  end
+
+  # --- gems layer --------------------------------------------------------
+
+  def test_no_gems_layer_when_gems_absent
+    spawn = FakeSpawn.new(exists: false)
+    image(spawn).call(env)
+    refute_match(/gem install/, spawn.dockerfiles.first)
+  end
+
+  def test_gems_layer_present_when_gems_specified
+    spawn = FakeSpawn.new(exists: false)
+    image(spawn).call(env(gems: ["rspec", "rubocop"]))
+    dockerfile = spawn.dockerfiles.first
+    assert_match(/RUN gem install --no-document/, dockerfile)
+    assert_match(/rspec/, dockerfile)
+    assert_match(/rubocop/, dockerfile)
+  end
+
+  def test_changed_gems_changes_tag
+    tag_a = image(FakeSpawn.new(exists: true)).call(env).value!
+    tag_b = image(FakeSpawn.new(exists: true)).call(env(gems: ["rspec"])).value!
+    refute_equal tag_a, tag_b
+  end
+
+  # --- mise layer --------------------------------------------------------
+
+  def test_no_mise_layer_when_mise_absent
+    spawn = FakeSpawn.new(exists: false)
+    image(spawn).call(env)
+    dockerfile = spawn.dockerfiles.first
+    refute_match(/mise/, dockerfile)
+  end
+
+  def test_mise_layer_present_when_mise_specified
+    spawn = FakeSpawn.new(exists: false)
+    image(spawn).call(env(mise: ["ruby@3.3", "node@22"]))
+    dockerfile = spawn.dockerfiles.first
+    assert_match(%r{RUN curl -fsSL https://mise\.run \| sh}, dockerfile)
+    assert_match(/ENV PATH="\/root\/\.local\/bin:\/root\/\.local\/share\/mise\/shims:\$PATH"/, dockerfile)
+    assert_match(/mise settings ruby\.compile=false/, dockerfile)
+    assert_match(/mise use -g/, dockerfile)
+    assert_match(/ruby@3\.3/, dockerfile)
+    assert_match(/node@22/, dockerfile)
+  end
+
+  def test_mise_bootstrap_debs_present_in_apt_layer_only_when_mise_declared
+    spawn = FakeSpawn.new(exists: false)
+    image(spawn).call(env.reject { |k, _| k == :deps }.merge(mise: ["ruby@3.3"]))
+    apt_layer = spawn.dockerfiles.first[/RUN apt-get.*?rm -rf \/var\/lib\/apt\/lists\/\*/m]
+    assert_match(/curl/, apt_layer)
+    assert_match(/ca-certificates/, apt_layer)
+    assert_match(/git/, apt_layer)
+  end
+
+  def test_no_apt_bootstrap_when_mise_absent_and_debs_empty
+    spawn = FakeSpawn.new(exists: false)
+    image(spawn).call(env.reject { |k, _| k == :deps })
+    refute_match(/apt-get/, spawn.dockerfiles.first)
+  end
+
+  def test_changed_mise_changes_tag
+    tag_a = image(FakeSpawn.new(exists: true)).call(env).value!
+    tag_b = image(FakeSpawn.new(exists: true)).call(env(mise: ["ruby@3.3"])).value!
+    refute_equal tag_a, tag_b
+  end
+
+  # --- layer order ---------------------------------------------------------
+
+  def test_layer_order_is_apt_then_mise_then_gems_then_npm_then_files
+    spawn = FakeSpawn.new(exists: false)
+    files = [{ path: "/root/x", content_b64: Base64.strict_encode64("hi") }]
+    image(spawn).call(env(deps: ["git"], mise: ["ruby@3.3"], gems: ["rspec"], npm: ["cowsay"], files: files))
+    dockerfile = spawn.dockerfiles.first
+
+    apt_i   = dockerfile.index("apt-get")
+    mise_i  = dockerfile.index("mise.run")
+    gems_i  = dockerfile.index("gem install")
+    npm_i   = dockerfile.index("npm install")
+    files_i = dockerfile.index("COPY")
+
+    assert_operator apt_i, :<, mise_i
+    assert_operator mise_i, :<, gems_i
+    assert_operator gems_i, :<, npm_i
+    assert_operator npm_i, :<, files_i
+  end
+
+  def test_debs_npm_files_only_environment_renders_todays_shape
+    spawn = FakeSpawn.new(exists: false)
+    files = [{ path: "/root/x", content_b64: Base64.strict_encode64("hi") }]
+    image(spawn).call(env(deps: ["git"], npm: ["cowsay"], files: files))
+    dockerfile = spawn.dockerfiles.first
+
+    assert_match(/\AFROM debian:stable-slim/, dockerfile)
+    assert_match(/RUN apt-get update -qq/, dockerfile)
+    assert_match(/RUN npm install -g/, dockerfile)
+    assert_match(/COPY files\/0/, dockerfile)
+    refute_match(/mise/, dockerfile)
+    refute_match(/gem install/, dockerfile)
+  end
 end

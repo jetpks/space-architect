@@ -145,6 +145,24 @@ class ProfilesCreateTest < Minitest::Test
     assert errors["secrets"]
   end
 
+  def test_create_empty_debs_element_names_field
+    bad = valid_params.merge(spec: valid_params[:spec].merge(environment: { debs: ["jq", ""] }))
+    errors = errors_after(bad)
+    assert errors["debs"]
+  end
+
+  def test_create_empty_gems_element_names_field
+    bad = valid_params.merge(spec: valid_params[:spec].merge(environment: { gems: ["rspec", ""] }))
+    errors = errors_after(bad)
+    assert errors["gems"]
+  end
+
+  def test_create_empty_mise_element_names_field
+    bad = valid_params.merge(spec: valid_params[:spec].merge(environment: { mise: ["ruby@3.3", ""] }))
+    errors = errors_after(bad)
+    assert errors["mise"]
+  end
+
   def test_create_invalid_spec_does_not_persist_a_row
     sign_in(@owner)
     before = @profiles_repo.list_for_user(@owner.id).size
