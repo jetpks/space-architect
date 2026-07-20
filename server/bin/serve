@@ -1,0 +1,21 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Production launcher — resolves INGEST_TOKEN (from the op:// ref by default, or
+# passes through a directly-set ENV value for dev/test) and execs the production
+# supervised web+worker topology in one host process. Every boot re-resolves the
+# token, so cold-restarting falcon no longer requires hand-minting and
+# redistributing a new one.
+#
+# Usage: bin/serve
+
+Dir.chdir(File.expand_path("..", __dir__))
+require_relative "../lib/space/server/boot/ingest_token"
+
+begin
+  Space::Server::Boot::IngestToken.new.resolve!
+rescue => e
+  abort "[bin/serve] INGEST_TOKEN resolution failed: #{e.message}"
+end
+
+exec("bundle", "exec", "falcon", "host", "falcon.rb")
