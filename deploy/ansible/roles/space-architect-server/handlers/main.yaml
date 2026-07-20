@@ -1,0 +1,10 @@
+---
+- name: restart container
+  community.general.launchd:
+    name: "{{ container_label }}"
+    state: restarted
+
+- name: restart space-architect-server
+  community.general.launchd:
+    name: "{{ server_label }}"
+    state: restarted
