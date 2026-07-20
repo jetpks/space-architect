@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.2.1] - 2026-07-19
+
+### Fixed
+
+- **`integrate` final line no longer claims "the verdict is the next session's"**
+  — the clause assumed a handoff to a fresh judging session, but the common
+  workflow starts a session that waits on the background builder jobs and then
+  judges in the *same* session. The line now reads "Gates NOT run — run gates:
+  `architect gate <iteration>`", a neutral instruction that holds in both the
+  same-session and fresh-session workflows.
+
 ## [5.2.0] - 2026-07-19
 
 ### Added

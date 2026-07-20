@@ -548,7 +548,7 @@ module Space::Architect
                 results.each do |r|
                   terminal.say "Merged #{r[:lane]} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
                 end
-                terminal.say "Gates NOT run — run `architect gate #{iteration}`; the verdict is the next session's."
+                terminal.say "Gates NOT run — run gates: `architect gate #{iteration}`"
               end
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
