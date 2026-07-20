@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { compatibleProviders, fetchProviderModels, REQUIRED_FLAVOR } from '@/lib/providers'
+import { compatibleProviders, fetchPiExtension, fetchProviderModels, REQUIRED_FLAVOR } from '@/lib/providers'
 import type { Provider } from '@/types'
 
 afterEach(() => {
@@ -69,5 +69,35 @@ describe('fetchProviderModels', () => {
   it('maps a network failure to fetch_failed without throwing', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
     await expect(fetchProviderModels(7)).resolves.toEqual({ models: [], error: 'fetch_failed' })
+  })
+})
+
+describe('fetchPiExtension', () => {
+  it('returns the parsed {extension, error} shape on success', async () => {
+    const extension = { path: '/root/.pi/agent/extensions/openrouter.ts', content: 'export default {}', env_key: 'PI_PROVIDER_API_KEY' }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ extension, error: null }) }),
+    )
+    expect(await fetchPiExtension(7)).toEqual({ extension, error: null })
+    expect(fetch).toHaveBeenCalledWith('/providers/7/pi_extension')
+  })
+
+  it('passes through a server-reported error token at HTTP 200', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ extension: null, error: 'secret_resolution_failed' }) }),
+    )
+    expect(await fetchPiExtension(7)).toEqual({ extension: null, error: 'secret_resolution_failed' })
+  })
+
+  it('maps a non-2xx response to fetch_failed without throwing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }))
+    expect(await fetchPiExtension(7)).toEqual({ extension: null, error: 'fetch_failed' })
+  })
+
+  it('maps a network failure to fetch_failed without throwing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+    await expect(fetchPiExtension(7)).resolves.toEqual({ extension: null, error: 'fetch_failed' })
   })
 })
