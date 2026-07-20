@@ -1,0 +1,48 @@
+#!/bin/bash
+# Production launcher for the space-architect-server topology, invoked by the
+# {{ server_label }} launchd agent. Resolves secrets fresh on every boot (op
+# refs — no values ever land here or in the plist) so a launchd-driven cold
+# restart survives without hand-minting anything. Then execs bin/serve, which
+# resolves INGEST_TOKEN itself and execs `falcon host falcon.rb`.
+set -euo pipefail
+
+RUBYBIN="{{ mise_ruby_bin }}"
+export PATH="$RUBYBIN:{{ mise_node_bin }}:/opt/homebrew/bin:/usr/bin:/bin"
+cd "{{ server_dir }}" || exit 1
+
+export HANAMI_ENV=production
+# vite_ruby's Ruby-side config defaults its mode to RACK_ENV (not HANAMI_ENV);
+# without this it would read vite.json's "development" block and look for the
+# manifest under public/vite-dev, which `npm run build` never writes to.
+export RACK_ENV=production
+
+export DATABASE_URL="{{ database_url }}"
+export REDIS_URL="{{ redis_url }}"
+export JOB_ENV_BASE_IMAGE="{{ job_env_base_image }}"
+export INGEST_TOKEN_REF="{{ ingest_token_ref }}"
+
+# The op service-account token lives at ~/.config/secret/op as a shell snippet
+# (`export OP_SERVICE_ACCOUNT_TOKEN=ops_...`, operator-placed, mode 0600). op
+# does not read it automatically, so source it before any `op read` — this also
+# carries the token to bin/serve's INGEST_TOKEN resolver below. launchd hands us
+# no login env, and a global `launchctl setenv` is lost on reboot, so we must
+# load it here or a rebooted host strands both secrets. Mirrors run-caddy.sh.
+source "{{ ansible_env.HOME }}/.config/secret/op"
+
+# SESSION_SECRET: op ref only, resolved fresh every boot — never written to
+# disk, logged, or templated into the plist (BRIEF §2.2 secret hygiene).
+SESSION_SECRET="$(op read '{{ session_secret_ref }}')"
+export SESSION_SECRET
+
+# INGEST_USER_ID: looked up by the seeded ingest owner user's github_uid
+# (server/config/db/seeds.rb) rather than hardcoded, so it always names a real
+# row. `hanami run` logs one JSON line to stdout before the puts result —
+# `tail -1` takes the actual value.
+INGEST_USER_ID="$(bundle exec hanami run 'puts Space::Server::App["repos.users_repo"].by_github_uid("{{ ingest_user_github_uid }}")&.id' | tail -1)"
+if [ -z "$INGEST_USER_ID" ]; then
+  echo "[run-server.sh] no user with github_uid={{ ingest_user_github_uid }} — run 'hanami db prepare' first" >&2
+  exit 1
+fi
+export INGEST_USER_ID
+
+exec ./bin/serve

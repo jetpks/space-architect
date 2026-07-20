@@ -1,0 +1,155 @@
+---
+# ── 1. Homebrew PATH ─────────────────────────────────────────────────────────
+
+- name: space-architect-server | ensure /opt/homebrew/bin on PATH in ~/.zprofile
+  ansible.builtin.lineinfile:
+    path: "{{ ansible_env.HOME }}/.zprofile"
+    line: 'export PATH="/opt/homebrew/bin:$PATH"'
+    create: true
+    mode: "0644"
+
+# ── 2. op / container / mise resolvable (BRIEF §7.1) ─────────────────────────
+# Brew-owner-provisioned (§4.2 amendment) — verified here, never installed by
+# this user-level, no-become playbook.
+
+- name: space-architect-server | verify op cli is available
+  ansible.builtin.command: op --version
+  changed_when: false
+
+- name: space-architect-server | verify container cli is available
+  ansible.builtin.command: container --version
+  changed_when: false
+
+- name: space-architect-server | verify mise is available
+  ansible.builtin.command: "{{ mise_bin }} --version"
+  changed_when: false
+
+# ── 3. mise + Ruby 4.0.5 ─────────────────────────────────────────────────────
+
+- name: space-architect-server | install ruby via mise
+  ansible.builtin.command: "{{ mise_bin }} install ruby@{{ mise_ruby_version }}"
+  register: mise_ruby_install
+  changed_when: "'already installed' not in mise_ruby_install.stderr"
+
+- name: space-architect-server | set global ruby version via mise
+  ansible.builtin.command: "{{ mise_bin }} use --global ruby@{{ mise_ruby_version }}"
+  changed_when: false
+
+# ── 4. mise + Node (build-time only — npm ci / npm run build) ───────────────
+
+- name: space-architect-server | install node via mise
+  ansible.builtin.command: "{{ mise_bin }} install node@{{ mise_node_version }}"
+  register: mise_node_install
+  changed_when: "'already installed' not in mise_node_install.stderr"
+
+- name: space-architect-server | set global node version via mise
+  ansible.builtin.command: "{{ mise_bin }} use --global node@{{ mise_node_version }}"
+  changed_when: false
+
+# ── 5. Server checkout ────────────────────────────────────────────────────────
+
+- name: space-architect-server | ensure ~/src directory exists
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/src"
+    state: directory
+    mode: "0755"
+
+- name: space-architect-server | clone or pull space-architect repository
+  ansible.builtin.git:
+    repo: "{{ server_repo_url }}"
+    dest: "{{ server_src_dir }}"
+    version: main
+    update: true
+
+# ── 6. bundle install guard (LOAD-BEARING — must run before server restart) ──
+
+- name: space-architect-server | bundle install server gems
+  community.general.bundler:
+    state: present
+    chdir: "{{ server_dir }}"
+    executable: "{{ mise_ruby_bin }}/bundle"
+  environment:
+    PATH: "{{ mise_ruby_bin }}:/opt/homebrew/bin:/usr/bin:/bin"
+
+# ── 7. Production frontend assets (BRIEF §7.6) ───────────────────────────────
+# npm run build always re-runs (source changes on every re-apply); vite build
+# defaults to mode=production and writes public/vite/.vite/manifest.json —
+# the same location ViteRuby::Config resolves at runtime when RACK_ENV=production
+# (set in run-server.sh.j2). No server/config/vite.json or app.rb change needed.
+
+- name: space-architect-server | npm ci server frontend dependencies
+  community.general.npm:
+    path: "{{ server_dir }}"
+    ci: true
+    executable: "{{ mise_node_bin }}/npm"
+
+- name: space-architect-server | build production frontend assets
+  ansible.builtin.command: npm run build
+  args:
+    chdir: "{{ server_dir }}"
+  environment:
+    PATH: "{{ mise_node_bin }}:/opt/homebrew/bin:/usr/bin:/bin"
+  changed_when: true
+
+# ── 8. Database schema + ingest-owner-user seed (BRIEF §7.6, §4.2) ──────────
+# `hanami db prepare`: creates the db + loads structure.sql if missing, runs
+# pending migrations, then always runs config/db/seeds.rb (hanami-cli DB::Prepare).
+
+- name: space-architect-server | hanami db prepare (production)
+  ansible.builtin.command: "{{ mise_ruby_bin }}/bundle exec hanami db prepare"
+  args:
+    chdir: "{{ server_dir }}"
+  environment:
+    PATH: "{{ mise_ruby_bin }}:/opt/homebrew/bin:/usr/bin:/bin"
+    HANAMI_ENV: production
+    DATABASE_URL: "{{ database_url }}"
+  changed_when: true
+
+# ── 9. Apple container: headless kernel + supervised container-system agent ─
+# (BRIEF §7.2, I27 ADOPT.) Container state is per-user; the executor runs as
+# eric, so the apiserver must run as eric and be up before falcon's executor
+# child needs it.
+
+- name: space-architect-server | set recommended container kernel (headless)
+  ansible.builtin.command: container system kernel set --recommended
+  changed_when: false
+
+- name: space-architect-server | ensure ~/Library/Logs exists
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/Library/Logs"
+    state: directory
+    mode: "0755"
+
+- name: space-architect-server | template container-system launchd plist
+  ansible.builtin.template:
+    src: com.slushsystems.container.plist.j2
+    dest: "{{ ansible_env.HOME }}/Library/LaunchAgents/{{ container_label }}.plist"
+    mode: "0644"
+  notify: restart container
+
+- name: space-architect-server | ensure container-system service is started
+  community.general.launchd:
+    name: "{{ container_label }}"
+    state: started
+
+# ── 10. Topology launchd KeepAlive agent (web + import + executor + consumer) ─
+# Ordered after the container-system agent (step 9) — the executor-worker
+# service needs `container` up on first request.
+
+- name: space-architect-server | template server run script
+  ansible.builtin.template:
+    src: run-server.sh.j2
+    dest: "{{ server_dir }}/run-server.sh"
+    mode: "0755"
+
+- name: space-architect-server | template server launchd plist
+  ansible.builtin.template:
+    src: com.slushsystems.space-architect-server.plist.j2
+    dest: "{{ ansible_env.HOME }}/Library/LaunchAgents/{{ server_label }}.plist"
+    mode: "0644"
+  notify: restart space-architect-server
+
+- name: space-architect-server | ensure server service is started
+  community.general.launchd:
+    name: "{{ server_label }}"
+    state: started

@@ -1,0 +1,4 @@
+---
+- name: space-architect-server | configure on Darwin
+  include_tasks: Darwin.yaml
+  when: ansible_facts['os_family'] == 'Darwin'

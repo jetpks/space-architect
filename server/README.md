@@ -35,12 +35,21 @@ npm run check          # TypeScript type check
 
 Machine pushes (e.g. from the CLI dispatch harness) authenticate via a shared secret:
 
-| Env var          | Description                                      |
-|------------------|--------------------------------------------------|
-| `INGEST_TOKEN`   | Secret bearer token for `POST /runs` and `POST /runs/:id/ingest` |
-| `INGEST_USER_ID` | Integer user ID that ingested runs are owned by  |
+| Env var             | Description                                      |
+|---------------------|--------------------------------------------------|
+| `INGEST_TOKEN`      | Secret bearer token for `POST /runs` and `POST /runs/:id/ingest` |
+| `INGEST_USER_ID`    | Integer user ID that ingested runs are owned by (plain config, not a secret) |
+| `INGEST_TOKEN_REF`  | op:// ref `bin/serve` resolves `INGEST_TOKEN` from (default `op://ansible/space-architect-server/ingest-token`) |
 
 When both are set, requests carrying `Authorization: Bearer <INGEST_TOKEN>` are authenticated as the configured user and bypass CSRF (machine pushes carry no session cookie). Browser/cookie requests are unaffected and continue to enforce CSRF normally.
+
+Production boot (`bin/serve`) resolves `INGEST_TOKEN` from the 1Password ref above on every start, so cold-restarting falcon no longer strands ingest auth on a hand-minted, unrecoverable token. A directly-set `INGEST_TOKEN` in the environment bypasses op resolution entirely and is used as-is (`bin/dev`, `bin/live_proof.rb`, and other dev/test flows that mint their own token).
+
+## Deploy on the studio
+
+Production runs as a launchd-supervised `deploy/ansible` role on
+`studio.slush.systems` — see `docs/how-to/deploy-on-the-studio.md` for the
+apply runbook and `deploy/ansible/README.md` for the role reference.
 
 ## Retention & Cleanup (v1: manual)
 

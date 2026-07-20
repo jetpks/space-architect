@@ -1,0 +1,17 @@
+---
+# Deploy space-architect-server on studio.slush.systems (macOS, user-level,
+# no become). Run locally on the studio:
+#
+#   cd ~/src/space-architect
+#   ansible-playbook -i deploy/ansible/hosts deploy/ansible/site.yaml
+#
+# Or via ansible-pull (runs unattended from the public repo):
+#
+#   ansible-pull -U https://github.com/jetpks/space-architect.git \
+#     -i deploy/ansible/hosts deploy/ansible/site.yaml
+- name: deploy space-architect-server on studio
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  roles:
+    - space-architect-server
