@@ -44,6 +44,9 @@ module Space
             optional(:env).value(Types::Hash.default({}.freeze))
             optional(:secrets).value(Types::Array.of(SECRET_REF_TYPE).default([].freeze))
             optional(:deps).value(Types::Array.of(Types::String.constrained(filled: true)).default([].freeze))
+            optional(:debs).value(Types::Array.of(Types::String.constrained(filled: true)).default([].freeze))
+            optional(:gems).value(Types::Array.of(Types::String.constrained(filled: true)).default([].freeze))
+            optional(:mise).value(Types::Array.of(Types::String.constrained(filled: true)).default([].freeze))
             optional(:npm).value(Types::Array.of(Types::String.constrained(filled: true)).default([].freeze))
             optional(:files).value(Types::Array.of(FILE_TYPE).default([].freeze))
             optional(:permissions).hash do

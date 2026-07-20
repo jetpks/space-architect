@@ -28,6 +28,9 @@ module Space
             env:           [:environment, :env],
             secrets:       [:environment, :secrets],
             deps:          [:environment, :deps],
+            debs:          [:environment, :debs],
+            gems:          [:environment, :gems],
+            mise:          [:environment, :mise],
             network:       [:environment, :permissions, :network],
             mounts:        [:environment, :permissions, :mounts]
           }.freeze
