@@ -39,7 +39,7 @@ const DETAIL_FIELDS = ['subject', 'description', 'file_path', 'cmd', 'query', 'u
 // Tools that mark a human-in-the-loop decision point — the user is asked to
 // choose (AskUserQuestion / codex's request_user_input) or to approve a plan
 // (ExitPlanMode). These are the significant beats of a conversation: tinted
-// emerald, rendered as phase dividers inside a turn, and listed as jump targets
+// teal, rendered as phase dividers inside a turn, and listed as jump targets
 // in the TOC. They are NOT turn boundaries — see memory
 // chat-share-decisions-not-boundaries for why.
 const DECISION_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode', 'request_user_input'])
@@ -152,7 +152,7 @@ function commitSubject(cmd: string): string | null {
   return null
 }
 
-// The significant-beat markers we surface (emerald decisions, orange memory
+// The significant-beat markers we surface (teal decisions, amber memory
 // writes). Each is tinted in the gist stack, rendered as a marked action row,
 // and listed as a TOC jump target. Class literals live here so Tailwind sees
 // them and Turn/TurnToc stay in sync.
@@ -160,34 +160,36 @@ export type Marker = 'decision' | 'memory' | 'commit'
 
 // text/textHover/subtle tint labels; seam is the trailing rule's bg on a marker
 // row; rule is the *border* color of a marked tool's fold bracket (so the bracket
-// reads in the marker's color, not neutral).
+// reads in the marker's color, not neutral). Built on the triad chart tokens
+// (chart-2 teal, chart-3 amber, chart-1 violet) so markers ride the same triad
+// as the rest of the chrome.
 export const MARKER_STYLE: Record<
   Marker,
   { glyph: string; text: string; textHover: string; subtle: string; seam: string; rule: string }
 > = {
   decision: {
     glyph: '⬥',
-    text: 'text-emerald-400',
-    textHover: 'hover:text-emerald-300',
-    subtle: 'text-emerald-400/80',
-    seam: 'bg-emerald-500/30',
-    rule: 'border-emerald-500/40',
+    text: 'text-chart-2',
+    textHover: 'hover:text-chart-2/80',
+    subtle: 'text-chart-2/80',
+    seam: 'bg-chart-2/30',
+    rule: 'border-chart-2/40',
   },
   memory: {
     glyph: '✎',
-    text: 'text-orange-400',
-    textHover: 'hover:text-orange-300',
-    subtle: 'text-orange-400/80',
-    seam: 'bg-orange-500/30',
-    rule: 'border-orange-500/40',
+    text: 'text-chart-3',
+    textHover: 'hover:text-chart-3/80',
+    subtle: 'text-chart-3/80',
+    seam: 'bg-chart-3/30',
+    rule: 'border-chart-3/40',
   },
   commit: {
     glyph: '⎇',
-    text: 'text-purple-400',
-    textHover: 'hover:text-purple-300',
-    subtle: 'text-purple-400/80',
-    seam: 'bg-purple-500/30',
-    rule: 'border-purple-500/40',
+    text: 'text-chart-1',
+    textHover: 'hover:text-chart-1/80',
+    subtle: 'text-chart-1/80',
+    seam: 'bg-chart-1/30',
+    rule: 'border-chart-1/40',
   },
 }
 

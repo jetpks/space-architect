@@ -19,9 +19,9 @@ export default function Nav() {
   const { current_user } = usePage<SharedProps>().props
 
   return (
-    <header className="border-b border-border bg-card">
+    <header className="border-b-2 border-primary bg-sidebar text-sidebar-foreground">
       <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-3">
-        <Link href="/" className="font-mono text-lg font-bold tracking-tight">
+        <Link href="/" className="font-mono text-lg font-bold tracking-tight text-primary">
           chat_share
         </Link>
 
