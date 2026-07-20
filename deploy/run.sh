@@ -30,7 +30,11 @@ export PATH="$VENV/bin:$PATH"
 
 ansible-galaxy collection install -r "$SCRIPT_DIR/ansible/requirements.yaml"
 
-exec ansible-pull \
+# NOT exec: exec would replace this shell and discard the EXIT trap, leaking
+# the lock dir so every subsequent run aborts as "already in flight". Run
+# ansible-pull as a child; the trap then removes the lock on exit (and
+# set -e propagates ansible-pull's exit code).
+ansible-pull \
   --url "$REPO_URL" \
   --checkout main \
   -i deploy/ansible/hosts \
