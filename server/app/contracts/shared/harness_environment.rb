@@ -52,7 +52,14 @@ module Space
             end
           end
 
+          # Includers whose environment fragment is nested (Contracts::CreateProfile's
+          # spec: { environment: ... }) define this before `include` to shift both the
+          # rule's dependency path and its failure keys under the same prefix;
+          # Contracts::CreateJob doesn't define it, so its environment rules stay
+          # top-level, byte-unchanged.
           def self.included(base)
+            prefix = base.respond_to?(:environment_rule_prefix) ? base.environment_rule_prefix : []
+
             # environment.env values become shell env vars, so every value must be a
             # string (JSON lets a caller send a number/bool/null/object). Keys arrive
             # pre-symbolized by Hanami::Router::Params.deep_symbolize regardless of
@@ -60,19 +67,23 @@ module Space
             # has no Hash[String, String] map type for params (Types::Hash.map raises
             # NotImplementedError inside dry-schema's params DSL — Map types aren't
             # supported there), hence the plain rule instead of a tighter schema type.
-            base.rule(environment: :env) do
+            base.rule(nest_rule_path(prefix, environment: :env)) do
               value.each do |k, v|
-                key([:environment, :env, k]).failure("must be a string") unless v.is_a?(String)
+                key([*prefix, :environment, :env, k]).failure("must be a string") unless v.is_a?(String)
               end
             end
 
             # Each file's materialized path shares the same absolute/non-escaping
             # posture as workspace.dir and mounts.
-            base.rule(environment: :files) do
+            base.rule(nest_rule_path(prefix, environment: :files)) do
               value.each_with_index do |file, index|
-                key([:environment, :files, index, :path]).failure("must be an absolute path") unless absolute_path?(file[:path])
+                key([*prefix, :environment, :files, index, :path]).failure("must be an absolute path") unless absolute_path?(file[:path])
               end
             end
+          end
+
+          def self.nest_rule_path(prefix, leaf)
+            prefix.reverse.reduce(leaf) { |acc, segment| { segment => acc } }
           end
 
           def absolute_path?(path)

@@ -16,12 +16,19 @@ module Space
       # vocabulary below. environment.files[].content_b64 is operator-vetted
       # config text, not a place to smuggle credentials.
       class CreateProfile < Dry::Validation::Contract
+        # The shipped frontend (Profiles/New.tsx) wraps the harness/environment
+        # fragments under a spec key, so the shared vocabulary's env/files rules
+        # must run against spec-prefixed paths — see harness_environment.rb.
+        def self.environment_rule_prefix = [:spec]
+
         include Shared::HarnessEnvironment
 
         params do
           required(:name).filled(:string)
-          required(:harness).hash(&Shared::HarnessEnvironment::HARNESS_SCHEMA)
-          required(:environment).hash(&Shared::HarnessEnvironment::ENVIRONMENT_SCHEMA)
+          required(:spec).hash do
+            required(:harness).hash(&Shared::HarnessEnvironment::HARNESS_SCHEMA)
+            required(:environment).hash(&Shared::HarnessEnvironment::ENVIRONMENT_SCHEMA)
+          end
         end
       end
     end
