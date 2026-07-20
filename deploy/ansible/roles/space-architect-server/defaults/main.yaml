@@ -1,0 +1,36 @@
+---
+# --- space-architect-server ---
+server_repo_url: https://github.com/jetpks/space-architect.git
+server_src_dir: "{{ ansible_env.HOME }}/src/space-architect"
+server_dir: "{{ server_src_dir }}/server"
+server_port: 3000
+server_label: com.slushsystems.space-architect-server
+
+# --- mise / Ruby ---
+mise_bin: /opt/homebrew/bin/mise
+mise_ruby_version: "4.0.5"
+# Derived path; override only if mise installs to a non-default location.
+mise_ruby_bin: "{{ ansible_env.HOME }}/.local/share/mise/installs/ruby/{{ mise_ruby_version }}/bin"
+
+# --- mise / Node (build-time only — npm ci + npm run build; not needed by run-server.sh) ---
+mise_node_version: "lts"
+mise_node_bin: "{{ ansible_env.HOME }}/.local/share/mise/installs/node/{{ mise_node_version }}/bin"
+
+# --- Datastores (brew-owner-provisioned — see README) ---
+database_url: postgres:///space_server_production
+redis_url: "redis://localhost:6379/0"
+
+# --- Job executor ---
+job_env_base_image: "space-claude-base:v1"
+
+# --- Secrets (op:// refs only — no values committed) ---
+# Same 1Password vault/item as INGEST_TOKEN's default ref (server/lib/space/server/boot/ingest_token.rb).
+ingest_token_ref: "op://ansible/space-architect-server/ingest-token"
+session_secret_ref: "op://ansible/space-architect-server/session-secret"
+
+# --- Ingest owner user (server/config/db/seeds.rb — must match SEED_GITHUB_UID there) ---
+ingest_user_github_uid: "ingest-service-account"
+
+# --- Apple container ---
+container_label: com.slushsystems.container
+container_bin: /opt/homebrew/bin/container

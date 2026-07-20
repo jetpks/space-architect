@@ -45,6 +45,12 @@ When both are set, requests carrying `Authorization: Bearer <INGEST_TOKEN>` are 
 
 Production boot (`bin/serve`) resolves `INGEST_TOKEN` from the 1Password ref above on every start, so cold-restarting falcon no longer strands ingest auth on a hand-minted, unrecoverable token. A directly-set `INGEST_TOKEN` in the environment bypasses op resolution entirely and is used as-is (`bin/dev`, `bin/live_proof.rb`, and other dev/test flows that mint their own token).
 
+## Deploy on the studio
+
+Production runs as a launchd-supervised `deploy/ansible` role on
+`studio.slush.systems` — see `docs/how-to/deploy-on-the-studio.md` for the
+apply runbook and `deploy/ansible/README.md` for the role reference.
+
 ## Retention & Cleanup (v1: manual)
 
 The inference-jobs pipeline (`lib/space/server/jobs/`) accumulates state in four
