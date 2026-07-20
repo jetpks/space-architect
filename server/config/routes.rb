@@ -55,6 +55,12 @@ module Space
       get  "/jobs/:id",        to: "jobs.show"
       post "/jobs/:id/cancel", to: "jobs.cancel"
 
+      # Profiles (harness profiles — user-owned partial job specs, I20)
+      get  "/profiles",            to: "profiles.index"
+      get  "/profiles/new",        to: "profiles.new"
+      post "/profiles",            to: "profiles.create"
+      post "/profiles/:id/delete", to: "profiles.destroy"
+
       # Spaces
       get "/spaces",                    to: "spaces.index"
       get "/spaces/:id",                to: "spaces.show"

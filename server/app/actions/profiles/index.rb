@@ -3,13 +3,13 @@
 module Space
   module Server
     module Actions
-      module Jobs
-        class New < Space::Server::Action
+      module Profiles
+        class Index < Space::Server::Action
           include Space::Server::Deps["repos.profiles_repo"]
 
           def handle(req, res)
             user = require_login(req, res)
-            render_inertia(req, res, "Jobs/New", props: { profiles: profile_list(user) })
+            render_inertia(req, res, "Profiles/Index", props: { profiles: profile_list(user) })
           end
 
           private
