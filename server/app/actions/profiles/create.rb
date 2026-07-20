@@ -16,18 +16,18 @@ module Space
           # form.errors per field — mirrors Jobs::Create's FIELD_PATHS.
           FIELD_PATHS = {
             name:          [:name],
-            harness_type:  [:harness, :type],
-            harness_model: [:harness, :model],
-            base_url:      [:harness, :backend, :base_url],
-            api_key_ref:   [:harness, :backend, :api_key_ref],
-            args:          [:harness, :args],
-            env:           [:environment, :env],
-            secrets:       [:environment, :secrets],
-            deps:          [:environment, :deps],
-            npm:           [:environment, :npm],
-            files:         [:environment, :files],
-            network:       [:environment, :permissions, :network],
-            mounts:        [:environment, :permissions, :mounts]
+            harness_type:  [:spec, :harness, :type],
+            harness_model: [:spec, :harness, :model],
+            base_url:      [:spec, :harness, :backend, :base_url],
+            api_key_ref:   [:spec, :harness, :backend, :api_key_ref],
+            args:          [:spec, :harness, :args],
+            env:           [:spec, :environment, :env],
+            secrets:       [:spec, :environment, :secrets],
+            deps:          [:spec, :environment, :deps],
+            npm:           [:spec, :environment, :npm],
+            files:         [:spec, :environment, :files],
+            network:       [:spec, :environment, :permissions, :network],
+            mounts:        [:spec, :environment, :permissions, :mounts]
           }.freeze
 
           def handle(req, res)
@@ -45,12 +45,13 @@ module Space
 
           def create_profile(user, result)
             now = Time.now
-            spec = result.to_h
+            validated = result.to_h
+            spec = validated[:spec]
             profiles_repo.create(
               user_id:      user.id,
-              name:         spec[:name],
+              name:         validated[:name],
               harness_type: spec.dig(:harness, :type),
-              spec:         spec.reject { |k, _| k == :name },
+              spec:         spec,
               created_at:   now,
               updated_at:   now
             )
@@ -58,8 +59,20 @@ module Space
 
           def field_errors(errors)
             FIELD_PATHS.each_with_object({}) do |(field, path), out|
-              node = errors.dig(*path)
+              node = dig_hash(errors, *path)
               out[field] = flatten_messages(node).join(", ") unless node.nil?
+            end
+          end
+
+          # Plain Hash#dig raises TypeError when an intermediate node is an Array
+          # (e.g. errors[:spec] == ["is missing"] for a payload that omits spec
+          # entirely) — that's the exact crash a missing/malformed spec fragment
+          # used to cause, so digging must stop instead of exploding.
+          def dig_hash(node, *path)
+            path.reduce(node) do |current, key|
+              break nil unless current.is_a?(Hash)
+
+              current[key]
             end
           end
 

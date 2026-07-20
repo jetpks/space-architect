@@ -20,16 +20,43 @@ class ProfilesCreateTest < Minitest::Test
   def valid_params
     {
       name: "my-profile",
-      harness: {
-        type: "claude", model: "claude-sonnet-5",
-        backend: { base_url: "https://api.example.com/v1", api_key_ref: "op://vault/item" },
-        args: ["--flag"]
-      },
-      environment: {
-        env: { FOO: "bar" },
-        secrets: [{ ref: "op://vault/item2", name: "API_KEY" }],
-        deps: ["git"],
-        permissions: { network: "true", mounts: ["/tmp"] }
+      spec: {
+        harness: {
+          type: "claude", model: "claude-sonnet-5",
+          backend: { base_url: "https://api.example.com/v1", api_key_ref: "op://vault/item" },
+          args: ["--flag"]
+        },
+        environment: {
+          env: { FOO: "bar" },
+          secrets: [{ ref: "op://vault/item2", name: "API_KEY" }],
+          deps: ["git"],
+          permissions: { network: "true", mounts: ["/tmp"] }
+        }
+      }
+    }
+  end
+
+  # The byte-exact shape Profiles/New.tsx's form.transform emits — mirrors the
+  # fixture asserted in Profiles/New.test.tsx ("submits by transforming into
+  # {name, spec} and posting to /profiles").
+  def frontend_transform_payload
+    {
+      name: "pi via gateway",
+      spec: {
+        harness: {
+          type: "pi",
+          model: "gpt-5",
+          backend: { base_url: "https://gateway.example.com" },
+          args: []
+        },
+        environment: {
+          env: {},
+          secrets: [],
+          deps: [],
+          npm: ["typescript"],
+          files: [{ path: "/workspace/f.txt", content_b64: "aGk=" }],
+          permissions: { network: false, mounts: [] }
+        }
       }
     }
   end
@@ -83,8 +110,10 @@ class ProfilesCreateTest < Minitest::Test
     sign_in(@owner)
     minimal = {
       name: "minimal",
-      harness: { type: "claude", model: "sonnet", backend: { base_url: "https://api.example.com" } },
-      environment: { deps: ["git"] }
+      spec: {
+        harness: { type: "claude", model: "sonnet", backend: { base_url: "https://api.example.com" } },
+        environment: { deps: ["git"] }
+      }
     }
     post("/profiles", params: minimal)
     profile = @profiles_repo.list_for_user(@owner.id).first
@@ -99,19 +128,19 @@ class ProfilesCreateTest < Minitest::Test
   end
 
   def test_create_non_http_base_url_names_field
-    bad = valid_params.merge(harness: valid_params[:harness].merge(backend: { base_url: "not-a-url" }))
+    bad = valid_params.merge(spec: valid_params[:spec].merge(harness: valid_params[:spec][:harness].merge(backend: { base_url: "not-a-url" })))
     errors = errors_after(bad)
     assert errors["base_url"]
   end
 
   def test_create_unknown_harness_type_names_field
-    bad = valid_params.merge(harness: valid_params[:harness].merge(type: "gpt4"))
+    bad = valid_params.merge(spec: valid_params[:spec].merge(harness: valid_params[:spec][:harness].merge(type: "gpt4")))
     errors = errors_after(bad)
     assert errors["harness_type"]
   end
 
   def test_create_secret_ref_not_op_names_field
-    bad = valid_params.merge(environment: { secrets: [{ ref: "not-op", name: "X" }] })
+    bad = valid_params.merge(spec: valid_params[:spec].merge(environment: { secrets: [{ ref: "not-op", name: "X" }] }))
     errors = errors_after(bad)
     assert errors["secrets"]
   end
@@ -123,4 +152,30 @@ class ProfilesCreateTest < Minitest::Test
     assert_equal before, @profiles_repo.list_for_user(@owner.id).size
   end
 
+  def test_create_missing_spec_names_no_field_without_exception
+    errors = errors_after(name: "x")
+    assert_equal({}, errors)
+  end
+
+  def test_create_flat_i20_shape_names_no_field_without_exception
+    flat = { name: "x", harness: valid_params[:spec][:harness], environment: valid_params[:spec][:environment] }
+    errors = errors_after(flat)
+    assert_equal({}, errors)
+  end
+
+  def test_create_frontend_transform_payload_persists
+    sign_in(@owner)
+    status, headers, _ = post("/profiles", params: frontend_transform_payload)
+    assert_equal 302, status
+    assert_equal "/profiles", headers["location"]
+    profile = @profiles_repo.list_for_user(@owner.id).first
+    refute_nil profile
+    assert_equal "pi via gateway", profile.name
+    assert_equal "pi", profile.harness_type
+    assert_equal "gpt-5", profile.spec.dig("harness", "model")
+    assert_equal "https://gateway.example.com", profile.spec.dig("harness", "backend", "base_url")
+    assert_equal ["typescript"], profile.spec.dig("environment", "npm")
+    assert_equal "/workspace/f.txt", profile.spec.dig("environment", "files", 0, "path")
+    assert_equal "aGk=", profile.spec.dig("environment", "files", 0, "content_b64")
+  end
 end
