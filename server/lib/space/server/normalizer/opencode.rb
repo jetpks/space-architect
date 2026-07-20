@@ -33,6 +33,13 @@ module Space
           end
         end
 
+        # Duck-typed by Runs::Ingest (pi's idiom): step_finish is message-level
+        # (→ :message_complete), and opencode emits no run-level sentinel — the
+        # process exits 0 after the final line, so clean EOF is the completion
+        # signal; the success/failure arbiter is the harness exit code, checked
+        # downstream in Jobs::Consumer.
+        def complete_at_eof? = true
+
         private
 
         def parse_json(str)
