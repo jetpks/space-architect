@@ -36,7 +36,7 @@ export default function New() {
             className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-2 file:text-primary-foreground"
           />
           {form.errors.source_file && (
-            <p className="text-sm text-rose-400">{form.errors.source_file}</p>
+            <p className="text-sm text-destructive">{form.errors.source_file}</p>
           )}
         </div>
 

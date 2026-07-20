@@ -191,7 +191,7 @@ function Field({
     <div className="space-y-1">
       <Label>{label}</Label>
       {children}
-      {error && <p className="text-sm text-rose-400">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   )
 }
