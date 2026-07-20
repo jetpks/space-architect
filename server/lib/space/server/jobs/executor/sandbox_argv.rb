@@ -17,10 +17,12 @@ module Space
         class SandboxArgv
           extend Dry::Monads[:result]
 
-          HARNESS_ARGS = %w[--output-format stream-json --verbose].freeze
-          PI_FLAGS     = %w[-p --mode json --no-session --no-approve].freeze
-          BASE_URL_ENV = "ANTHROPIC_BASE_URL"
-          API_KEY_ENV  = "ANTHROPIC_API_KEY"
+          HARNESS_ARGS          = %w[--output-format stream-json --verbose].freeze
+          PI_FLAGS              = %w[-p --mode json --no-session --no-approve].freeze
+          OPENCODE_ARGS         = %w[--format json].freeze
+          BASE_URL_ENV          = "ANTHROPIC_BASE_URL"
+          API_KEY_ENV           = "ANTHROPIC_API_KEY"
+          NO_BACKEND_ENV_TYPES  = %w[pi opencode].freeze
 
           # => Success(argv) | Failure(reason)
           def self.build(spec, image_tag, cidfile: nil)
@@ -35,10 +37,11 @@ module Space
             return Failure("invalid mount(s): #{invalid.join(', ')}") unless invalid.empty?
 
             # The harness backend (base_url/api_key_ref) is claude's Anthropic-gateway
-            # transport — pi reaches its gateway another way (local-inference.ts), so
-            # it gets no ANTHROPIC_BASE_URL/API_KEY env injection (declared
+            # transport — pi and opencode each reach their gateway another way (a
+            # pi extension / opencode config riding environment.files), so neither
+            # gets ANTHROPIC_BASE_URL/API_KEY env injection (declared
             # environment.env/secrets still ride either way).
-            env_backend = harness["type"] == "pi" ? {} : backend
+            env_backend = NO_BACKEND_ENV_TYPES.include?(harness["type"]) ? {} : backend
 
             argv = ["container", "run", "--rm"]
             argv << "--cidfile" << cidfile if cidfile
@@ -52,7 +55,11 @@ module Space
           end
 
           def self.harness_tail(harness, prompt)
-            harness["type"] == "pi" ? pi_tail(harness, prompt) : claude_tail(harness, prompt)
+            case harness["type"]
+            when "pi" then pi_tail(harness, prompt)
+            when "opencode" then opencode_tail(harness, prompt)
+            else claude_tail(harness, prompt)
+            end
           end
 
           def self.pi_tail(harness, prompt)
@@ -60,6 +67,16 @@ module Space
             tail += ["--model", harness["model"]] if harness["model"]
             tail << prompt
             tail + Array(harness["args"])
+          end
+
+          # opencode's headless surface: `opencode run <message> [--model
+          # provider/model] --format json`, verified live against 1.17.13 (server
+          # lane report has the full recipe). Model reaches opencode via its own
+          # config (environment.files), not this argv, the same seam pi uses.
+          def self.opencode_tail(harness, prompt)
+            tail = ["opencode", "run", prompt]
+            tail += ["--model", harness["model"]] if harness["model"]
+            tail + OPENCODE_ARGS + Array(harness["args"])
           end
 
           def self.claude_tail(harness, prompt)

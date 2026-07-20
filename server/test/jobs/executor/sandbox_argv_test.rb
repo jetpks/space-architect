@@ -84,6 +84,41 @@ class SandboxArgvTest < Minitest::Test
     assert_equal "-e", argv[argv.index("TOKEN") - 1]
   end
 
+  # --- opencode harness type branching (I25) --------------------------------
+
+  def test_opencode_argv_shape
+    s = spec("harness" => { "type" => "opencode", "model" => "qwen3-27b-optiq", "backend" => {} })
+    argv = SandboxArgv.build(s, "img:abc123").value!
+    assert_equal ["opencode", "run", "do the thing", "--model", "qwen3-27b-optiq",
+                  "--format", "json"], argv.last(7)
+  end
+
+  def test_opencode_argv_appends_harness_args
+    s = spec("harness" => { "type" => "opencode", "model" => "qwen3-27b-optiq", "backend" => {}, "args" => ["--agent", "build"] })
+    argv = SandboxArgv.build(s, "img:abc123").value!
+    assert_equal ["--agent", "build"], argv.last(2)
+  end
+
+  def test_opencode_gets_no_backend_env_injection
+    s = spec("harness" => {
+      "type" => "opencode", "model" => "qwen3-27b-optiq",
+      "backend" => { "base_url" => "https://gateway.example.com", "api_key_ref" => "op://vault/anthropic/key" }
+    })
+    argv = SandboxArgv.build(s, "img:abc123").value!
+    refute argv.any? { |a| a.start_with?("ANTHROPIC_BASE_URL=") }, "opencode must not receive ANTHROPIC_BASE_URL"
+    refute_includes argv, "ANTHROPIC_API_KEY", "opencode must not receive the bare -e ANTHROPIC_API_KEY name"
+  end
+
+  def test_opencode_still_carries_declared_env_and_secrets
+    s = spec(
+      "harness" => { "type" => "opencode", "model" => "qwen3-27b-optiq", "backend" => {} },
+      "environment" => { "env" => { "FOO" => "bar" }, "secrets" => [{ "ref" => "op://vault/item", "name" => "TOKEN" }] }
+    )
+    argv = SandboxArgv.build(s, "img:abc123").value!
+    assert_includes argv, "FOO=bar"
+    assert_equal "-e", argv[argv.index("TOKEN") - 1]
+  end
+
   def test_claude_still_gets_backend_env_injection
     s = spec("harness" => {
       "type" => "claude", "model" => "sonnet-5",

@@ -75,6 +75,12 @@ class CreateJobContractTest < Minitest::Test
     assert_equal "pi", r.to_h.dig(:harness, :type)
   end
 
+  def test_accepts_opencode_harness_type
+    r = contract.call(valid_spec.merge(harness: valid_spec[:harness].merge(type: "opencode")))
+    assert r.success?, r.errors.to_h.inspect
+    assert_equal "opencode", r.to_h.dig(:harness, :type)
+  end
+
   def test_rejects_non_http_base_url
     r = contract.call(valid_spec.merge(harness: valid_spec[:harness].merge(backend: { base_url: "not-a-url" })))
     assert r.failure?

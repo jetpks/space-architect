@@ -10,7 +10,7 @@ module Space
         # partial job spec (harness + environment, minus prompt/workspace/
         # provenance), so both contracts must agree on this fragment's rules.
         module HarnessEnvironment
-          HARNESS_TYPES    = %w[claude pi].freeze
+          HARNESS_TYPES    = %w[claude pi opencode].freeze
           HTTP_URI_FORMAT  = URI::DEFAULT_PARSER.make_regexp(%w[http https]).freeze
           OP_REF_FORMAT    = /\Aop:\/\//.freeze
           ENV_NAME_FORMAT  = /\A[A-Za-z_][A-Za-z0-9_]*\z/.freeze

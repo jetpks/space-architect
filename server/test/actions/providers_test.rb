@@ -2,6 +2,7 @@
 
 require_relative "action_test_helper"
 require_relative "../../app/actions/providers/models"
+require_relative "../../app/actions/providers/pi_extension"
 
 class ProvidersTest < Minitest::Test
   include ActionTestHelper
@@ -251,6 +252,70 @@ class ProvidersTest < Minitest::Test
       payload = parse_json(body)
       assert_equal [], payload["models"]
       assert_equal "secret_resolution_failed", payload["error"]
+    end
+  end
+
+  # --- pi extension generation -----------------------------------------------
+
+  def pi_extension_fetch_models = Space::Server::Actions::Providers::PiExtension::FETCH_MODELS
+
+  def test_pi_extension_anon_redirects_with_flash
+    provider = make_provider(@owner)
+    status, headers, _ = get("/providers/#{provider.id}/pi_extension")
+    assert_equal 302, status
+    assert_equal "/", headers["location"]
+  end
+
+  def test_pi_extension_foreign_provider_returns_404
+    provider = make_provider(@other)
+    sign_in(@owner)
+    status, = get("/providers/#{provider.id}/pi_extension")
+    assert_equal 404, status
+  end
+
+  def test_pi_extension_happy_path_keyless_provider
+    provider = make_provider(@owner, api_key_ref: nil)
+    sign_in(@owner)
+
+    pi_extension_fetch_models.stub(:call, ->(_base_url, _ref) { ["model-a", "model-b"] }) do
+      status, _, body = get("/providers/#{provider.id}/pi_extension")
+      assert_equal 200, status
+      payload = parse_json(body)
+      assert_nil payload["error"]
+      extension = payload["extension"]
+      assert_equal "/root/.pi/agent/extensions/gateway.ts", extension["path"]
+      assert_nil extension["env_key"]
+      assert_includes extension["content"], 'apiKey: "local-proxy"'
+      assert_includes extension["content"], 'id: "model-a"'
+      assert_includes extension["content"], 'id: "model-b"'
+    end
+  end
+
+  def test_pi_extension_happy_path_key_bearing_provider
+    provider = make_provider(@owner, api_key_ref: "op://vault/item")
+    sign_in(@owner)
+
+    pi_extension_fetch_models.stub(:call, ->(_base_url, _ref) { ["model-a"] }) do
+      status, _, body = get("/providers/#{provider.id}/pi_extension")
+      assert_equal 200, status
+      payload = parse_json(body)
+      extension = payload["extension"]
+      assert_equal "PI_PROVIDER_API_KEY", extension["env_key"]
+      assert_includes extension["content"], "process.env.PI_PROVIDER_API_KEY"
+      refute_includes extension["content"], "op://vault/item"
+    end
+  end
+
+  def test_pi_extension_upstream_error_returns_safe_token
+    provider = make_provider(@owner)
+    sign_in(@owner)
+
+    pi_extension_fetch_models.stub(:call, ->(_base_url, _ref) { raise Space::Server::Operations::FetchModels::UpstreamError, "status 500" }) do
+      status, _, body = get("/providers/#{provider.id}/pi_extension")
+      assert_equal 200, status
+      payload = parse_json(body)
+      assert_nil payload["extension"]
+      assert_equal "upstream_error", payload["error"]
     end
   end
 
