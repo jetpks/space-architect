@@ -112,7 +112,15 @@
 
 - name: space-architect-server | set recommended container kernel (headless)
   ansible.builtin.command: container system kernel set --recommended
-  changed_when: false
+  register: container_kernel_set
+  # `kernel set --recommended` is not idempotent: with the recommended kernel
+  # already installed it exits non-zero with "...already exists" (I27 set it on
+  # this host). Treat that as the converged state, not a failure; still fail on
+  # any other error.
+  changed_when: "'already exists' not in (container_kernel_set.stderr | default(''))"
+  failed_when:
+    - container_kernel_set.rc != 0
+    - "'already exists' not in (container_kernel_set.stderr | default(''))"
 
 - name: space-architect-server | ensure ~/Library/Logs exists
   ansible.builtin.file:
