@@ -67,6 +67,7 @@ module Space
       post "/providers",             to: "providers.create"
       post "/providers/:id/delete",  to: "providers.destroy"
       get  "/providers/:id/models",  to: "providers.models"
+      get  "/providers/:id/pi_extension", to: "providers.pi_extension"
 
       # Spaces
       get "/spaces",                    to: "spaces.index"

@@ -114,6 +114,14 @@ class CreateProfileContractTest < Minitest::Test
     assert_equal "pi", r.to_h.dig(:spec, :harness, :type)
   end
 
+  def test_accepts_opencode_harness_type
+    r = contract.call(
+      valid_params.merge(spec: valid_params[:spec].merge(harness: valid_params[:spec][:harness].merge(type: "opencode")))
+    )
+    assert r.success?, r.errors.to_h.inspect
+    assert_equal "opencode", r.to_h.dig(:spec, :harness, :type)
+  end
+
   def test_rejects_non_http_base_url
     r = contract.call(
       valid_params.merge(
