@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { Head, useForm } from '@inertiajs/react'
 import { Button } from '@/components/ui/button'
@@ -7,14 +6,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import AppLayout from '@/layouts/AppLayout'
-import type { Profile } from '@/types'
-import { decodeBase64, encodeBase64 } from './helpers'
+import { encodeBase64 } from '@/pages/Jobs/helpers'
 
 type FileRow = { path: string; content: string }
 
 type FormData = {
+  name: string
   harness_type: string
-  prompt: string
   harness_model: string
   base_url: string
   api_key_ref: string
@@ -28,16 +26,14 @@ type FormData = {
   mounts: string[]
 }
 
-const ANTHROPIC_ROW: [string, string] = ['ANTHROPIC_API_KEY', 'unused-for-keyless-backends']
-
 const INITIAL_DATA: FormData = {
+  name: '',
   harness_type: 'claude',
-  prompt: '',
   harness_model: '',
   base_url: '',
   api_key_ref: '',
   args: [],
-  env: [ANTHROPIC_ROW],
+  env: [],
   secrets: [],
   deps: [],
   npm: [],
@@ -46,128 +42,70 @@ const INITIAL_DATA: FormData = {
   mounts: [],
 }
 
-type Props = { profiles?: Profile[] }
-
-export default function New({ profiles = [] }: Props) {
+export default function New() {
   const form = useForm<FormData>(INITIAL_DATA)
-  const [selectedProfileId, setSelectedProfileId] = useState('')
-  const harnessType = form.data.harness_type ?? 'claude'
-
-  function onHarnessTypeChange(newType: string) {
-    if (newType !== harnessType) {
-      const env = form.data.env
-      const anthropicIndex = env.findIndex(([key]) => key === ANTHROPIC_ROW[0])
-      if (newType === 'pi' && anthropicIndex !== -1 && env[anthropicIndex][1] === ANTHROPIC_ROW[1]) {
-        form.setData('env', env.filter((_, i) => i !== anthropicIndex))
-      } else if (newType === 'claude' && anthropicIndex === -1) {
-        form.setData('env', [...env, ANTHROPIC_ROW])
-      }
-      form.setData('harness_type', newType)
-    }
-  }
-
-  function applyProfile(id: string) {
-    setSelectedProfileId(id)
-    const profile = profiles.find((p) => String(p.id) === id)
-    if (!profile) return
-    const spec = profile.spec
-
-    form.setData('harness_type', profile.harness_type)
-    form.setData('harness_model', spec.harness.model)
-    form.setData('base_url', spec.harness.backend.base_url)
-    form.setData('api_key_ref', spec.harness.backend.api_key_ref ?? '')
-    form.setData('args', spec.harness.args ?? [])
-    form.setData('env', Object.entries(spec.environment.env ?? {}))
-    form.setData(
-      'secrets',
-      (spec.environment.secrets ?? []).map(({ ref, name }): [string, string] => [ref, name]),
-    )
-    form.setData('deps', spec.environment.deps ?? [])
-    form.setData('npm', spec.environment.npm ?? [])
-    form.setData(
-      'files',
-      (spec.environment.files ?? []).map((f) => ({ path: f.path, content: decodeBase64(f.content_b64) })),
-    )
-    form.setData('network', spec.environment.permissions?.network ?? false)
-    form.setData('mounts', spec.environment.permissions?.mounts ?? [])
-  }
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
     form.transform((data) => ({
-      harness: {
-        type: data.harness_type ?? 'claude',
-        model: data.harness_model,
-        backend: {
-          base_url: data.base_url,
-          ...(data.api_key_ref.trim() ? { api_key_ref: data.api_key_ref } : {}),
+      name: data.name,
+      spec: {
+        harness: {
+          type: data.harness_type,
+          model: data.harness_model,
+          backend: {
+            base_url: data.base_url,
+            ...(data.api_key_ref.trim() ? { api_key_ref: data.api_key_ref } : {}),
+          },
+          args: data.args.filter((a) => a.trim() !== ''),
         },
-        args: data.args.filter((a) => a.trim() !== ''),
-      },
-      prompt: data.prompt,
-      environment: {
-        env: Object.fromEntries(data.env.filter(([k]) => k.trim() !== '')),
-        secrets: data.secrets
-          .filter(([ref, name]) => ref.trim() !== '' && name.trim() !== '')
-          .map(([ref, name]) => ({ ref, name })),
-        deps: data.deps.filter((d) => d.trim() !== ''),
-        npm: (data.npm ?? []).filter((n) => n.trim() !== ''),
-        files: (data.files ?? [])
-          .filter((f) => f.path.trim() !== '')
-          .map((f) => ({ path: f.path, content_b64: encodeBase64(f.content) })),
-        permissions: {
-          network: data.network,
-          mounts: data.mounts.filter((m) => m.trim() !== ''),
+        environment: {
+          env: Object.fromEntries(data.env.filter(([k]) => k.trim() !== '')),
+          secrets: data.secrets
+            .filter(([ref, name]) => ref.trim() !== '' && name.trim() !== '')
+            .map(([ref, name]) => ({ ref, name })),
+          deps: data.deps.filter((d) => d.trim() !== ''),
+          npm: data.npm.filter((n) => n.trim() !== ''),
+          files: data.files
+            .filter((f) => f.path.trim() !== '')
+            .map((f) => ({ path: f.path, content_b64: encodeBase64(f.content) })),
+          permissions: {
+            network: data.network,
+            mounts: data.mounts.filter((m) => m.trim() !== ''),
+          },
         },
       },
     }))
-    form.post('/jobs')
+    form.post('/profiles')
   }
 
   return (
     <AppLayout>
-      <Head title="New job" />
-      <h1 className="text-2xl font-bold">New job</h1>
+      <Head title="New profile" />
+      <h1 className="text-2xl font-bold">New profile</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Enqueue a Claude Code harness run against a backend of your choosing.
+        Save a reusable harness + environment configuration to prefill future jobs.
       </p>
 
       <form onSubmit={submit} className="mt-4 max-w-2xl space-y-6">
-        {profiles.length > 0 && (
-          <Field label="Load from profile">
-            <select
-              value={selectedProfileId}
-              onChange={(e) => applyProfile(e.target.value)}
-              className={SELECT_CLASS}
-            >
-              <option value="">Select a profile…</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
+        <Field label="Name" error={form.errors.name}>
+          <Input
+            value={form.data.name}
+            onChange={(e) => form.setData('name', e.target.value)}
+            placeholder="pi via gateway"
+            required
+          />
+        </Field>
 
         <Field label="Harness type" error={form.errors.harness_type}>
           <select
-            value={harnessType}
-            onChange={(e) => onHarnessTypeChange(e.target.value)}
+            value={form.data.harness_type}
+            onChange={(e) => form.setData('harness_type', e.target.value)}
             className={SELECT_CLASS}
           >
             <option value="claude">claude</option>
             <option value="pi">pi</option>
           </select>
-        </Field>
-
-        <Field label="Prompt" error={form.errors.prompt}>
-          <Textarea
-            value={form.data.prompt}
-            onChange={(e) => form.setData('prompt', e.target.value)}
-            rows={6}
-            required
-          />
         </Field>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -206,22 +144,15 @@ export default function New({ profiles = [] }: Props) {
           error={form.errors.args}
         />
 
-        <div className="space-y-1">
-          <PairField
-            label="Environment variables"
-            rows={form.data.env}
-            onChange={(env) => form.setData('env', env)}
-            keyPlaceholder="NAME"
-            valuePlaceholder="value"
-            addLabel="Add variable"
-            error={form.errors.env}
-          />
-          <p className="text-sm text-muted-foreground">
-            {harnessType === 'pi'
-              ? "pi's backend config rides the profile's extension file; the executor injects no ANTHROPIC env for pi."
-              : 'The claude CLI refuses to start without ANTHROPIC_API_KEY set; keyless backends (the gateway) ignore it.'}
-          </p>
-        </div>
+        <PairField
+          label="Environment variables"
+          rows={form.data.env}
+          onChange={(env) => form.setData('env', env)}
+          keyPlaceholder="NAME"
+          valuePlaceholder="value"
+          addLabel="Add variable"
+          error={form.errors.env}
+        />
 
         <PairField
           label="Secrets"
@@ -243,7 +174,7 @@ export default function New({ profiles = [] }: Props) {
 
         <ListField
           label="npm packages"
-          values={form.data.npm ?? []}
+          values={form.data.npm}
           onChange={(npm) => form.setData('npm', npm)}
           placeholder="typescript"
           error={form.errors.npm}
@@ -252,12 +183,13 @@ export default function New({ profiles = [] }: Props) {
         <div className="space-y-1">
           <FilesField
             label="Files"
-            rows={form.data.files ?? []}
+            rows={form.data.files}
             onChange={(files) => form.setData('files', files)}
             error={form.errors.files}
           />
           <p className="text-sm text-muted-foreground">
-            Written into the sandbox at the given absolute path before the harness runs.
+            Profiles store config only, never keys — secrets ride op:// refs above, not file
+            content.
           </p>
         </div>
 
@@ -280,7 +212,7 @@ export default function New({ profiles = [] }: Props) {
         />
 
         <Button type="submit" disabled={form.processing}>
-          Enqueue job
+          Save profile
         </Button>
       </form>
     </AppLayout>
