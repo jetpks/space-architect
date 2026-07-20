@@ -32,6 +32,30 @@ class CreateProfileContractTest < Minitest::Test
     assert r.success?, r.errors.to_h.inspect
   end
 
+  def test_accepts_absent_provider_id
+    r = contract.call(valid_params)
+    assert r.success?, r.errors.to_h.inspect
+    refute r.to_h.key?(:provider_id)
+  end
+
+  def test_accepts_null_provider_id
+    r = contract.call(valid_params.merge(provider_id: nil))
+    assert r.success?, r.errors.to_h.inspect
+    assert_nil r.to_h[:provider_id]
+  end
+
+  def test_accepts_integer_provider_id
+    r = contract.call(valid_params.merge(provider_id: 42))
+    assert r.success?, r.errors.to_h.inspect
+    assert_equal 42, r.to_h[:provider_id]
+  end
+
+  def test_rejects_string_provider_id
+    r = contract.call(valid_params.merge(provider_id: "abc"))
+    assert r.failure?
+    assert r.errors.to_h[:provider_id]
+  end
+
   def test_valid_minimal_spec_applies_defaults
     r = contract.call(
       name: "minimal",
