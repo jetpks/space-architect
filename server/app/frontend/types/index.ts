@@ -143,6 +143,15 @@ export type Run = {
   id: number
   status: string
   published: boolean
+  role: string | null
+  harness: string | null
+  model: string | null
+  producer: string | null
+  created_at: string
+  updated_at: string
+  // Owner-only: the job that produced this run (null for ingested runs and
+  // non-owner viewers).
+  job: { id: number; status: string; prompt: string } | null
 }
 
 export type RunListItem = {

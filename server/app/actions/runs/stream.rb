@@ -119,6 +119,13 @@ module Space
                   stream << sse_format(nil, ["type", "block_open",  "data", JSON.generate(type: "block_open",  block_id: block_id, index: i, block_type: "text")])
                   stream << sse_format(nil, ["type", "text_delta",  "data", JSON.generate(type: "text_delta",  block_id: block_id, text: block["text"].to_s)])
                   stream << sse_format(nil, ["type", "block_close", "data", JSON.generate(type: "block_close", block_id: block_id)])
+                when "thinking"
+                  stream << sse_format(nil, ["type", "block_open",  "data", JSON.generate(type: "block_open",  block_id: block_id, index: i, block_type: "thinking")])
+                  stream << sse_format(nil, ["type", "text_delta",  "data", JSON.generate(type: "text_delta",  block_id: block_id, text: block["thinking"].to_s)])
+                  stream << sse_format(nil, ["type", "block_close", "data", JSON.generate(type: "block_close", block_id: block_id)])
+                when "redacted_thinking"
+                  stream << sse_format(nil, ["type", "block_open",  "data", JSON.generate(type: "block_open",  block_id: block_id, index: i, block_type: "redacted_thinking")])
+                  stream << sse_format(nil, ["type", "block_close", "data", JSON.generate(type: "block_close", block_id: block_id)])
                 when "tool_use"
                   stream << sse_format(nil, ["type", "block_open",     "data", JSON.generate(type: "block_open",     block_id: block_id, index: i, block_type: "tool_use", name: block["name"], tool_use_id: block["id"])])
                   stream << sse_format(nil, ["type", "tool_args_delta","data", JSON.generate(type: "tool_args_delta", block_id: block_id, partial_json: JSON.generate(block["input"] || {}))])

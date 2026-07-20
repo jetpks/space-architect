@@ -110,4 +110,37 @@ class TerminalRunReplayTest < Minitest::Test
       "COMPLETE run with nil conversation_id must emit run_complete and close " \
       "(AC-4: reverting stream.rb cutover makes this hang and fail)"
   end
+
+  # COMPLETE run whose persisted conversation includes a thinking block.
+  # db_replay must emit it as a thinking block, not silently drop it.
+  def test_complete_run_replays_thinking_blocks
+    conv = Factory[:conversation, user_id: @user.id]
+    Factory[:message,
+      conversation_id: conv.id,
+      role: "assistant",
+      content: [{ "type" => "thinking", "thinking" => "replay-thinking-fixture" }],
+      position: 0
+    ]
+    Factory[:message,
+      conversation_id: conv.id,
+      role: "assistant",
+      content: [{ "type" => "text", "text" => "final answer" }],
+      position: 1
+    ]
+
+    run_record = Factory[:run, user_id: @user.id, status: 0, published: true]
+    @runs_repo.update(run_record.id, status: 2, conversation_id: conv.id)
+    run = @runs_repo.by_pk(run_record.id)
+
+    Sync { @redis.call("DEL", Space::Server::Runs::StreamKey.for(run.id)) }
+
+    sse = stream_sse(run)
+
+    assert_match "run_complete", sse
+    assert_match '"block_type":"thinking"', sse,
+      "db_replay must open a thinking block for persisted thinking content"
+    assert_match "replay-thinking-fixture", sse,
+      "db_replay must carry the thinking text, not drop the block"
+    assert_match "final answer", sse
+  end
 end
