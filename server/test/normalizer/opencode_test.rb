@@ -196,4 +196,8 @@ class OpencodeTest < Minitest::Test
     events = parser.process(step_finish)
     assert_equal :tool_use, events.first[:stop_reason]
   end
+
+  test "complete_at_eof? is true (step_finish is message-level; no run-level sentinel)" do
+    assert_equal true, parser.complete_at_eof?
+  end
 end
