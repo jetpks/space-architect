@@ -217,6 +217,16 @@ export type Profile = {
   spec: ProfileSpec
 }
 
+// An inference backend jobs and profiles can target. flavors names the wire
+// protocols it speaks (see lib/providers REQUIRED_FLAVOR).
+export type Provider = {
+  id: number
+  name: string
+  base_url: string
+  api_key_ref: string | null
+  flavors: string[]
+}
+
 // An access grant on a conversation: a GitHub user, or every member of a
 // GitHub organization. Serialized only to the owner.
 export type Share = {

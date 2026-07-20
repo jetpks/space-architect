@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
+import type { Provider } from '@/types'
 
 let formData: Record<string, unknown>
 let formErrors: Record<string, string>
@@ -45,6 +46,26 @@ beforeEach(() => {
   post.mockClear()
   transform.mockClear()
 })
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+const ANTHROPIC_PROVIDER: Provider = {
+  id: 1,
+  name: 'anthropic-direct',
+  base_url: 'https://api.anthropic.com',
+  api_key_ref: 'op://vault/anthropic',
+  flavors: ['anthropic'],
+}
+
+const OPENAI_PROVIDER: Provider = {
+  id: 2,
+  name: 'openrouter',
+  base_url: 'https://openrouter.ai/api/v1',
+  api_key_ref: null,
+  flavors: ['openai'],
+}
 
 describe('Jobs/New', () => {
   it('renders the v1 spec surface fields', () => {
@@ -253,5 +274,131 @@ describe('Jobs/New', () => {
     expect(setData).toHaveBeenCalledWith('files', [{ path: '/workspace/f.txt', content: 'hi' }])
     expect(setData).toHaveBeenCalledWith('network', true)
     expect(setData).toHaveBeenCalledWith('mounts', ['/host:/container'])
+  })
+
+  it('renders only providers compatible with the current (claude) harness', () => {
+    render(<New providers={[ANTHROPIC_PROVIDER, OPENAI_PROVIDER]} />)
+    const field = screen.getByText('Provider').closest('div')!
+    const select = within(field).getByRole('combobox')
+    expect(within(select).getByText('anthropic-direct')).not.toBeNull()
+    expect(within(select).queryByText('openrouter')).toBeNull()
+  })
+
+  it('selecting a provider fills base_url/api_key_ref and fetches models', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: ['claude-sonnet-5'], error: null }) }),
+    )
+    render(<New providers={[ANTHROPIC_PROVIDER]} />)
+    const field = screen.getByText('Provider').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: '1' } })
+
+    expect(setData).toHaveBeenCalledWith('base_url', 'https://api.anthropic.com')
+    expect(setData).toHaveBeenCalledWith('api_key_ref', 'op://vault/anthropic')
+    expect(fetch).toHaveBeenCalledWith('/providers/1/models')
+    await waitFor(() => {
+      const modelField = screen.getByText('Model').closest('div')!
+      expect(within(modelField).getByText('claude-sonnet-5')).not.toBeNull()
+    })
+  })
+
+  it('falls back to free-text model input and a muted message on fetch error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ models: [], error: 'fetch_failed' }) }),
+    )
+    render(<New providers={[ANTHROPIC_PROVIDER]} />)
+    const field = screen.getByText('Provider').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: '1' } })
+
+    await waitFor(() => {
+      const modelField = screen.getByText('Model').closest('div')!
+      expect(within(modelField).getByPlaceholderText('claude-sonnet-5')).not.toBeNull()
+      expect(within(modelField).getByText('Could not load models for this provider.')).not.toBeNull()
+    })
+  })
+
+  it('locks base_url/api_key_ref to read-only while a provider is selected', () => {
+    render(<New providers={[ANTHROPIC_PROVIDER]} />)
+    const field = screen.getByText('Provider').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: '1' } })
+
+    const urlField = screen.getByText('Backend base URL').closest('div')!
+    expect(within(urlField).getByPlaceholderText('https://api.example.com/v1')).toHaveAttribute(
+      'readonly',
+    )
+  })
+
+  it('resets an incompatible selected provider to Custom backend when harness type switches', () => {
+    render(<New providers={[ANTHROPIC_PROVIDER]} />)
+    const providerField = screen.getByText('Provider').closest('div')!
+    fireEvent.change(within(providerField).getByRole('combobox'), { target: { value: '1' } })
+    expect(within(providerField).getByRole('combobox')).toHaveValue('1')
+
+    const harnessField = screen.getByText('Harness type').closest('div')!
+    fireEvent.change(within(harnessField).getByRole('combobox'), { target: { value: 'pi' } })
+
+    expect(within(providerField).getByRole('combobox')).toHaveValue('custom')
+  })
+
+  it('applyProfile resets the provider select to Custom backend', () => {
+    const profile = {
+      id: 1,
+      name: 'pi via gateway',
+      harness_type: 'pi',
+      spec: {
+        harness: {
+          type: 'pi',
+          model: 'gpt-5',
+          backend: { base_url: 'https://gateway.example.com', api_key_ref: null },
+          args: [],
+        },
+        environment: { env: {}, secrets: [], deps: [], npm: [], files: [], permissions: {} },
+      },
+    }
+    render(<New profiles={[profile]} providers={[ANTHROPIC_PROVIDER]} />)
+    const providerField = screen.getByText('Provider').closest('div')!
+    fireEvent.change(within(providerField).getByRole('combobox'), { target: { value: '1' } })
+    expect(within(providerField).getByRole('combobox')).toHaveValue('1')
+
+    const profileField = screen.getByText('Load from profile').closest('div')!
+    fireEvent.change(within(profileField).getByRole('combobox'), { target: { value: '1' } })
+
+    expect(within(providerField).getByRole('combobox')).toHaveValue('custom')
+  })
+
+  it('submits a byte-unchanged payload with a provider selected', () => {
+    const { container } = render(<New providers={[ANTHROPIC_PROVIDER]} />)
+    const field = screen.getByText('Provider').closest('div')!
+    fireEvent.change(within(field).getByRole('combobox'), { target: { value: '1' } })
+
+    fireEvent.submit(container.querySelector('form')!)
+    const transformer = transform.mock.calls[0][0]
+    const payload = transformer({
+      ...formData,
+      prompt: 'do the thing',
+      harness_model: 'claude-sonnet-5',
+      base_url: 'https://api.anthropic.com',
+      api_key_ref: 'op://vault/anthropic',
+      env: [['FOO', 'bar']],
+      secrets: [],
+    })
+    expect(payload).toEqual({
+      harness: {
+        type: 'claude',
+        model: 'claude-sonnet-5',
+        backend: { base_url: 'https://api.anthropic.com', api_key_ref: 'op://vault/anthropic' },
+        args: [],
+      },
+      prompt: 'do the thing',
+      environment: {
+        env: { FOO: 'bar' },
+        secrets: [],
+        deps: [],
+        npm: [],
+        files: [],
+        permissions: { network: false, mounts: [] },
+      },
+    })
   })
 })

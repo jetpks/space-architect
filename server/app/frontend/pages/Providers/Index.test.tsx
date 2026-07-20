@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import type { Provider } from './Index'
+import type { Provider } from '@/types'
 
 const { post } = vi.hoisted(() => ({ post: vi.fn() }))
 
@@ -18,6 +18,10 @@ vi.mock('@/layouts/AppLayout', () => ({
 }))
 
 import Index from './Index'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 const PROVIDER: Provider = {
   id: 1,
@@ -62,5 +66,32 @@ describe('Providers/Index', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     expect(post).toHaveBeenCalledWith('/providers/1/delete')
+  })
+
+  it('lists model ids inline after previewing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ models: ['gpt-5', 'gpt-5-mini'], error: null }),
+      }),
+    )
+    render(<Index providers={[PROVIDER]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Preview models' }))
+    await waitFor(() => expect(screen.getByText('gpt-5, gpt-5-mini')).not.toBeNull())
+    expect(fetch).toHaveBeenCalledWith('/providers/1/models')
+  })
+
+  it('shows a muted message when the preview returns an error token', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ models: [], error: 'unreachable' }),
+      }),
+    )
+    render(<Index providers={[PROVIDER]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Preview models' }))
+    await waitFor(() => expect(screen.getByText('No models available.')).not.toBeNull())
   })
 })
