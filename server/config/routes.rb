@@ -61,6 +61,13 @@ module Space
       post "/profiles",            to: "profiles.create"
       post "/profiles/:id/delete", to: "profiles.destroy"
 
+      # Providers (inference providers — user-owned rows, I22)
+      get  "/providers",             to: "providers.index"
+      get  "/providers/new",         to: "providers.new"
+      post "/providers",             to: "providers.create"
+      post "/providers/:id/delete",  to: "providers.destroy"
+      get  "/providers/:id/models",  to: "providers.models"
+
       # Spaces
       get "/spaces",                    to: "spaces.index"
       get "/spaces/:id",                to: "spaces.show"
