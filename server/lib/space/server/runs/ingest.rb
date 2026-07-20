@@ -50,6 +50,7 @@ module Space
           end
 
           xadd(key, { type: :run_complete }) unless terminal_emitted
+          final_status = :complete if !terminal_emitted && parser&.respond_to?(:complete_at_eof?) && parser.complete_at_eof?
           { events: event_count, status: final_status }
         rescue => e
           begin

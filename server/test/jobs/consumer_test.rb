@@ -12,6 +12,7 @@ class ConsumerTest < Minitest::Test
   FIXTURE_DIR = File.join(__dir__, "..", "fixtures", "claude_stream_json")
   BASIC   = File.readlines(File.join(FIXTURE_DIR, "basic.jsonl"), chomp: true).freeze
   PARTIAL = File.readlines(File.join(FIXTURE_DIR, "partial.jsonl"), chomp: true).freeze
+  PI_STREAM = File.readlines(File.join(__dir__, "..", "fixtures", "files", "pi_streaming_session.jsonl"), chomp: true).freeze
 
   def redis_endpoint
     url = ENV["REDIS_URL"]
@@ -106,6 +107,33 @@ class ConsumerTest < Minitest::Test
       assert_includes types, "run_init"
       assert_includes types, "message_start"
       assert_equal "run_complete", types.last
+    end
+  end
+
+  # A pi harness stream has no run_complete-style sentinel (EOF + exit code end
+  # it — see Runs::Ingest#complete_at_eof?), so this proves the whole rail
+  # (raw stream → Normalizer::Pi → Ingest → Persistor → Consumer) reaches a
+  # complete run exactly like a claude drain does (I17).
+  def test_drains_pi_fixture_into_conversation_and_completes
+    job = Factory[:job, user_id: @user.id, status: "running"]
+    with_redis do |redis|
+      seed_raw(redis, job, PI_STREAM)
+
+      consumer(redis).drain(job)
+
+      job, run = drained_run(job.id)
+      assert run.complete?, "expected complete run, got #{run.status}"
+
+      conv = @conversations_repo.by_pk(run.conversation_id)
+      refute_nil conv
+      assert_equal "job", conv.source
+
+      msgs = @messages_repo.for_conversation(run.conversation_id)
+      assert msgs.any? { |m| m.blocks.any? { |b| b["type"] == "tool_use" && b["name"] == "read" } }
+      assert msgs.any? { |m| m.blocks.any? { |b| b["type"] == "tool_result" } }
+      assert msgs.any? { |m| m.blocks.any? { |b| b["text"].to_s.include?("Done. I added a smoke test") } }
+
+      assert_equal "run_complete", display_types(redis, run.id).last
     end
   end
 

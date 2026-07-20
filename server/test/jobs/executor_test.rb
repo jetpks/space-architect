@@ -557,6 +557,22 @@ class ExecutorTest < Minitest::Test
     end
   end
 
+  # --- run-row harness field (I17) ---
+
+  def test_run_row_records_pi_harness_type
+    job = make_job("harness" => DEFAULT_SPEC["harness"].merge("type" => "pi"))
+    spawner = FakeSpawner.new(FakeHandle.new(stdout: "line\n", code: 0))
+
+    with_redis do |redis|
+      redis.del(key_for(job))
+      build_executor(redis: redis, spawner: spawner).tick
+
+      finished = jobs_repo.by_pk(job.id)
+      run = runs_repo.by_pk(finished.run_id)
+      assert_equal "pi", run.harness
+    end
+  end
+
   def test_tick_returns_nil_on_empty_queue
     with_redis do |redis|
       assert_nil build_executor(redis: redis, spawner: FakeSpawner.new).tick

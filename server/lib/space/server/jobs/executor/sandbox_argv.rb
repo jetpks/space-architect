@@ -18,6 +18,7 @@ module Space
           extend Dry::Monads[:result]
 
           HARNESS_ARGS = %w[--output-format stream-json --verbose].freeze
+          PI_FLAGS     = %w[-p --mode json --no-session --no-approve].freeze
           BASE_URL_ENV = "ANTHROPIC_BASE_URL"
           API_KEY_ENV  = "ANTHROPIC_API_KEY"
 
@@ -33,17 +34,38 @@ module Space
             invalid = mounts.reject { |m| valid_mount?(m) }
             return Failure("invalid mount(s): #{invalid.join(', ')}") unless invalid.empty?
 
+            # The harness backend (base_url/api_key_ref) is claude's Anthropic-gateway
+            # transport — pi reaches its gateway another way (local-inference.ts), so
+            # it gets no ANTHROPIC_BASE_URL/API_KEY env injection (declared
+            # environment.env/secrets still ride either way).
+            env_backend = harness["type"] == "pi" ? {} : backend
+
             argv = ["container", "run", "--rm"]
             argv << "--cidfile" << cidfile if cidfile
-            env_pairs(environment, backend).each { |k, v| argv << "-e" << "#{k}=#{v}" }
-            secret_names(environment, backend).each { |name| argv << "-e" << name }
+            env_pairs(environment, env_backend).each { |k, v| argv << "-e" << "#{k}=#{v}" }
+            secret_names(environment, env_backend).each { |name| argv << "-e" << name }
             argv << "--network" << "none" unless permissions["network"]
             mounts.each { |m| argv << "-v" << m }
             argv << "--workdir" << workdir if workdir
             argv << image_tag
-            argv << "claude" << "-p" << spec["prompt"]
-            argv << "--model" << harness["model"] if harness["model"]
-            Success(argv + HARNESS_ARGS + Array(harness["args"]))
+            Success(argv + harness_tail(harness, spec["prompt"]))
+          end
+
+          def self.harness_tail(harness, prompt)
+            harness["type"] == "pi" ? pi_tail(harness, prompt) : claude_tail(harness, prompt)
+          end
+
+          def self.pi_tail(harness, prompt)
+            tail = ["pi"] + PI_FLAGS
+            tail += ["--model", harness["model"]] if harness["model"]
+            tail << prompt
+            tail + Array(harness["args"])
+          end
+
+          def self.claude_tail(harness, prompt)
+            tail = ["claude", "-p", prompt]
+            tail += ["--model", harness["model"]] if harness["model"]
+            tail + HARNESS_ARGS + Array(harness["args"])
           end
 
           # environment.env with backend-derived pairs applied last: the backend

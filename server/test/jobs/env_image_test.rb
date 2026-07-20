@@ -4,6 +4,7 @@
 # needed: EnvImage's only collaborator is the injected CLI-spawn seam, faked
 # below). Mirrors test/runs/support.rb's approach for the same reason.
 $LOAD_PATH.unshift File.expand_path("../../lib", __dir__)
+require "base64"
 require "space/server/jobs/env_image"
 require "minitest/autorun"
 
@@ -18,7 +19,7 @@ class EnvImageTest < Minitest::Test
   # i.e. from inside this call, since EnvImage's Dir.mktmpdir block is still
   # open at the point it invokes the spawn seam.
   class FakeSpawn
-    attr_reader :calls, :dockerfiles
+    attr_reader :calls, :dockerfiles, :materialized_files
 
     def initialize(exists: false, build_ok: true, build_output: "")
       @exists = exists
@@ -26,12 +27,18 @@ class EnvImageTest < Minitest::Test
       @build_output = build_output
       @calls = []
       @dockerfiles = []
+      @materialized_files = []
     end
 
+    # Snapshots the Dockerfile and any files/<i> content while the build
+    # context tmpdir still exists — #call runs synchronously inside
+    # EnvImage's Dir.mktmpdir block, which deletes the dir once this returns.
     def call(*argv)
       @calls << argv
       if argv[1] == "build"
         @dockerfiles << File.read(argv[argv.index("-f") + 1])
+        files_dir = File.join(argv.last, "files")
+        @materialized_files << (Dir.exist?(files_dir) ? Dir.children(files_dir).sort.to_h { |f| [f, File.binread(File.join(files_dir, f))] } : {})
         [@build_output, FakeStatus.new(@build_ok)]
       else
         ["", FakeStatus.new(@exists)]
@@ -39,10 +46,12 @@ class EnvImageTest < Minitest::Test
     end
 
     def build_calls = @calls.select { |argv| argv[1] == "build" }
+
+    def materialized_file(index) = materialized_files.last.fetch(index.to_s)
   end
 
   def env(overrides = {})
-    { env: { "FOO" => "bar" }, deps: ["git"], files: "sha256:abc" }.merge(overrides)
+    { env: { "FOO" => "bar" }, deps: ["git"] }.merge(overrides)
   end
 
   def image(spawn) = Space::Server::Jobs::EnvImage.new(spawn: spawn)
@@ -71,8 +80,10 @@ class EnvImageTest < Minitest::Test
   end
 
   def test_string_and_symbol_keyed_environment_agree
-    sym_env    = { env: { FOO: "bar" }, deps: ["git"], files: "sha256:abc" }
-    string_env = { "env" => { "FOO" => "bar" }, "deps" => ["git"], "files" => "sha256:abc" }
+    sym_env = { env: { FOO: "bar" }, deps: ["git"], npm: ["cowsay"],
+                files: [{ path: "/root/x", content_b64: "Zm9v" }] }
+    string_env = { "env" => { "FOO" => "bar" }, "deps" => ["git"], "npm" => ["cowsay"],
+                   "files" => [{ "path" => "/root/x", "content_b64" => "Zm9v" }] }
     tag_a = image(FakeSpawn.new(exists: true)).call(sym_env).value!
     tag_b = image(FakeSpawn.new(exists: true)).call(string_env).value!
     assert_equal tag_a, tag_b
@@ -138,6 +149,63 @@ class EnvImageTest < Minitest::Test
   def test_same_base_image_keeps_tag_stable
     tag_a = Space::Server::Jobs::EnvImage.new(spawn: FakeSpawn.new(exists: true), base_image: "alpine:3.20").call(env).value!
     tag_b = Space::Server::Jobs::EnvImage.new(spawn: FakeSpawn.new(exists: true), base_image: "alpine:3.20").call(env).value!
+    assert_equal tag_a, tag_b
+  end
+
+  # --- npm layer -----------------------------------------------------------
+
+  def test_no_npm_layer_when_npm_absent
+    spawn = FakeSpawn.new(exists: false)
+    image(spawn).call(env)
+    refute_match(/npm install/, spawn.dockerfiles.first)
+  end
+
+  def test_npm_layer_present_when_npm_specified
+    spawn = FakeSpawn.new(exists: false)
+    image(spawn).call(env(npm: ["cowsay", "left-pad"]))
+    dockerfile = spawn.dockerfiles.first
+    assert_match(/RUN npm install -g/, dockerfile)
+    assert_match(/cowsay/, dockerfile)
+    assert_match(/left-pad/, dockerfile)
+  end
+
+  def test_changed_npm_changes_tag
+    tag_a = image(FakeSpawn.new(exists: true)).call(env).value!
+    tag_b = image(FakeSpawn.new(exists: true)).call(env(npm: ["cowsay"])).value!
+    refute_equal tag_a, tag_b
+  end
+
+  # --- files layer -----------------------------------------------------------
+
+  def test_no_files_layer_when_files_absent
+    spawn = FakeSpawn.new(exists: false)
+    image(spawn).call(env)
+    refute_match(/COPY/, spawn.dockerfiles.first)
+  end
+
+  def test_files_layer_materializes_file_at_its_absolute_path_with_content_intact
+    spawn = FakeSpawn.new(exists: false)
+    content = "export const extension = {}\n"
+    files = [{ path: "/root/.pi/agent/extensions/local-inference.ts", content_b64: Base64.strict_encode64(content) }]
+    image(spawn).call(env(files: files))
+
+    dockerfile = spawn.dockerfiles.first
+    assert_match(%r{COPY files/0 /root/\.pi/agent/extensions/local-inference\.ts}, dockerfile)
+    assert_equal content, spawn.materialized_file(0)
+  end
+
+  def test_changed_file_content_changes_tag
+    files_a = [{ path: "/root/x", content_b64: Base64.strict_encode64("one") }]
+    files_b = [{ path: "/root/x", content_b64: Base64.strict_encode64("two") }]
+    tag_a = image(FakeSpawn.new(exists: true)).call(env(files: files_a)).value!
+    tag_b = image(FakeSpawn.new(exists: true)).call(env(files: files_b)).value!
+    refute_equal tag_a, tag_b
+  end
+
+  def test_unchanged_npm_and_files_keep_tag_stable
+    files = [{ path: "/root/x", content_b64: Base64.strict_encode64("same") }]
+    tag_a = image(FakeSpawn.new(exists: true)).call(env(npm: ["cowsay"], files: files)).value!
+    tag_b = image(FakeSpawn.new(exists: true)).call(env(npm: ["cowsay"], files: files)).value!
     assert_equal tag_a, tag_b
   end
 end

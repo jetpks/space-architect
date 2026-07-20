@@ -86,7 +86,7 @@ module Space
           now = Time.now
           run = @runs_repo.create(
             user_id:    job.user_id,
-            harness:    "claude",
+            harness:    job.spec.dig("harness", "type") || "claude",
             model:      job.spec.dig("harness", "model"),
             status:     0,
             created_at: now,
