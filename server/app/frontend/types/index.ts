@@ -143,6 +143,15 @@ export type Run = {
   id: number
   status: string
   published: boolean
+  role: string | null
+  harness: string | null
+  model: string | null
+  producer: string | null
+  created_at: string
+  updated_at: string
+  // Owner-only: the job that produced this run (null for ingested runs and
+  // non-owner viewers).
+  job: { id: number; status: string; prompt: string } | null
 }
 
 export type RunListItem = {
@@ -150,6 +159,90 @@ export type RunListItem = {
   status: string
   published: boolean
   created_at: string
+}
+
+export type JobListItem = {
+  id: number
+  status: string
+  model: string
+  created_at: string
+  run_id: number | null
+}
+
+export type HarnessSpec = {
+  type: string
+  model: string
+  backend: { base_url: string; api_key_ref?: string | null }
+  args?: string[]
+}
+
+export type EnvironmentSpec = {
+  env?: Record<string, string>
+  secrets?: { ref: string; name: string }[]
+  deps?: string[]
+  debs?: string[]
+  npm?: string[]
+  gems?: string[]
+  mise?: string[]
+  files?: { path: string; content_b64: string }[]
+  permissions?: { network?: boolean; mounts?: string[] }
+}
+
+// The v1 job spec surface (see app/contracts/create_job.rb).
+export type JobSpec = {
+  harness: HarnessSpec
+  prompt: string
+  environment: EnvironmentSpec
+}
+
+export type JobDetail = {
+  id: number
+  status: string
+  attempts: number
+  run_id: number | null
+  spec: JobSpec
+  created_at: string
+  updated_at: string
+}
+
+// A stored partial job spec (see app/contracts/create_profile.rb): harness +
+// environment, no prompt. Jobs/New prefills its form from one; it never
+// carries a prompt of its own.
+export type ProfileSpec = {
+  harness: HarnessSpec
+  environment: EnvironmentSpec
+}
+
+export type Profile = {
+  id: number
+  name: string
+  harness_type: string
+  spec: ProfileSpec
+}
+
+// An inference backend jobs and profiles can target. flavors names the wire
+// protocols it speaks (see lib/providers REQUIRED_FLAVOR).
+export type Provider = {
+  id: number
+  name: string
+  base_url: string
+  api_key_ref: string | null
+  flavors: string[]
+}
+
+// A pi extension file generated from a provider row + its live model list.
+// env_key is set only for key-bearing providers (see lib/providers fetchPiExtension).
+export type PiExtension = {
+  path: string
+  content: string
+  env_key: string | null
+}
+
+// Wraps GET /providers/:id/pi_extension — the frozen {extension, error} shape
+// at HTTP 200 both ways.
+export type PiExtensionResponse = {
+  extension: PiExtension | null
+  error: string | null
 }
 
 // An access grant on a conversation: a GitHub user, or every member of a

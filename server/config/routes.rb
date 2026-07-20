@@ -47,6 +47,28 @@ module Space
       get  "/runs/:id/stream",  to: "runs.stream"
       get  "/runs/:id",         to: "runs.show"
 
+      # Jobs (inference-job queue + browser UI — I06/I10; /jobs/new before /jobs/:id,
+      # same precedent as conversations/new above)
+      get  "/jobs",            to: "jobs.index"
+      get  "/jobs/new",        to: "jobs.new"
+      post "/jobs",            to: "jobs.create"
+      get  "/jobs/:id",        to: "jobs.show"
+      post "/jobs/:id/cancel", to: "jobs.cancel"
+
+      # Profiles (harness profiles — user-owned partial job specs, I20)
+      get  "/profiles",            to: "profiles.index"
+      get  "/profiles/new",        to: "profiles.new"
+      post "/profiles",            to: "profiles.create"
+      post "/profiles/:id/delete", to: "profiles.destroy"
+
+      # Providers (inference providers — user-owned rows, I22)
+      get  "/providers",             to: "providers.index"
+      get  "/providers/new",         to: "providers.new"
+      post "/providers",             to: "providers.create"
+      post "/providers/:id/delete",  to: "providers.destroy"
+      get  "/providers/:id/models",  to: "providers.models"
+      get  "/providers/:id/pi_extension", to: "providers.pi_extension"
+
       # Spaces
       get "/spaces",                    to: "spaces.index"
       get "/spaces/:id",                to: "spaces.show"

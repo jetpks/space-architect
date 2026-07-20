@@ -1,11 +1,13 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Boot-smoke for the supervised web+worker topology.
+# Boot-smoke for the supervised web+workers topology.
 #
-# Launches `falcon host falcon.rb`, confirms BOTH services up (web answers /up; worker
-# logs ready), enqueues a real Redis job, observes it drain to :completed, sends SIGTERM,
-# confirms graceful exit 0 and no orphaned child processes.
+# Asserts the dev jobs queue is quiescent (never enqueues an inference job itself),
+# launches `falcon host falcon.rb`, confirms ALL FOUR services up (web answers /up;
+# executor + consumer workers log ready), enqueues a real Redis import job, observes
+# it drain to :completed, sends SIGTERM, confirms graceful exit 0 and no orphaned
+# child processes.
 #
 # Usage: cd architect && HANAMI_ENV=development bundle exec ruby bin/topology_smoke.rb
 # Exit 0 = PASS; exit 1 = FAIL (details on stderr)
@@ -55,6 +57,18 @@ end
 log "Redis OK"
 
 # ---------------------------------------------------------------------------
+# The jobs queue must be quiescent: a queued/running job would be claimed by
+# the executor-worker we boot and invoke the real `container` CLI. Fail fast —
+# never clean up other people's data.
+# ---------------------------------------------------------------------------
+busy = Space::Server::Repos::JobsRepo.new.jobs.where(status: %w[queued running]).to_a
+unless busy.empty?
+  fail! "jobs queue not quiescent: #{busy.length} queued/running job(s) in the dev DB " \
+        "(ids: #{busy.map(&:id).join(', ')}) — resolve them before running the smoke"
+end
+log "Jobs queue quiescent — no queued/running jobs"
+
+# ---------------------------------------------------------------------------
 # Create test fixtures: store source file, create conversation record.
 # ---------------------------------------------------------------------------
 FIXTURE = File.join(ARCHITECT_DIR, "test", "fixtures", "files", "transcript.jsonl")
@@ -100,12 +114,17 @@ log "Enqueued job conversation_id=#{conv_id} prefix=#{enqueue_prefix}"
 falcon_bin = `which falcon`.strip
 fail! "falcon not found on PATH" if falcon_bin.empty?
 
-log "Spawning: #{falcon_bin} host falcon.rb"
+# Capture the host's combined output: the worker ready-line checks below read it.
+require "tmpdir"
+FALCON_LOG = File.join(Dir.mktmpdir("topology-smoke-"), "falcon.log")
+
+log "Spawning: #{falcon_bin} host falcon.rb (log: #{FALCON_LOG})"
 falcon_pid = Process.spawn(
   { "HANAMI_ENV" => "development" },
   falcon_bin, "host", "falcon.rb",
   chdir: ARCHITECT_DIR,
-  pgroup: true  # own process group so we can kill all children
+  pgroup: true,  # own process group so we can kill all children
+  [:out, :err] => FALCON_LOG
 )
 log "falcon host PID=#{falcon_pid}"
 
@@ -141,6 +160,27 @@ until Time.now > deadline
   sleep 0.5
 end
 fail! "Web service did not come up within #{BOOT_WAIT}s (GET #{WEB_URL} never returned 200)" unless web_up
+
+# ---------------------------------------------------------------------------
+# Confirm the executor-worker and consumer-worker children are up: their
+# services log a ready line (the same line the dev bins log) into FALCON_LOG.
+# ---------------------------------------------------------------------------
+WORKER_READY_LINES = ["Executor worker starting", "Consumer worker starting"].freeze
+
+log "Waiting up to #{BOOT_WAIT}s for worker ready lines in falcon log..."
+missing = WORKER_READY_LINES
+deadline = Time.now + BOOT_WAIT
+until Time.now > deadline
+  output = File.read(FALCON_LOG)
+  missing = WORKER_READY_LINES.reject { |line| output.include?(line) }
+  break if missing.empty?
+  sleep 0.5
+end
+unless missing.empty?
+  fail! "worker children not confirmed up within #{BOOT_WAIT}s — missing ready line(s): " \
+        "#{missing.join(' | ')} (see #{FALCON_LOG})"
+end
+log "Executor + consumer workers UP — ready lines observed"
 
 # ---------------------------------------------------------------------------
 # Wait for import job to drain to :completed.
@@ -210,7 +250,9 @@ log "No orphaned processes — all #{children_before.size} children exited"
 # ---------------------------------------------------------------------------
 puts ""
 puts "TOPOLOGY SMOKE OK"
+puts "  quiescence: no queued/running jobs at start"
 puts "  web: GET #{WEB_URL} → 200"
-puts "  worker: conversation #{conv_id} → :completed"
+puts "  workers: executor + consumer ready lines observed"
+puts "  import: conversation #{conv_id} → :completed"
 puts "  shutdown: graceful exit, 0 orphans"
 exit 0

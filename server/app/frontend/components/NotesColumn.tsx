@@ -205,7 +205,7 @@ function NotesColumn({
                     e.stopPropagation()
                     router.delete(`/annotations/${note.id}`, { preserveScroll: true })
                   }}
-                  className="ml-auto text-muted-foreground hover:text-rose-400"
+                  className="ml-auto text-muted-foreground hover:text-destructive"
                   aria-label="Delete note"
                 >
                   <X className="size-3.5" />

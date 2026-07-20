@@ -70,6 +70,34 @@ Factory.define(:run) do |f|
   f.updated_at { Time.now }
 end
 
+Factory.define(:job) do |f|
+  f.association(:user)
+  f.spec {
+    {
+      "harness" => { "type" => "claude", "model" => "sonnet", "backend" => { "base_url" => "https://api.example.com" } },
+      "prompt" => "do the thing",
+      "environment" => { "env" => {}, "secrets" => [], "deps" => [], "permissions" => { "network" => false, "mounts" => [] } }
+    }
+  }
+  f.status    { "queued" }
+  f.created_at { Time.now }
+  f.updated_at { Time.now }
+end
+
+Factory.define(:profile) do |f|
+  f.association(:user)
+  f.name         { Faker::Lorem.unique.word }
+  f.harness_type { "claude" }
+  f.spec {
+    {
+      "harness" => { "type" => "claude", "model" => "sonnet", "backend" => { "base_url" => "https://api.example.com" } },
+      "environment" => { "env" => {}, "secrets" => [], "deps" => [], "npm" => [], "files" => [], "permissions" => { "network" => false, "mounts" => [] } }
+    }
+  }
+  f.created_at { Time.now }
+  f.updated_at { Time.now }
+end
+
 Factory.define(:space) do |f|
   f.association(:user)
   f.slug      { Faker::Internet.unique.slug }

@@ -149,13 +149,13 @@ class PersistDbReplayTest < Minitest::Test
               assert_match "space-architect-server", sse,
                 "SSE replay must include second assistant text content"
 
-              # Events must arrive in ascending id order (db_replay uses 0-1, 0-2, ...)
-              ids = sse.scan(/^id: ([\d-]+)/).flatten
-              refute_empty ids, "SSE must contain id: lines"
-              assert_equal ids, ids.sort_by { |id| id.split("-").map(&:to_i) },
-                "SSE event ids must be in ascending order"
-              assert_equal "0-#{ids.size}", ids.last,
-                "last SSE id must match total event count"
+              # I12: db_replay emits no id: lines — a fabricated id (e.g. the old
+              # "0-1", "0-2", ...) would alias a real Redis stream position, and a
+              # client that adopted it as Last-Event-ID would later reconnect with
+              # `XRANGE ((0-N` against the real stream and replay it in full (see
+              # app/actions/runs/stream.rb#sse_format). The Redis key was deleted
+              # above, so this whole response is pure db_replay: no id: lines at all.
+              refute_match(/^id:/, sse, "db_replay must not emit id: lines")
             end
           ensure
             client&.close rescue nil

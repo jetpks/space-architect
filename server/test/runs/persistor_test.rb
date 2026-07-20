@@ -23,6 +23,12 @@ class PersistorTest < Minitest::Test
     assert_equal "architect_dispatch", conv.source
   end
 
+  def test_setup_accepts_source_override
+    run = Factory[:run, user_id: @user.id]
+    conv = @persistor.setup(run, source: "job")
+    assert_equal "job", conv.source
+  end
+
   def test_setup_sets_conversation_id_reader
     run = Factory[:run, user_id: @user.id]
     @persistor.setup(run)

@@ -86,7 +86,7 @@ export default function AnnotationSection({
                   preserveScroll: true,
                 })
               }
-              className="text-muted-foreground hover:text-rose-400"
+              className="text-muted-foreground hover:text-destructive"
               aria-label="Delete note"
             >
               <X className="size-4" />

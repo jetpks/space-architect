@@ -89,7 +89,7 @@ export default function ShareDialog({
                       preserveScroll: true,
                     })
                   }
-                  className="text-muted-foreground transition-colors hover:text-rose-400"
+                  className="text-muted-foreground transition-colors hover:text-destructive"
                   aria-label={`Remove share for ${share.github_login}`}
                 >
                   <X className="size-4" />
