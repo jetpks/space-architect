@@ -10,6 +10,7 @@ module Space
         params do
           required(:conversation).hash do
             required(:source_file).filled
+            optional(:session_id).filled(:string)
           end
         end
       end
