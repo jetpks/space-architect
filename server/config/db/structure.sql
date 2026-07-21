@@ -130,7 +130,8 @@ CREATE TABLE public.conversations (
     title text,
     updated_at timestamp with time zone NOT NULL,
     user_id bigint NOT NULL,
-    source_file_data text
+    source_file_data text,
+    parent_session_id text
 );
 
 
@@ -908,4 +909,5 @@ INSERT INTO schema_migrations (filename) VALUES
 ('20260719000000_add_failure_evidence_to_jobs.rb'),
 ('20260719010000_create_profiles.rb'),
 ('20260719020000_create_providers.rb'),
-('20260719030000_add_provider_id_to_profiles.rb');
+('20260719030000_add_provider_id_to_profiles.rb'),
+('20260721000000_add_parent_session_id_to_conversations.rb');
