@@ -20,6 +20,8 @@ const JOB: JobListItem = {
   id: 1,
   status: 'running',
   model: 'claude-sonnet-5',
+  harness: 'claude',
+  prompt_snippet: 'do the thing',
   created_at: '2026-06-28T21:32:12.278Z',
   run_id: 7,
 }
@@ -28,6 +30,31 @@ describe('Jobs/Index', () => {
   it('renders a link to each job', () => {
     const { container } = render(<Index jobs={[JOB]} />)
     expect(container.querySelector('a[href="/jobs/1"]')).not.toBeNull()
+  })
+
+  it('renders harness type and prompt snippet', () => {
+    const { container } = render(<Index jobs={[JOB]} />)
+    expect(container.textContent).toContain('claude')
+    expect(container.textContent).toContain('do the thing')
+  })
+
+  it('renders provenance when present', () => {
+    const job = { ...JOB, provenance: { space: 's1', iteration: 'I16', lane: 'server' } }
+    const { container } = render(<Index jobs={[job]} />)
+    expect(container.textContent).toContain('s1')
+    expect(container.textContent).toContain('I16')
+    expect(container.textContent).toContain('server')
+  })
+
+  it('links run_id to its run page', () => {
+    const { container } = render(<Index jobs={[JOB]} />)
+    expect(container.querySelector('a[href="/runs/7"]')).not.toBeNull()
+  })
+
+  it('omits the run link when run_id is null', () => {
+    const job = { ...JOB, run_id: null }
+    const { container } = render(<Index jobs={[job]} />)
+    expect(container.querySelector('a[href="/runs/7"]')).toBeNull()
   })
 
   it('renders a status badge for every one of the five job states', () => {

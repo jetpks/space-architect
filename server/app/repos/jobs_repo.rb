@@ -29,6 +29,12 @@ module Space
           jobs.where(run_id: run_id).to_a.first
         end
 
+        # Bulk form of by_run_id for index pages: one job per run_id, keyed for
+        # O(1) lookup — avoids an N+1 when resolving a whole page of runs.
+        def by_run_ids(run_ids)
+          jobs.where(run_id: run_ids).to_a.each_with_object({}) { |job, h| h[job.run_id] = job }
+        end
+
         # Index scope: a user's own jobs, newest first, capped at 100 (I10 — no
         # pagination yet).
         def list_for_user(user_id, limit: 100)

@@ -25,11 +25,26 @@ export default function Index({ jobs }: Props) {
       ) : (
         <ul className="divide-y divide-border">
           {jobs.map((job) => (
-            <li key={job.id} className="flex items-center justify-between py-3">
-              <Link href={`/jobs/${job.id}`} className="font-medium hover:underline">
-                Job #{job.id} · {job.model}
-              </Link>
-              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            <li key={job.id} className="flex items-center justify-between gap-4 py-3">
+              <div className="min-w-0">
+                <Link href={`/jobs/${job.id}`} className="font-medium hover:underline">
+                  Job #{job.id} · {[job.harness, job.model].filter(Boolean).join(' · ')}
+                </Link>
+                {job.provenance && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {job.provenance.space} · {job.provenance.iteration} · {job.provenance.lane}
+                  </p>
+                )}
+                {job.prompt_snippet && (
+                  <p className="mt-1 truncate text-sm text-muted-foreground">{job.prompt_snippet}</p>
+                )}
+                {job.run_id && (
+                  <Link href={`/runs/${job.run_id}`} className="mt-1 block text-xs underline underline-offset-2">
+                    Run #{job.run_id}
+                  </Link>
+                )}
+              </div>
+              <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
                 <Badge variant={STATUS_VARIANT[job.status] ?? 'outline'}>{job.status}</Badge>
                 {timeLabel(job.created_at, null)}
               </span>

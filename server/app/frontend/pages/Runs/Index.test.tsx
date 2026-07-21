@@ -20,7 +20,11 @@ const RUN: RunListItem = {
   id: 1,
   status: 'complete',
   published: false,
+  harness: 'claude',
+  model: 'sonnet',
+  lane: 'builder-a',
   created_at: '2026-06-28T21:32:12.278Z',
+  prompt_snippet: 'do the thing',
 }
 
 describe('Runs/Index', () => {
@@ -34,14 +38,48 @@ describe('Runs/Index', () => {
     expect(container.textContent).toContain('No runs yet')
   })
 
-  it('renders absolute timestamp for created_at with UTC fallback (null offset)', () => {
+  it('renders absolute timestamp for created_at with Z fallback (null offset)', () => {
     const { container } = render(<Index runs={[RUN]} />)
-    // null offset → UTC +0000
-    expect(container.textContent).toContain('2026-06-28T21:32:12.278+0000')
+    expect(container.textContent).toContain('2026-06-28T21:32:12.278Z')
   })
 
-  it('renders the absolute pattern matching ISO8601 with colon-less offset', () => {
+  it('renders the absolute pattern matching ISO8601 with a Z suffix', () => {
     const { container } = render(<Index runs={[RUN]} />)
-    expect(container.textContent).toMatch(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}[+-]\d{4}/)
+    expect(container.textContent).toMatch(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z/)
+  })
+
+  it('renders harness, model, and lane on the row', () => {
+    const { container } = render(<Index runs={[RUN]} />)
+    expect(container.textContent).toContain('claude')
+    expect(container.textContent).toContain('sonnet')
+    expect(container.textContent).toContain('builder-a')
+  })
+
+  it('renders the prompt snippet when present', () => {
+    const { container } = render(<Index runs={[RUN]} />)
+    expect(container.textContent).toContain('do the thing')
+  })
+
+  it('omits the prompt snippet when absent (non-owner or no job)', () => {
+    const run = { ...RUN, prompt_snippet: null }
+    const { container } = render(<Index runs={[run]} />)
+    expect(container.textContent).not.toContain('do the thing')
+  })
+
+  it('distinguishes two rows by their identity fields', () => {
+    const other: RunListItem = {
+      id: 2,
+      status: 'live',
+      published: false,
+      harness: 'opencode',
+      model: 'gpt-5',
+      lane: 'builder-b',
+      created_at: '2026-06-28T22:00:00Z',
+      prompt_snippet: null,
+    }
+    const { container } = render(<Index runs={[RUN, other]} />)
+    expect(container.textContent).toContain('opencode')
+    expect(container.textContent).toContain('gpt-5')
+    expect(container.textContent).toContain('builder-b')
   })
 })

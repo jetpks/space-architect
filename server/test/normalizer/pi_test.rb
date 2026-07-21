@@ -1,6 +1,20 @@
 # frozen_string_literal: true
 
 require_relative "support"
+require "space/server/runs/persistor"
+
+# Duck-typed stand-ins for Persistor's repo dependencies — no DB, since this
+# file's support.rb boots the normalizer standalone (no Hanami/ROM).
+class FakePiConversationsRepo
+  Conv = Struct.new(:id, :user_id, :source)
+  def create(user_id:, source:, **) = Conv.new(1, user_id, source)
+end
+
+class FakePiMessagesRepo
+  attr_reader :rows
+  def initialize = @rows = []
+  def create(**attrs) = @rows << attrs
+end
 
 class PiTest < Minitest::Test
   def parser = Space::Server::Normalizer::Pi.new
@@ -17,6 +31,7 @@ class PiTest < Minitest::Test
     events = parse_fixture("pi_streaming_session.jsonl")
     assert_equal(
       [:run_init,
+       :message_start, :block_open, :text_delta, :block_close, :message_complete,
        :message_start, :block_open, :text_delta, :block_close,
        :block_open, :text_delta, :block_close,
        :block_open, :tool_args_delta, :block_close,
@@ -34,17 +49,29 @@ class PiTest < Minitest::Test
     assert_equal "/tmp/pi-stream-project",     run_init[:cwd]
   end
 
-  test "streaming session: message_start fields from message_end" do
+  test "streaming session: opening user prompt is persisted as a leading user message" do
     events    = parse_fixture("pi_streaming_session.jsonl")
     msg_start = events.find { |e| e[:type] == :message_start }
+    assert_equal "user", msg_start[:role]
+    assert_nil msg_start[:model]
+
+    prompt_index = events.index(msg_start)
+    prompt_delta = events[prompt_index + 2]
+    assert_equal :text_delta, prompt_delta[:type]
+    assert_equal "add a smoke test for the importer", prompt_delta[:text]
+  end
+
+  test "streaming session: message_start fields from the assistant message_end" do
+    events    = parse_fixture("pi_streaming_session.jsonl")
+    msg_start = events.select { |e| e[:type] == :message_start }.find { |e| e[:role] == "assistant" }
     assert_equal "assistant",             msg_start[:role]
     assert_equal "minimax/minimax-m3",    msg_start[:model]
   end
 
-  test "streaming session: thinking, text, and tool_use blocks in order across both assistant message_ends" do
+  test "streaming session: thinking, text, and tool_use blocks in order across the user prompt and both assistant message_ends" do
     events      = parse_fixture("pi_streaming_session.jsonl")
     block_opens = events.select { |e| e[:type] == :block_open }
-    assert_equal [:thinking, :text, :tool_use, :text], block_opens.map { |e| e[:block_type] }
+    assert_equal [:text, :thinking, :text, :tool_use, :text], block_opens.map { |e| e[:block_type] }
 
     tool_block = block_opens.find { |e| e[:block_type] == :tool_use }
     assert_equal "read",          tool_block[:name]
@@ -54,8 +81,9 @@ class PiTest < Minitest::Test
   test "streaming session: text deltas carry block text" do
     events = parse_fixture("pi_streaming_session.jsonl")
     deltas = events.select { |e| e[:type] == :text_delta }
-    assert_equal "I'll write a smoke test for the importer next.", deltas[0][:text]
-    assert_equal "Let me check the existing test patterns.",       deltas[1][:text]
+    assert_equal "add a smoke test for the importer",             deltas[0][:text]
+    assert_equal "I'll write a smoke test for the importer next.", deltas[1][:text]
+    assert_equal "Let me check the existing test patterns.",       deltas[2][:text]
   end
 
   test "streaming session: tool_args_delta carries serialized arguments" do
@@ -67,8 +95,8 @@ class PiTest < Minitest::Test
 
   test "streaming session: message_complete normalizes camelCase toolUse stop reason" do
     events       = parse_fixture("pi_streaming_session.jsonl")
-    msg_complete = events.find { |e| e[:type] == :message_complete }
-    assert_equal :tool_use, msg_complete[:stop_reason]
+    msg_complete = events.find { |e| e[:type] == :message_complete && e[:stop_reason] == :tool_use }
+    refute_nil msg_complete
   end
 
   test "streaming session: tool_result sourced from tool_execution_end" do
@@ -84,8 +112,11 @@ class PiTest < Minitest::Test
     assert_equal 1, events.count { |e| e[:type] == :tool_result }, "message_end(role: toolResult) must not double-emit"
   end
 
-  test "user role message_end produces no event (the initial prompt is already known to the caller)" do
-    assert_equal [], parser.process({ "type" => "message_end", "message" => { "role" => "user", "content" => [{ "type" => "text", "text" => "hi" }] } })
+  test "user role message_end emits a full message lifecycle for the prompt" do
+    events = parser.process({ "type" => "message_end", "message" => { "role" => "user", "content" => [{ "type" => "text", "text" => "hi" }] } })
+    assert_equal [:message_start, :block_open, :text_delta, :block_close, :message_complete], events.map { |e| e[:type] }
+    assert_equal "user", events.first[:role]
+    assert_equal "hi",   events[2][:text]
   end
 
   test "streaming session: final assistant message_end (no preceding message_start) still emits its content" do
@@ -193,5 +224,29 @@ class PiTest < Minitest::Test
 
   test "unknown line types produce no events" do
     assert_equal [], parser.process('{"type":"unknown_future_event"}')
+  end
+
+  # ── ingest fix (AC1): normalizer output flushed through the real Persistor ─
+
+  test "streaming session: fed through Persistor, the opening prompt lands as a role:user row before the assistant reply" do
+    events = parse_fixture("pi_streaming_session.jsonl")
+
+    conversations_repo = FakePiConversationsRepo.new
+    messages_repo       = FakePiMessagesRepo.new
+    persistor = Space::Server::Runs::Persistor.new(conversations_repo, messages_repo)
+    persistor.setup(Struct.new(:user_id).new(1))
+    events.each { |e| persistor.process(e) }
+
+    rows = messages_repo.rows
+    assert_equal "user", rows[0][:role]
+    assert_equal [{ "type" => "text", "text" => "add a smoke test for the importer" }], rows[0][:content]
+    assert_equal 0, rows[0][:position]
+
+    assert_equal "assistant", rows[1][:role]
+    assert_operator rows[1][:position], :>, rows[0][:position]
+
+    tool_result_row = rows.find { |r| r[:content].any? { |b| b["type"] == "tool_result" } }
+    refute_nil tool_result_row, "tool_result handling must be unchanged"
+    assert_equal "user", tool_result_row[:role]
   end
 end
