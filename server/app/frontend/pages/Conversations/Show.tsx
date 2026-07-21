@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Head, router, usePage } from '@inertiajs/react'
+import { Head, Link, router, usePage } from '@inertiajs/react'
 import { MessageSquarePlus } from 'lucide-react'
 import {
   AlertDialog,
@@ -364,6 +364,14 @@ export default function Show({ conversation, turns, annotations, shares }: Props
         <div className="min-w-0" ref={centerRef}>
           <header id="conversation" className="mb-4 scroll-mt-20 border-b border-border pb-4">
             <h1 className="text-2xl font-bold">{conversation.title}</h1>
+            {conversation.parent && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                part of{' '}
+                <Link href={`/conversations/${conversation.parent.id}`} className="hover:underline">
+                  {conversation.parent.title ?? `conversation #${conversation.parent.id}`}
+                </Link>
+              </p>
+            )}
             <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
               {conversation.status} · {turns.length} turns
               {conversation.published && <Badge variant="secondary">published</Badge>}
@@ -432,6 +440,21 @@ export default function Show({ conversation, turns, annotations, shares }: Props
               </div>
             )}
           </header>
+
+          {conversation.children && conversation.children.length > 0 && (
+            <section className="mb-4 border-b border-border pb-4">
+              <h2 className="text-sm font-semibold text-muted-foreground">Subagent transcripts</h2>
+              <ul className="mt-2 divide-y divide-border">
+                {conversation.children.map((child) => (
+                  <li key={child.id} className="py-1.5">
+                    <Link href={`/conversations/${child.id}`} className="text-sm hover:underline">
+                      {child.title ?? child.session_id}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {!marginNotes && (
             <AnnotationSection
