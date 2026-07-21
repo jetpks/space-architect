@@ -110,13 +110,13 @@ class InertiaRenderTest < Minitest::Test
   end
 
   def test_index_turns_count_correct
-    # @conv has 2 messages; Turn.group(visible_messages) determines the count
+    # I36: turns_count is the denormalized column (0 here — @conv's messages
+    # were inserted directly, not through the import job); just verify type/shape.
     sign_in(@owner)
     _, _, body = inertia_get("/")
     data = parse_json(body)
     conv_data = data["props"]["conversations"].find { |c| c["id"] == @conv.id }
     refute_nil conv_data
-    # turns_count is an integer; exact value depends on Turn.group logic, just verify type
     assert_kind_of Integer, conv_data["turns_count"]
   end
 

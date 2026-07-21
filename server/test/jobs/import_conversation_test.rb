@@ -37,6 +37,7 @@ class ImportConversationJobTest < Minitest::Test
     assert_equal 3,            messages.size
     assert_equal [0, 1, 2],    messages.map(&:position)
     assert_equal %w[user assistant user], messages.map(&:role)
+    assert_equal Space::Server::Transcript::Turn.group(messages).size, conv.turns_count
   end
 
   # ── codex ─────────────────────────────────────────────────────────────────────
@@ -101,6 +102,7 @@ class ImportConversationJobTest < Minitest::Test
 
     conv = conversations_repo.by_pk(conv.id)
     assert_equal :failed, conv.status
+    assert_equal 0, conv.turns_count, "a failed import must not recompute turns_count"
   end
 
   # ── nil source_file guard ─────────────────────────────────────────────────────

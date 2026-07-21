@@ -65,6 +65,34 @@ class ConversationsActionTest < Minitest::Test
     assert conversations.first["published"]
   end
 
+  # Recording logger stand-in — Sequel::Database#loggers accepts anything
+  # responding to the Logger interface; #info is what Sequel calls per query.
+  class SqlSpy
+    attr_reader :statements
+    def initialize = @statements = []
+    def info(msg) = @statements << msg
+    def method_missing(*) = nil
+    def respond_to_missing?(*) = true
+  end
+
+  # I36: the index must never load message rows — that's what pinned a web
+  # fiber past falcon's 30s health-check timeout and produced the studio 502.
+  def test_index_issues_no_message_queries
+    conv = Factory[:conversation, user_id: @owner.id, published: true]
+    Factory[:message, conversation_id: conv.id, role: "user",
+            content: [{ "type" => "text", "text" => "hi" }], position: 1]
+
+    connection = Space::Server::App["db.gateway"].connection
+    spy = SqlSpy.new
+    connection.loggers << spy
+    inertia_get("/")
+    connection.loggers.delete(spy)
+
+    message_queries = spy.statements.select { |sql| sql.include?(%(FROM "messages")) }
+    assert_equal 0, message_queries.length,
+      "expected zero queries against messages, got #{message_queries.length}"
+  end
+
   def test_conversations_path_returns_index_component
     status1, _, body1 = inertia_get("/")
     status2, _, body2 = inertia_get("/conversations")
