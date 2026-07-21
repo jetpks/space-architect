@@ -122,6 +122,39 @@ class ConversationsActionTest < Minitest::Test
     assert_equal true, data["props"]["conversation"]["can_manage"]
   end
 
+  def test_show_includes_parent_and_children_props_for_owner
+    sign_in(@owner)
+    parent = Factory[:conversation, published: false, user_id: @owner.id, session_id: "sess-parent"]
+    conv = Factory[:conversation, published: false, user_id: @owner.id, session_id: "sess-child", parent_session_id: "sess-parent"]
+    child = Factory[:conversation, published: false, user_id: @owner.id, session_id: "sess-grandchild", parent_session_id: "sess-child"]
+
+    _, _, body = inertia_get("/conversations/#{conv.id}")
+    data = parse_json(body)
+    assert_equal parent.id, data["props"]["conversation"]["parent"]["id"]
+    assert_equal [child.id], data["props"]["conversation"]["children"].map { |c| c["id"] }
+    assert_equal "sess-grandchild", data["props"]["conversation"]["children"].first["session_id"]
+  end
+
+  def test_show_omits_parent_and_children_keys_for_non_owner
+    other = Factory[:user, github_uid: "other-uid", username: "other"]
+    sign_in(other)
+    conv = Factory[:conversation, published: true, user_id: @owner.id, session_id: "sess-child", parent_session_id: "sess-parent"]
+
+    _, _, body = inertia_get("/conversations/#{conv.id}")
+    data = parse_json(body)
+    refute data["props"]["conversation"].key?("parent"), "non-owner must not receive parent key"
+    refute data["props"]["conversation"].key?("children"), "non-owner must not receive children key"
+  end
+
+  def test_show_omits_parent_and_children_keys_for_anonymous
+    conv = Factory[:conversation, published: true, user_id: @owner.id, session_id: "sess-child", parent_session_id: "sess-parent"]
+
+    _, _, body = inertia_get("/conversations/#{conv.id}")
+    data = parse_json(body)
+    refute data["props"]["conversation"].key?("parent"), "anon must not receive parent key"
+    refute data["props"]["conversation"].key?("children"), "anon must not receive children key"
+  end
+
   def test_show_returns_404_for_missing_conversation
     status, _, _ = inertia_get("/conversations/99999")
     assert_equal 404, status

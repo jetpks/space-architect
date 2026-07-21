@@ -26,7 +26,13 @@ module Space
           }
         end
 
-        def conversation_json(conversation, viewer:, owner:)
+        # parent/children default to a sentinel (not nil) so callers that omit them
+        # entirely (list views, unit tests fixed to the pre-linkage key set) get no
+        # parent/children keys at all; the owner-gated Show action opts in explicitly.
+        NOT_PROVIDED = Object.new.freeze
+        private_constant :NOT_PROVIDED
+
+        def conversation_json(conversation, viewer:, owner:, parent: NOT_PROVIDED, children: NOT_PROVIDED)
           {
             id: conversation.id,
             title: display_title(conversation),
@@ -43,7 +49,15 @@ module Space
               name: conversation.user.name,
               avatar_url: conversation.user.avatar_url
             }
-          }
+          }.tap do |json|
+            unless parent.equal?(NOT_PROVIDED)
+              json[:parent] = parent && { id: parent.id, title: display_title(parent) }
+            end
+
+            unless children.equal?(NOT_PROVIDED)
+              json[:children] = children.to_a.map { |c| { id: c.id, title: display_title(c), session_id: c.session_id } }
+            end
+          end
         end
 
         def share_json(share)

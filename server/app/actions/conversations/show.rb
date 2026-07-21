@@ -34,8 +34,12 @@ module Space
 
             turns = Space::Server::Transcript::Turn.group(visible)
 
+            # parent:/children: are only passed when owner:true, so the serializer's
+            # opt-in sentinel keeps the keys off entirely for non-owner/anon viewers.
+            links = owner ? { parent: conversations_repo.parent_of(conversation), children: conversations_repo.children_of(conversation) } : {}
+
             render_inertia(req, res, "Conversations/Show", props: {
-              conversation: Serializers::Conversation.conversation_json(conversation, viewer: user, owner: owner),
+              conversation: Serializers::Conversation.conversation_json(conversation, viewer: user, owner: owner, **links),
               turns: turns.map { |t| Serializers::Conversation.turn_json(t, owner: owner) },
               annotations: annotations.map { |a| Serializers::Conversation.annotation_json(a, viewer: user) },
               shares: owner ? conversation.shares.map { |s| Serializers::Conversation.share_json(s) } : nil

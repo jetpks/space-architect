@@ -121,6 +121,33 @@ class CodexImporterTest < Minitest::Test
     assert last_user.blocks.first["text"].lstrip.start_with?("<turn_aborted>")
   end
 
+  def test_preserves_existing_session_id_and_sets_parent_when_content_id_differs
+    conv = Factory[:conversation, session_id: "cli-key-1"]
+    io = File.open(fixture_path("codex_rollout.jsonl"))
+    Space::Server::Importers::Codex.new.import!(conv, io)
+    io.close
+
+    conv = conversations_repo.by_pk(conv.id)
+    assert_equal "cli-key-1", conv.session_id
+    assert_equal "sess-codex-1", conv.parent_session_id
+  end
+
+  def test_leaves_parent_session_id_nil_when_content_id_matches_existing_session_id
+    conv = Factory[:conversation, session_id: "sess-codex-1"]
+    io = File.open(fixture_path("codex_rollout.jsonl"))
+    Space::Server::Importers::Codex.new.import!(conv, io)
+    io.close
+
+    conv = conversations_repo.by_pk(conv.id)
+    assert_equal "sess-codex-1", conv.session_id
+    assert_nil conv.parent_session_id
+  end
+
+  def test_browser_path_fills_nil_session_id_and_leaves_parent_session_id_nil
+    assert_equal "sess-codex-1", @conv.session_id
+    assert_nil @conv.parent_session_id
+  end
+
   private
 
   def conversations_repo = Space::Server::Repos::ConversationsRepo.new

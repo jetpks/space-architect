@@ -32,12 +32,13 @@ module Space
           end
 
           conversations_repo.update(conversation.id, {
-            status:        STATUS_TO_INT[:completed],
-            title:         @title,
-            session_id:    @session_id,
-            original_cwd:  @original_cwd,
-            git_branch:    @git_branch,
-            agent_version: @agent_version
+            status:             STATUS_TO_INT[:completed],
+            title:              @title,
+            session_id:         conversation.session_id || @session_id,
+            parent_session_id:  parent_session_id(conversation),
+            original_cwd:       @original_cwd,
+            git_branch:         @git_branch,
+            agent_version:      @agent_version
           }.compact)
         rescue => e
           conversations_repo.update(conversation.id, status: STATUS_TO_INT[:failed])
@@ -49,6 +50,12 @@ module Space
         end
 
         private
+
+        def parent_session_id(conversation)
+          return nil unless conversation.session_id
+          return nil if @session_id.nil? || @session_id == conversation.session_id
+          @session_id
+        end
 
         def parse(line)
           return if line.strip.empty?

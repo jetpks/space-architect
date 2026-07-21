@@ -77,6 +77,23 @@ module Space
         def find_by_session_id(user_id, session_id)
           conversations.where(user_id: user_id, session_id: session_id).order(Sequel.desc(:id)).to_a.first
         end
+
+        # The owner's conversation this row was forked/subagent'd from, if any.
+        # Newest wins on duplicates; nil-safe when parent_session_id is nil.
+        def parent_of(conversation)
+          return nil unless conversation.parent_session_id
+          conversations
+            .where(user_id: conversation.user_id, session_id: conversation.parent_session_id)
+            .order(Sequel.desc(:id)).to_a.first
+        end
+
+        # The owner's conversations that link back to this row as their parent.
+        def children_of(conversation)
+          return [] unless conversation.session_id
+          conversations
+            .where(user_id: conversation.user_id, parent_session_id: conversation.session_id)
+            .order(:id).to_a
+        end
       end
     end
   end
