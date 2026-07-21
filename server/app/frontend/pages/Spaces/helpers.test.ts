@@ -198,36 +198,51 @@ describe('Spaces/Show — artifacts', () => {
 // --- formatAbsolute ---
 
 describe('formatAbsolute', () => {
-  it('shifts UTC instant to negative offset (-0600)', () => {
-    expect(formatAbsolute('2026-06-28T21:32:12.278Z', -21600)).toBe('2026-06-28T15:32:12.278-0600')
+  it('shifts UTC instant to negative offset (-06:00)', () => {
+    expect(formatAbsolute('2026-06-28T21:32:12.278Z', -21600)).toBe('2026-06-28T15:32:12.278-06:00')
   })
 
-  it('shifts UTC instant to positive offset (+0530)', () => {
-    expect(formatAbsolute('2026-06-28T21:32:12.278Z', 19800)).toBe('2026-06-29T03:02:12.278+0530')
+  it('shifts UTC instant to positive offset (+05:30)', () => {
+    expect(formatAbsolute('2026-06-28T21:32:12.278Z', 19800)).toBe('2026-06-29T03:02:12.278+05:30')
   })
 
-  it('renders UTC when offsetSeconds is null', () => {
-    expect(formatAbsolute('2026-06-28T21:32:12.278Z', null)).toBe('2026-06-28T21:32:12.278+0000')
+  it('renders Z when offsetSeconds is null', () => {
+    expect(formatAbsolute('2026-06-28T21:32:12.278Z', null)).toBe('2026-06-28T21:32:12.278Z')
   })
 
-  it('renders UTC when offsetSeconds is undefined', () => {
-    expect(formatAbsolute('2026-06-28T21:32:12.278Z', undefined)).toBe('2026-06-28T21:32:12.278+0000')
+  it('renders Z when offsetSeconds is undefined', () => {
+    expect(formatAbsolute('2026-06-28T21:32:12.278Z', undefined)).toBe('2026-06-28T21:32:12.278Z')
   })
 
-  it('uses colon-less offset (no colon between hours and minutes)', () => {
+  it('renders Z when offsetSeconds is 0 (known-zero offset)', () => {
+    expect(formatAbsolute('2026-06-28T21:32:12.278Z', 0)).toBe('2026-06-28T21:32:12.278Z')
+  })
+
+  it('uses colon-separated RFC3339 offset', () => {
     const result = formatAbsolute('2026-06-28T21:32:12.278Z', -21600)
-    expect(result).toMatch(/[+-]\d{4}$/)
+    expect(result).toMatch(/[+-]\d{2}:\d{2}$/)
   })
 
-  it('shows 3-digit milliseconds', () => {
+  it('shows real 3-digit milliseconds when the source value carries them', () => {
     const result = formatAbsolute('2026-06-28T21:32:12.007Z', -21600)
     expect(result).toContain('.007')
+  })
+
+  it('omits millis entirely when the source value has no fractional seconds', () => {
+    const result = formatAbsolute('2026-07-20T17:49:02+00:00', null)
+    expect(result).toBe('2026-07-20T17:49:02Z')
+    expect(result).not.toContain('.')
+  })
+
+  it('omits millis when the source value carries an explicit zero fraction', () => {
+    const result = formatAbsolute('2026-07-20T17:49:02.000+00:00', null)
+    expect(result).toBe('2026-07-20T17:49:02Z')
   })
 
   it('is host-timezone independent — does not read local zone', () => {
     // All assertions use getUTC* internally; result is deterministic regardless of TZ env.
     const r1 = formatAbsolute('2026-06-28T00:00:00.000Z', 0)
-    expect(r1).toBe('2026-06-28T00:00:00.000+0000')
+    expect(r1).toBe('2026-06-28T00:00:00Z')
   })
 })
 
@@ -238,12 +253,12 @@ describe('timeLabel', () => {
     const past = new Date(Date.now() - 2 * 60 * 60_000).toISOString()
     const label = timeLabel(past, 0)
     expect(label).toMatch(/ago/)
-    expect(label).toMatch(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}[+-]\d{4}/)
+    expect(label).toMatch(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z/)
     expect(label).toContain(' · ')
   })
 
-  it('passes null offset through to formatAbsolute (UTC fallback)', () => {
+  it('passes null offset through to formatAbsolute (Z fallback)', () => {
     const label = timeLabel('2026-06-28T21:32:12.278Z', null)
-    expect(label).toContain('+0000')
+    expect(label).toContain('Z')
   })
 })

@@ -71,6 +71,12 @@ module Space
         def by_pk(id)
           conversations.by_pk(id).one
         end
+
+        # Scoped to the owning user; if dev-artifact duplicates exist for the
+        # same (user_id, session_id), the newest row wins.
+        def find_by_session_id(user_id, session_id)
+          conversations.where(user_id: user_id, session_id: session_id).order(Sequel.desc(:id)).to_a.first
+        end
       end
     end
   end

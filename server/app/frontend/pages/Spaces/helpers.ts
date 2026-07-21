@@ -31,8 +31,10 @@ export function relativeTime(iso: string): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
-// Display precision is milliseconds; the isoUtc input retains microsecond fidelity.
-// Compose the wall-clock by shifting the UTC epoch — host timezone is never read.
+// Display precision is milliseconds, but only when the wire value actually
+// carries non-zero fractional seconds — otherwise showing ".000" fabricates
+// precision the source never had. Compose the wall-clock by shifting the UTC
+// epoch — host timezone is never read.
 export function formatAbsolute(isoUtc: string, offsetSeconds?: number | null): string {
   const offset = offsetSeconds ?? 0
   const shifted = new Date(new Date(isoUtc).getTime() + offset * 1000)
@@ -42,12 +44,19 @@ export function formatAbsolute(isoUtc: string, offsetSeconds?: number | null): s
   const h = String(shifted.getUTCHours()).padStart(2, '0')
   const m = String(shifted.getUTCMinutes()).padStart(2, '0')
   const s = String(shifted.getUTCSeconds()).padStart(2, '0')
-  const ms = String(shifted.getUTCMilliseconds()).padStart(3, '0')
-  const sign = offset < 0 ? '-' : '+'
-  const absOff = Math.abs(offset)
-  const oh = String(Math.floor(absOff / 3600)).padStart(2, '0')
-  const om = String(Math.floor((absOff % 3600) / 60)).padStart(2, '0')
-  return `${Y}-${M}-${D}T${h}:${m}:${s}.${ms}${sign}${oh}${om}`
+
+  const fractionDigits = isoUtc.match(/\.(\d+)/)?.[1] ?? ''
+  const hasRealMillis = Number(fractionDigits.padEnd(3, '0').slice(0, 3)) !== 0
+  const ms = hasRealMillis ? `.${String(shifted.getUTCMilliseconds()).padStart(3, '0')}` : ''
+
+  const tz =
+    offsetSeconds == null || offsetSeconds === 0
+      ? 'Z'
+      : `${offset < 0 ? '-' : '+'}${String(Math.floor(Math.abs(offset) / 3600)).padStart(2, '0')}:${String(
+          Math.floor((Math.abs(offset) % 3600) / 60),
+        ).padStart(2, '0')}`
+
+  return `${Y}-${M}-${D}T${h}:${m}:${s}${ms}${tz}`
 }
 
 export function timeLabel(isoUtc: string, offsetSeconds?: number | null): string {

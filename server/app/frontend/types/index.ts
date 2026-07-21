@@ -158,15 +158,24 @@ export type RunListItem = {
   id: number
   status: string
   published: boolean
+  harness: string | null
+  model: string | null
+  lane: string | null
   created_at: string
+  // Owner-gated first ~140 chars of the originating job's prompt; nil for
+  // non-owners, anon viewers, and runs with no job (ingested runs).
+  prompt_snippet: string | null
 }
 
 export type JobListItem = {
   id: number
   status: string
   model: string
+  harness: string | null
+  prompt_snippet: string | null
   created_at: string
   run_id: number | null
+  provenance?: { space: string; iteration: string; lane: string }
 }
 
 export type HarnessSpec = {

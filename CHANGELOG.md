@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.3.0] - 2026-07-20
+
+### Added
+
+- **`architect sessions sync`** — scans local pi (`~/.pi/agent/sessions`) and
+  claude (`~/.claude/projects`) session stores and uploads new/grown `.jsonl`
+  files to a space-server over the bearer-authenticated `POST /conversations`
+  wire contract. Per-file `{size, mtime}` cursor at
+  `$XDG_STATE_HOME/space-architect/session-sync.yaml`, a 60-second recent-mtime
+  guard against mid-write reads, `--dry-run`, and per-file
+  uploaded/updated/skipped/failed reporting (non-zero exit on any failure).
+  An `op://` token is resolved once per run via `op read`.
+- **`architect sessions agent install|uninstall|status`** — manages a per-user
+  launchd agent (`io.github.jetpks.space-architect.session-sync`, default
+  `StartInterval` 900s) that runs the sync on an interval. An `op://` token is
+  stored in the plist as the ref, never as a resolved secret.
+- **Server: bearer branch + upsert on `POST /conversations`** — machine uploads
+  authenticate with the ingest bearer token and upsert by `(user, session_id)`:
+  re-uploading a grown session file updates the existing conversation row
+  (source file replaced, import re-enqueued) instead of duplicating it.
+  The browser upload path is unchanged.
+- **Server: run-fidelity surfaces** — the pi opening prompt is persisted and
+  rendered as a leading user turn on Runs/Show (owner-gated); runs/jobs indexes
+  carry harness/model/lane and an owner-gated prompt snippet; absolute
+  timestamps render the wire value honestly (RFC3339 offsets, millis only when
+  present).
+
 ## [5.2.1] - 2026-07-19
 
 ### Fixed

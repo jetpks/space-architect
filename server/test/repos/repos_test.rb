@@ -114,6 +114,30 @@ class ReposTest < Minitest::Test
     assert_respond_to found, :status
   end
 
+  def test_conversations_find_by_session_id_scoped_to_user
+    user  = make_user
+    user2 = make_user
+    conv = Factory[:conversation, user_id: user.id, session_id: "sess-1"]
+    Factory[:conversation, user_id: user2.id, session_id: "sess-1"]
+
+    found = conversations_repo.find_by_session_id(user.id, "sess-1")
+    assert_equal conv.id, found.id
+  end
+
+  def test_conversations_find_by_session_id_returns_nil_when_absent
+    user = make_user
+    assert_nil conversations_repo.find_by_session_id(user.id, "no-such-session")
+  end
+
+  def test_conversations_find_by_session_id_newest_wins_on_duplicates
+    user = make_user
+    Factory[:conversation, user_id: user.id, session_id: "sess-1"]
+    newest = Factory[:conversation, user_id: user.id, session_id: "sess-1"]
+
+    found = conversations_repo.find_by_session_id(user.id, "sess-1")
+    assert_equal newest.id, found.id
+  end
+
   def test_conversations_delete_cascades_children
     conv = make_conversation
     user = make_user
