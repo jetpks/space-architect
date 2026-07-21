@@ -141,7 +141,7 @@ class InertiaRenderTest < Minitest::Test
     data = inertia_page("/conversations/#{@conv.id}")
     conv = data["props"]["conversation"]
     expected_keys = %w[id title status published source original_cwd git_branch
-                       agent_version can_manage can_note owner].sort
+                       agent_version can_manage can_note owner parent children].sort
     assert_equal expected_keys, conv.keys.sort,
                  "conversation_json key set must match exactly"
   end
