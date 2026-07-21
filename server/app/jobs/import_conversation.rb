@@ -28,6 +28,10 @@ module Space
             io.rewind
             Space::Server::Importers.select(record).new.import!(conversation, io)
           end
+
+          imported = conversations_repo.with_messages(conversation.id)
+          turns_count = Space::Server::Transcript::Turn.group(imported.messages).size
+          conversations_repo.update(conversation.id, turns_count: turns_count)
         rescue => e
           # Importer already persisted status:failed before re-raising.
           # Swallow here so async-job's retry-forever loop (server.rb dequeue rescue ->
