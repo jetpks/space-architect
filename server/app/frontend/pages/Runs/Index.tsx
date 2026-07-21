@@ -26,11 +26,21 @@ export default function Index({ runs }: Props) {
       ) : (
         <ul className="divide-y divide-border">
           {runs.map((r) => (
-            <li key={r.id} className="flex items-center justify-between py-3">
-              <Link href={`/runs/${r.id}`} className="font-medium hover:underline">
-                Run #{r.id}
-              </Link>
-              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            <li key={r.id} className="flex items-center justify-between gap-4 py-3">
+              <div className="min-w-0">
+                <Link href={`/runs/${r.id}`} className="font-medium hover:underline">
+                  Run #{r.id}
+                  {(r.harness || r.model || r.lane) && (
+                    <span className="ml-2 font-normal text-muted-foreground">
+                      {[r.harness, r.model, r.lane].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                </Link>
+                {r.prompt_snippet && (
+                  <p className="mt-1 truncate text-sm text-muted-foreground">{r.prompt_snippet}</p>
+                )}
+              </div>
+              <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
                 <Badge variant={STATUS_VARIANT[r.status] ?? 'outline'}>{r.status}</Badge>
                 {timeLabel(r.created_at, null)}
               </span>

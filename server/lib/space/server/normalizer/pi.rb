@@ -62,14 +62,32 @@ module Space
           message = record["message"] || {}
           case message["role"]
           when "assistant" then assistant_lifecycle(message)
-          else [] # "user" (the initial prompt, already known to the caller) and "toolResult" (tool_execution_end)
+          when "user"      then user_lifecycle(message)
+          else [] # "toolResult" (sourced from tool_execution_end instead)
           end
         end
 
         def assistant_lifecycle(message)
           events = [Event.make(:message_start, model: message["model"], role: "assistant", usage: message["usage"])]
+          events.concat(content_block_events(message["content"]))
+          events << Event.make(:message_complete,
+            stop_reason: Event.normalize_stop_reason(message["stopReason"]),
+            usage:       message["usage"])
+          events
+        end
 
-          Array(message["content"]).each_with_index do |block, i|
+        # The opening user prompt: pi's only source for it is this message_end
+        # (unlike claude/opencode, which never stream it at all).
+        def user_lifecycle(message)
+          events = [Event.make(:message_start, model: nil, role: "user", usage: nil)]
+          events.concat(content_block_events(message["content"]))
+          events << Event.make(:message_complete, stop_reason: nil, usage: nil)
+          events
+        end
+
+        def content_block_events(content)
+          events = []
+          Array(content).each_with_index do |block, i|
             block_id   = i.to_s
             block_type = Event::BLOCK_TYPES.fetch(block["type"]) { block["type"].to_sym }
 
@@ -91,10 +109,6 @@ module Space
 
             events << Event.make(:block_close, block_id: block_id)
           end
-
-          events << Event.make(:message_complete,
-            stop_reason: Event.normalize_stop_reason(message["stopReason"]),
-            usage:       message["usage"])
           events
         end
 

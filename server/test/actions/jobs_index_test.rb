@@ -59,6 +59,30 @@ class JobsIndexTest < Minitest::Test
     assert_nil entry["run_id"]
   end
 
+  def test_index_job_shape_includes_harness_and_prompt_snippet
+    Factory[:job, user_id: @owner.id]
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs")
+    entry = parse_json(body).dig("props", "jobs").first
+    assert_equal "claude",       entry["harness"]
+    assert_equal "do the thing", entry["prompt_snippet"]
+  end
+
+  def test_index_job_shape_prompt_snippet_truncated_and_single_line
+    spec = {
+      "harness" => { "type" => "claude", "model" => "sonnet" },
+      "prompt"  => "line one\nline two #{"x" * 150}",
+      "environment" => { "env" => {}, "secrets" => [], "deps" => [], "permissions" => { "network" => false, "mounts" => [] } }
+    }
+    Factory[:job, user_id: @owner.id, spec: spec]
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs")
+    entry = parse_json(body).dig("props", "jobs").first
+    refute_includes entry["prompt_snippet"], "\n"
+    assert_equal 141, entry["prompt_snippet"].length
+    assert entry["prompt_snippet"].end_with?("…")
+  end
+
   # --- Bearer personality (AC2) -------------------------------------------
 
   def test_index_bearer_wrong_token_returns_401

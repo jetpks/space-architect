@@ -119,6 +119,29 @@ describe('Runs/Show', () => {
     expect(screen.queryByText('Job')).toBeNull()
   })
 
+  it('renders the prompt as a leading user-styled turn, exactly once', () => {
+    const run: Run = {
+      ...RUN,
+      job: { id: 19, status: 'succeeded', prompt: 'Write six aphorisms' },
+    }
+    const { container } = render(<Show run={run} />)
+
+    const matches = screen.getAllByText('Write six aphorisms')
+    expect(matches).toHaveLength(1)
+
+    const list = container.querySelector('ol')!
+    const firstItem = list.children[0]
+    expect(firstItem.textContent).toContain('Write six aphorisms')
+    expect(firstItem.textContent).toContain('user')
+  })
+
+  it('does not render a leading turn when the job has no prompt', () => {
+    const run: Run = { ...RUN, job: null }
+    const { container } = render(<Show run={run} />)
+    const list = container.querySelector('ol')!
+    expect(list.children).toHaveLength(0)
+  })
+
   it('re-syncs on refocus while the run is live: closes the stale connection and opens a fresh one', () => {
     render(<Show run={RUN} />)
     const first = MockEventSource.instances[0]

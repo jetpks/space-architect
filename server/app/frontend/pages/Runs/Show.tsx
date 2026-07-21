@@ -91,6 +91,22 @@ export default function Show({ run }: Props) {
 
   const toolResults = useMemo(() => buildToolResultIndex(legacyMessages), [legacyMessages])
 
+  // The opening prompt never streams over SSE (claude/opencode don't emit it,
+  // and pi's copy — now that it's persisted, see Normalizer::Pi — arrives via
+  // the replayed transcript, not this live view). It only reaches the client
+  // through job.spec["prompt"], owner-gated the same way as job.id/status.
+  const promptMessage: MessageType | null = run.job?.prompt
+    ? {
+        id: -1,
+        role: 'user',
+        model: null,
+        position: -1,
+        published: false,
+        blocks: [{ type: 'text', text: run.job.prompt }],
+        can_publish: false,
+      }
+    : null
+
   return (
     <AppLayout>
       <Head title={`Run #${run.id}`} />
@@ -136,16 +152,6 @@ export default function Show({ run }: Props) {
           )}
         </dl>
 
-        {run.job && (
-          <details className="mt-3 text-sm">
-            <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-              Prompt
-            </summary>
-            <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-3 text-xs">
-              {run.job.prompt}
-            </pre>
-          </details>
-        )}
       </header>
 
       {state.status === 'pending' && (
@@ -153,6 +159,11 @@ export default function Show({ run }: Props) {
       )}
 
       <ol className="mt-4 space-y-3">
+        {promptMessage && (
+          <li>
+            <Message message={promptMessage} conversationId={0} hideMenu />
+          </li>
+        )}
         {legacyMessages.map((msg, i) => (
           <li key={i}>
             <Message message={msg} conversationId={0} toolResults={toolResults} hideMenu />
