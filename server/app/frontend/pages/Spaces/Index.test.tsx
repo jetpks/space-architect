@@ -40,13 +40,13 @@ describe('Spaces/Index', () => {
 
   it('renders the absolute timestamp for imported_at in space git_utc_offset', () => {
     const { container } = render(<Index spaces={[SPACE]} />)
-    // 2026-06-28T21:32:12.278Z with -21600s offset → 2026-06-28T15:32:12.278-0600
-    expect(container.textContent).toContain('2026-06-28T15:32:12.278-0600')
+    // 2026-06-28T21:32:12.278Z with -21600s offset → 2026-06-28T15:32:12.278-06:00
+    expect(container.textContent).toContain('2026-06-28T15:32:12.278-06:00')
   })
 
   it('renders UTC fallback when git_utc_offset is null', () => {
     const space: SpaceListItem = { ...SPACE, git_utc_offset: null }
     const { container } = render(<Index spaces={[space]} />)
-    expect(container.textContent).toMatch(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}\+0000/)
+    expect(container.textContent).toMatch(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z/)
   })
 })

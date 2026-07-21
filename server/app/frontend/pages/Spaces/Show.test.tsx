@@ -239,13 +239,13 @@ describe('ArchitectSessionSection — eager inline turns', () => {
   })
 
   it('architect session card shows absolute timestamp in space git_utc_offset', () => {
-    // occurred_at is UTC; space.git_utc_offset=-21600 → wall-clock should be -0600
+    // occurred_at is UTC; space.git_utc_offset=-21600 → wall-clock should be -06:00
     const run: ArchitectRun = { ...ARCHITECT_RUN, occurred_at: '2026-06-28T21:32:12.278Z' }
     const space = { ...SPACE, git_utc_offset: -21600 }
     const { container } = render(<Show {...DEFAULT_PROPS} space={space} architect_runs={[run]} />)
     const section = container.querySelector('#architect-run-200')
     expect(section).not.toBeNull()
-    expect(section!.textContent).toContain('2026-06-28T15:32:12.278-0600')
+    expect(section!.textContent).toContain('2026-06-28T15:32:12.278-06:00')
   })
 
   it('iteration card shows absolute timestamp in occurred_at_utc_offset', () => {
@@ -255,7 +255,7 @@ describe('ArchitectSessionSection — eager inline turns', () => {
       occurred_at_utc_offset: -21600,
     }
     const { container } = render(<Show {...DEFAULT_PROPS} iterations={[iter]} />)
-    expect(container.textContent).toMatch(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}[+-]\d{4}/)
+    expect(container.textContent).toMatch(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}[+-]\d\d:\d\d/)
   })
 })
 
