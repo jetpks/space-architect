@@ -13,14 +13,14 @@ module Space
       module Conversation
         module_function
 
-        def conversation_list_json(conversation, viewer:, turns_count:)
+        def conversation_list_json(conversation, viewer:)
           owned = conversation.owned_by?(viewer)
           {
             id: conversation.id,
             title: display_title(conversation),
             status: conversation.status,
             published: conversation.published,
-            turns_count: turns_count,
+            turns_count: conversation.turns_count,
             owned: owned,
             shared: !owned && conversation.shared_with?(viewer, access: :view)
           }

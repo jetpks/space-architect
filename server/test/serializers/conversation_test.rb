@@ -1,65 +1,79 @@
 # frozen_string_literal: true
 
+require "delegate"
 require_relative "support"
 
 S = Space::Server::Serializers::Conversation
+
+# TestConversation (support.rb) predates turns_count becoming a real column
+# read directly by conversation_list_json. Wrap it with SimpleDelegator to add
+# turns_count per-test without touching the shared double.
+class TestConversationWithTurns < SimpleDelegator
+  def initialize(base, turns_count)
+    super(base)
+    @turns_count = turns_count
+  end
+
+  def turns_count = @turns_count
+end
 
 class ConversationListJsonTest < Minitest::Test
   EXPECTED_KEYS = %i[id title status published turns_count owned shared].freeze
 
   def owner     = TestUser.new(id: 1, username: "alice", name: "Alice", avatar_url: "http://a.example")
   def viewer    = TestUser.new(id: 2, username: "bob",   name: "Bob",   avatar_url: "http://b.example")
-  def conv(title: "My conv")
-    TestConversation.new(
+  def conv(title: "My conv", turns_count: 0)
+    base = TestConversation.new(
       id: 42, title: title, status: :completed, published: false,
       source: nil, original_cwd: nil, git_branch: nil, agent_version: nil,
       user: owner, owner_id: 1, view_grantee_ids: [2], note_grantee_ids: []
     )
+    TestConversationWithTurns.new(base, turns_count)
   end
 
   def test_exact_key_set
-    result = S.conversation_list_json(conv, viewer: owner, turns_count: 3)
+    result = S.conversation_list_json(conv(turns_count: 3), viewer: owner)
     assert_equal EXPECTED_KEYS.sort, result.keys.sort
   end
 
   def test_owner_flags
-    result = S.conversation_list_json(conv, viewer: owner, turns_count: 5)
+    result = S.conversation_list_json(conv(turns_count: 5), viewer: owner)
     assert_equal true,  result[:owned]
     assert_equal false, result[:shared]
     assert_equal 5,     result[:turns_count]
   end
 
   def test_view_shared_non_owner_flags
-    result = S.conversation_list_json(conv, viewer: viewer, turns_count: 0)
+    result = S.conversation_list_json(conv, viewer: viewer)
     assert_equal false, result[:owned]
     assert_equal true,  result[:shared]
   end
 
   def test_anon_flags
-    result = S.conversation_list_json(conv, viewer: nil, turns_count: 0)
+    result = S.conversation_list_json(conv, viewer: nil)
     assert_equal false, result[:owned]
     assert_equal false, result[:shared]
   end
 
   def test_non_owner_non_shared_flags
     stranger = TestUser.new(id: 99, username: "z", name: nil, avatar_url: nil)
-    result = S.conversation_list_json(conv, viewer: stranger, turns_count: 0)
+    result = S.conversation_list_json(conv, viewer: stranger)
     assert_equal false, result[:owned]
     assert_equal false, result[:shared]
   end
 
   def test_display_title_present
-    result = S.conversation_list_json(conv(title: "Real title"), viewer: nil, turns_count: 0)
+    result = S.conversation_list_json(conv(title: "Real title"), viewer: nil)
     assert_equal "Real title", result[:title]
   end
 
   def test_display_title_nil_falls_back
-    result = S.conversation_list_json(conv(title: nil), viewer: nil, turns_count: 0)
+    result = S.conversation_list_json(conv(title: nil), viewer: nil)
     assert_equal "Untitled conversation", result[:title]
   end
 
   def test_display_title_blank_falls_back
-    result = S.conversation_list_json(conv(title: "  "), viewer: nil, turns_count: 0)
+    result = S.conversation_list_json(conv(title: "  "), viewer: nil)
     assert_equal "Untitled conversation", result[:title]
   end
 end

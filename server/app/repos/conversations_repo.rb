@@ -29,18 +29,21 @@ module Space
         # Index scope: published ∪ owned-by-user ∪ shared-with-user, deduped.
         # Anonymous (user nil) → published only.
         # Empty org_ids → safe (Sequel renders empty IN as false literal).
-        # Combines :messages and :shares so struct predicates (shared_with?,
-        # visible_messages) work without N+1 or NoMethodError.
+        # Combines :shares so struct predicates (shared_with?) work without N+1.
+        # Does NOT combine :messages — the Index action reads the denormalized
+        # turns_count column instead; loading every message here is what caused
+        # the studio 502 (I36). Callers needing message-backed predicates
+        # (visible_messages, visible_to?) must use with_messages_and_shares/for_show.
         def visible_to(user)
           if user.nil?
-            return conversations.where(published: true).combine(:messages, :shares).to_a
+            return conversations.where(published: true).combine(:shares).to_a
           end
 
           share_ids = conversation_shares_repo.granted_conversation_ids(user)
           expr = Sequel.expr(published: true) |
                  Sequel.expr(user_id: user.id) |
                  Sequel.expr(id: share_ids)
-          conversations.where(expr).combine(:messages, :shares).to_a
+          conversations.where(expr).combine(:shares).to_a
         end
 
         # Full show combine: user (for serializer owner block), messages (ordered),

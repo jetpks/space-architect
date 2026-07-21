@@ -4,10 +4,13 @@ require_relative "action_test_helper"
 
 # Integration-flow parity for test/integration/conversations_flow_test.rb.
 # Covers the two behaviors not fully asserted by per-action tests:
-#   - turns_count in the index is the number of real turns, not raw messages
+#   - turns_count in the index is the stored column, not a live Turn.group over
+#     raw messages (I36: recomputed only at the import seam)
 #   - show action nests rounds under turns and ships annotations flat
 class ConversationsFlowTest < Minitest::Test
   include ActionTestHelper
+
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
 
   def setup
     setup_db
@@ -17,7 +20,8 @@ class ConversationsFlowTest < Minitest::Test
     @conv  = Factory[:conversation, user_id: @owner.id, published: false]
 
     # Three messages: prompt opens a turn; assistant + tool_result ride in one round.
-    # Turn.group produces 1 turn from 3 messages — the key assertion below.
+    # These are inserted directly (not via the import job), so turns_count stays
+    # at its column default — the key assertion below.
     @prompt = Factory[:message, conversation_id: @conv.id, role: "user",
                       content: [{"type" => "text", "text" => "q"}], position: 1]
     @assistant = Factory[:message, conversation_id: @conv.id, role: "assistant",
@@ -31,21 +35,33 @@ class ConversationsFlowTest < Minitest::Test
     OmniAuth.config.mock_auth[:github] = :csrf_detected
   end
 
-  # Mirror of oracle: "index counts real turns, not raw messages"
-  # Turn.group(3 messages) → 1 turn. The index must report turns_count: 1, not 3.
-  def test_index_counts_real_turns_not_raw_messages
+  # I36: turns_count is denormalized at the import seam, not derived from
+  # messages at request time. @conv's messages were inserted directly (not via
+  # ImportConversation), so the index must report the column default (0), even
+  # though Turn.group(3 messages) would compute 1 turn.
+  def test_index_reports_stored_turns_count_not_a_live_recompute
     sign_in(@owner)
     _, _, body = inertia_get("/")
     data      = parse_json(body)
     conv_data = data["props"]["conversations"].find { |c| c["id"] == @conv.id }
     refute_nil conv_data, "owner must see their own conversation in the index"
 
-    raw_count   = 3  # @prompt, @assistant, @result
-    turns_count = conv_data["turns_count"]
-    assert_equal 1, turns_count,
-      "turns_count must equal Turn.group result (1 turn), not raw message count"
-    assert_operator turns_count, :<, raw_count,
-      "turns_count must be less than raw message count (#{raw_count})"
+    assert_equal 0, conv_data["turns_count"],
+      "a never-imported conversation must read the turns_count column default, not a live Turn.group"
+  end
+
+  # I36: once the column is set (as ImportConversation does on a successful
+  # import), the index must surface exactly that stored value.
+  def test_index_reports_turns_count_set_by_import
+    conversations_repo.update(@conv.id, turns_count: 1)
+
+    sign_in(@owner)
+    _, _, body = inertia_get("/")
+    data      = parse_json(body)
+    conv_data = data["props"]["conversations"].find { |c| c["id"] == @conv.id }
+    refute_nil conv_data
+
+    assert_equal 1, conv_data["turns_count"]
   end
 
   # Mirror of oracle: "show nests rounds under turns and ships annotations flat"
