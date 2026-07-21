@@ -8,3 +8,12 @@
   community.general.launchd:
     name: "{{ server_label }}"
     state: restarted
+
+# Graceful, zero-downtime re-parse of the LIVE gateway's Caddyfile — a launchd
+# restart of caddy itself would blip the gateway. Assumes caddy is already
+# running (the gateway's role starts it); the `{env.DIGITAL_OCEAN_API_KEY}`
+# placeholder in the gateway's Caddyfile is resolved at runtime and unaffected
+# by a config reload.
+- name: reload caddy
+  ansible.builtin.command: "{{ caddy_bin }} reload --config {{ caddy_config_path }}"
+  changed_when: true

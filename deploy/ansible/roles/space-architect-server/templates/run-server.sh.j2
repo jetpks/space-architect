@@ -34,6 +34,19 @@ source "{{ ansible_env.HOME }}/.config/secret/op"
 SESSION_SECRET="$(op read '{{ session_secret_ref }}')"
 export SESSION_SECRET
 
+# ASSUME_SSL: Caddy terminates TLS and reverse-proxies plain HTTP to :3000, so
+# the app must treat every request as https (secure cookies, https:// OAuth
+# callback) even though it never sees TLS itself. FORCE_SSL and
+# PERMITTED_HOSTS are left at their dev-safe defaults (config/settings.rb).
+export ASSUME_SSL=true
+
+# GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET: op refs only, resolved fresh every
+# boot — same discipline as SESSION_SECRET above.
+GITHUB_CLIENT_ID="$(op read '{{ github_client_id_ref }}')"
+export GITHUB_CLIENT_ID
+GITHUB_CLIENT_SECRET="$(op read '{{ github_client_secret_ref }}')"
+export GITHUB_CLIENT_SECRET
+
 # INGEST_USER_ID: looked up by the seeded ingest owner user's github_uid
 # (server/config/db/seeds.rb) rather than hardcoded, so it always names a real
 # row. `hanami run` logs one JSON line to stdout before the puts result —
