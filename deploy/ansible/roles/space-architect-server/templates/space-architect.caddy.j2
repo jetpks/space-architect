@@ -1,3 +1,13 @@
+{# Static vite assets are served directly from disk by Caddy (fast + cached),
+   NOT proxied to falcon — in production Hanami does not serve public/, and the
+   built bundles are content-hashed so they can be cached immutably. Everything
+   else falls through to the app. `handle /vite/*` (not handle_path) preserves
+   the /vite prefix so the file maps to {{ server_dir }}/public/vite/... #}
+handle /vite/* {
+    root * {{ server_dir }}/public
+    header Cache-Control "public, max-age=31536000, immutable"
+    file_server
+}
 handle {
     reverse_proxy 127.0.0.1:{{ server_port }} {
         flush_interval -1
