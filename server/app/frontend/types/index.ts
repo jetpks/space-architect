@@ -137,6 +137,12 @@ export type Conversation = {
     name: string | null
     avatar_url: string | null
   }
+  // Owner-only: the conversation this one is a subagent transcript of. Absent
+  // (not just null) for non-owners and anonymous viewers.
+  parent?: { id: number; title: string | null } | null
+  // Owner-only: subagent transcripts synced from this conversation. Absent
+  // for non-owners and anonymous viewers; empty array when there are none.
+  children?: Array<{ id: number; title: string | null; session_id: string }>
 }
 
 export type Run = {

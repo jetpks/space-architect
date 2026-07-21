@@ -114,6 +114,33 @@ class PiImporterTreeTest < Minitest::Test
     assert_equal "Done. I added tests for the OAuth callback and failure paths.", terminal.blocks.first["text"]
   end
 
+  def test_preserves_existing_session_id_and_sets_parent_when_content_id_differs
+    conv = Factory[:conversation, session_id: "cli-key-1"]
+    io = File.open(fixture_path("pi_session.jsonl"))
+    Space::Server::Importers::Pi.new.import!(conv, io)
+    io.close
+
+    conv = conversations_repo.by_pk(conv.id)
+    assert_equal "cli-key-1", conv.session_id
+    assert_equal "pi-sess-1", conv.parent_session_id
+  end
+
+  def test_leaves_parent_session_id_nil_when_content_id_matches_existing_session_id
+    conv = Factory[:conversation, session_id: "pi-sess-1"]
+    io = File.open(fixture_path("pi_session.jsonl"))
+    Space::Server::Importers::Pi.new.import!(conv, io)
+    io.close
+
+    conv = conversations_repo.by_pk(conv.id)
+    assert_equal "pi-sess-1", conv.session_id
+    assert_nil conv.parent_session_id
+  end
+
+  def test_browser_path_fills_nil_session_id_and_leaves_parent_session_id_nil
+    assert_equal "pi-sess-1", @conv.session_id
+    assert_nil @conv.parent_session_id
+  end
+
   private
 
   def conversations_repo = Space::Server::Repos::ConversationsRepo.new

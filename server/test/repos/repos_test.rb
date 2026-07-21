@@ -138,6 +138,49 @@ class ReposTest < Minitest::Test
     assert_equal newest.id, found.id
   end
 
+  def test_conversations_parent_of_scoped_to_user
+    user  = make_user
+    other = make_user
+    parent = Factory[:conversation, user_id: user.id, session_id: "sess-parent"]
+    Factory[:conversation, user_id: other.id, session_id: "sess-parent"]
+    child = Factory[:conversation, user_id: user.id, session_id: "sess-child", parent_session_id: "sess-parent"]
+
+    found = conversations_repo.parent_of(child)
+    assert_equal parent.id, found.id
+  end
+
+  def test_conversations_parent_of_nil_safe_when_parent_session_id_absent
+    conv = Factory[:conversation, user_id: make_user.id, session_id: "sess-child"]
+    assert_nil conversations_repo.parent_of(conv)
+  end
+
+  def test_conversations_parent_of_newest_wins_on_duplicates
+    user = make_user
+    Factory[:conversation, user_id: user.id, session_id: "sess-parent"]
+    newest = Factory[:conversation, user_id: user.id, session_id: "sess-parent"]
+    child = Factory[:conversation, user_id: user.id, session_id: "sess-child", parent_session_id: "sess-parent"]
+
+    found = conversations_repo.parent_of(child)
+    assert_equal newest.id, found.id
+  end
+
+  def test_conversations_children_of_scoped_to_user_and_ordered
+    user  = make_user
+    other = make_user
+    parent = Factory[:conversation, user_id: user.id, session_id: "sess-parent"]
+    first_child = Factory[:conversation, user_id: user.id, session_id: "sess-child-1", parent_session_id: "sess-parent"]
+    second_child = Factory[:conversation, user_id: user.id, session_id: "sess-child-2", parent_session_id: "sess-parent"]
+    Factory[:conversation, user_id: other.id, session_id: "sess-child-3", parent_session_id: "sess-parent"]
+
+    found = conversations_repo.children_of(parent)
+    assert_equal [first_child.id, second_child.id], found.map(&:id)
+  end
+
+  def test_conversations_children_of_nil_safe_when_session_id_absent
+    conv = Factory[:conversation, user_id: make_user.id]
+    assert_empty conversations_repo.children_of(conv)
+  end
+
   def test_conversations_delete_cascades_children
     conv = make_conversation
     user = make_user
