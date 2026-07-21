@@ -60,6 +60,7 @@
     dest: "{{ server_src_dir }}"
     version: main
     update: true
+  notify: restart space-architect-server
 
 # ── 6. bundle install guard (LOAD-BEARING — must run before server restart) ──
 
@@ -70,6 +71,7 @@
     executable: "{{ mise_ruby_bin }}/bundle"
   environment:
     PATH: "{{ mise_ruby_bin }}:/opt/homebrew/bin:/usr/bin:/bin"
+  notify: restart space-architect-server
 
 # ── 7. Production frontend assets (BRIEF §7.6) ───────────────────────────────
 # npm run build always re-runs (source changes on every re-apply); vite build
@@ -149,6 +151,7 @@
     src: run-server.sh.j2
     dest: "{{ server_dir }}/run-server.sh"
     mode: "0755"
+  notify: restart space-architect-server
 
 - name: space-architect-server | template server launchd plist
   ansible.builtin.template:

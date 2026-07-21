@@ -64,7 +64,7 @@ ansible-pull -U https://github.com/jetpks/space-architect.git \
 | Production frontend assets | `npm ci && npm run build` — `public/vite/.vite/manifest.json`, served by `vite_hanami` under `RACK_ENV=production` |
 | `hanami db prepare` | creates/migrates the schema and seeds the ingest-owner user (`config/db/seeds.rb`) — every apply, idempotent |
 | Container-system launchd agent | `com.slushsystems.container` — `container system start`, KeepAlive, ordered before the topology agent |
-| Topology launchd agent | `com.slushsystems.space-architect-server` — `run-server.sh` execs `bin/serve` → `falcon host falcon.rb`, KeepAlive |
+| Topology launchd agent | `com.slushsystems.space-architect-server` — `run-server.sh` execs `bin/serve` → `falcon host falcon.rb`, KeepAlive; restarted on repo pull, gem changes, or run-script re-template (`notify: restart space-architect-server`) |
 | Caddy vhost snippet | `~/.config/caddy/caddy.d/space-architect.caddy` — catch-all `handle` reverse-proxying to `:3000`; `caddy reload`d on change |
 
 ## Fronting via the studio's existing Caddy
