@@ -27,6 +27,8 @@ job_env_base_image: "space-claude-base:v1"
 # Same 1Password vault/item as INGEST_TOKEN's default ref (server/lib/space/server/boot/ingest_token.rb).
 ingest_token_ref: "op://ansible/space-architect-server/ingest-token"
 session_secret_ref: "op://ansible/space-architect-server/session-secret"
+github_client_id_ref: "op://ansible/space-architect-server/github-client-id"
+github_client_secret_ref: "op://ansible/space-architect-server/github-client-secret"
 
 # --- Ingest owner user (server/config/db/seeds.rb — must match SEED_GITHUB_UID there) ---
 ingest_user_github_uid: "ingest-service-account"
@@ -34,3 +36,9 @@ ingest_user_github_uid: "ingest-service-account"
 # --- Apple container ---
 container_label: com.slushsystems.container
 container_bin: /opt/homebrew/bin/container
+
+# --- Caddy (existing studio gateway — fronts this app via an imported snippet) ---
+caddy_config_dir: "{{ ansible_env.HOME }}/.config/caddy"
+caddy_snippet_dir: "{{ caddy_config_dir }}/caddy.d"
+caddy_bin: "{{ ansible_env.HOME }}/caddy-build/caddy"
+caddy_config_path: "{{ caddy_config_dir }}/Caddyfile"

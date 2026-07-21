@@ -161,3 +161,22 @@
   community.general.launchd:
     name: "{{ server_label }}"
     state: started
+
+# ── 11. Caddy vhost snippet (fronts the studio gateway's existing Caddy) ────
+# Imported by the gateway's Caddyfile after its `handle @api` block, so this
+# bare catch-all `handle` becomes the fallthrough route for everything that
+# isn't the gateway's /v1/*, /metrics. Self-sufficient: does not depend on the
+# gateway deploy having created caddy_snippet_dir.
+
+- name: space-architect-server | ensure caddy snippet directory exists
+  ansible.builtin.file:
+    path: "{{ caddy_snippet_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: space-architect-server | template caddy vhost snippet
+  ansible.builtin.template:
+    src: space-architect.caddy.j2
+    dest: "{{ caddy_snippet_dir }}/space-architect.caddy"
+    mode: "0644"
+  notify: reload caddy

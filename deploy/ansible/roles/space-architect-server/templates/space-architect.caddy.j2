@@ -1,0 +1,5 @@
+handle {
+    reverse_proxy 127.0.0.1:{{ server_port }} {
+        flush_interval -1
+    }
+}
