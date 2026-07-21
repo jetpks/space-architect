@@ -1,7 +1,11 @@
 # frozen_string_literal: true
 
 require "json"
+require "fileutils"
+require "space_src/launchd/agent"
 require_relative "../jobs_client"
+require_relative "../conversations_client"
+require_relative "../session_sync"
 
 module Space::Architect
   module CLI
@@ -940,6 +944,131 @@ module Space::Architect
           end
         end
       end
+
+      module Sessions
+        # See Jobs.require_credentials! above for why this is validated
+        # explicitly rather than relying on dry-cli's `required:` option flag.
+        def self.require_credentials!(host, token)
+          raise Space::Core::Error, "--host is required" unless host
+          raise Space::Core::Error, "--token is required" unless token
+        end
+
+        class Sync < BaseCommand
+          desc "Scan pi/claude session files and upload new/grown conversations to a space-server"
+          option :host,        required: true, desc: "Base URL of the space-server"
+          option :token,       required: true, desc: "Bearer token for authorization (an op:// ref is resolved once via `op read`)"
+          option :state_file,  default: nil,   desc: "Cursor YAML path (default: $XDG_STATE_HOME/space-architect/session-sync.yaml)"
+          option :pi_root,     default: nil,   desc: "Override the pi sessions root (default: ~/.pi/agent/sessions)"
+          option :claude_root, default: nil,   desc: "Override the claude projects root (default: ~/.claude/projects)"
+          option :dry_run,     type: :boolean, default: false, desc: "Report what would upload without uploading or recording the cursor"
+
+          def call(host: nil, token: nil, state_file: nil, pi_root: nil, claude_root: nil, dry_run: false, **opts)
+            setup_terminal(**opts.slice(:color, :colors))
+            handle_errors do
+              Sessions.require_credentials!(host, token)
+              runner = SessionSync::Runner.new(
+                client: ConversationsClient.new(host, token),
+                state_path: state_file || SessionSync.default_state_file,
+                pi_root: pi_root || SessionSync.default_pi_root,
+                claude_root: claude_root || SessionSync.default_claude_root,
+                dry_run: dry_run
+              )
+              results = runner.call
+              results.each do |r|
+                terminal.say "#{r[:action]}: #{r[:path]}#{r[:action] == :failed ? " (#{r[:status]}: #{r[:errors]})" : ""}"
+              end
+              failed = results.count { |r| r[:action] == :failed }
+              terminal.say "#{results.size} file(s): #{results.size - failed} ok, #{failed} failed"
+              CLI.record_outcome(Outcome.new(exit_code: failed.zero? ? 0 : 1))
+            end
+          end
+        end
+
+        module Agent
+          module Helpers
+            def plist_path
+              File.join(SessionSync.launch_agents_dir, "#{SessionSync::LABEL}.plist")
+            end
+
+            def format_failure(f) = f.is_a?(Hash) ? f.inspect : f.to_s
+          end
+
+          class Install < BaseCommand
+            include Helpers
+            desc "Install the launchd agent that periodically runs `architect sessions sync`"
+            option :host,     required: true, desc: "Base URL of the space-server"
+            option :token,    required: true, desc: "Bearer token for authorization (an op:// ref is stored as-is in the plist)"
+            option :interval, default: "900", desc: "StartInterval in seconds (default 900)"
+
+            def call(host: nil, token: nil, interval: "900", **opts)
+              setup_terminal(**opts.slice(:color, :colors))
+              handle_errors do
+                Sessions.require_credentials!(host, token)
+                pp = plist_path
+                xml = SessionSync::Plist.call(
+                  label: SessionSync::LABEL,
+                  refresh_interval: interval.to_i,
+                  log_dir: SessionSync.log_dir,
+                  bin_path: SessionSync::BinPath.detect,
+                  host: host,
+                  token: token
+                )
+                FileUtils.mkdir_p(File.dirname(pp))
+                File.write(pp, xml)
+
+                result = Space::Src::Launchd::Agent.new(label: SessionSync::LABEL).install(pp)
+                raise Space::Core::Error, "bootstrap failed: #{format_failure(result.failure)}" if result.failure?
+
+                terminal.say "Installed: #{terminal.path(pp)}"
+                CLI.record_outcome(Outcome.new(exit_code: 0))
+              end
+            end
+          end
+
+          class Uninstall < BaseCommand
+            include Helpers
+            desc "Uninstall the session-sync launchd agent (bootout + remove the plist)"
+
+            def call(**opts)
+              setup_terminal(**opts.slice(:color, :colors))
+              handle_errors do
+                pp = plist_path
+                result = Space::Src::Launchd::Agent.new(label: SessionSync::LABEL).uninstall
+                terminal.say "bootout reported: #{format_failure(result.failure)}" if result.failure?
+
+                if File.exist?(pp)
+                  File.delete(pp)
+                  terminal.say "Removed plist: #{terminal.path(pp)}"
+                else
+                  terminal.say "Plist not present: #{terminal.path(pp)}"
+                end
+                CLI.record_outcome(Outcome.new(exit_code: 0))
+              end
+            end
+          end
+
+          class Status < BaseCommand
+            include Helpers
+            desc "Report the session-sync launchd agent's loaded/running/last-exit state"
+
+            def call(**opts)
+              setup_terminal(**opts.slice(:color, :colors))
+              handle_errors do
+                result = Space::Src::Launchd::Agent.new(label: SessionSync::LABEL).status
+                raise Space::Core::Error, "status failed: #{format_failure(result.failure)}" if result.failure?
+
+                s = result.success
+                terminal.say "label: #{SessionSync::LABEL}"
+                terminal.say "loaded: #{s[:loaded]}"
+                terminal.say "running: #{s[:running]}"
+                terminal.say "pid: #{s[:pid].inspect}"
+                terminal.say "last_exit: #{s[:last_exit].inspect}"
+                CLI.record_outcome(Outcome.new(exit_code: 0))
+              end
+            end
+          end
+        end
+      end
     end
   end
 end
@@ -978,6 +1107,14 @@ Space::Architect::CLI::Registry.register "jobs" do |j|
   j.register "show",   Space::Architect::CLI::Architect::Jobs::Show
   j.register "watch",  Space::Architect::CLI::Architect::Jobs::Watch
   j.register "cancel", Space::Architect::CLI::Architect::Jobs::Cancel
+end
+Space::Architect::CLI::Registry.register "sessions" do |s|
+  s.register "sync", Space::Architect::CLI::Architect::Sessions::Sync
+  s.register "agent" do |a|
+    a.register "install",   Space::Architect::CLI::Architect::Sessions::Agent::Install
+    a.register "uninstall", Space::Architect::CLI::Architect::Sessions::Agent::Uninstall
+    a.register "status",    Space::Architect::CLI::Architect::Sessions::Agent::Status
+  end
 end
 Space::Architect::CLI::Registry.register "variant" do |v|
   v.register "add",     Space::Architect::CLI::Architect::Variant::Add
