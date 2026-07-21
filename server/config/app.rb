@@ -56,7 +56,14 @@ module Space
 
       config.actions.sessions = :cookie, {
         key: "_space_server_session",
-        secret: settings.session_secret
+        secret: settings.session_secret,
+        # Secure whenever the app is behind TLS (assume_ssl: Caddy terminates and
+        # proxies plain HTTP; force_ssl: app redirects to https). Off in plain-http
+        # dev so the cookie still rides. same_site :lax keeps the OAuth callback
+        # (a top-level GET from github.com) carrying the session while blocking
+        # cross-site POST — matches the XSRF-TOKEN cookie's own lax posture.
+        secure: settings.assume_ssl || settings.force_ssl,
+        same_site: :lax
       }
       # csrf_protection defaults to true when sessions are enabled;
       # hanami-controller auto-disables it in HANAMI_ENV=test
