@@ -199,6 +199,76 @@ class ArchitectSessionsCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # (e2) with --token absent, SPACE_ARCHITECT_INGEST_TOKEN authenticates the request.
+  def test_sessions_sync_falls_back_to_env_token
+    setup = temp_env
+    with_env(setup[:env].merge("SPACE_ARCHITECT_INGEST_TOKEN" => "env-secret")) do
+      Dir.mktmpdir("sessions-cli-test") do |root|
+        pi_root = File.join(root, "pi")
+        claude_root = File.join(root, "claude")
+        state_file = File.join(root, "state.yaml")
+        write_session_file(pi_root, "proj", "20260101T000000_sess-env.jsonl")
+
+        Sync do
+          port, requests, server_task, tcp_server = start_stub([
+            json_response(201, {conversation_id: 1, action: "created"})
+          ])
+          invoke("sessions", "sync", "--host", "http://127.0.0.1:#{port}",
+            "--state-file", state_file, "--pi-root", pi_root, "--claude-root", claude_root)
+          server_task.wait
+          tcp_server.close
+
+          assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+          assert_equal "Bearer env-secret", requests[0][:headers]["authorization"]
+        end
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # (e3) an explicit --token wins over SPACE_ARCHITECT_INGEST_TOKEN.
+  def test_sessions_sync_explicit_token_wins_over_env
+    setup = temp_env
+    with_env(setup[:env].merge("SPACE_ARCHITECT_INGEST_TOKEN" => "env-secret")) do
+      Dir.mktmpdir("sessions-cli-test") do |root|
+        pi_root = File.join(root, "pi")
+        claude_root = File.join(root, "claude")
+        state_file = File.join(root, "state.yaml")
+        write_session_file(pi_root, "proj", "20260101T000000_sess-explicit.jsonl")
+
+        Sync do
+          port, requests, server_task, tcp_server = start_stub([
+            json_response(201, {conversation_id: 1, action: "created"})
+          ])
+          invoke("sessions", "sync", "--host", "http://127.0.0.1:#{port}", "--token", "flag-secret",
+            "--state-file", state_file, "--pi-root", pi_root, "--claude-root", claude_root)
+          server_task.wait
+          tcp_server.close
+
+          assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+          assert_equal "Bearer flag-secret", requests[0][:headers]["authorization"]
+        end
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # (e4) with neither --token nor SPACE_ARCHITECT_INGEST_TOKEN present, the error
+  # names both sources.
+  def test_sessions_sync_requires_token_or_env_names_both_sources
+    setup = temp_env
+    with_env(setup[:env]) do
+      _out, err = invoke("sessions", "sync", "--host", "http://example.com")
+      refute_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+      assert_match(/--token/, err)
+      assert_match(/SPACE_ARCHITECT_INGEST_TOKEN/, err)
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   # ---- `sessions agent install|uninstall|status` ----
 
   # Stub Space::Src::Launchd::Agent so no live launchctl is ever invoked
@@ -242,11 +312,27 @@ class ArchitectSessionsCLITest < Space::ArchitectTest
     fake
   end
 
+  # Stub SessionSync.resolve_token so `agent install` never shells out to a
+  # real `op` binary — mirrors stub_agent's singleton-method-swap pattern.
+  def stub_resolve_token(resolved: "resolved-secret")
+    calls = []
+    ss = Space::Architect::SessionSync
+    @resolve_token_orig = ss.method(:resolve_token)
+    ss.singleton_class.send(:remove_method, :resolve_token) if ss.singleton_class.method_defined?(:resolve_token, false)
+    ss.define_singleton_method(:resolve_token) { |ref| calls << ref; resolved }
+    calls
+  end
+
   def teardown
     if @agent_new_orig
       agent_class = Space::Src::Launchd::Agent
       agent_class.singleton_class.send(:remove_method, :new) if agent_class.singleton_class.method_defined?(:new, false)
       agent_class.define_singleton_method(:new, &@agent_new_orig)
+    end
+    if @resolve_token_orig
+      ss = Space::Architect::SessionSync
+      ss.singleton_class.send(:remove_method, :resolve_token) if ss.singleton_class.method_defined?(:resolve_token, false)
+      ss.define_singleton_method(:resolve_token, &@resolve_token_orig)
     end
     super
   end
@@ -272,7 +358,13 @@ class ArchitectSessionsCLITest < Space::ArchitectTest
       assert_match(/<key>StartInterval<\/key>\s*<integer>1800<\/integer>/, xml)
       m = xml.match(/<key>ProgramArguments<\/key>\s*<array>(.*?)<\/array>/m)
       args = m[1].scan(/<string>([^<]*)<\/string>/).flatten
-      assert_equal ["/usr/local/bin/architect", "sessions", "sync", "--host", "http://example.com", "--token", "secret-token"], args
+      assert_equal ["/usr/local/bin/architect", "sessions", "sync", "--host", "http://example.com"], args
+      token_env = Space::Architect::SessionSync::TOKEN_ENV
+      assert_match(
+        %r{<key>EnvironmentVariables</key>\s*<dict>\s*<key>#{Regexp.escape(token_env)}</key>\s*<string>secret-token</string>\s*</dict>},
+        xml
+      )
+      assert_equal 0o600, File.stat(pp).mode & 0o777
 
       assert_equal [[:install, pp]], fake.calls
       assert_match(/Installed/, out)
@@ -281,18 +373,33 @@ class ArchitectSessionsCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  # (g) an op:// token is written into the plist as the ref, never resolved.
-  def test_agent_install_writes_op_token_as_ref
+  # (g) an op:// token is resolved exactly once at install time (via the injected
+  # resolver — no real `op` binary) and the RESOLVED value lands in the plist's
+  # EnvironmentVariables; the ref itself and the resolved value never appear in argv.
+  def test_agent_install_resolves_op_token_into_env
     setup = temp_env
     with_env(setup[:env].merge("SPACE_ARCHITECT_BIN_PATH" => "/usr/local/bin/architect")) do
       stub_agent
-      invoke("sessions", "agent", "install", "--host", "http://example.com",
-        "--token", "op://vault/space-architect/session-sync-token")
+      ref = "op://vault/space-architect/session-sync-token"
+      calls = stub_resolve_token(resolved: "resolved-secret")
+      invoke("sessions", "agent", "install", "--host", "http://example.com", "--token", ref)
+
+      assert_equal [ref], calls
 
       label = Space::Architect::SessionSync::LABEL
       pp = File.join(setup[:env]["HOME"], "Library", "LaunchAgents", "#{label}.plist")
       xml = File.read(pp)
-      assert_match(%r{<string>op://vault/space-architect/session-sync-token</string>}, xml)
+      token_env = Space::Architect::SessionSync::TOKEN_ENV
+      assert_match(
+        %r{<key>EnvironmentVariables</key>\s*<dict>\s*<key>#{Regexp.escape(token_env)}</key>\s*<string>resolved-secret</string>\s*</dict>},
+        xml
+      )
+      refute_match(/#{Regexp.escape(ref)}/, xml)
+
+      m = xml.match(/<key>ProgramArguments<\/key>\s*<array>(.*?)<\/array>/m)
+      args = m[1].scan(/<string>([^<]*)<\/string>/).flatten
+      assert_equal ["/usr/local/bin/architect", "sessions", "sync", "--host", "http://example.com"], args
+      assert_equal 0o600, File.stat(pp).mode & 0o777
     end
   ensure
     FileUtils.rm_rf(setup[:root]) if setup

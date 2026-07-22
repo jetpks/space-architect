@@ -6,17 +6,18 @@ require "tempfile"
 class SessionSyncPlistTest < Space::ArchitectTest
   Plist = Space::Architect::SessionSync::Plist
   LABEL = Space::Architect::SessionSync::LABEL
+  TOKEN_ENV = Space::Architect::SessionSync::TOKEN_ENV
   BIN_PATH = "/Users/eric/.gem/ruby/4.0.0/bin/architect"
   LOG_DIR = "/Users/eric/.local/state/space-architect/logs"
 
-  def fixture_xml(host: "https://example.com", token: "secret-token", refresh_interval: 900)
+  def fixture_xml(host: "https://example.com", env: {TOKEN_ENV => "secret-token"}, refresh_interval: 900)
     Plist.call(
       label: LABEL,
       refresh_interval: refresh_interval,
       log_dir: LOG_DIR,
       bin_path: BIN_PATH,
       host: host,
-      token: token
+      env: env
     )
   end
 
@@ -33,19 +34,31 @@ class SessionSyncPlistTest < Space::ArchitectTest
     assert_match(/<key>Label<\/key>\s*<string>#{Regexp.escape(LABEL)}<\/string>/o, fixture_xml)
   end
 
-  # AC5: argv runs `sessions sync` with the configured host/token.
-  def test_emitted_plist_program_arguments_run_sessions_sync_with_host_and_token
-    xml = fixture_xml(host: "https://example.com", token: "secret-token")
+  # AC5: argv runs `sessions sync` with the configured host, and carries no token material.
+  def test_emitted_plist_program_arguments_run_sessions_sync_with_host_only
+    xml = fixture_xml(host: "https://example.com")
     m = xml.match(/<key>ProgramArguments<\/key>\s*<array>(.*?)<\/array>/m)
     refute_nil m, "ProgramArguments array missing"
     args = m[1].scan(/<string>([^<]*)<\/string>/).flatten
-    assert_equal [BIN_PATH, "sessions", "sync", "--host", "https://example.com", "--token", "secret-token"], args
+    assert_equal [BIN_PATH, "sessions", "sync", "--host", "https://example.com"], args
   end
 
-  # AC5: an op:// token appears as the REF, never resolved.
-  def test_op_token_appears_as_ref_not_resolved
-    xml = fixture_xml(token: "op://vault/space-architect/session-sync-token")
-    assert_match(/<string>op:\/\/vault\/space-architect\/session-sync-token<\/string>/, xml)
+  def test_program_arguments_contains_no_token_flag
+    refute_match(/--token/, fixture_xml)
+  end
+
+  # AC2: EnvironmentVariables carries the resolved token value verbatim (Plist never resolves).
+  def test_environment_variables_dict_contains_ingest_token
+    xml = fixture_xml(env: {TOKEN_ENV => "resolved-secret"})
+    assert_match(
+      %r{<key>EnvironmentVariables</key>\s*<dict>\s*<key>#{Regexp.escape(TOKEN_ENV)}</key>\s*<string>resolved-secret</string>\s*</dict>},
+      xml
+    )
+  end
+
+  def test_op_ref_passed_through_env_is_not_resolved
+    xml = fixture_xml(env: {TOKEN_ENV => "op://vault/space-architect/session-sync-token"})
+    assert_match(%r{<string>op://vault/space-architect/session-sync-token</string>}, xml)
   end
 
   # AC5: the requested StartInterval is honored.
@@ -60,28 +73,31 @@ class SessionSyncPlistTest < Space::ArchitectTest
 
   def test_rejects_empty_label
     assert_raises(ArgumentError) do
-      Plist.call(label: "", refresh_interval: 900, log_dir: LOG_DIR, bin_path: BIN_PATH, host: "h", token: "t")
+      Plist.call(label: "", refresh_interval: 900, log_dir: LOG_DIR, bin_path: BIN_PATH, host: "h", env: {TOKEN_ENV => "t"})
     end
   end
 
   def test_rejects_non_positive_refresh_interval
     assert_raises(ArgumentError) do
-      Plist.call(label: LABEL, refresh_interval: 0, log_dir: LOG_DIR, bin_path: BIN_PATH, host: "h", token: "t")
+      Plist.call(label: LABEL, refresh_interval: 0, log_dir: LOG_DIR, bin_path: BIN_PATH, host: "h", env: {TOKEN_ENV => "t"})
     end
   end
 
   def test_rejects_relative_paths
     assert_raises(ArgumentError) do
-      Plist.call(label: LABEL, refresh_interval: 900, log_dir: "relative/dir", bin_path: BIN_PATH, host: "h", token: "t")
+      Plist.call(label: LABEL, refresh_interval: 900, log_dir: "relative/dir", bin_path: BIN_PATH, host: "h", env: {TOKEN_ENV => "t"})
     end
   end
 
-  def test_rejects_missing_host_or_token
+  def test_rejects_missing_host_or_token_env
     assert_raises(ArgumentError) do
-      Plist.call(label: LABEL, refresh_interval: 900, log_dir: LOG_DIR, bin_path: BIN_PATH, host: "", token: "t")
+      Plist.call(label: LABEL, refresh_interval: 900, log_dir: LOG_DIR, bin_path: BIN_PATH, host: "", env: {TOKEN_ENV => "t"})
     end
     assert_raises(ArgumentError) do
-      Plist.call(label: LABEL, refresh_interval: 900, log_dir: LOG_DIR, bin_path: BIN_PATH, host: "h", token: "")
+      Plist.call(label: LABEL, refresh_interval: 900, log_dir: LOG_DIR, bin_path: BIN_PATH, host: "h", env: {TOKEN_ENV => ""})
+    end
+    assert_raises(ArgumentError) do
+      Plist.call(label: LABEL, refresh_interval: 900, log_dir: LOG_DIR, bin_path: BIN_PATH, host: "h", env: {})
     end
   end
 end
