@@ -5,6 +5,35 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.4.0] - 2026-07-21
+
+### Changed
+
+- **`architect sessions agent install` resolves an `op://` token at install
+  time** — the ref is resolved once via `op read` and the raw value is written
+  to the plist's `EnvironmentVariables` dict (`SPACE_ARCHITECT_INGEST_TOKEN`),
+  with the plist written mode 0600 and ProgramArguments carrying no token
+  material. Interval runs no longer invoke `op` at all, so a locked 1Password
+  can no longer fail the sync (previously the ref rode argv and every fire ran
+  `op read`). Reinstall existing agents to migrate; a non-`op://` token passes
+  through to the env dict unresolved.
+
+### Added
+
+- **`architect sessions sync` env-token fallback** — `--token` is now
+  optional: when absent, the token is read from `SPACE_ARCHITECT_INGEST_TOKEN`.
+  An explicit `--token` always wins; with neither present, the error names
+  both sources.
+- **Server: conversation session links** — importers preserve a session file's
+  own `session_id` and record a differing content-derived id as
+  `parent_session_id`; conversations resolve `parent`/`children` links
+  (owner-scoped) and Conversations/Show renders "part of" / "Subagent
+  transcripts" navigation between them.
+- **Server: denormalized `turns_count` on conversations** — the conversations
+  index reads a counter column recomputed at import instead of loading every
+  conversation's messages, fixing index-page timeouts (502s) at
+  thousand-conversation scale.
+
 ## [5.3.0] - 2026-07-20
 
 ### Added
