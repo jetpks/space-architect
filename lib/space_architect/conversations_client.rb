@@ -16,7 +16,7 @@ module Space::Architect
       @host = host.chomp("/")
       @token = token
       @client = client
-      @op_resolver = op_resolver || method(:op_read)
+      @op_resolver = op_resolver || SessionSync.method(:resolve_token)
       @resolved_token = nil
     end
 
@@ -60,13 +60,6 @@ module Space::Architect
     # Resolved once per client instance (per run), per spec.
     def resolved_token
       @resolved_token ||= @token.start_with?("op://") ? @op_resolver.call(@token) : @token
-    end
-
-    def op_read(ref)
-      value = IO.popen(["op", "read", ref], &:read)
-      raise Space::Core::Error, "op read failed for #{ref}" unless $?.success?
-
-      value.chomp
     end
 
     def build_multipart(boundary, path, session_id)

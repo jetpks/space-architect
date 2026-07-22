@@ -950,13 +950,13 @@ module Space::Architect
         # explicitly rather than relying on dry-cli's `required:` option flag.
         def self.require_credentials!(host, token)
           raise Space::Core::Error, "--host is required" unless host
-          raise Space::Core::Error, "--token is required" unless token
+          raise Space::Core::Error, "--token or #{SessionSync::TOKEN_ENV} is required" unless token
         end
 
         class Sync < BaseCommand
           desc "Scan pi/claude session files and upload new/grown conversations to a space-server"
           option :host,        required: true, desc: "Base URL of the space-server"
-          option :token,       required: true, desc: "Bearer token for authorization (an op:// ref is resolved once via `op read`)"
+          option :token,       default: nil,   desc: "Bearer token for authorization (defaults to $#{SessionSync::TOKEN_ENV}; an explicit --token wins; an op:// ref is resolved once via `op read`)"
           option :state_file,  default: nil,   desc: "Cursor YAML path (default: $XDG_STATE_HOME/space-architect/session-sync.yaml)"
           option :pi_root,     default: nil,   desc: "Override the pi sessions root (default: ~/.pi/agent/sessions)"
           option :claude_root, default: nil,   desc: "Override the claude projects root (default: ~/.claude/projects)"
@@ -965,9 +965,10 @@ module Space::Architect
           def call(host: nil, token: nil, state_file: nil, pi_root: nil, claude_root: nil, dry_run: false, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
-              Sessions.require_credentials!(host, token)
+              resolved_token = token || ENV[SessionSync::TOKEN_ENV]
+              Sessions.require_credentials!(host, resolved_token)
               runner = SessionSync::Runner.new(
-                client: ConversationsClient.new(host, token),
+                client: ConversationsClient.new(host, resolved_token),
                 state_path: state_file || SessionSync.default_state_file,
                 pi_root: pi_root || SessionSync.default_pi_root,
                 claude_root: claude_root || SessionSync.default_claude_root,
@@ -997,13 +998,14 @@ module Space::Architect
             include Helpers
             desc "Install the launchd agent that periodically runs `architect sessions sync`"
             option :host,     required: true, desc: "Base URL of the space-server"
-            option :token,    required: true, desc: "Bearer token for authorization (an op:// ref is stored as-is in the plist)"
+            option :token,    required: true, desc: "Bearer token for authorization (an op:// ref is resolved once at install time; the raw value is stored in the plist's EnvironmentVariables, not argv)"
             option :interval, default: "900", desc: "StartInterval in seconds (default 900)"
 
             def call(host: nil, token: nil, interval: "900", **opts)
               setup_terminal(**opts.slice(:color, :colors))
               handle_errors do
                 Sessions.require_credentials!(host, token)
+                resolved_token = token.start_with?("op://") ? SessionSync.resolve_token(token) : token
                 pp = plist_path
                 xml = SessionSync::Plist.call(
                   label: SessionSync::LABEL,
@@ -1011,10 +1013,11 @@ module Space::Architect
                   log_dir: SessionSync.log_dir,
                   bin_path: SessionSync::BinPath.detect,
                   host: host,
-                  token: token
+                  env: {SessionSync::TOKEN_ENV => resolved_token}
                 )
                 FileUtils.mkdir_p(File.dirname(pp))
                 File.write(pp, xml)
+                File.chmod(0o600, pp)
 
                 result = Space::Src::Launchd::Agent.new(label: SessionSync::LABEL).install(pp)
                 raise Space::Core::Error, "bootstrap failed: #{format_failure(result.failure)}" if result.failure?

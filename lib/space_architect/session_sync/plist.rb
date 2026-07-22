@@ -23,10 +23,11 @@ module Space::Architect
         # @param log_dir [String]          Absolute directory for stdout/stderr logs.
         # @param bin_path [String]         Absolute path to the architect bin script.
         # @param host [String]             --host value passed to `sessions sync`.
-        # @param token [String]            --token value passed to `sessions sync` (an op:// ref
-        #                                  is passed through verbatim — never resolved here).
+        # @param env [Hash]                EnvironmentVariables dict; must contain a non-empty
+        #                                  SessionSync::TOKEN_ENV value (resolved by the caller —
+        #                                  never resolved here).
         # @return [String] the full plist XML.
-        def call(label:, refresh_interval:, log_dir:, bin_path:, host:, token:)
+        def call(label:, refresh_interval:, log_dir:, bin_path:, host:, env:)
           raise ArgumentError, "label is required" if label.to_s.empty?
           raise ArgumentError, "refresh_interval must be > 0" unless refresh_interval.is_a?(Integer) && refresh_interval > 0
           %w[log_dir bin_path].each do |k|
@@ -34,7 +35,7 @@ module Space::Architect
             raise ArgumentError, "#{k} must be absolute (got #{v.inspect})" unless v.is_a?(String) && File.absolute_path?(v)
           end
           raise ArgumentError, "host is required" if host.to_s.empty?
-          raise ArgumentError, "token is required" if token.to_s.empty?
+          raise ArgumentError, "env[#{SessionSync::TOKEN_ENV}] is required" if env.to_h[SessionSync::TOKEN_ENV].to_s.empty?
 
           out_log = File.join(log_dir, "#{label}.out.log")
           err_log = File.join(log_dir, "#{label}.err.log")
@@ -45,9 +46,9 @@ module Space::Architect
             bin_path,
             "sessions",
             "sync",
-            "--host", host,
-            "--token", token
+            "--host", host
           ])
+          body << key("EnvironmentVariables") << "\n" << dict(env)
           body << key("StartInterval") << integer(refresh_interval) << "\n"
           body << key("RunAtLoad") << boolean(true) << "\n"
           body << key("ProcessType") << string("Background") << "\n"
@@ -88,6 +89,15 @@ module Space::Architect
           out = +"  <array>\n"
           items.each { |arg| out << "    <string>#{escape(arg)}</string>\n" }
           out << "  </array>"
+        end
+
+        def dict(hash)
+          out = +"  <dict>\n"
+          hash.each do |k, v|
+            out << "    <key>#{escape(k)}</key>\n"
+            out << "    <string>#{escape(v)}</string>\n"
+          end
+          out << "  </dict>"
         end
       end
     end
