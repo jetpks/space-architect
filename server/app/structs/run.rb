@@ -8,6 +8,7 @@ module Space
         def live?     = status == :live
         def complete? = status == :complete
         def failed?   = status == :failed
+        def canceled? = status == :canceled
 
         def published?
           !!published

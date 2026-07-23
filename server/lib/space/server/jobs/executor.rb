@@ -135,7 +135,15 @@ module Space
           text.byteslice(text.bytesize - FAILURE_EVIDENCE_BYTES, FAILURE_EVIDENCE_BYTES)
         end
 
+        # A cancel landing during the env-image build (BRIEF I46) has no
+        # container to stop yet — the heartbeat/lease path only kicks in once
+        # #supervise is watching a live handle. Re-check here, right before the
+        # only side effects a build-time cancel can still prevent (secrets
+        # resolution, the container itself); the consumer already treats a
+        # canceled producer as EOF, so skipping silently is enough.
         def spawn_and_relay(job, argv, stream, cidfile)
+          return if @jobs_repo.by_pk(job.id).canceled?
+
           secrets = @secret_resolver.call(secret_refs(job.spec))
           handle  = @spawner.call(argv, env: secrets, cidfile: cidfile)
           code, canceled = supervise(job, handle, stream)

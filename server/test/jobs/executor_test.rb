@@ -557,6 +557,29 @@ class ExecutorTest < Minitest::Test
     end
   end
 
+  # A cancel landing between env-image build success and container spawn
+  # (I46) must never reach the sandbox: no spawner call, no secrets resolved,
+  # no exit frame — the consumer already treats a canceled producer as EOF.
+  def test_cancel_during_env_build_skips_spawn_entirely
+    job     = make_job
+    spawner = FakeSpawner.new(FakeHandle.new)
+    resolver_called = false
+
+    with_redis do |redis|
+      redis.del(key_for(job))
+      executor = build_executor(redis: redis, spawner: spawner,
+        env_image: ->(_environment) { jobs_repo.cancel(job.id); Success("img:abc123") },
+        resolver: ->(_refs) { resolver_called = true; {} })
+      executor.tick
+
+      refute resolver_called, "a build-time cancel must skip secret resolution"
+      assert_equal 0, spawner.calls, "a build-time cancel must never spawn the sandbox"
+      assert_equal "canceled", jobs_repo.by_pk(job.id).status, "cancel must not be clobbered"
+      assert_equal 0, events(redis, key_for(job)).count { |t, _| t == "exit" },
+        "a build-time cancel must not emit a terminal exit frame"
+    end
+  end
+
   # --- run-row harness field (I17) ---
 
   def test_run_row_records_pi_harness_type

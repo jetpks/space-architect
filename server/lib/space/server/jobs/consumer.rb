@@ -69,12 +69,19 @@ module Space
           run = ensure_run(job)
           @runs_repo.update(run.id, status: 1, updated_at: Time.now) if run.pending?
 
-          raw       = RawStream.new(@redis, job.id, abandoned: -> { producer_gone?(job.id) })
+          gone_job  = nil
+          raw       = RawStream.new(@redis, job.id, abandoned: -> { producer_gone?(job.id) { |j| gone_job = j } })
           persistor = Runs::Persistor.new(@conversations_repo, @messages_repo)
           result    = Runs::Ingest.new(@redis, persistor: persistor, source: SOURCE).call(run, raw)
           exit_code = raw.drain_to_exit
 
-          final = result[:status] == :complete && exit_code == 0 ? 2 : 3
+          final = if result[:status] == :complete && exit_code == 0
+                    2
+                  elsif gone_job&.canceled?
+                    4
+                  else
+                    3
+                  end
           @runs_repo.update(run.id, status: final, conversation_id: persistor.conversation_id, updated_at: Time.now)
         end
 
@@ -98,9 +105,12 @@ module Space
         end
 
         # The executor is done (or the job vanished): no further raw entries are
-        # coming, so a quiet stream means EOF rather than "keep waiting".
+        # coming, so a quiet stream means EOF rather than "keep waiting". Yields
+        # the fetched job (if a block is given) so #drain can reuse this same
+        # read to tell a canceled producer from a genuinely failed one.
         def producer_gone?(job_id)
           job = @jobs_repo.by_pk(job_id)
+          yield job if block_given?
           job.nil? || job.succeeded? || job.failed? || job.canceled?
         end
       end
