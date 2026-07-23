@@ -17,6 +17,10 @@ vi.mock('@/layouts/AppLayout', () => ({
   default: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
 }))
 
+vi.mock('@/components/RunStream', () => ({
+  default: ({ runId }: { runId: number }) => <div data-testid="run-stream">stream:{runId}</div>,
+}))
+
 import Show from './Show'
 
 const JOB: JobDetail = {
@@ -115,5 +119,20 @@ describe('Jobs/Show', () => {
     const { getByRole } = render(<Show job={{ ...JOB, status: 'running' }} />)
     fireEvent.click(getByRole('button', { name: 'Cancel' }))
     expect(post).not.toHaveBeenCalled()
+  })
+
+  it('renders a "Run again" link to /jobs/new?from=<id>', () => {
+    const { container } = render(<Show job={JOB} />)
+    expect(container.querySelector('a[href="/jobs/new?from=1"]')).not.toBeNull()
+  })
+
+  it('embeds the live run stream when run_id is set', () => {
+    const { container } = render(<Show job={JOB} />)
+    expect(container.querySelector('[data-testid="run-stream"]')).not.toBeNull()
+  })
+
+  it('omits the live run stream when run_id is null', () => {
+    const { container } = render(<Show job={{ ...JOB, run_id: null }} />)
+    expect(container.querySelector('[data-testid="run-stream"]')).toBeNull()
   })
 })

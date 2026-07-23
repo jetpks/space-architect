@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { Head, useForm } from '@inertiajs/react'
 import { Button } from '@/components/ui/button'
@@ -9,8 +9,8 @@ import { Textarea } from '@/components/ui/textarea'
 import AppLayout from '@/layouts/AppLayout'
 import { compatibleProviders, fetchProviderModels } from '@/lib/providers'
 import { CUSTOM_BACKEND, syncPiExtension, type FileRow, type GeneratedPi } from '@/lib/pi-extension'
-import type { Profile, Provider } from '@/types'
-import { decodeBase64, encodeBase64 } from './helpers'
+import type { JobSpec, Profile, Provider } from '@/types'
+import { encodeBase64, specFormFields, type SpecFormFields } from './helpers'
 
 type FormData = {
   harness_type: string
@@ -50,9 +50,9 @@ const INITIAL_DATA: FormData = {
   mounts: [],
 }
 
-type Props = { profiles?: Profile[]; providers?: Provider[] }
+type Props = { profiles?: Profile[]; providers?: Provider[]; prefill_spec?: JobSpec }
 
-export default function New({ profiles = [], providers = [] }: Props) {
+export default function New({ profiles = [], providers = [], prefill_spec }: Props) {
   const form = useForm<FormData>(INITIAL_DATA)
   const [selectedProfileId, setSelectedProfileId] = useState('')
   const [selectedProviderId, setSelectedProviderId] = useState(CUSTOM_BACKEND)
@@ -119,11 +119,19 @@ export default function New({ profiles = [], providers = [] }: Props) {
     }
   }
 
+  // Applies every field of the shared spec mapping (see Jobs/helpers.ts
+  // specFormFields) via individual form.setData calls, so profile
+  // application and re-run prefill can never drift from one another.
+  function applyFields(fields: SpecFormFields) {
+    ;(Object.entries(fields) as [keyof FormData, FormData[keyof FormData]][]).forEach(([key, value]) =>
+      form.setData(key, value),
+    )
+  }
+
   function applyProfile(id: string) {
     setSelectedProfileId(id)
     const profile = profiles.find((p) => String(p.id) === id)
     if (!profile) return
-    const spec = profile.spec
 
     setSelectedProviderId(CUSTOM_BACKEND)
     setModelOptions([])
@@ -131,27 +139,17 @@ export default function New({ profiles = [], providers = [] }: Props) {
     setGeneratedPi(null)
     setPiExtensionError(null)
 
-    form.setData('harness_type', profile.harness_type)
-    form.setData('harness_model', spec.harness.model)
-    form.setData('base_url', spec.harness.backend.base_url)
-    form.setData('api_key_ref', spec.harness.backend.api_key_ref ?? '')
-    form.setData('args', spec.harness.args ?? [])
-    form.setData('env', Object.entries(spec.environment.env ?? {}))
-    form.setData(
-      'secrets',
-      (spec.environment.secrets ?? []).map(({ ref, name }): [string, string] => [ref, name]),
-    )
-    form.setData('debs', spec.environment.debs ?? spec.environment.deps ?? [])
-    form.setData('npm', spec.environment.npm ?? [])
-    form.setData('gems', spec.environment.gems ?? [])
-    form.setData('mise', spec.environment.mise ?? [])
-    form.setData(
-      'files',
-      (spec.environment.files ?? []).map((f) => ({ path: f.path, content: decodeBase64(f.content_b64) })),
-    )
-    form.setData('network', spec.environment.permissions?.network ?? false)
-    form.setData('mounts', spec.environment.permissions?.mounts ?? [])
+    applyFields(specFormFields(profile.spec))
   }
+
+  // /jobs/new?from=<id> re-run: prefill the form from the owned job's spec on
+  // first mount, using the same mapping applyProfile uses. Absent prop → the
+  // form's own defaults are left untouched.
+  useEffect(() => {
+    if (!prefill_spec) return
+    applyFields(specFormFields(prefill_spec))
+    form.setData('prompt', prefill_spec.prompt)
+  }, [prefill_spec])
 
   function submit(e: React.FormEvent) {
     e.preventDefault()

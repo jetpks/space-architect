@@ -3,6 +3,7 @@ import { Head, Link, router } from '@inertiajs/react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import AppLayout from '@/layouts/AppLayout'
+import RunStream from '@/components/RunStream'
 import type { JobDetail } from '@/types'
 import { timeLabel } from '@/pages/Spaces/helpers'
 import { STATUS_VARIANT } from './helpers'
@@ -17,8 +18,8 @@ const POLL_MS = 2500
 
 export default function Show({ job }: Props) {
   // Self-refresh while the job is still in flight; stop once it lands on a
-  // terminal status (succeeded/failed/canceled). No SSE here — /runs/:id owns
-  // the live stream once run_id is set.
+  // terminal status (succeeded/failed/canceled). The embedded RunStream below
+  // handles the live transcript itself once run_id is set.
   useEffect(() => {
     if (!ACTIVE_STATUSES.has(job.status)) return
     const id = setInterval(() => router.reload({ only: ['job'] }), POLL_MS)
@@ -61,18 +62,26 @@ export default function Show({ job }: Props) {
         </div>
       </dl>
 
-      {(job.run_id || ACTIVE_STATUSES.has(job.status)) && (
-        <div className="mt-4 flex gap-2">
-          {job.run_id && (
-            <Button asChild>
-              <Link href={`/runs/${job.run_id}`}>View live run</Link>
-            </Button>
-          )}
-          {ACTIVE_STATUSES.has(job.status) && (
-            <Button variant="destructive" onClick={handleCancel}>
-              Cancel
-            </Button>
-          )}
+      <div className="mt-4 flex gap-2">
+        {job.run_id && (
+          <Button asChild>
+            <Link href={`/runs/${job.run_id}`}>View live run</Link>
+          </Button>
+        )}
+        {ACTIVE_STATUSES.has(job.status) && (
+          <Button variant="destructive" onClick={handleCancel}>
+            Cancel
+          </Button>
+        )}
+        <Button asChild variant="outline">
+          <Link href={`/jobs/new?from=${job.id}`}>Run again</Link>
+        </Button>
+      </div>
+
+      {job.run_id && (
+        <div className="mt-6">
+          <h2 className="text-lg font-semibold">Live run</h2>
+          <RunStream runId={job.run_id} prompt={job.spec.prompt} />
         </div>
       )}
 
