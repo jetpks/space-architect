@@ -1758,7 +1758,8 @@ class ArchitectCLITest < Space::ArchitectTest
         out, err = invoke("dispatch", "demo", "A", "--as-job",
                           "--host", "http://127.0.0.1:#{port}",
                           "--token", "secret-token",
-                          "--backend-url", "https://backend.example.com")
+                          "--backend-url", "https://backend.example.com",
+                          "--job-model", "some/sandbox-model")
 
         server_thread.join(5)
 
@@ -1783,7 +1784,7 @@ class ArchitectCLITest < Space::ArchitectTest
         assert_equal "unused-for-keyless-backends", posted["environment"]["env"]["ANTHROPIC_API_KEY"]
         assert_equal "claude", posted["harness"]["type"]
         assert_equal "https://backend.example.com", posted["harness"]["backend"]["base_url"]
-        refute posted["harness"].key?("model"), "model must be omitted when --job-model is not given"
+        assert_equal "some/sandbox-model", posted["harness"]["model"]
         refute_includes posted["harness"]["args"], "-p"
         refute_includes posted["harness"]["args"], "--model"
         assert_equal({ "space" => "test-space", "iteration" => "demo", "lane" => "A" }, posted["provenance"])
