@@ -24,35 +24,38 @@ module Space
               halt 401, JSON.generate(error: "Sign in required.")
             end
 
-            render_json(res, { jobs: job_list(user) })
+            render_json(res, { jobs: job_entries(jobs_repo.list_for_user(user.id)) })
           end
 
           def handle_browser(req, res)
             user = require_login(req, res)
-            render_inertia(req, res, "Jobs/Index", props: { jobs: job_list(user) })
+            page = clamped_page(req)
+            paged = jobs_repo.list_for_user_page(user.id, page: page)
+            render_inertia(req, res, "Jobs/Index", props: {
+              jobs: job_entries(paged[:rows]),
+              pagination: { page: page, has_more: paged[:has_more] }
+            })
           end
 
-          PROMPT_SNIPPET_LENGTH = 140
+          def clamped_page(req)
+            page = req.params[:page].to_i
+            page.positive? ? page : 1
+          end
 
-          def job_list(user)
-            jobs_repo.list_for_user(user.id).map do |job|
+          def job_entries(jobs)
+            jobs.map do |job|
               entry = {
                 id: job.id,
                 status: job.status,
                 model: job.spec.dig("harness", "model"),
                 harness: job.spec.dig("harness", "type"),
-                prompt_snippet: prompt_snippet(job.spec["prompt"]),
+                prompt_snippet: Serializers::PromptSnippet.call(job.spec["prompt"]),
                 created_at: job.created_at.iso8601,
                 run_id: job.run_id
               }
               provenance = job.spec["provenance"]
               provenance ? entry.merge(provenance: provenance) : entry
             end
-          end
-
-          def prompt_snippet(prompt)
-            single_line = prompt.to_s.tr("\n", " ").squeeze(" ").strip
-            single_line.length > PROMPT_SNIPPET_LENGTH ? "#{single_line[0, PROMPT_SNIPPET_LENGTH]}…" : single_line
           end
         end
       end

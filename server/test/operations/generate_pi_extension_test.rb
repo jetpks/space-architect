@@ -46,4 +46,13 @@ class GeneratePiExtensionTest < Minitest::Test
     result = generator.call(Provider.new("Studio", "https://studio.slush.systems", "op://vault/item/field"), [])
     refute_includes result[:content], "op://vault/item/field"
   end
+
+  # pi-coding-agent's ProviderConfigInput has no top-level `compat` — it lives
+  # per-model at Model#compat (model-registry.d.ts).
+  def test_compat_is_per_model_not_provider_level
+    result = generator.call(Provider.new("Studio", "https://studio.slush.systems", nil), ["model-a", "model-b"])
+    provider_config, models_config = result[:content].split("models: [", 2)
+    refute_includes provider_config, "compat:"
+    assert_equal 2, models_config.scan("compat:").size
+  end
 end

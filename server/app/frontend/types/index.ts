@@ -139,15 +139,19 @@ export type Conversation = {
   }
   // Owner-only: the conversation this one is a subagent transcript of. Absent
   // (not just null) for non-owners and anonymous viewers.
-  parent?: { id: number; title: string | null } | null
+  parent?: { id: number; title: string } | null
   // Owner-only: subagent transcripts synced from this conversation. Absent
   // for non-owners and anonymous viewers; empty array when there are none.
-  children?: Array<{ id: number; title: string | null; session_id: string }>
+  children?: Array<{ id: number; title: string; session_id: string }>
 }
+
+// The five states in config/db/migrate/20260622000000_create_runs.rb's status
+// column (0=pending, 1=live, 2=complete, 3=failed, 4=canceled).
+export type RunStatus = 'pending' | 'live' | 'complete' | 'failed' | 'canceled'
 
 export type Run = {
   id: number
-  status: string
+  status: RunStatus
   published: boolean
   role: string | null
   harness: string | null
@@ -162,7 +166,7 @@ export type Run = {
 
 export type RunListItem = {
   id: number
-  status: string
+  status: RunStatus
   published: boolean
   harness: string | null
   model: string | null
@@ -171,6 +175,13 @@ export type RunListItem = {
   // Owner-gated first ~140 chars of the originating job's prompt; nil for
   // non-owners, anon viewers, and runs with no job (ingested runs).
   prompt_snippet: string | null
+}
+
+// The `?page=N` cursor a list page received alongside its row prop, capped at
+// ≤ 50 rows per page. has_more is true iff a further page exists.
+export type Pagination = {
+  page: number
+  has_more: boolean
 }
 
 export type JobListItem = {

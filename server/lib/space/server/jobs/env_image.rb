@@ -36,7 +36,7 @@ module Space
       class EnvImage
         include Dry::Monads[:result]
 
-        DEFAULT_BASE_IMAGE = "debian:stable-slim"
+        DEFAULT_BASE_IMAGE = "space-claude-base:v1"
         TEMPLATE_PATH = Pathname.new(__dir__).join("env_image", "dockerfile.erb").freeze
 
         # Pulled onto the apt layer ahead of `debs` whenever `mise` is declared —

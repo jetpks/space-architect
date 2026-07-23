@@ -5,6 +5,7 @@ require "socket"
 require "json"
 require "fileutils"
 require "tmpdir"
+require "rbconfig"
 
 # CLI-level tests for `architect sessions sync|agent install|agent uninstall|agent status`,
 # exercised end-to-end via invoke() — same TCP-stub pattern as architect_jobs_cli_test.rb
@@ -358,10 +359,10 @@ class ArchitectSessionsCLITest < Space::ArchitectTest
       assert_match(/<key>StartInterval<\/key>\s*<integer>1800<\/integer>/, xml)
       m = xml.match(/<key>ProgramArguments<\/key>\s*<array>(.*?)<\/array>/m)
       args = m[1].scan(/<string>([^<]*)<\/string>/).flatten
-      assert_equal ["/usr/local/bin/architect", "sessions", "sync", "--host", "http://example.com"], args
+      assert_equal [RbConfig.ruby, "/usr/local/bin/architect", "sessions", "sync", "--host", "http://example.com"], args
       token_env = Space::Architect::SessionSync::TOKEN_ENV
       assert_match(
-        %r{<key>EnvironmentVariables</key>\s*<dict>\s*<key>#{Regexp.escape(token_env)}</key>\s*<string>secret-token</string>\s*</dict>},
+        %r{<key>EnvironmentVariables</key>\s*<dict>.*<key>#{Regexp.escape(token_env)}</key>\s*<string>secret-token</string>.*</dict>}m,
         xml
       )
       assert_equal 0o600, File.stat(pp).mode & 0o777
@@ -391,14 +392,14 @@ class ArchitectSessionsCLITest < Space::ArchitectTest
       xml = File.read(pp)
       token_env = Space::Architect::SessionSync::TOKEN_ENV
       assert_match(
-        %r{<key>EnvironmentVariables</key>\s*<dict>\s*<key>#{Regexp.escape(token_env)}</key>\s*<string>resolved-secret</string>\s*</dict>},
+        %r{<key>EnvironmentVariables</key>\s*<dict>.*<key>#{Regexp.escape(token_env)}</key>\s*<string>resolved-secret</string>.*</dict>}m,
         xml
       )
       refute_match(/#{Regexp.escape(ref)}/, xml)
 
       m = xml.match(/<key>ProgramArguments<\/key>\s*<array>(.*?)<\/array>/m)
       args = m[1].scan(/<string>([^<]*)<\/string>/).flatten
-      assert_equal ["/usr/local/bin/architect", "sessions", "sync", "--host", "http://example.com"], args
+      assert_equal [RbConfig.ruby, "/usr/local/bin/architect", "sessions", "sync", "--host", "http://example.com"], args
       assert_equal 0o600, File.stat(pp).mode & 0o777
     end
   ensure

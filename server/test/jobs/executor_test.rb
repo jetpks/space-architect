@@ -111,6 +111,7 @@ class ExecutorTest < Minitest::Test
     end
 
     def expire(*args) = @client.expire(*args)
+    def del(*args) = @client.del(*args)
   end
 
   DEFAULT_SPEC = {
@@ -187,6 +188,24 @@ class ExecutorTest < Minitest::Test
 
       ttl = redis.ttl(key_for(job))
       assert ttl.positive? && ttl <= 1800, "TTL contract violated: #{ttl}"
+    end
+  end
+
+  # A requeued job (crash → lease-expire → sweep → re-claim) must start from
+  # an empty raw stream, not append onto the surviving transcript.
+  def test_stale_raw_stream_is_cleared_before_execution_starts
+    job     = make_job
+    spawner = FakeSpawner.new(FakeHandle.new(stdout: "fresh\n", code: 0))
+
+    with_redis do |redis|
+      redis.del(key_for(job))
+      redis.xadd(key_for(job), "*", "type", "out", "data", "stale from a crashed attempt")
+
+      build_executor(redis: redis, spawner: spawner).tick
+
+      evs = events(redis, key_for(job))
+      refute_includes evs.map { |_, d| d }, "stale from a crashed attempt"
+      assert_equal ["fresh"], evs.select { |t, _| t == "out" }.map { |_, d| d }
     end
   end
 
@@ -272,6 +291,23 @@ class ExecutorTest < Minitest::Test
 
       stored = jobs_repo.by_pk(job.id).failure_evidence
       assert_equal Space::Server::Jobs::Executor::FAILURE_EVIDENCE_BYTES, stored.bytesize
+      assert_equal huge[-10..], stored[-10..], "the tail (most recent output) must be kept, not the head"
+    end
+  end
+
+  def test_env_build_failure_evidence_is_valid_utf8_when_the_byte_boundary_splits_a_multibyte_char
+    job     = make_job
+    spawner = FakeSpawner.new(FakeHandle.new)
+    n       = Space::Server::Jobs::Executor::FAILURE_EVIDENCE_BYTES
+    huge    = "é" + ("x" * (n - 1))  # 2-byte char placed so truncation slices it in half
+
+    with_redis do |redis|
+      redis.del(key_for(job))
+      executor = build_executor(redis: redis, spawner: spawner, env_image: ->(_environment) { Failure(huge) })
+      executor.tick
+
+      stored = jobs_repo.by_pk(job.id).failure_evidence
+      assert stored.valid_encoding?, "evidence must be valid UTF-8 even when a multibyte char is split at the boundary"
       assert_equal huge[-10..], stored[-10..], "the tail (most recent output) must be kept, not the head"
     end
   end
@@ -554,6 +590,29 @@ class ExecutorTest < Minitest::Test
       assert_equal "canceled", jobs_repo.by_pk(job.id).status
       assert_equal 0, events(redis, key_for(job)).count { |t, _| t == "exit" },
         "a canceled run must not emit a terminal exit frame"
+    end
+  end
+
+  # A cancel landing between env-image build success and container spawn
+  # (I46) must never reach the sandbox: no spawner call, no secrets resolved,
+  # no exit frame — the consumer already treats a canceled producer as EOF.
+  def test_cancel_during_env_build_skips_spawn_entirely
+    job     = make_job
+    spawner = FakeSpawner.new(FakeHandle.new)
+    resolver_called = false
+
+    with_redis do |redis|
+      redis.del(key_for(job))
+      executor = build_executor(redis: redis, spawner: spawner,
+        env_image: ->(_environment) { jobs_repo.cancel(job.id); Success("img:abc123") },
+        resolver: ->(_refs) { resolver_called = true; {} })
+      executor.tick
+
+      refute resolver_called, "a build-time cancel must skip secret resolution"
+      assert_equal 0, spawner.calls, "a build-time cancel must never spawn the sandbox"
+      assert_equal "canceled", jobs_repo.by_pk(job.id).status, "cancel must not be clobbered"
+      assert_equal 0, events(redis, key_for(job)).count { |t, _| t == "exit" },
+        "a build-time cancel must not emit a terminal exit frame"
     end
   end
 

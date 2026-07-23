@@ -255,6 +255,15 @@ class ProvidersTest < Minitest::Test
     end
   end
 
+  def test_models_unrelated_error_propagates
+    provider = make_provider(@owner)
+    sign_in(@owner)
+
+    fetch_models.stub(:call, ->(_base_url, _ref) { raise NoMethodError, "undefined method" }) do
+      assert_raises(NoMethodError) { get("/providers/#{provider.id}/models") }
+    end
+  end
+
   # --- pi extension generation -----------------------------------------------
 
   def pi_extension_fetch_models = Space::Server::Actions::Providers::PiExtension::FETCH_MODELS
@@ -380,6 +389,29 @@ class ProvidersTest < Minitest::Test
     resolver = FakeSecretResolver.new({})
     fetcher = Space::Server::Operations::FetchModels.new(http: http, secret_resolver: resolver)
 
-    assert_raises(Space::Server::Operations::FetchModels::SecretResolutionError) { fetcher.call("https://api.example.com", "op://vault/missing") }
+    assert_raises(Space::Server::Operations::FetchModels::SecretResolutionError) { Sync { fetcher.call("https://api.example.com", "op://vault/missing") } }
+  end
+
+  class SlowSecretResolver
+    def call(_refs)
+      Async::Task.current.sleep(1)
+      {"API_KEY" => "sekret"}
+    end
+  end
+
+  def test_fetch_models_slow_resolver_trips_timeout
+    fetch_models_const = Space::Server::Operations::FetchModels
+    original_timeout = fetch_models_const::TIMEOUT_SECONDS
+    fetch_models_const.send(:remove_const, :TIMEOUT_SECONDS)
+    fetch_models_const.const_set(:TIMEOUT_SECONDS, 0.01)
+
+    http = FakeHttp.new(FakeResponse.new(200, JSON.generate(data: [])))
+    fetcher = fetch_models_const.new(http: http, secret_resolver: SlowSecretResolver.new)
+
+    assert_raises(Async::TimeoutError) { Sync { fetcher.call("https://api.example.com", "op://vault/item") } }
+    refute http.last_call, "resolver timeout must trip before the upstream fetch runs"
+  ensure
+    fetch_models_const.send(:remove_const, :TIMEOUT_SECONDS)
+    fetch_models_const.const_set(:TIMEOUT_SECONDS, original_timeout)
   end
 end

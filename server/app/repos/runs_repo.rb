@@ -35,15 +35,19 @@ module Space
           runs.where(expr).to_a
         end
 
-        # Index scope: published ∪ owned-by-user, newest first.
-        # Anonymous (user nil) → published only.
-        def list_visible_to(user)
-          if user.nil?
-            return runs.where(published: true).order(Sequel.desc(:created_at)).to_a
-          end
+        PAGE_SIZE = 50
 
-          expr = Sequel.expr(published: true) | Sequel.expr(user_id: user.id)
-          runs.where(expr).order(Sequel.desc(:created_at)).to_a
+        # Index scope: published ∪ owned-by-user, newest first, paged (page size
+        # 50). Anonymous (user nil) → published only. Fetches PAGE_SIZE + 1 rows
+        # to detect has_more without a COUNT query.
+        def list_visible_to(user, page: 1)
+          expr = user.nil? ? { published: true } : Sequel.expr(published: true) | Sequel.expr(user_id: user.id)
+          rows = runs.where(expr)
+                     .order(Sequel.desc(:created_at))
+                     .limit(PAGE_SIZE + 1)
+                     .offset((page - 1) * PAGE_SIZE)
+                     .to_a
+          { rows: rows.first(PAGE_SIZE), has_more: rows.size > PAGE_SIZE }
         end
 
         def for_show(id)

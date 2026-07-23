@@ -53,9 +53,8 @@ module Space
             status:             STATUS_TO_INT[:completed],
             title:              @title,
             session_id:         conversation.session_id || @session_id,
-            parent_session_id:  parent_session_id(conversation),
             original_cwd:       @original_cwd
-          }.compact)
+          }.compact.merge(parent_session_id: parent_session_id(conversation)))
         rescue => e
           conversations_repo.update(conversation.id, status: STATUS_TO_INT[:failed])
           raise e
@@ -283,7 +282,7 @@ module Space
             model:           model_for(message),
             occurred_at:     entry["timestamp"],
             position:        @position,
-            content:         scrub_nul(blocks),
+            content:         NulScrub.scrub_nul(blocks),
             conversation_id: conversation_id,
             created_at:      Time.now,
             updated_at:      Time.now
@@ -301,21 +300,12 @@ module Space
             model:           model_for(message),
             occurred_at:     entry["timestamp"],
             position:        @position,
-            content:         scrub_nul(blocks),
+            content:         NulScrub.scrub_nul(blocks),
             conversation_id: conversation_id,
             created_at:      Time.now,
             updated_at:      Time.now
           )
           @position += 1
-        end
-
-        def scrub_nul(value)
-          case value
-          when String then value.delete("\0")
-          when Array  then value.map { |v| scrub_nul(v) }
-          when Hash   then value.transform_values { |v| scrub_nul(v) }
-          else value
-          end
         end
 
         def text_block(text)

@@ -71,8 +71,10 @@ module Space
 
           # opencode's headless surface: `opencode run <message> [--model
           # provider/model] --format json`, verified live against 1.17.13 (server
-          # lane report has the full recipe). Model reaches opencode via its own
-          # config (environment.files), not this argv, the same seam pi uses.
+          # lane report has the full recipe). The model reaches opencode via
+          # the `--model` flag below; it's the backend/gateway (base_url/
+          # api_key) that rides environment.files instead (see build's
+          # env_backend comment).
           def self.opencode_tail(harness, prompt)
             tail = ["opencode", "run", prompt]
             tail += ["--model", harness["model"]] if harness["model"]

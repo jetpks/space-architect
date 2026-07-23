@@ -4,9 +4,18 @@ import type { Provider } from '@/types'
 
 let formData: Record<string, unknown>
 let formErrors: Record<string, string>
-const setData = vi.fn((key: string, value: unknown) => {
-  formData = { ...formData, [key]: value }
-})
+// Mirrors @inertiajs/react's setData overloads: a (key, value) pair, or a
+// functional updater — the pi-extension sync helper uses the latter so it
+// always reads current data at resolve time.
+const setData = vi.fn(
+  (
+    keyOrUpdater: string | ((prev: Record<string, unknown>) => Record<string, unknown>),
+    value?: unknown,
+  ) => {
+    formData =
+      typeof keyOrUpdater === 'function' ? keyOrUpdater(formData) : { ...formData, [keyOrUpdater]: value }
+  },
+)
 const post = vi.fn()
 const transform = vi.fn()
 
@@ -482,6 +491,50 @@ describe('Jobs/New', () => {
     expect(payload.environment).not.toHaveProperty('deps')
   })
 
+  it('prefills the form from prefill_spec on mount, field-for-field via the shared mapping', () => {
+    const prefillSpec = {
+      harness: {
+        type: 'pi',
+        model: 'gpt-5',
+        backend: { base_url: 'https://gateway.example.com', api_key_ref: 'op://vault/item' },
+        args: ['--flag'],
+      },
+      prompt: 'do the re-run thing',
+      environment: {
+        env: { FOO: 'bar' },
+        secrets: [{ ref: 'op://vault/secret', name: 'SECRET' }],
+        debs: ['git'],
+        npm: ['typescript'],
+        gems: ['rails'],
+        mise: ['ruby@3.4'],
+        files: [{ path: '/workspace/f.txt', content_b64: btoa('hi') }],
+        permissions: { network: true, mounts: ['/host:/container'] },
+      },
+    }
+    render(<New prefill_spec={prefillSpec} />)
+
+    expect(setData).toHaveBeenCalledWith('harness_type', 'pi')
+    expect(setData).toHaveBeenCalledWith('harness_model', 'gpt-5')
+    expect(setData).toHaveBeenCalledWith('base_url', 'https://gateway.example.com')
+    expect(setData).toHaveBeenCalledWith('api_key_ref', 'op://vault/item')
+    expect(setData).toHaveBeenCalledWith('args', ['--flag'])
+    expect(setData).toHaveBeenCalledWith('env', [['FOO', 'bar']])
+    expect(setData).toHaveBeenCalledWith('secrets', [['op://vault/secret', 'SECRET']])
+    expect(setData).toHaveBeenCalledWith('debs', ['git'])
+    expect(setData).toHaveBeenCalledWith('npm', ['typescript'])
+    expect(setData).toHaveBeenCalledWith('gems', ['rails'])
+    expect(setData).toHaveBeenCalledWith('mise', ['ruby@3.4'])
+    expect(setData).toHaveBeenCalledWith('files', [{ path: '/workspace/f.txt', content: 'hi' }])
+    expect(setData).toHaveBeenCalledWith('network', true)
+    expect(setData).toHaveBeenCalledWith('mounts', ['/host:/container'])
+    expect(setData).toHaveBeenCalledWith('prompt', 'do the re-run thing')
+  })
+
+  it('leaves the form at its untouched defaults when prefill_spec is absent', () => {
+    render(<New />)
+    expect(setData).not.toHaveBeenCalled()
+  })
+
   it('offers opencode as a harness type', () => {
     render(<New />)
     const field = screen.getByText('Harness type').closest('div')!
@@ -511,7 +564,7 @@ describe('Jobs/New', () => {
 
     expect(fetch).toHaveBeenCalledWith('/providers/2/pi_extension')
     await waitFor(() => {
-      expect(setData).toHaveBeenCalledWith('files', [
+      expect(formData.files).toEqual([
         { path: '/root/.pi/agent/extensions/openrouter.ts', content: 'export default {}' },
       ])
     })
@@ -534,7 +587,7 @@ describe('Jobs/New', () => {
     fireEvent.change(within(field).getByRole('combobox'), { target: { value: '3' } })
 
     await waitFor(() => {
-      expect(setData).toHaveBeenCalledWith('secrets', [['op://vault/gateway', 'PI_PROVIDER_API_KEY']])
+      expect(formData.secrets).toEqual([['op://vault/gateway', 'PI_PROVIDER_API_KEY']])
     })
   })
 
@@ -555,7 +608,7 @@ describe('Jobs/New', () => {
     fireEvent.change(within(field).getByRole('combobox'), { target: { value: '2' } })
 
     await waitFor(() => {
-      expect(setData).toHaveBeenCalledWith('files', [
+      expect(formData.files).toEqual([
         { path: '/workspace/hand-added.txt', content: 'mine' },
         { path: '/root/.pi/agent/extensions/openrouter.ts', content: 'v1' },
       ])
@@ -571,7 +624,7 @@ describe('Jobs/New', () => {
     fireEvent.change(within(field).getByRole('combobox'), { target: { value: '3' } })
 
     await waitFor(() => {
-      expect(setData).toHaveBeenCalledWith('files', [
+      expect(formData.files).toEqual([
         { path: '/workspace/hand-added.txt', content: 'mine' },
         { path: '/root/.pi/agent/extensions/gateway.ts', content: 'v2' },
       ])
@@ -588,7 +641,7 @@ describe('Jobs/New', () => {
     await waitFor(() => {
       expect(screen.getByText(/Could not generate the pi extension/)).not.toBeNull()
     })
-    expect(setData).not.toHaveBeenCalledWith('files', expect.arrayContaining([expect.objectContaining({ path: expect.stringContaining('extensions') })]))
+    expect(formData.files).toEqual([])
   })
 
   it('selecting Custom backend adds nothing', () => {
@@ -597,6 +650,6 @@ describe('Jobs/New', () => {
     const field = screen.getByText('Provider').closest('div')!
     fireEvent.change(within(field).getByRole('combobox'), { target: { value: 'custom' } })
 
-    expect(setData).not.toHaveBeenCalledWith('files', expect.anything())
+    expect(setData).not.toHaveBeenCalled()
   })
 })

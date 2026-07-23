@@ -7,14 +7,13 @@ module Space
         class Index < Space::Server::Action
           include Space::Server::Deps["repos.runs_repo", "repos.jobs_repo"]
 
-          PROMPT_SNIPPET_LENGTH = 140
-
           def handle(req, res)
             user = current_user(req)
-            runs = runs_repo.list_visible_to(user)
-            jobs_by_run_id = jobs_repo.by_run_ids(runs.map(&:id))
+            page = clamped_page(req)
+            paged = runs_repo.list_visible_to(user, page: page)
+            jobs_by_run_id = jobs_repo.by_run_ids(paged[:rows].map(&:id))
 
-            run_list = runs.map do |run|
+            run_list = paged[:rows].map do |run|
               {
                 id: run.id,
                 status: run.status,
@@ -26,17 +25,24 @@ module Space
                 prompt_snippet: prompt_snippet(jobs_by_run_id[run.id], user)
               }
             end
-            render_inertia(req, res, "Runs/Index", props: { runs: run_list })
+            render_inertia(req, res, "Runs/Index", props: {
+              runs: run_list,
+              pagination: { page: page, has_more: paged[:has_more] }
+            })
           end
 
           private
+
+          def clamped_page(req)
+            page = req.params[:page].to_i
+            page.positive? ? page : 1
+          end
 
           # Owner-only, mirroring Runs::Show#job_props — a published run must
           # not leak its originating prompt to anonymous or non-owner viewers.
           def prompt_snippet(job, user)
             return nil unless job&.owned_by?(user)
-            single_line = job.spec["prompt"].to_s.tr("\n", " ").squeeze(" ").strip
-            single_line.length > PROMPT_SNIPPET_LENGTH ? "#{single_line[0, PROMPT_SNIPPET_LENGTH]}…" : single_line
+            Serializers::PromptSnippet.call(job.spec["prompt"])
           end
         end
       end

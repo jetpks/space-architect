@@ -35,10 +35,23 @@ module Space
           jobs.where(run_id: run_ids).to_a.each_with_object({}) { |job, h| h[job.run_id] = job }
         end
 
-        # Index scope: a user's own jobs, newest first, capped at 100 (I10 — no
-        # pagination yet).
+        # Bearer JSON scope (I10): a user's own jobs, newest first, capped at 100.
+        # The browser index paginates instead — see list_for_user_page.
         def list_for_user(user_id, limit: 100)
           jobs.where(user_id: user_id).order(Sequel.desc(:created_at)).limit(limit).to_a
+        end
+
+        PAGE_SIZE = 50
+
+        # Browser index scope: a user's own jobs, newest first, paged (page size
+        # 50). Fetches PAGE_SIZE + 1 rows to detect has_more without a COUNT query.
+        def list_for_user_page(user_id, page: 1)
+          rows = jobs.where(user_id: user_id)
+                     .order(Sequel.desc(:created_at))
+                     .limit(PAGE_SIZE + 1)
+                     .offset((page - 1) * PAGE_SIZE)
+                     .to_a
+          { rows: rows.first(PAGE_SIZE), has_more: rows.size > PAGE_SIZE }
         end
 
         LEASE_SECONDS = 60

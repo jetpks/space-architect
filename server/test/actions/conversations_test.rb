@@ -93,6 +93,55 @@ class ConversationsActionTest < Minitest::Test
       "expected zero queries against messages, got #{message_queries.length}"
   end
 
+  # --- pagination (I45) ---------------------------------------------------
+
+  def test_index_pagination_default_page_1_capped_with_prop
+    55.times { Factory[:conversation, published: true] }
+    _, _, body = inertia_get("/")
+    data = parse_json(body)
+    assert_equal 50, data.dig("props", "conversations").length
+    assert_equal({ "page" => 1, "has_more" => true }, data.dig("props", "pagination"))
+  end
+
+  def test_index_pagination_page_2_returns_remaining_rows
+    55.times { |i| Factory[:conversation, published: true, updated_at: Time.now - i] }
+    _, _, body = inertia_get("/", params: { page: 2 })
+    data = parse_json(body)
+    assert_equal 5, data.dig("props", "conversations").length
+    assert_equal({ "page" => 2, "has_more" => false }, data.dig("props", "pagination"))
+  end
+
+  def test_index_pagination_invalid_page_defaults_to_1
+    Factory[:conversation, published: true]
+    _, _, body = inertia_get("/", params: { page: "abc" })
+    assert_equal({ "page" => 1, "has_more" => false }, parse_json(body).dig("props", "pagination"))
+  end
+
+  def test_index_orders_by_updated_at_desc
+    older = Factory[:conversation, published: true, updated_at: Time.now - 3600, created_at: Time.now - 7200]
+    newer = Factory[:conversation, published: true, updated_at: Time.now, created_at: Time.now - 100]
+    _, _, body = inertia_get("/")
+    ids = parse_json(body)["props"]["conversations"].map { |c| c["id"] }
+    assert_equal [newer.id, older.id], ids
+  end
+
+  def test_index_issues_no_message_queries_while_paging_page_2
+    55.times { |i| Factory[:conversation, user_id: @owner.id, published: true, updated_at: Time.now - i] }
+    conv = Factory[:conversation, user_id: @owner.id, published: true]
+    Factory[:message, conversation_id: conv.id, role: "user",
+            content: [{ "type" => "text", "text" => "hi" }], position: 1]
+
+    connection = Space::Server::App["db.gateway"].connection
+    spy = SqlSpy.new
+    connection.loggers << spy
+    inertia_get("/", params: { page: 2 })
+    connection.loggers.delete(spy)
+
+    message_queries = spy.statements.select { |sql| sql.include?(%(FROM "messages")) }
+    assert_equal 0, message_queries.length,
+      "expected zero queries against messages, got #{message_queries.length}"
+  end
+
   def test_conversations_path_returns_index_component
     status1, _, body1 = inertia_get("/")
     status2, _, body2 = inertia_get("/conversations")

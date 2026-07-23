@@ -148,9 +148,79 @@ class CodexImporterTest < Minitest::Test
     assert_nil @conv.parent_session_id
   end
 
+  def test_reimport_clears_stale_parent_session_id_when_content_no_longer_implies_one
+    conv = Factory[:conversation, session_id: "sess-codex-1", parent_session_id: "stale-parent"]
+    io = File.open(fixture_path("codex_rollout.jsonl"))
+    Space::Server::Importers::Codex.new.import!(conv, io)
+    io.close
+
+    conv = conversations_repo.by_pk(conv.id)
+    assert_equal "sess-codex-1", conv.session_id
+    assert_nil conv.parent_session_id
+  end
+
   private
 
   def conversations_repo = Space::Server::Repos::ConversationsRepo.new
   def messages_repo      = Space::Server::Repos::MessagesRepo.new
   def fixture_path(name) = File.join(__dir__, "..", "fixtures", "files", name)
+end
+
+class CodexImporterNulTest < Minitest::Test
+  def conn
+    @conn ||= Space::Server::App["db.gateway"].connection
+  end
+
+  def setup
+    Faker::Internet.unique.clear
+    Faker::Number.unique.clear
+    [:annotations, :conversation_shares, :messages, :conversations, :users].each do |t|
+      conn[t].delete
+    end
+    @conv = Factory[:conversation]
+    io = File.open(fixture_path("codex_rollout_with_nul.jsonl"))
+    Space::Server::Importers::Codex.new.import!(@conv, io)
+    io.close
+    @conv     = conversations_repo.by_pk(@conv.id)
+    @messages = messages_repo.for_conversation(@conv.id)
+  end
+
+  def test_completes_despite_nul_bytes
+    assert_equal :completed, @conv.status
+    assert_equal 5, @messages.size
+  end
+
+  def test_strips_nul_from_all_persisted_content
+    strings_inspected = 0
+    @messages.each do |m|
+      walk_strings(m.content) do |s|
+        strings_inspected += 1
+        refute_includes s, "\0", "Message uuid=#{m.uuid} block contains a U+0000 byte after scrub"
+      end
+    end
+    assert_operator strings_inspected, :>, 0
+  end
+
+  def test_preserves_surrounding_text_when_nul_removed
+    assert_equal "details  more info", @messages[1].blocks.first["text"]
+
+    tool_result = @messages.find { |m| m.blocks.any? { |b| b["type"] == "tool_result" } }
+    assert_equal "total0", tool_result.blocks.first["content"]
+
+    assert_equal "Alldone.", @messages.last.blocks.first["text"]
+  end
+
+  private
+
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
+  def messages_repo      = Space::Server::Repos::MessagesRepo.new
+  def fixture_path(name) = File.join(__dir__, "..", "fixtures", "files", name)
+
+  def walk_strings(value, &block)
+    case value
+    when String then yield value
+    when Array  then value.each { |v| walk_strings(v, &block) }
+    when Hash   then value.each_value { |v| walk_strings(v, &block) }
+    end
+  end
 end

@@ -3,12 +3,15 @@
 module Space::Architect
   module SessionSync
     # Hand-rolled launchd plist emitter for the session-sync agent, imitating
-    # Space::Src::Launchd::Plist's shape. Unlike that emitter, this one does
-    # NOT wrap the invocation in mise/ruby toolchain resolution: the
-    # `architect` executable is a rubygems binstub (or the dev exe/architect
-    # script, which sets up Bundler itself) and needs no toolchain pinning to
-    # run non-interactively, so ProgramArguments invokes it directly.
+    # Space::Src::Launchd::Plist's shape. Under launchd's bare PATH, a bare
+    # env-relative ruby binstub shebang resolves to macOS system Ruby instead
+    # of the caller's toolchain, so ProgramArguments names the interpreter
+    # explicitly (ruby_bin) rather than relying on shebang resolution — no
+    # mise wrapping needed, since the sync itself pins no toolchain at run
+    # time.
     class Plist
+      DEFAULT_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
       HEADER = <<~XML
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -22,15 +25,17 @@ module Space::Architect
         # @param refresh_interval [Integer] StartInterval in seconds (must be > 0).
         # @param log_dir [String]          Absolute directory for stdout/stderr logs.
         # @param bin_path [String]         Absolute path to the architect bin script.
+        # @param ruby_bin [String]         Absolute path to the ruby to run bin_path under.
         # @param host [String]             --host value passed to `sessions sync`.
         # @param env [Hash]                EnvironmentVariables dict; must contain a non-empty
         #                                  SessionSync::TOKEN_ENV value (resolved by the caller —
-        #                                  never resolved here).
+        #                                  never resolved here). PATH defaults to DEFAULT_PATH
+        #                                  unless the caller supplies its own.
         # @return [String] the full plist XML.
-        def call(label:, refresh_interval:, log_dir:, bin_path:, host:, env:)
+        def call(label:, refresh_interval:, log_dir:, bin_path:, ruby_bin:, host:, env:)
           raise ArgumentError, "label is required" if label.to_s.empty?
           raise ArgumentError, "refresh_interval must be > 0" unless refresh_interval.is_a?(Integer) && refresh_interval > 0
-          %w[log_dir bin_path].each do |k|
+          %w[log_dir bin_path ruby_bin].each do |k|
             v = binding.local_variable_get(k)
             raise ArgumentError, "#{k} must be absolute (got #{v.inspect})" unless v.is_a?(String) && File.absolute_path?(v)
           end
@@ -43,12 +48,13 @@ module Space::Architect
           body = +""
           body << key("Label") << string(label) << "\n"
           body << key("ProgramArguments") << "\n" << array([
+            ruby_bin,
             bin_path,
             "sessions",
             "sync",
             "--host", host
           ])
-          body << key("EnvironmentVariables") << "\n" << dict(env)
+          body << key("EnvironmentVariables") << "\n" << dict({"PATH" => DEFAULT_PATH}.merge(env.to_h))
           body << key("StartInterval") << integer(refresh_interval) << "\n"
           body << key("RunAtLoad") << boolean(true) << "\n"
           body << key("ProcessType") << string("Background") << "\n"

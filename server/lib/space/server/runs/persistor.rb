@@ -110,7 +110,7 @@ module Space
             conversation_id: @conversation_id,
             role:            @current_msg[:role],
             model:           @current_msg[:model],
-            content:         @current_msg[:ordered],
+            content:         Space::Server::Importers::NulScrub.scrub_nul(@current_msg[:ordered]),
             position:        @position,
             published:       false,
             created_at:      Time.now,
@@ -128,8 +128,10 @@ module Space
           @messages_repo.create(
             conversation_id: @conversation_id,
             role:            "user",
-            content:         [{ "type" => "tool_result", "tool_use_id" => event[:tool_use_id],
-                                "content" => event[:content], "is_error" => event[:is_error] }],
+            content:         Space::Server::Importers::NulScrub.scrub_nul(
+                               [{ "type" => "tool_result", "tool_use_id" => event[:tool_use_id],
+                                  "content" => event[:content], "is_error" => event[:is_error] }]
+                             ),
             position:        @position,
             published:       false,
             created_at:      Time.now,

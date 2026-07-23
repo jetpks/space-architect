@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import { Head, useForm } from '@inertiajs/react'
 import { Button } from '@/components/ui/button'
@@ -7,13 +7,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import AppLayout from '@/layouts/AppLayout'
-import { compatibleProviders, fetchPiExtension, fetchProviderModels } from '@/lib/providers'
-import type { Profile, Provider } from '@/types'
-import { decodeBase64, encodeBase64 } from './helpers'
-
-const CUSTOM_BACKEND = 'custom'
-
-type FileRow = { path: string; content: string }
+import { compatibleProviders, fetchProviderModels } from '@/lib/providers'
+import { CUSTOM_BACKEND, syncPiExtension, type FileRow, type GeneratedPi } from '@/lib/pi-extension'
+import type { JobSpec, Profile, Provider } from '@/types'
+import { encodeBase64, specFormFields, type SpecFormFields } from './helpers'
 
 type FormData = {
   harness_type: string
@@ -35,11 +32,6 @@ type FormData = {
 
 const ANTHROPIC_ROW: [string, string] = ['ANTHROPIC_API_KEY', 'unused-for-keyless-backends']
 
-// Tracks the currently auto-added pi extension files/secrets row so a provider
-// switch (or leaving harness pi) can remove exactly those rows without
-// touching anything the user added by hand.
-type GeneratedPi = { path: string; ref: string; envKey: string } | { path: string; ref: null; envKey: null }
-
 const INITIAL_DATA: FormData = {
   harness_type: 'claude',
   prompt: '',
@@ -58,9 +50,9 @@ const INITIAL_DATA: FormData = {
   mounts: [],
 }
 
-type Props = { profiles?: Profile[]; providers?: Provider[] }
+type Props = { profiles?: Profile[]; providers?: Provider[]; prefill_spec?: JobSpec }
 
-export default function New({ profiles = [], providers = [] }: Props) {
+export default function New({ profiles = [], providers = [], prefill_spec }: Props) {
   const form = useForm<FormData>(INITIAL_DATA)
   const [selectedProfileId, setSelectedProfileId] = useState('')
   const [selectedProviderId, setSelectedProviderId] = useState(CUSTOM_BACKEND)
@@ -71,39 +63,16 @@ export default function New({ profiles = [], providers = [] }: Props) {
   const harnessType = form.data.harness_type ?? 'claude'
   const providerOptions = compatibleProviders(providers, harnessType)
 
-  // Removes the previously auto-added files/secrets rows (if any), then, if
-  // newHarnessType is pi and providerId names a provider, fetches and adds
-  // its generated extension. Hand-added rows are never touched.
-  function syncPiExtension(newHarnessType: string, providerId: string) {
-    setPiExtensionError(null)
-    const stale = generatedPi
-    const files = stale ? form.data.files.filter((f) => f.path !== stale.path) : form.data.files
-    const secrets = stale?.ref
-      ? form.data.secrets.filter(([ref, name]) => !(ref === stale.ref && name === stale.envKey))
-      : form.data.secrets
-    if (stale) {
-      form.setData('files', files)
-      form.setData('secrets', secrets)
-      setGeneratedPi(null)
-    }
-
-    if (newHarnessType !== 'pi' || providerId === CUSTOM_BACKEND) return
-    const provider = providers.find((p) => String(p.id) === providerId)
-    if (!provider) return
-
-    fetchPiExtension(provider.id).then(({ extension, error }) => {
-      if (!extension) {
-        setPiExtensionError(error)
-        return
-      }
-      form.setData('files', [...files, { path: extension.path, content: extension.content }])
-      if (extension.env_key && provider.api_key_ref) {
-        form.setData('secrets', [...secrets, [provider.api_key_ref, extension.env_key]])
-        setGeneratedPi({ path: extension.path, ref: provider.api_key_ref, envKey: extension.env_key })
-      } else {
-        setGeneratedPi({ path: extension.path, ref: null, envKey: null })
-      }
-    })
+  function syncPi(newHarnessType: string, providerId: string) {
+    syncPiExtension(
+      newHarnessType,
+      providerId,
+      providers,
+      generatedPi,
+      setGeneratedPi,
+      setPiExtensionError,
+      (updater) => form.setData((prev) => ({ ...prev, ...updater(prev) })),
+    )
   }
 
   function selectProvider(id: string) {
@@ -113,7 +82,7 @@ export default function New({ profiles = [], providers = [] }: Props) {
 
     const provider = providerOptions.find((p) => String(p.id) === id)
     if (!provider) {
-      syncPiExtension(harnessType, CUSTOM_BACKEND)
+      syncPi(harnessType, CUSTOM_BACKEND)
       return
     }
     form.setData('base_url', provider.base_url)
@@ -124,7 +93,7 @@ export default function New({ profiles = [], providers = [] }: Props) {
       setModelsError(error)
     })
 
-    syncPiExtension(harnessType, id)
+    syncPi(harnessType, id)
   }
 
   function onHarnessTypeChange(newType: string) {
@@ -146,15 +115,23 @@ export default function New({ profiles = [], providers = [] }: Props) {
         setModelOptions([])
         setModelsError(null)
       }
-      syncPiExtension(newType, stillCompatible ? selectedProviderId : CUSTOM_BACKEND)
+      syncPi(newType, stillCompatible ? selectedProviderId : CUSTOM_BACKEND)
     }
+  }
+
+  // Applies every field of the shared spec mapping (see Jobs/helpers.ts
+  // specFormFields) via individual form.setData calls, so profile
+  // application and re-run prefill can never drift from one another.
+  function applyFields(fields: SpecFormFields) {
+    ;(Object.entries(fields) as [keyof FormData, FormData[keyof FormData]][]).forEach(([key, value]) =>
+      form.setData(key, value),
+    )
   }
 
   function applyProfile(id: string) {
     setSelectedProfileId(id)
     const profile = profiles.find((p) => String(p.id) === id)
     if (!profile) return
-    const spec = profile.spec
 
     setSelectedProviderId(CUSTOM_BACKEND)
     setModelOptions([])
@@ -162,27 +139,17 @@ export default function New({ profiles = [], providers = [] }: Props) {
     setGeneratedPi(null)
     setPiExtensionError(null)
 
-    form.setData('harness_type', profile.harness_type)
-    form.setData('harness_model', spec.harness.model)
-    form.setData('base_url', spec.harness.backend.base_url)
-    form.setData('api_key_ref', spec.harness.backend.api_key_ref ?? '')
-    form.setData('args', spec.harness.args ?? [])
-    form.setData('env', Object.entries(spec.environment.env ?? {}))
-    form.setData(
-      'secrets',
-      (spec.environment.secrets ?? []).map(({ ref, name }): [string, string] => [ref, name]),
-    )
-    form.setData('debs', spec.environment.debs ?? spec.environment.deps ?? [])
-    form.setData('npm', spec.environment.npm ?? [])
-    form.setData('gems', spec.environment.gems ?? [])
-    form.setData('mise', spec.environment.mise ?? [])
-    form.setData(
-      'files',
-      (spec.environment.files ?? []).map((f) => ({ path: f.path, content: decodeBase64(f.content_b64) })),
-    )
-    form.setData('network', spec.environment.permissions?.network ?? false)
-    form.setData('mounts', spec.environment.permissions?.mounts ?? [])
+    applyFields(specFormFields(profile.spec))
   }
+
+  // /jobs/new?from=<id> re-run: prefill the form from the owned job's spec on
+  // first mount, using the same mapping applyProfile uses. Absent prop → the
+  // form's own defaults are left untouched.
+  useEffect(() => {
+    if (!prefill_spec) return
+    applyFields(specFormFields(prefill_spec))
+    form.setData('prompt', prefill_spec.prompt)
+  }, [prefill_spec])
 
   function submit(e: React.FormEvent) {
     e.preventDefault()

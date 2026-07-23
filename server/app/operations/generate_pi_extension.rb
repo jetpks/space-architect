@@ -52,10 +52,6 @@ module Space
                 baseUrl: #{"#{provider.base_url}/v1".inspect},
                 apiKey: #{api_key_expr(provider)},
                 api: "openai-completions",
-                compat: {
-                  supportsDeveloperRole: false,
-                  supportsReasoningEffort: false,
-                },
                 models: [
             #{model_entries(model_ids)}
                 ],
@@ -90,6 +86,10 @@ module Space
             "      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },",
             "      contextWindow: #{CONTEXT_WINDOW},",
             "      maxTokens: #{MAX_TOKENS},",
+            "      compat: {",
+            "        supportsDeveloperRole: false,",
+            "        supportsReasoningEffort: false,",
+            "      },",
             "    },"
           ]
           lines.join("\n")

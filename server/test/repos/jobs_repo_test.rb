@@ -53,6 +53,41 @@ class JobsRepoTest < Minitest::Test
     refute_includes ids, j2.id
   end
 
+  # --- list_for_user_page (I45 pagination) -------------------------------
+
+  def test_list_for_user_page_defaults_to_page_1_capped_at_page_size
+    user = make_user
+    55.times { Factory[:job, user_id: user.id] }
+    result = jobs_repo.list_for_user_page(user.id)
+    assert_equal 50, result[:rows].length
+    assert result[:has_more]
+  end
+
+  def test_list_for_user_page_2_returns_remaining_rows_and_has_more_false
+    user = make_user
+    55.times { |i| Factory[:job, user_id: user.id, created_at: Time.now - i, updated_at: Time.now - i] }
+    result = jobs_repo.list_for_user_page(user.id, page: 2)
+    assert_equal 5, result[:rows].length
+    refute result[:has_more]
+  end
+
+  def test_list_for_user_page_orders_newest_first
+    user = make_user
+    older = Factory[:job, user_id: user.id, created_at: Time.now - 60, updated_at: Time.now - 60]
+    newer = Factory[:job, user_id: user.id]
+    result = jobs_repo.list_for_user_page(user.id)
+    assert_equal [newer.id, older.id], result[:rows].map(&:id)
+  end
+
+  def test_list_for_user_page_scopes_to_owner
+    u1 = make_user
+    u2 = make_user
+    j1 = Factory[:job, user_id: u1.id]
+    Factory[:job, user_id: u2.id]
+    result = jobs_repo.list_for_user_page(u1.id)
+    assert_equal [j1.id], result[:rows].map(&:id)
+  end
+
   def test_status_check_constraint_rejects_invalid_status
     user = make_user
     err = assert_raises(ROM::SQL::CheckConstraintError) do

@@ -142,6 +142,14 @@ describe('Runs/Show', () => {
     expect(list.children).toHaveLength(0)
   })
 
+  it('renders a distinct badge for a canceled run, not the failed styling', () => {
+    const run: Run = { ...RUN, status: 'canceled' }
+    render(<Show run={run} />)
+    const badge = screen.getByText('canceled')
+    expect(badge.getAttribute('data-variant')).toBe('outline')
+    expect(badge.getAttribute('data-variant')).not.toBe('destructive')
+  })
+
   it('re-syncs on refocus while the run is live: closes the stale connection and opens a fresh one', () => {
     render(<Show run={RUN} />)
     const first = MockEventSource.instances[0]

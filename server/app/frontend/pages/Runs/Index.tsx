@@ -1,10 +1,11 @@
 import { Head, Link } from '@inertiajs/react'
 import { Badge } from '@/components/ui/badge'
 import AppLayout from '@/layouts/AppLayout'
-import type { RunListItem } from '@/types'
+import Pagination from '@/components/Pagination'
+import type { RunListItem, Pagination as PaginationData } from '@/types'
 import { timeLabel } from '@/pages/Spaces/helpers'
 
-type Props = { runs: RunListItem[] }
+type Props = { runs: RunListItem[]; pagination: PaginationData }
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
 
@@ -13,9 +14,10 @@ const STATUS_VARIANT: Record<string, BadgeVariant> = {
   live: 'default',
   complete: 'secondary',
   failed: 'destructive',
+  canceled: 'outline',
 }
 
-export default function Index({ runs }: Props) {
+export default function Index({ runs, pagination }: Props) {
   return (
     <AppLayout>
       <Head title="Runs" />
@@ -48,6 +50,8 @@ export default function Index({ runs }: Props) {
           ))}
         </ul>
       )}
+
+      <Pagination pagination={pagination} path="/runs" />
     </AppLayout>
   )
 }

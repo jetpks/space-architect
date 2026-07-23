@@ -170,6 +170,20 @@ class ConsumerTest < Minitest::Test
     end
   end
 
+  def test_canceled_producer_finishes_run_canceled_not_failed
+    job = Factory[:job, user_id: @user.id, status: "running"]
+    with_redis do |redis|
+      seed_raw(redis, job, BASIC.first(3), exit_code: nil)
+      @jobs_repo.cancel(job.id)
+
+      consumer(redis).drain(job)
+
+      _, run = drained_run(job.id)
+      assert run.canceled?, "a canceled producer must finish the run canceled, got #{run.status}"
+      refute_nil run.conversation_id, "conversation stays linked even on cancel"
+    end
+  end
+
   def test_redrain_leaves_one_conversation_and_no_duplicated_messages
     job = Factory[:job, user_id: @user.id, status: "succeeded"]
     with_redis do |redis|

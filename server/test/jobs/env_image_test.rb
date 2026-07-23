@@ -129,7 +129,7 @@ class EnvImageTest < Minitest::Test
     spawn = FakeSpawn.new(exists: false)
     image(spawn).call(env(deps: ["git", "curl"]))
     dockerfile = spawn.dockerfiles.first
-    assert_match(/\AFROM debian:stable-slim/, dockerfile)
+    assert_match(/\AFROM space-claude-base:v1/, dockerfile)
     assert_match(/git/, dockerfile)
     assert_match(/curl/, dockerfile)
   end
@@ -322,7 +322,7 @@ class EnvImageTest < Minitest::Test
     image(spawn).call(env(deps: ["git"], npm: ["cowsay"], files: files))
     dockerfile = spawn.dockerfiles.first
 
-    assert_match(/\AFROM debian:stable-slim/, dockerfile)
+    assert_match(/\AFROM space-claude-base:v1/, dockerfile)
     assert_match(/RUN apt-get update -qq/, dockerfile)
     assert_match(/RUN npm install -g/, dockerfile)
     assert_match(/COPY files\/0/, dockerfile)

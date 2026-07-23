@@ -34,10 +34,9 @@ module Space
             status:             STATUS_TO_INT[:completed],
             title:              @title,
             session_id:         conversation.session_id || @session_id,
-            parent_session_id:  parent_session_id(conversation),
             original_cwd:       @original_cwd,
             agent_version:      @agent_version
-          }.compact)
+          }.compact.merge(parent_session_id: parent_session_id(conversation)))
         rescue => e
           conversations_repo.update(conversation.id, status: STATUS_TO_INT[:failed])
           raise e
@@ -148,7 +147,7 @@ module Space
             model:           (@model if role == "assistant"),
             occurred_at:     timestamp,
             position:        @position,
-            content:         blocks,
+            content:         NulScrub.scrub_nul(blocks),
             conversation_id: conversation_id,
             created_at:      Time.now,
             updated_at:      Time.now
