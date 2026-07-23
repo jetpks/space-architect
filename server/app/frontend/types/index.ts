@@ -139,10 +139,10 @@ export type Conversation = {
   }
   // Owner-only: the conversation this one is a subagent transcript of. Absent
   // (not just null) for non-owners and anonymous viewers.
-  parent?: { id: number; title: string | null } | null
+  parent?: { id: number; title: string } | null
   // Owner-only: subagent transcripts synced from this conversation. Absent
   // for non-owners and anonymous viewers; empty array when there are none.
-  children?: Array<{ id: number; title: string | null; session_id: string }>
+  children?: Array<{ id: number; title: string; session_id: string }>
 }
 
 // The five states in config/db/migrate/20260622000000_create_runs.rb's status

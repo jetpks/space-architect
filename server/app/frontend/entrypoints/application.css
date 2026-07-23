@@ -53,6 +53,12 @@
 }
 
 :root {
+    /* The per-turn band tint (see pages/Conversations/Show.tsx turnColor): golden-
+       angle hue per turn, lightness/saturation from these theme vars. Light mode
+       wants a visible tint on the page background; dark mode (below) keeps the
+       original very-dark wash. */
+    --turn-band-s: 38%;
+    --turn-band-l: 90%;
     --background: oklch(0.975 0.012 285);
     --foreground: oklch(0.18 0.012 285);
     --card: oklch(0.979 0.01 285);
@@ -89,6 +95,8 @@
 }
 
 .dark {
+    --turn-band-s: 38%;
+    --turn-band-l: 12%;
     --background: oklch(0.16 0.032 285);
     --foreground: oklch(0.97 0.006 285);
     --card: oklch(0.21 0.034 285);

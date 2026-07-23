@@ -53,12 +53,14 @@ type Props = {
 }
 
 // A subtle, distinct background tint per turn, cycled by index via the golden
-// angle so adjacent turns never collide. Very dark / low-light so foreground
-// text and the emerald accents stay readable; the same color lights up the TOC
-// entry when its turn is on screen.
+// angle so adjacent turns never collide. Saturation/lightness ride the
+// --turn-band-s/--turn-band-l custom properties (entrypoints/application.css)
+// so the band reads as a visible light tint on a light page and the original
+// very-dark wash in dark mode; the same color lights up the TOC entry when its
+// turn is on screen.
 function turnColor(index: number): string {
   const hue = Math.round((index * 137.508) % 360)
-  return `hsl(${hue} 38% 12%)`
+  return `hsl(${hue} var(--turn-band-s) var(--turn-band-l))`
 }
 
 export default function Show({ conversation, turns, annotations, shares }: Props) {
@@ -368,7 +370,7 @@ export default function Show({ conversation, turns, annotations, shares }: Props
               <p className="mt-1 text-sm text-muted-foreground">
                 part of{' '}
                 <Link href={`/conversations/${conversation.parent.id}`} className="hover:underline">
-                  {conversation.parent.title ?? `conversation #${conversation.parent.id}`}
+                  {conversation.parent.title}
                 </Link>
               </p>
             )}
@@ -448,7 +450,7 @@ export default function Show({ conversation, turns, annotations, shares }: Props
                 {conversation.children.map((child) => (
                   <li key={child.id} className="py-1.5">
                     <Link href={`/conversations/${child.id}`} className="text-sm hover:underline">
-                      {child.title ?? child.session_id}
+                      {child.title}
                     </Link>
                   </li>
                 ))}
