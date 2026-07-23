@@ -148,6 +148,43 @@ class PiImporterTreeTest < Minitest::Test
   def fixture_path(name) = File.join(__dir__, "..", "fixtures", "files", name)
 end
 
+class PiImporterSkillEnvelopeTest < Minitest::Test
+  def conn
+    @conn ||= Space::Server::App["db.gateway"].connection
+  end
+
+  def setup
+    Faker::Internet.unique.clear
+    Faker::Number.unique.clear
+    [:annotations, :conversation_shares, :messages, :conversations, :users].each do |t|
+      conn[t].delete
+    end
+  end
+
+  def test_titles_from_the_ask_after_the_skill_envelope
+    conv = Factory[:conversation]
+    io   = File.open(fixture_path("pi_skill_session.jsonl"))
+    Space::Server::Importers::Pi.new.import!(conv, io)
+    io.close
+
+    assert_equal "review the auth flow and add tests", conversations_repo.by_pk(conv.id).title
+  end
+
+  def test_promptless_skill_kickstart_titles_with_skill_name
+    conv = Factory[:conversation]
+    io   = File.open(fixture_path("pi_skill_promptless_session.jsonl"))
+    Space::Server::Importers::Pi.new.import!(conv, io)
+    io.close
+
+    assert_equal "skill: architect", conversations_repo.by_pk(conv.id).title
+  end
+
+  private
+
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
+  def fixture_path(name) = File.join(__dir__, "..", "fixtures", "files", name)
+end
+
 class PiImporterStreamingTest < Minitest::Test
   def conn
     @conn ||= Space::Server::App["db.gateway"].connection

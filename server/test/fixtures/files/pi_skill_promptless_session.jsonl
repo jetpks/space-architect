@@ -1,0 +1,2 @@
+{"type":"session","version":3,"id":"pi-skill-2","timestamp":"2026-06-13T01:19:59.389Z","cwd":"/tmp/pi-skill-promptless"}
+{"type":"message","id":"a0000001","parentId":null,"timestamp":"2026-06-13T01:20:00.000Z","message":{"role":"user","content":"<skill name=\"architect\" location=\"/Users/eric/.agents/skills/architect/SKILL.md\">\nReferences are relative to /Users/eric/.agents/skills/architect.\n\n# Architect\n…the whole skill markdown…\n</skill>\n\n","timestamp":1781313704754}}

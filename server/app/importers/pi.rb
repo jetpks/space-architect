@@ -325,9 +325,24 @@ module Space
         def derive_title(blocks)
           text = blocks.filter_map { |b| b["text"] if b["type"] == "text" }.join(" ").strip
           return nil if text.empty?
+
+          if text.start_with?("<skill ") && text.include?("</skill>")
+            skill_title = skill_envelope_title(text)
+            return skill_title if skill_title
+          end
+
           line = text.lines.map(&:strip).reject { |l| l.nil? || l.empty? }.first
           return nil unless line
           line.length > 80 ? line[0, 80] : line
+        end
+
+        def skill_envelope_title(text)
+          after = text.split("</skill>", 2).last
+          line  = after.lines.map(&:strip).reject { |l| l.nil? || l.empty? }.first
+          return line.length > 80 ? line[0, 80] : line if line
+
+          name = text[/<skill\s+name="([^"]*)"/, 1]
+          "skill: #{name}" if name
         end
       end
     end
