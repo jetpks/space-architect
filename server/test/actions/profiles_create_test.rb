@@ -8,9 +8,11 @@ class ProfilesCreateTest < Minitest::Test
   def setup
     setup_db
     Space::Server::App["db.gateway"].connection[:profiles].delete
+    Space::Server::App["db.gateway"].connection[:providers].delete
     OmniAuth.config.test_mode = true
-    @owner        = Factory[:user, github_uid: "profiles-create-owner", username: "profiles-create-owner"]
-    @profiles_repo = Space::Server::App["repos.profiles_repo"]
+    @owner          = Factory[:user, github_uid: "profiles-create-owner", username: "profiles-create-owner"]
+    @profiles_repo  = Space::Server::App["repos.profiles_repo"]
+    @providers_repo = Space::Server::App["repos.providers_repo"]
   end
 
   def teardown
@@ -34,6 +36,14 @@ class ProfilesCreateTest < Minitest::Test
         }
       }
     }
+  end
+
+  def make_provider(user, attrs = {})
+    now = Time.now
+    @providers_repo.create({
+      user_id: user.id, name: "gateway", base_url: "https://api.example.com/v1",
+      api_key_ref: "op://vault/item", flavors: ["openai"], created_at: now, updated_at: now
+    }.merge(attrs))
   end
 
   # The byte-exact shape Profiles/New.tsx's form.transform emits — mirrors the
@@ -195,5 +205,55 @@ class ProfilesCreateTest < Minitest::Test
     assert_equal ["typescript"], profile.spec.dig("environment", "npm")
     assert_equal "/workspace/f.txt", profile.spec.dig("environment", "files", 0, "path")
     assert_equal "aGk=", profile.spec.dig("environment", "files", 0, "content_b64")
+  end
+
+  # --- POST /profiles — provider_id provenance (BRIEF I23 shape 2) ----------
+
+  def test_create_without_provider_id_persists_nil
+    sign_in(@owner)
+    post("/profiles", params: valid_params)
+    profile = @profiles_repo.list_for_user(@owner.id).first
+    assert_nil profile.provider_id
+  end
+
+  def test_create_with_owned_provider_persists_provider_id
+    provider = make_provider(@owner)
+    sign_in(@owner)
+    post("/profiles", params: valid_params.merge(provider_id: provider.id))
+    profile = @profiles_repo.list_for_user(@owner.id).first
+    assert_equal provider.id, profile.provider_id
+  end
+
+  def test_create_with_unknown_provider_id_names_field_and_does_not_persist
+    sign_in(@owner)
+    before = @profiles_repo.list_for_user(@owner.id).size
+    errors = errors_after(valid_params.merge(provider_id: 999_999))
+    assert errors["provider_id"]
+    assert_equal before, @profiles_repo.list_for_user(@owner.id).size
+  end
+
+  def test_create_with_foreign_provider_id_names_field_and_does_not_persist
+    other = Factory[:user, github_uid: "profiles-provider-foreign", username: "profiles-provider-foreign"]
+    provider = make_provider(other)
+    sign_in(@owner)
+    before = @profiles_repo.list_for_user(@owner.id).size
+    errors = errors_after(valid_params.merge(provider_id: provider.id))
+    assert errors["provider_id"]
+    assert_equal before, @profiles_repo.list_for_user(@owner.id).size
+  end
+
+  def test_deleting_referenced_provider_nulls_profile_provider_id_and_spec_survives
+    provider = make_provider(@owner)
+    sign_in(@owner)
+    post("/profiles", params: valid_params.merge(provider_id: provider.id))
+    profile = @profiles_repo.list_for_user(@owner.id).first
+    assert_equal provider.id, profile.provider_id
+
+    @providers_repo.delete(provider.id)
+
+    reloaded = @profiles_repo.by_pk(profile.id)
+    refute_nil reloaded
+    assert_nil reloaded.provider_id
+    assert_equal "claude", reloaded.spec.dig("harness", "type")
   end
 end

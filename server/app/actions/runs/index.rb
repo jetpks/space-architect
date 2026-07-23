@@ -7,8 +7,6 @@ module Space
         class Index < Space::Server::Action
           include Space::Server::Deps["repos.runs_repo", "repos.jobs_repo"]
 
-          PROMPT_SNIPPET_LENGTH = 140
-
           def handle(req, res)
             user = current_user(req)
             runs = runs_repo.list_visible_to(user)
@@ -35,8 +33,7 @@ module Space
           # not leak its originating prompt to anonymous or non-owner viewers.
           def prompt_snippet(job, user)
             return nil unless job&.owned_by?(user)
-            single_line = job.spec["prompt"].to_s.tr("\n", " ").squeeze(" ").strip
-            single_line.length > PROMPT_SNIPPET_LENGTH ? "#{single_line[0, PROMPT_SNIPPET_LENGTH]}…" : single_line
+            Serializers::PromptSnippet.call(job.spec["prompt"])
           end
         end
       end

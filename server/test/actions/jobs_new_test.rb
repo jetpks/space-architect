@@ -8,8 +8,10 @@ class JobsNewTest < Minitest::Test
   def setup
     setup_db
     Space::Server::App["db.gateway"].connection[:profiles].delete
+    Space::Server::App["db.gateway"].connection[:providers].delete
     OmniAuth.config.test_mode = true
-    @owner = Factory[:user, github_uid: "jobs-new-owner", username: "jobs-new-owner"]
+    @owner          = Factory[:user, github_uid: "jobs-new-owner", username: "jobs-new-owner"]
+    @providers_repo = Space::Server::App["repos.providers_repo"]
   end
 
   def teardown
@@ -59,5 +61,31 @@ class JobsNewTest < Minitest::Test
     assert_equal profile.name, entry["name"]
     assert_equal "claude", entry["harness_type"]
     assert entry.key?("spec")
+  end
+
+  # --- GET /jobs/new — providers prop (BRIEF I23 shape 1) --------------------
+
+  def test_new_carries_empty_providers_prop_when_none_exist
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs/new")
+    assert_equal [], parse_json(body).dig("props", "providers")
+  end
+
+  def test_new_carries_own_providers_ordered_by_name_with_frozen_shape
+    other = Factory[:user, github_uid: "jobs-new-other", username: "jobs-new-other"]
+    now = Time.now
+    @providers_repo.create(user_id: @owner.id, name: "zeta", base_url: "https://z.example.com",
+                            api_key_ref: "op://vault/z", flavors: ["openai"], created_at: now, updated_at: now)
+    @providers_repo.create(user_id: @owner.id, name: "alpha", base_url: "https://a.example.com",
+                            api_key_ref: nil, flavors: [], created_at: now, updated_at: now)
+    @providers_repo.create(user_id: other.id, name: "foreign", base_url: "https://f.example.com",
+                            api_key_ref: nil, flavors: [], created_at: now, updated_at: now)
+
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs/new")
+    providers = parse_json(body).dig("props", "providers")
+    assert_equal %w[alpha zeta], providers.map { |p| p["name"] }
+    entry = providers.first
+    assert_equal %w[api_key_ref base_url flavors id name].sort, entry.keys.sort
   end
 end

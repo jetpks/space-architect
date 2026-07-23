@@ -53,9 +53,8 @@ module Space
             status:             STATUS_TO_INT[:completed],
             title:              @title,
             session_id:         conversation.session_id || @session_id,
-            parent_session_id:  parent_session_id(conversation),
             original_cwd:       @original_cwd
-          }.compact)
+          }.compact.merge(parent_session_id: parent_session_id(conversation)))
         rescue => e
           conversations_repo.update(conversation.id, status: STATUS_TO_INT[:failed])
           raise e

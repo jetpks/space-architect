@@ -148,6 +148,17 @@ class CodexImporterTest < Minitest::Test
     assert_nil @conv.parent_session_id
   end
 
+  def test_reimport_clears_stale_parent_session_id_when_content_no_longer_implies_one
+    conv = Factory[:conversation, session_id: "sess-codex-1", parent_session_id: "stale-parent"]
+    io = File.open(fixture_path("codex_rollout.jsonl"))
+    Space::Server::Importers::Codex.new.import!(conv, io)
+    io.close
+
+    conv = conversations_repo.by_pk(conv.id)
+    assert_equal "sess-codex-1", conv.session_id
+    assert_nil conv.parent_session_id
+  end
+
   private
 
   def conversations_repo = Space::Server::Repos::ConversationsRepo.new

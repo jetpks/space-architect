@@ -28,10 +28,13 @@ module Space
         # Returns model ids sorted ascending. Raises SecretResolutionError,
         # UpstreamError, or Async::TimeoutError — Providers::Models maps each to a
         # safe response token, never surfacing upstream bodies or secret values.
+        # Key resolution and the upstream fetch share the one TIMEOUT_SECONDS budget.
         def call(base_url, api_key_ref)
-          api_key = resolve_key(api_key_ref)
-          response = fetch(base_url, api_key)
-          parse(response)
+          Async::Task.current.with_timeout(TIMEOUT_SECONDS) do
+            api_key = resolve_key(api_key_ref)
+            response = fetch(base_url, api_key)
+            parse(response)
+          end
         end
 
         private
@@ -40,15 +43,15 @@ module Space
           return nil if api_key_ref.nil?
 
           @secret_resolver.call([{"ref" => api_key_ref, "name" => "API_KEY"}])["API_KEY"]
+        rescue Async::TimeoutError
+          raise
         rescue StandardError => e
           raise SecretResolutionError, e.message
         end
 
         def fetch(base_url, api_key)
           headers = api_key ? [["authorization", "Bearer #{api_key}"]] : []
-          Async::Task.current.with_timeout(TIMEOUT_SECONDS) do
-            @http.get("#{base_url}#{MODELS_PATH}", headers)
-          end
+          @http.get("#{base_url}#{MODELS_PATH}", headers)
         end
 
         def parse(response)
