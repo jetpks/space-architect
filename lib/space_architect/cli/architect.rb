@@ -1012,6 +1012,7 @@ module Space::Architect
                   refresh_interval: interval.to_i,
                   log_dir: SessionSync.log_dir,
                   bin_path: SessionSync::BinPath.detect,
+                  ruby_bin: RbConfig.ruby,
                   host: host,
                   env: {SessionSync::TOKEN_ENV => resolved_token}
                 )
