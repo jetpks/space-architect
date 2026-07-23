@@ -25,6 +25,11 @@ module Space
           def err(line) = add("err", line)
           def exit(code) = add("exit", JSON.generate(code: code))
 
+          # Clears any stale stream from a prior attempt at this job id — a
+          # requeued job (crash → lease-expire → sweep → re-claim) must start
+          # from an empty stream, not append onto the surviving transcript.
+          def reset = @redis.del(@key)
+
           private
 
           def add(type, data)

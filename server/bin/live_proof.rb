@@ -39,6 +39,7 @@ require "socket"
 require "time"
 require "timeout"
 require "uri"
+require_relative "../lib/space/server/jobs/env_image"
 
 SERVER_DIR = File.expand_path("..", __dir__)
 
@@ -46,9 +47,9 @@ BASE_URL   = ENV.fetch("LIVE_PROOF_BASE_URL", "https://studio.slush.systems")
 MODEL      = ENV.fetch("LIVE_PROOF_MODEL", "qwen3-27b-optiq")
 KEY_REF    = ENV["LIVE_PROOF_KEY_REF"]
 JOB_WAIT   = Integer(ENV.fetch("LIVE_PROOF_TIMEOUT", "600"))
-BASE_IMAGE = ENV.fetch("JOB_ENV_BASE_IMAGE", "space-claude-base:v1")
+BASE_IMAGE = ENV.fetch("JOB_ENV_BASE_IMAGE", Space::Server::Jobs::EnvImage::DEFAULT_BASE_IMAGE)
 
-CANONICAL_BASE_TAG = "space-claude-base:v1"
+CANONICAL_BASE_TAG = Space::Server::Jobs::EnvImage::DEFAULT_BASE_IMAGE
 BASE_IMAGE_DIR     = File.join(SERVER_DIR, "images", "claude-base")
 
 WEB_PORT     = 3000
