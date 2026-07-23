@@ -50,13 +50,21 @@ class ArchitectJobsCLITest < Space::ArchitectTest
 
   Net_HTTP_STATUS = { 200 => "OK", 401 => "Unauthorized", 403 => "Forbidden", 404 => "Not Found", 409 => "Conflict" }.freeze
 
-  # (a) `jobs list` GETs /jobs with the Bearer header and renders an aligned table.
+  # (a) `jobs list` GETs /jobs with the Bearer header and renders an aligned table,
+  # with Harness/Model/Lane provenance columns sourced from the list JSON's top-level
+  # harness/model and nested provenance.lane (see server/app/actions/jobs/index.rb) —
+  # and rendered blank, not crashing, for an older row that carries none of them.
   def test_jobs_list_requests_and_renders_table
     setup = temp_env
     with_env(setup[:env]) do
       Sync do
         port, requests, server_task, tcp_server = start_stub([
-          json_response(200, { jobs: [{ id: 1, status: "running", run_id: 4, created_at: "2026-07-19T00:00:00Z" }] })
+          json_response(200, { jobs: [
+            { id: 1, status: "running", run_id: 4, created_at: "2026-07-19T00:00:00Z",
+              harness: "claude", model: "sonnet",
+              provenance: { space: "s1", iteration: "I16", lane: "server" } },
+            { id: 2, status: "queued", run_id: nil, created_at: "2026-07-19T00:05:00Z" }
+          ] })
         ])
 
         out, err = invoke("jobs", "list", "--host", "http://127.0.0.1:#{port}", "--token", "secret-token")
@@ -68,9 +76,20 @@ class ArchitectJobsCLITest < Space::ArchitectTest
         assert_equal "GET",  requests[0][:method]
         assert_equal "/jobs", requests[0][:path]
         assert_equal "Bearer secret-token", requests[0][:headers]["authorization"]
-        assert_match(/\b1\b/,       out)
-        assert_match(/running/,     out)
-        assert_match(/4/,           out)
+
+        header, row1, row2 = out.lines.map(&:rstrip)
+        assert_match(/\bID\b.*\bHarness\b.*\bModel\b.*\bLane\b/, header)
+
+        assert_match(/\b1\b/,   row1)
+        assert_match(/running/, row1)
+        assert_match(/\b4\b/,   row1)
+        assert_match(/claude/,  row1)
+        assert_match(/sonnet/,  row1)
+        assert_match(/server/,  row1)
+
+        assert_match(/\b2\b/, row2)
+        assert_match(/queued/, row2)
+        refute_match(/claude|sonnet|server/, row2)
       end
     end
   ensure
