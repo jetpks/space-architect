@@ -5,6 +5,75 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.5.0] - 2026-07-22
+
+### Added
+
+- **`architect jobs list` provenance columns** — the table gains Harness /
+  Model / Lane (sourced from the list JSON's existing fields), blank when an
+  older row lacks them, so parallel lanes are tellable apart at a glance.
+- **Server: pagination on the jobs, runs, and conversations indexes** — 50
+  rows per page with a `?page=N` param and Prev/Next controls; runs and
+  conversations were previously unbounded fetches. Conversations order
+  newest-updated first, and the index still never loads messages.
+- **Server: job re-run prefill** — `GET /jobs/new?from=<job id>` (owner-gated)
+  prefills the new-job form field-for-field from that job's spec via the same
+  mapping profile application uses; Jobs/Show gains a "Run again" link.
+- **Server: embedded live run view** — the run stream (SSE + rendering) is
+  extracted into a shared `RunStream` component and embedded on Jobs/Show
+  whenever the job has a run, so watching a job live no longer requires
+  leaving the job page.
+- **Server: browser cancel + honest canceled lifecycle** — Jobs/Show renders a
+  Cancel control while a job is queued/running; runs gain a distinct terminal
+  status `canceled(4)` (a canceled job's run no longer reports `failed`), and
+  a cancel arriving during the env-image build skips the container spawn (and
+  secret resolution) entirely.
+
+### Changed
+
+- **`architect sessions agent install` emits a launchd-proof plist** — the
+  agent's ProgramArguments now open with the installing interpreter's absolute
+  ruby path (`RbConfig.ruby`) ahead of the absolute bin path, and the agent
+  environment carries a homebrew-inclusive PATH, so launchd's bare PATH can no
+  longer resolve macOS system Ruby via an env shebang (LoadError, agent exit
+  1). Reinstall existing agents to migrate; wrapper-script workarounds are
+  obsolete.
+- **`architect dispatch --as-job` requires `--job-model`** — the missing model
+  now fails fast at dispatch with an error naming the flag, instead of
+  composing a spec the server rejects with a late 422.
+
+### Fixed
+
+- **Server: bulk session syncs no longer strand conversations at pending** —
+  transient DB-infrastructure errors (pool timeout, connection loss) inside an
+  import now re-raise so the queue's retry re-fires them, instead of being
+  swallowed as permanent failures; import concurrency is bounded below the DB
+  connection pool so a bulk backfill can't starve it.
+- **Server: NUL bytes can no longer fail imports or live persists** — one
+  shared scrub now covers the claude_code, codex, and pi importers and the
+  live run persistor (Postgres jsonb rejects NUL outright;
+  `PG::UntranslatableCharacter` was failing real claude_code transcripts with
+  NUL in tool-block content).
+- **Server: executor hardening** — a requeued job's raw Redis stream is
+  deleted at execution start (a surviving stale stream silently corrupted the
+  transcript); truncated failure evidence is scrubbed back to valid UTF-8 when
+  the byte boundary splits a multibyte character; the default sandbox base
+  image is `space-claude-base:v1` everywhere (dev bins previously defaulted to
+  `debian:stable-slim`).
+- **Server: models-proxy timeout covers key resolution** — `op://` key
+  resolution now runs inside the same 10s budget as the upstream fetch, and
+  the providers/models action only rescues the operation's own failure
+  classes, so genuine bugs propagate instead of masquerading as
+  `upstream_error`.
+- **Server: `parent_session_id` is clearable** — a re-import whose content no
+  longer implies a parent now nulls the stored link instead of preserving it
+  forever.
+- **Server: theme-aware transcript turn bands** — per-turn tint colors ride
+  CSS custom properties with light and dark definitions (bands were
+  dark-calibrated and near-invisible in light mode); a mid-fetch form edit no
+  longer gets clobbered by the pi-extension sync on the job/profile forms; the
+  generated pi extension places `compat` per-model per the upstream types.
+
 ## [5.4.0] - 2026-07-21
 
 ### Changed
