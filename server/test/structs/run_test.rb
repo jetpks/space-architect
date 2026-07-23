@@ -28,30 +28,43 @@ class RunStructTest < Minitest::Test
     refute run.live?,      "status 0 must not be live?"
     refute run.complete?,  "status 0 must not be complete?"
     refute run.failed?,    "status 0 must not be failed?"
+    refute run.canceled?,  "status 0 must not be canceled?"
   end
 
   def test_live_status_predicate
     run = make_run(status: 1)
-    refute run.pending?,  "status 1 must not be pending?"
-    assert run.live?,     "status 1 must be live?"
-    refute run.complete?, "status 1 must not be complete?"
-    refute run.failed?,   "status 1 must not be failed?"
+    refute run.pending?,   "status 1 must not be pending?"
+    assert run.live?,      "status 1 must be live?"
+    refute run.complete?,  "status 1 must not be complete?"
+    refute run.failed?,    "status 1 must not be failed?"
+    refute run.canceled?,  "status 1 must not be canceled?"
   end
 
   def test_complete_status_predicate
     run = make_run(status: 2)
-    refute run.pending?,  "status 2 must not be pending?"
-    refute run.live?,     "status 2 must not be live?"
-    assert run.complete?, "status 2 must be complete?"
-    refute run.failed?,   "status 2 must not be failed?"
+    refute run.pending?,   "status 2 must not be pending?"
+    refute run.live?,      "status 2 must not be live?"
+    assert run.complete?,  "status 2 must be complete?"
+    refute run.failed?,    "status 2 must not be failed?"
+    refute run.canceled?,  "status 2 must not be canceled?"
   end
 
   def test_failed_status_predicate
     run = make_run(status: 3)
-    refute run.pending?,  "status 3 must not be pending?"
-    refute run.live?,     "status 3 must not be live?"
-    refute run.complete?, "status 3 must not be complete?"
-    assert run.failed?,   "status 3 must be failed?"
+    refute run.pending?,   "status 3 must not be pending?"
+    refute run.live?,      "status 3 must not be live?"
+    refute run.complete?,  "status 3 must not be complete?"
+    assert run.failed?,    "status 3 must be failed?"
+    refute run.canceled?,  "status 3 must not be canceled?"
+  end
+
+  def test_canceled_status_predicate
+    run = make_run(status: 4)
+    refute run.pending?,   "status 4 must not be pending?"
+    refute run.live?,      "status 4 must not be live?"
+    refute run.complete?,  "status 4 must not be complete?"
+    refute run.failed?,    "status 4 must not be failed?"
+    assert run.canceled?,  "status 4 must be canceled?"
   end
 
   # Auth predicates — private run
