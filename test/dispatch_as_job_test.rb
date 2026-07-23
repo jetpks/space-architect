@@ -75,7 +75,7 @@ class DispatchAsJobTest < Space::ArchitectTest
     fake = FakeJobsClient.new(id: 42)
 
     res = project.dispatch_as_job("demo", "A", host: "http://example.com", token: "tok",
-      backend_url: "https://backend.example.com", jobs_client: fake)
+      backend_url: "https://backend.example.com", job_model: "some/sandbox-model", jobs_client: fake)
 
     assert_equal 42, res[:job_id]
     spec = fake.spec
@@ -96,7 +96,7 @@ class DispatchAsJobTest < Space::ArchitectTest
 
     assert_equal "claude",                     spec["harness"]["type"]
     assert_equal "https://backend.example.com", spec["harness"]["backend"]["base_url"]
-    refute spec["harness"].key?("model"), "model must be omitted when --job-model is not given"
+    assert_equal "some/sandbox-model",         spec["harness"]["model"]
 
     args = spec["harness"]["args"]
     refute_includes args, "-p"
@@ -131,7 +131,8 @@ class DispatchAsJobTest < Space::ArchitectTest
     fake = FakeJobsClient.new
 
     project.dispatch_as_job("demo", "A", host: "http://example.com", token: "tok",
-      backend_url: "https://backend.example.com", api_key_ref: "op://vault/item/field", jobs_client: fake)
+      backend_url: "https://backend.example.com", job_model: "some/sandbox-model",
+      api_key_ref: "op://vault/item/field", jobs_client: fake)
 
     spec = fake.spec
     refute spec["environment"]["env"].key?("ANTHROPIC_API_KEY")
@@ -148,7 +149,8 @@ class DispatchAsJobTest < Space::ArchitectTest
     fixed_now = Time.iso8601("2026-07-19T09:00:00-05:00")
 
     project.dispatch_as_job("demo", "A", host: "http://example.com", token: "tok",
-      backend_url: "https://backend.example.com", jobs_client: fake, now: fixed_now)
+      backend_url: "https://backend.example.com", job_model: "some/sandbox-model",
+      jobs_client: fake, now: fixed_now)
 
     yaml = YAML.load_file(File.join(space_dir, "space.yaml"))
     lane = yaml.dig("project", "iterations", 0, "lanes", 0)
@@ -178,10 +180,26 @@ class DispatchAsJobTest < Space::ArchitectTest
     File.delete(File.join(build_dir, "prompt.md"))
     fake = FakeJobsClient.new
 
-    assert_raises(Space::Core::Error) do
+    err = assert_raises(Space::Core::Error) do
+      project.dispatch_as_job("demo", "A", host: "http://example.com", token: "tok",
+        backend_url: "https://backend.example.com", job_model: "some/sandbox-model", jobs_client: fake)
+    end
+    assert_match(/prompt\.md not found/, err.message)
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  def test_dispatch_as_job_requires_job_model
+    root = Dir.mktmpdir("dispatch-as-job-no-model-test")
+    _space_dir, project, _build_dir = setup_space_with_worktree(root)
+    fake = FakeJobsClient.new
+
+    err = assert_raises(Space::Core::Error) do
       project.dispatch_as_job("demo", "A", host: "http://example.com", token: "tok",
         backend_url: "https://backend.example.com", jobs_client: fake)
     end
+    assert_match(/--job-model is required with --as-job/, err.message)
+    assert_nil fake.spec, "the jobs client must not be called when --job-model is missing"
   ensure
     FileUtils.rm_rf(root)
   end

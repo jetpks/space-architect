@@ -349,6 +349,7 @@ module Space::Architect
             if as_job
               Jobs.require_credentials!(host, token)
               raise Space::Core::Error, "--backend-url is required with --as-job" unless backend_url
+              raise Space::Core::Error, "--job-model is required with --as-job" unless job_model
               raise Space::Core::Error, "--as-job cannot be combined with --push-url/--push-token/--push-host/--detach" \
                 if push_url || push_token || push_host || detach
             end
@@ -884,8 +885,11 @@ module Space::Architect
               if jobs.empty?
                 terminal.say "No jobs"
               else
-                rows = jobs.map { |j| [j["id"], j["status"], j["run_id"], j["created_at"]] }
-                terminal.say terminal.table(%w[ID Status RunID CreatedAt], rows)
+                rows = jobs.map do |j|
+                  [j["id"], j["status"], j["run_id"], j["created_at"],
+                   j["harness"], j["model"], j.dig("provenance", "lane")]
+                end
+                terminal.say terminal.table(%w[ID Status RunID CreatedAt Harness Model Lane], rows)
               end
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end

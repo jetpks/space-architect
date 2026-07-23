@@ -939,6 +939,7 @@ module Space::Architect
         resolve_dispatch_harness(lane_entry, model: model, harness: harness, effort: effort, force: force, err: err)
       raise Space::Core::Error, "--as-job only supports the claude-code harness (lane '#{lane}' resolves to '#{resolved_harness}')" \
         unless resolved_harness == "claude-code"
+      raise Space::Core::Error, "--job-model is required with --as-job" unless job_model
 
       id = iteration_id(entry)
       wt_path = space.path.join(lane_entry["worktree"] || "build/#{id}-#{lane}/wt")
