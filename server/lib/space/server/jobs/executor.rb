@@ -71,6 +71,7 @@ module Space
         # expires and the sweep requeues it (the crash-recovery path).
         def execute(job)
           stream = RawStream.new(@redis, job.id)
+          stream.reset
           create_run(job)
           @env_image.call(job.spec["environment"]).either(
             ->(image_tag) { run_sandbox(job, image_tag, stream) },
@@ -129,10 +130,13 @@ module Space
 
         # Keep only the last FAILURE_EVIDENCE_BYTES bytes — enough to see the
         # actual error, bounded so a runaway build log can't bloat the jobs table.
+        # The byteslice can split a multibyte char at the boundary, so scrub
+        # the truncated tail back to valid UTF-8 (the untruncated short path
+        # is already valid text and skips the scrub).
         def bounded_evidence(text)
           return text if text.bytesize <= FAILURE_EVIDENCE_BYTES
 
-          text.byteslice(text.bytesize - FAILURE_EVIDENCE_BYTES, FAILURE_EVIDENCE_BYTES)
+          text.byteslice(text.bytesize - FAILURE_EVIDENCE_BYTES, FAILURE_EVIDENCE_BYTES).scrub
         end
 
         # A cancel landing during the env-image build (BRIEF I46) has no
