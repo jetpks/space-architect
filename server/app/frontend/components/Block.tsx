@@ -45,6 +45,32 @@ function parseCommand(text: string) {
   return { name, args, stdout }
 }
 
+// <skill name="…" location="…">…</skill> envelope — a skill-led prompt, the
+// whole skill markdown inlined ahead of the user's actual ask. Strict, same
+// discipline as parseCommand: the text must OPEN the message (after leading
+// whitespace) with `<skill ` and carry a matched `</skill>`; prose that merely
+// mentions the tag mid-message, or an opener with no matching close, falls
+// through (returns null) and renders literally. `location` is optional;
+// `rest` is everything after the close, trimmed ('' when nothing follows).
+type Skill = { name: string; location?: string; body: string; rest: string }
+
+function parseSkill(text: string): Skill | null {
+  const trimmed = text.trimStart()
+  const open = trimmed.match(/^<skill\s([^>]*)>/)
+  if (!open) return null
+  const closeIdx = trimmed.indexOf('</skill>')
+  if (closeIdx === -1) return null
+  const name = open[1].match(/\bname="([^"]*)"/)?.[1]
+  if (!name) return null
+  const location = open[1].match(/\blocation="([^"]*)"/)?.[1]
+  return {
+    name,
+    location,
+    body: trimmed.slice(open[0].length, closeIdx).trim(),
+    rest: trimmed.slice(closeIdx + '</skill>'.length).trim(),
+  }
+}
+
 // <task-notification> envelope — background task completion. Strict: must open
 // the message and be a genuine matched pair.
 type TaskNotification = {
@@ -175,6 +201,32 @@ function CommandBlock({ name, args, stdout }: { name?: string; args?: string; st
         </span>
       )}
       {stdout && <OutputBlock text={stdout} />}
+    </div>
+  )
+}
+
+// Skill-led prompt: the skill name collapses to a one-line pill (mirroring
+// CommandBlock's), the ~26KB skill body sits behind it on a code surface that's
+// itself line-clamped (CodeBlock's own COLLAPSE_THRESHOLD) so expanding never
+// dumps the whole thing, and the user's trailing ask — the actual point of the
+// message — renders below as ordinary prose, exactly like a plain prompt.
+function SkillBlock({ name, location, body, rest }: Skill) {
+  return (
+    <div className="space-y-2">
+      <Collapsible className="text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <CollapsibleTrigger className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/60 px-2 py-0.5 font-mono text-sm text-primary hover:text-primary/80">
+            ✦ {name}
+          </CollapsibleTrigger>
+          {location && <span className="text-xs text-muted-foreground">{location}</span>}
+        </div>
+        <CollapsibleContent>
+          <div className="mt-1">
+            <CodeBlock text={body} language="markdown" showLineNumbers={false} />
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+      {rest && <CollapsibleText text={rest} />}
     </div>
   )
 }
@@ -571,6 +623,8 @@ export default function Block({
       if (notification) return <TaskNotificationBlock notification={notification} />
       const boilerplate = parseBoilerplate(text)
       if (boilerplate) return <BoilerplateBlock {...boilerplate} />
+      const skill = parseSkill(text)
+      if (skill) return <SkillBlock {...skill} />
       return <CollapsibleText text={text} />
     }
 

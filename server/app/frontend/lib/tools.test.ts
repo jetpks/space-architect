@@ -124,6 +124,31 @@ describe('codex tool affordances', () => {
   })
 })
 
+describe('gist: skill envelope', () => {
+  const SKILL_MARKDOWN =
+    '<skill name="architect" location="/Users/eric/.agents/skills/architect/SKILL.md">\n' +
+    'References are relative to /Users/eric/.agents/skills/architect.\n\n' +
+    '# Architect\n…the whole skill markdown…\n</skill>'
+
+  it('collapses the envelope to a skill-name marker followed by the trailing user input', () => {
+    const m = message([{ type: 'text', text: `${SKILL_MARKDOWN}\n\nplease fix the flaky test` }], 'user')
+    expect(gist(m)).toBe('✦ architect please fix the flaky test')
+  })
+
+  it('yields a non-empty gist naming the skill for a promptless kickstart', () => {
+    const m = message([{ type: 'text', text: SKILL_MARKDOWN }], 'user')
+    const result = gist(m)
+    expect(result).not.toBe('')
+    expect(result).toContain('architect')
+  })
+
+  it('contains no raw <skill tag text', () => {
+    const m = message([{ type: 'text', text: `${SKILL_MARKDOWN}\n\ndo the thing` }], 'user')
+    expect(gist(m)).not.toContain('<skill')
+    expect(gist(m)).not.toContain('</skill>')
+  })
+})
+
 describe('isEncryptedThinking', () => {
   it('hides redacted_thinking (encrypted chain-of-thought)', () => {
     expect(isEncryptedThinking(message([{ type: 'redacted_thinking', data: 'gAAAAA==' }]))).toBe(

@@ -218,3 +218,94 @@ describe('B3: system-reminder', () => {
     expect(screen.queryByText('system reminder')).not.toBeInTheDocument()
   })
 })
+
+// --- skill envelope (AC1-AC3) ------------------------------------------
+
+const SKILL_BODY = [
+  'References are relative to /Users/eric/.agents/skills/architect.',
+  '',
+  '# Architect',
+  ...Array.from({ length: 30 }, (_, i) => `line ${i} of skill markdown`),
+].join('\n')
+
+function skillEnvelope(rest = '') {
+  return (
+    `<skill name="architect" location="/Users/eric/.agents/skills/architect/SKILL.md">\n` +
+    `${SKILL_BODY}\n</skill>` +
+    (rest ? `\n\n${rest}` : '')
+  )
+}
+
+describe('skill envelope', () => {
+  it('renders a collapsed skill pill with the name, and location as muted detail', () => {
+    renderText(skillEnvelope('do the thing'))
+    expect(screen.getByText(/✦\s*architect/)).toBeInTheDocument()
+    expect(
+      screen.getByText('/Users/eric/.agents/skills/architect/SKILL.md'),
+    ).toBeInTheDocument()
+  })
+
+  it('never renders the raw <skill tag text', () => {
+    const { container } = renderText(skillEnvelope('do the thing'))
+    expect(container.textContent).not.toContain('<skill')
+    expect(container.textContent).not.toContain('</skill>')
+  })
+
+  it('hides the body by default (collapsed)', () => {
+    const { container } = renderText(skillEnvelope('do the thing'))
+    const content = container.querySelector('[data-slot="collapsible-content"]')
+    expect(content).toHaveAttribute('hidden')
+    expect(screen.queryByText(/# Architect/)).not.toBeInTheDocument()
+  })
+
+  it('expanding the pill reveals the body on a line-clamped code surface', () => {
+    const { container } = renderText(skillEnvelope('do the thing'))
+    fireEvent.click(screen.getByText(/✦/))
+    const content = container.querySelector('[data-slot="collapsible-content"]')
+    expect(content).not.toHaveAttribute('hidden')
+    expect(container.textContent).toContain('References are relative to')
+    // the body itself is long enough to trip CodeBlock's own line clamp
+    expect(screen.getByText(/Show all \d+ lines/)).toBeInTheDocument()
+    expect(container.textContent).not.toContain('line 29 of skill markdown')
+  })
+
+  it('collapses back after expanding', () => {
+    const { container } = renderText(skillEnvelope('do the thing'))
+    const trigger = screen.getByText(/✦/)
+    fireEvent.click(trigger)
+    fireEvent.click(trigger)
+    expect(container.querySelector('[data-slot="collapsible-content"]')).toHaveAttribute('hidden')
+  })
+
+  it('renders the trailing rest as prose below the skill row', () => {
+    renderText(skillEnvelope('please fix the flaky test'))
+    expect(screen.getByText('please fix the flaky test')).toBeInTheDocument()
+  })
+
+  it('renders the pill alone with no empty prose section when promptless', () => {
+    const { container } = renderText(skillEnvelope())
+    expect(screen.getByText(/✦/)).toBeInTheDocument()
+    // CollapsibleText's markdown wrapper (prose class) should not be mounted
+    expect(container.querySelector('.prose')).not.toBeInTheDocument()
+  })
+
+  it('B4: prose mentioning the skill tag mid-message renders literally', () => {
+    renderText(
+      `I was reading about the <skill name="x" location="y"></skill> envelope format today.`,
+    )
+    expect(screen.queryByText(/✦/)).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/I was reading about the/),
+    ).toBeInTheDocument()
+  })
+
+  it('B4: an unclosed skill opener falls through to text', () => {
+    renderText('<skill name="architect" location="loc">\nno closing tag here')
+    expect(screen.queryByText(/✦/)).not.toBeInTheDocument()
+  })
+
+  it('B4: a code sample showing the tag does not render a pill', () => {
+    renderText('```\n<skill name="x">...</skill>\n```\nsome other prose after the fence')
+    expect(screen.queryByText(/✦/)).not.toBeInTheDocument()
+  })
+})
