@@ -25,6 +25,11 @@ export default function Show({ job }: Props) {
     return () => clearInterval(id)
   }, [job.status])
 
+  function handleCancel() {
+    if (!window.confirm('Cancel this job?')) return
+    router.post(`/jobs/${job.id}/cancel`)
+  }
+
   return (
     <AppLayout>
       <Head title={`Job #${job.id}`} />
@@ -56,11 +61,18 @@ export default function Show({ job }: Props) {
         </div>
       </dl>
 
-      {job.run_id && (
-        <div className="mt-4">
-          <Button asChild>
-            <Link href={`/runs/${job.run_id}`}>View live run</Link>
-          </Button>
+      {(job.run_id || ACTIVE_STATUSES.has(job.status)) && (
+        <div className="mt-4 flex gap-2">
+          {job.run_id && (
+            <Button asChild>
+              <Link href={`/runs/${job.run_id}`}>View live run</Link>
+            </Button>
+          )}
+          {ACTIVE_STATUSES.has(job.status) && (
+            <Button variant="destructive" onClick={handleCancel}>
+              Cancel
+            </Button>
+          )}
         </div>
       )}
 
