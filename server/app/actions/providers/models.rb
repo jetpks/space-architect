@@ -33,7 +33,7 @@ module Space
             render_json(res, { models: [], error: "secret_resolution_failed" })
           rescue Async::TimeoutError
             render_json(res, { models: [], error: "timeout" })
-          rescue StandardError
+          rescue Operations::FetchModels::UpstreamError
             render_json(res, { models: [], error: "upstream_error" })
           end
         end
