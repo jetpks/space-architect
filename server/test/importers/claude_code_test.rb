@@ -95,3 +95,63 @@ class ClaudeCodeImporterTest < Minitest::Test
   def messages_repo      = Space::Server::Repos::MessagesRepo.new
   def fixture_path(name) = File.join(__dir__, "..", "fixtures", "files", name)
 end
+
+class ClaudeCodeImporterNulTest < Minitest::Test
+  def conn
+    @conn ||= Space::Server::App["db.gateway"].connection
+  end
+
+  def setup
+    Faker::Internet.unique.clear
+    Faker::Number.unique.clear
+    [:annotations, :conversation_shares, :messages, :conversations, :users].each do |t|
+      conn[t].delete
+    end
+    @conv = Factory[:conversation]
+    io = File.open(fixture_path("transcript_with_nul.jsonl"))
+    Space::Server::Importers::ClaudeCode.new.import!(@conv, io)
+    io.close
+    @conv     = conversations_repo.by_pk(@conv.id)
+    @messages = messages_repo.for_conversation(@conv.id)
+  end
+
+  def test_completes_despite_nul_bytes
+    assert_equal :completed, @conv.status
+    assert_equal 3, @messages.size
+  end
+
+  def test_strips_nul_from_all_persisted_content
+    strings_inspected = 0
+    @messages.each do |m|
+      walk_strings(m.content) do |s|
+        strings_inspected += 1
+        refute_includes s, "\0", "Message uuid=#{m.uuid} block contains a U+0000 byte after scrub"
+      end
+    end
+    assert_operator strings_inspected, :>, 0
+  end
+
+  def test_preserves_surrounding_text_when_nul_removed
+    assert_equal "Hello there", @messages[0].blocks.first["text"]
+
+    tool_use = @messages[1].blocks.find { |b| b["type"] == "tool_use" }
+    assert_equal "ls -la", tool_use["input"]["command"]
+
+    tool_result = @messages[2].blocks.first
+    assert_equal "file.txt", tool_result["content"]
+  end
+
+  private
+
+  def conversations_repo = Space::Server::Repos::ConversationsRepo.new
+  def messages_repo      = Space::Server::Repos::MessagesRepo.new
+  def fixture_path(name) = File.join(__dir__, "..", "fixtures", "files", name)
+
+  def walk_strings(value, &block)
+    case value
+    when String then yield value
+    when Array  then value.each { |v| walk_strings(v, &block) }
+    when Hash   then value.each_value { |v| walk_strings(v, &block) }
+    end
+  end
+end

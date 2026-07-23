@@ -148,7 +148,7 @@ module Space
             model:           (@model if role == "assistant"),
             occurred_at:     timestamp,
             position:        @position,
-            content:         blocks,
+            content:         NulScrub.scrub_nul(blocks),
             conversation_id: conversation_id,
             created_at:      Time.now,
             updated_at:      Time.now

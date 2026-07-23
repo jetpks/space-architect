@@ -283,7 +283,7 @@ module Space
             model:           model_for(message),
             occurred_at:     entry["timestamp"],
             position:        @position,
-            content:         scrub_nul(blocks),
+            content:         NulScrub.scrub_nul(blocks),
             conversation_id: conversation_id,
             created_at:      Time.now,
             updated_at:      Time.now
@@ -301,21 +301,12 @@ module Space
             model:           model_for(message),
             occurred_at:     entry["timestamp"],
             position:        @position,
-            content:         scrub_nul(blocks),
+            content:         NulScrub.scrub_nul(blocks),
             conversation_id: conversation_id,
             created_at:      Time.now,
             updated_at:      Time.now
           )
           @position += 1
-        end
-
-        def scrub_nul(value)
-          case value
-          when String then value.delete("\0")
-          when Array  then value.map { |v| scrub_nul(v) }
-          when Hash   then value.transform_values { |v| scrub_nul(v) }
-          else value
-          end
         end
 
         def text_block(text)

@@ -78,13 +78,13 @@ module Space
         def build_message(record, position, conversation_id)
           message = record["message"] || {}
           messages_repo.create(
-            uuid:            record["uuid"],
-            parent_uuid:     record["parentUuid"],
-            role:            message["role"] || record["type"],
-            model:           message["model"],
+            uuid:            NulScrub.scrub_nul(record["uuid"]),
+            parent_uuid:     NulScrub.scrub_nul(record["parentUuid"]),
+            role:            NulScrub.scrub_nul(message["role"] || record["type"]),
+            model:           NulScrub.scrub_nul(message["model"]),
             occurred_at:     record["timestamp"],
             position:        position,
-            content:         normalize_content(message["content"]),
+            content:         NulScrub.scrub_nul(normalize_content(message["content"])),
             conversation_id: conversation_id,
             created_at:      Time.now,
             updated_at:      Time.now

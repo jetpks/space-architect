@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require_relative "../test_helper"
+require "async"
+require "async/semaphore"
 
 class ImportConversationJobTest < Minitest::Test
   def conn = @conn ||= Space::Server::App["db.gateway"].connection
@@ -105,6 +107,28 @@ class ImportConversationJobTest < Minitest::Test
     assert_equal 0, conv.turns_count, "a failed import must not recompute turns_count"
   end
 
+  # ── transient DB errors propagate for async-job's retry (AC1) ────────────────
+  # A DB-infrastructure error means the importer never got a chance to persist
+  # status:failed, so swallowing it would strand the row at status:pending forever.
+
+  def test_pool_timeout_propagates_out_of_call
+    conv = make_conversation("transcript.jsonl")
+    raising_repo = Object.new
+    def raising_repo.by_pk(*) = raise(Sequel::PoolTimeout, "timeout: 5")
+
+    job = Space::Server::Jobs::ImportConversation.new(conversations_repo: raising_repo)
+    assert_raises(Sequel::PoolTimeout) { job.call(conv.id) }
+  end
+
+  def test_database_connection_error_propagates_out_of_call
+    conv = make_conversation("transcript.jsonl")
+    raising_repo = Object.new
+    def raising_repo.by_pk(*) = raise(Sequel::DatabaseConnectionError, "connection refused")
+
+    job = Space::Server::Jobs::ImportConversation.new(conversations_repo: raising_repo)
+    assert_raises(Sequel::DatabaseConnectionError) { job.call(conv.id) }
+  end
+
   # ── nil source_file guard ─────────────────────────────────────────────────────
 
   def test_missing_source_file_returns_without_raise
@@ -120,5 +144,45 @@ class ImportConversationJobTest < Minitest::Test
   def test_nonexistent_conversation_returns_without_raise
     # Must not raise even for a completely unknown id
     Space::Server::Jobs::ImportConversation.new.call(999_999_999)
+  end
+end
+
+# ── Delegate concurrency bound (AC2) ──────────────────────────────────────────
+# `importer:` is a constructor-injection seam (Delegate defaults to the real
+# ImportConversation); swapping it here tests the semaphore bound in isolation,
+# without driving real DB imports through it.
+class ImportConversationDelegateTest < Minitest::Test
+  class ConcurrencyTrackingImporter
+    attr_reader :max_concurrent
+
+    def initialize
+      @concurrent     = 0
+      @max_concurrent = 0
+    end
+
+    def new = self
+
+    def call(_conversation_id)
+      @concurrent += 1
+      @max_concurrent = @concurrent if @concurrent > @max_concurrent
+      Async::Task.current.sleep(0.05)
+    ensure
+      @concurrent -= 1
+    end
+  end
+
+  def test_concurrent_calls_never_exceed_the_configured_limit
+    limit    = Space::Server::Jobs::ImportConversation::MAX_CONCURRENT_IMPORTS
+    importer = ConcurrencyTrackingImporter.new
+    delegate = Space::Server::Jobs::ImportConversation::Delegate.new(
+      semaphore: Async::Semaphore.new(limit), importer: importer
+    )
+
+    Sync do |task|
+      (limit * 3).times.map { |i| task.async { delegate.call({ "conversation_id" => i }) } }.each(&:wait)
+    end
+
+    assert_operator importer.max_concurrent, :<=, limit
+    assert_equal limit, importer.max_concurrent, "semaphore should saturate at the limit under contention"
   end
 end

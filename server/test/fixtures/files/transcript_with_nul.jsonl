@@ -1,0 +1,5 @@
+{"type":"mode","mode":"default","sessionId":"sess-nul-1"}
+{"type":"ai-title","aiTitle":"Test conversation","sessionId":"sess-nul-1"}
+{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"Hello \u0000there"},"timestamp":"2026-06-06T12:00:00Z","sessionId":"sess-nul-1","cwd":"/tmp/proj","gitBranch":"main","version":"2.1.0"}
+{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","model":"claude-opus-4-8","content":[{"type":"thinking","thinking":"hmm"},{"type":"text","text":"Hi!"},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls \u0000-la"}}]},"timestamp":"2026-06-06T12:00:01Z","sessionId":"sess-nul-1"}
+{"type":"user","uuid":"u2","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"file\u0000.txt","is_error":false}]},"timestamp":"2026-06-06T12:00:02Z","sessionId":"sess-nul-1"}
