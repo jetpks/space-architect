@@ -24,16 +24,26 @@ module Space
               halt 401, JSON.generate(error: "Sign in required.")
             end
 
-            render_json(res, { jobs: job_list(user) })
+            render_json(res, { jobs: job_entries(jobs_repo.list_for_user(user.id)) })
           end
 
           def handle_browser(req, res)
             user = require_login(req, res)
-            render_inertia(req, res, "Jobs/Index", props: { jobs: job_list(user) })
+            page = clamped_page(req)
+            paged = jobs_repo.list_for_user_page(user.id, page: page)
+            render_inertia(req, res, "Jobs/Index", props: {
+              jobs: job_entries(paged[:rows]),
+              pagination: { page: page, has_more: paged[:has_more] }
+            })
           end
 
-          def job_list(user)
-            jobs_repo.list_for_user(user.id).map do |job|
+          def clamped_page(req)
+            page = req.params[:page].to_i
+            page.positive? ? page : 1
+          end
+
+          def job_entries(jobs)
+            jobs.map do |job|
               entry = {
                 id: job.id,
                 status: job.status,

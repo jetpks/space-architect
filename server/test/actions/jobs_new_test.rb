@@ -88,4 +88,33 @@ class JobsNewTest < Minitest::Test
     entry = providers.first
     assert_equal %w[api_key_ref base_url flavors id name].sort, entry.keys.sort
   end
+
+  # --- GET /jobs/new?from=<job id> — re-run prefill (I45 AC4) ---------------
+
+  def test_new_prefill_spec_present_for_owned_from_job
+    job = Factory[:job, user_id: @owner.id]
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs/new", params: { from: job.id })
+    assert_equal job.spec, parse_json(body).dig("props", "prefill_spec")
+  end
+
+  def test_new_prefill_spec_absent_for_foreign_job
+    other = Factory[:user, github_uid: "jobs-new-foreign", username: "jobs-new-foreign"]
+    job = Factory[:job, user_id: other.id]
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs/new", params: { from: job.id })
+    refute parse_json(body)["props"].key?("prefill_spec")
+  end
+
+  def test_new_prefill_spec_absent_when_from_param_missing
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs/new")
+    refute parse_json(body)["props"].key?("prefill_spec")
+  end
+
+  def test_new_prefill_spec_absent_for_nonexistent_from
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs/new", params: { from: 999_999 })
+    refute parse_json(body)["props"].key?("prefill_spec")
+  end
 end
