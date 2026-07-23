@@ -152,6 +152,35 @@ class PersistorTest < Minitest::Test
     assert_equal 0, msgs.length
   end
 
+  # ── NUL scrubbing (AC4) ───────────────────────────────────────────────────────
+
+  def test_streamed_text_is_scrubbed_of_nul_bytes
+    run = Factory[:run, user_id: @user.id]
+    @persistor.setup(run)
+
+    [
+      { type: :message_start,   role: "assistant", model: "test-model" },
+      { type: :block_open,      block_id: "0", index: 0, block_type: :text },
+      { type: :text_delta,      block_id: "0", text: "Hello, \0wor" },
+      { type: :text_delta,      block_id: "0", text: "ld!" },
+      { type: :block_close,     block_id: "0" },
+      { type: :message_complete, message_id: "m1", stop_reason: :end_turn }
+    ].each { |e| @persistor.process(e) }
+
+    msg = @messages_repo.for_conversation(@persistor.conversation_id).first
+    assert_equal [{ "type" => "text", "text" => "Hello, world!" }], msg.blocks
+  end
+
+  def test_tool_result_content_is_scrubbed_of_nul_bytes
+    run = Factory[:run, user_id: @user.id]
+    @persistor.setup(run)
+
+    @persistor.process(type: :tool_result, tool_use_id: "tu_1", content: "out\0put text", is_error: false)
+
+    block = @messages_repo.for_conversation(@persistor.conversation_id).first.blocks.first
+    assert_equal "output text", block["content"]
+  end
+
   def test_full_sequence_produces_correct_db_state
     run = Factory[:run, user_id: @user.id]
     @persistor.setup(run)
