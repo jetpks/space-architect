@@ -83,6 +83,40 @@ class JobsIndexTest < Minitest::Test
     assert entry["prompt_snippet"].end_with?("…")
   end
 
+  # --- pagination (I45) ---------------------------------------------------
+
+  def test_index_pagination_default_page_1_capped_with_prop
+    55.times { Factory[:job, user_id: @owner.id] }
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs")
+    data = parse_json(body)
+    assert_equal 50, data.dig("props", "jobs").length
+    assert_equal({ "page" => 1, "has_more" => true }, data.dig("props", "pagination"))
+  end
+
+  def test_index_pagination_page_2_returns_remaining_rows
+    55.times { |i| Factory[:job, user_id: @owner.id, created_at: Time.now - i, updated_at: Time.now - i] }
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs", params: { page: 2 })
+    data = parse_json(body)
+    assert_equal 5, data.dig("props", "jobs").length
+    assert_equal({ "page" => 2, "has_more" => false }, data.dig("props", "pagination"))
+  end
+
+  def test_index_pagination_invalid_page_defaults_to_1
+    Factory[:job, user_id: @owner.id]
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs", params: { page: "bogus" })
+    assert_equal({ "page" => 1, "has_more" => false }, parse_json(body).dig("props", "pagination"))
+  end
+
+  def test_index_pagination_has_more_false_within_a_single_page
+    3.times { Factory[:job, user_id: @owner.id] }
+    sign_in(@owner)
+    _, _, body = inertia_get("/jobs")
+    refute parse_json(body).dig("props", "pagination", "has_more")
+  end
+
   # --- Bearer personality (AC2) -------------------------------------------
 
   def test_index_bearer_wrong_token_returns_401

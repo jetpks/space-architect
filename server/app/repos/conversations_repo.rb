@@ -26,24 +26,28 @@ module Space
           conversations.by_pk(id).combine(:messages).one
         end
 
-        # Index scope: published ∪ owned-by-user ∪ shared-with-user, deduped.
-        # Anonymous (user nil) → published only.
-        # Empty org_ids → safe (Sequel renders empty IN as false literal).
-        # Combines :shares so struct predicates (shared_with?) work without N+1.
-        # Does NOT combine :messages — the Index action reads the denormalized
-        # turns_count column instead; loading every message here is what caused
-        # the studio 502 (I36). Callers needing message-backed predicates
-        # (visible_messages, visible_to?) must use with_messages_and_shares/for_show.
-        def visible_to(user)
+        PAGE_SIZE = 50
+
+        # Index scope: published ∪ owned-by-user ∪ shared-with-user, deduped,
+        # newest-updated first, paged (page size 50). Anonymous (user nil) →
+        # published only. Empty org_ids → safe (Sequel renders empty IN as false
+        # literal). Combines :shares so struct predicates (shared_with?) work
+        # without N+1. Does NOT combine :messages — the Index action reads the
+        # denormalized turns_count column instead; loading every message here is
+        # what caused the studio 502 (I36). Callers needing message-backed
+        # predicates (visible_messages, visible_to?) must use
+        # with_messages_and_shares/for_show. Fetches PAGE_SIZE + 1 rows to detect
+        # has_more without a COUNT query.
+        def visible_to(user, page: 1)
           if user.nil?
-            return conversations.where(published: true).combine(:shares).to_a
+            return paged(conversations.where(published: true), page)
           end
 
           share_ids = conversation_shares_repo.granted_conversation_ids(user)
           expr = Sequel.expr(published: true) |
                  Sequel.expr(user_id: user.id) |
                  Sequel.expr(id: share_ids)
-          conversations.where(expr).combine(:shares).to_a
+          paged(conversations.where(expr), page)
         end
 
         # Full show combine: user (for serializer owner block), messages (ordered),
@@ -96,6 +100,17 @@ module Space
           conversations
             .where(user_id: conversation.user_id, parent_session_id: conversation.session_id)
             .order(:id).to_a
+        end
+
+        private
+
+        def paged(relation, page)
+          rows = relation.order(Sequel.desc(:updated_at))
+                          .limit(PAGE_SIZE + 1)
+                          .offset((page - 1) * PAGE_SIZE)
+                          .combine(:shares)
+                          .to_a
+          { rows: rows.first(PAGE_SIZE), has_more: rows.size > PAGE_SIZE }
         end
       end
     end

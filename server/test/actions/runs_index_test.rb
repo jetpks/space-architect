@@ -149,6 +149,36 @@ class RunsIndexTest < Minitest::Test
     assert_nil entry["prompt_snippet"]
   end
 
+  # --- pagination (I45) ---------------------------------------------------
+
+  def test_index_pagination_default_page_1_capped_with_prop
+    55.times { Factory[:run, user_id: @owner.id, published: true] }
+    _, _, body = inertia_get("/runs")
+    data = parse_json(body)
+    assert_equal 50, data.dig("props", "runs").length
+    assert_equal({ "page" => 1, "has_more" => true }, data.dig("props", "pagination"))
+  end
+
+  def test_index_pagination_page_2_returns_remaining_rows
+    55.times { |i| Factory[:run, user_id: @owner.id, published: true, created_at: Time.now - i] }
+    _, _, body = inertia_get("/runs", params: { page: 2 })
+    data = parse_json(body)
+    assert_equal 5, data.dig("props", "runs").length
+    assert_equal({ "page" => 2, "has_more" => false }, data.dig("props", "pagination"))
+  end
+
+  def test_index_pagination_invalid_page_defaults_to_1
+    Factory[:run, user_id: @owner.id, published: true]
+    _, _, body = inertia_get("/runs", params: { page: "nope" })
+    assert_equal({ "page" => 1, "has_more" => false }, parse_json(body).dig("props", "pagination"))
+  end
+
+  def test_index_pagination_has_more_false_within_a_single_page
+    3.times { Factory[:run, user_id: @owner.id, published: true] }
+    _, _, body = inertia_get("/runs")
+    refute parse_json(body).dig("props", "pagination", "has_more")
+  end
+
   # Recording logger stand-in — Sequel::Database#loggers accepts anything
   # responding to the Logger interface; #info is what Sequel calls per query.
   class SqlSpy
