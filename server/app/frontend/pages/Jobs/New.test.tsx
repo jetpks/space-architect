@@ -491,6 +491,50 @@ describe('Jobs/New', () => {
     expect(payload.environment).not.toHaveProperty('deps')
   })
 
+  it('prefills the form from prefill_spec on mount, field-for-field via the shared mapping', () => {
+    const prefillSpec = {
+      harness: {
+        type: 'pi',
+        model: 'gpt-5',
+        backend: { base_url: 'https://gateway.example.com', api_key_ref: 'op://vault/item' },
+        args: ['--flag'],
+      },
+      prompt: 'do the re-run thing',
+      environment: {
+        env: { FOO: 'bar' },
+        secrets: [{ ref: 'op://vault/secret', name: 'SECRET' }],
+        debs: ['git'],
+        npm: ['typescript'],
+        gems: ['rails'],
+        mise: ['ruby@3.4'],
+        files: [{ path: '/workspace/f.txt', content_b64: btoa('hi') }],
+        permissions: { network: true, mounts: ['/host:/container'] },
+      },
+    }
+    render(<New prefill_spec={prefillSpec} />)
+
+    expect(setData).toHaveBeenCalledWith('harness_type', 'pi')
+    expect(setData).toHaveBeenCalledWith('harness_model', 'gpt-5')
+    expect(setData).toHaveBeenCalledWith('base_url', 'https://gateway.example.com')
+    expect(setData).toHaveBeenCalledWith('api_key_ref', 'op://vault/item')
+    expect(setData).toHaveBeenCalledWith('args', ['--flag'])
+    expect(setData).toHaveBeenCalledWith('env', [['FOO', 'bar']])
+    expect(setData).toHaveBeenCalledWith('secrets', [['op://vault/secret', 'SECRET']])
+    expect(setData).toHaveBeenCalledWith('debs', ['git'])
+    expect(setData).toHaveBeenCalledWith('npm', ['typescript'])
+    expect(setData).toHaveBeenCalledWith('gems', ['rails'])
+    expect(setData).toHaveBeenCalledWith('mise', ['ruby@3.4'])
+    expect(setData).toHaveBeenCalledWith('files', [{ path: '/workspace/f.txt', content: 'hi' }])
+    expect(setData).toHaveBeenCalledWith('network', true)
+    expect(setData).toHaveBeenCalledWith('mounts', ['/host:/container'])
+    expect(setData).toHaveBeenCalledWith('prompt', 'do the re-run thing')
+  })
+
+  it('leaves the form at its untouched defaults when prefill_spec is absent', () => {
+    render(<New />)
+    expect(setData).not.toHaveBeenCalled()
+  })
+
   it('offers opencode as a harness type', () => {
     render(<New />)
     const field = screen.getByText('Harness type').closest('div')!

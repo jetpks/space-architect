@@ -1,11 +1,12 @@
 import { Head, Link } from '@inertiajs/react'
 import { Badge } from '@/components/ui/badge'
 import AppLayout from '@/layouts/AppLayout'
-import type { ConversationListItem } from '@/types'
+import Pagination from '@/components/Pagination'
+import type { ConversationListItem, Pagination as PaginationData } from '@/types'
 
-type Props = { conversations: ConversationListItem[] }
+type Props = { conversations: ConversationListItem[]; pagination: PaginationData }
 
-export default function Index({ conversations }: Props) {
+export default function Index({ conversations, pagination }: Props) {
   return (
     <AppLayout>
       <Head title="Conversations" />
@@ -30,6 +31,8 @@ export default function Index({ conversations }: Props) {
           ))}
         </ul>
       )}
+
+      <Pagination pagination={pagination} path="/conversations" />
     </AppLayout>
   )
 }

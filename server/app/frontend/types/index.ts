@@ -177,6 +177,13 @@ export type RunListItem = {
   prompt_snippet: string | null
 }
 
+// The `?page=N` cursor a list page received alongside its row prop, capped at
+// ≤ 50 rows per page. has_more is true iff a further page exists.
+export type Pagination = {
+  page: number
+  has_more: boolean
+}
+
 export type JobListItem = {
   id: number
   status: string

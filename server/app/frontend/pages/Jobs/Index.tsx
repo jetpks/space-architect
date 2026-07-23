@@ -2,13 +2,14 @@ import { Head, Link } from '@inertiajs/react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import AppLayout from '@/layouts/AppLayout'
-import type { JobListItem } from '@/types'
+import Pagination from '@/components/Pagination'
+import type { JobListItem, Pagination as PaginationData } from '@/types'
 import { timeLabel } from '@/pages/Spaces/helpers'
 import { STATUS_VARIANT } from './helpers'
 
-type Props = { jobs: JobListItem[] }
+type Props = { jobs: JobListItem[]; pagination: PaginationData }
 
-export default function Index({ jobs }: Props) {
+export default function Index({ jobs, pagination }: Props) {
   return (
     <AppLayout>
       <Head title="Jobs" />
@@ -52,6 +53,8 @@ export default function Index({ jobs }: Props) {
           ))}
         </ul>
       )}
+
+      <Pagination pagination={pagination} path="/jobs" />
     </AppLayout>
   )
 }
