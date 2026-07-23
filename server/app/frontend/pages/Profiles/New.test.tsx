@@ -4,9 +4,18 @@ import type { Provider } from '@/types'
 
 let formData: Record<string, unknown>
 let formErrors: Record<string, string>
-const setData = vi.fn((key: string, value: unknown) => {
-  formData = { ...formData, [key]: value }
-})
+// Mirrors @inertiajs/react's setData overloads: a (key, value) pair, or a
+// functional updater — the pi-extension sync helper uses the latter so it
+// always reads current data at resolve time.
+const setData = vi.fn(
+  (
+    keyOrUpdater: string | ((prev: Record<string, unknown>) => Record<string, unknown>),
+    value?: unknown,
+  ) => {
+    formData =
+      typeof keyOrUpdater === 'function' ? keyOrUpdater(formData) : { ...formData, [keyOrUpdater]: value }
+  },
+)
 const post = vi.fn()
 const transform = vi.fn()
 
@@ -249,7 +258,7 @@ describe('Profiles/New', () => {
 
     expect(fetch).toHaveBeenCalledWith('/providers/2/pi_extension')
     await waitFor(() => {
-      expect(setData).toHaveBeenCalledWith('files', [
+      expect(formData.files).toEqual([
         { path: '/root/.pi/agent/extensions/openrouter.ts', content: 'export default {}' },
       ])
     })
@@ -272,7 +281,7 @@ describe('Profiles/New', () => {
     fireEvent.change(within(field).getByRole('combobox'), { target: { value: '3' } })
 
     await waitFor(() => {
-      expect(setData).toHaveBeenCalledWith('secrets', [['op://vault/gateway', 'PI_PROVIDER_API_KEY']])
+      expect(formData.secrets).toEqual([['op://vault/gateway', 'PI_PROVIDER_API_KEY']])
     })
   })
 
@@ -293,7 +302,7 @@ describe('Profiles/New', () => {
     fireEvent.change(within(field).getByRole('combobox'), { target: { value: '2' } })
 
     await waitFor(() => {
-      expect(setData).toHaveBeenCalledWith('files', [
+      expect(formData.files).toEqual([
         { path: '/workspace/hand-added.txt', content: 'mine' },
         { path: '/root/.pi/agent/extensions/openrouter.ts', content: 'v1' },
       ])
@@ -309,7 +318,7 @@ describe('Profiles/New', () => {
     fireEvent.change(within(field).getByRole('combobox'), { target: { value: '3' } })
 
     await waitFor(() => {
-      expect(setData).toHaveBeenCalledWith('files', [
+      expect(formData.files).toEqual([
         { path: '/workspace/hand-added.txt', content: 'mine' },
         { path: '/root/.pi/agent/extensions/gateway.ts', content: 'v2' },
       ])
@@ -326,7 +335,7 @@ describe('Profiles/New', () => {
     await waitFor(() => {
       expect(screen.getByText(/Could not generate the pi extension/)).not.toBeNull()
     })
-    expect(setData).not.toHaveBeenCalledWith('files', expect.arrayContaining([expect.objectContaining({ path: expect.stringContaining('extensions') })]))
+    expect(formData.files).toEqual([])
   })
 
   it('selecting Custom backend adds nothing', () => {
@@ -335,6 +344,6 @@ describe('Profiles/New', () => {
     const field = screen.getByText('Provider').closest('div')!
     fireEvent.change(within(field).getByRole('combobox'), { target: { value: 'custom' } })
 
-    expect(setData).not.toHaveBeenCalledWith('files', expect.anything())
+    expect(setData).not.toHaveBeenCalled()
   })
 })

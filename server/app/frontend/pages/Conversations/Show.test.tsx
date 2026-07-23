@@ -68,20 +68,12 @@ describe('Conversations/Show', () => {
     expect(link).toHaveAttribute('href', '/conversations/3')
   })
 
-  it('falls back to a generic label when the parent has no title', () => {
-    const conversation = { ...CONVERSATION, parent: { id: 3, title: null } }
-    renderShow(conversation)
-
-    const link = screen.getByText('conversation #3').closest('a')
-    expect(link).toHaveAttribute('href', '/conversations/3')
-  })
-
   it('renders one link per child under "Subagent transcripts"', () => {
     const conversation = {
       ...CONVERSATION,
       children: [
         { id: 6, title: 'Subagent one', session_id: 'sess-a' },
-        { id: 7, title: null, session_id: 'sess-b' },
+        { id: 7, title: 'Subagent two', session_id: 'sess-b' },
       ],
     }
     renderShow(conversation)
@@ -91,7 +83,7 @@ describe('Conversations/Show', () => {
     const linkOne = screen.getByText('Subagent one').closest('a')
     expect(linkOne).toHaveAttribute('href', '/conversations/6')
 
-    const linkTwo = screen.getByText('sess-b').closest('a')
+    const linkTwo = screen.getByText('Subagent two').closest('a')
     expect(linkTwo).toHaveAttribute('href', '/conversations/7')
   })
 

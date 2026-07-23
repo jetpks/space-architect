@@ -230,8 +230,10 @@ function Turn({
   // beat actually shows. Scoped to the owning turn in Show so a jump doesn't
   // churn every turn's memo.
   reveal: number | null
-  // Per-turn background tint (cycled by index in Show) so you can sense position
-  // while scrolling; the same color lights up the TOC entry when it's on screen.
+  // Per-turn background tint (cycled by index in Show), an hsl() string driven
+  // by the --turn-band-s/--turn-band-l theme vars so it reads on both light and
+  // dark; you can sense position while scrolling, and the same color lights up
+  // the TOC entry when it's on screen.
   color: string
   // The conversation's project root, used to detect memory writes (a /memory/
   // file outside the repo) — highlighted orange like decisions are emerald.

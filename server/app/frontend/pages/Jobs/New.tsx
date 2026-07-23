@@ -7,13 +7,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import AppLayout from '@/layouts/AppLayout'
-import { compatibleProviders, fetchPiExtension, fetchProviderModels } from '@/lib/providers'
+import { compatibleProviders, fetchProviderModels } from '@/lib/providers'
+import { CUSTOM_BACKEND, syncPiExtension, type FileRow, type GeneratedPi } from '@/lib/pi-extension'
 import type { Profile, Provider } from '@/types'
 import { decodeBase64, encodeBase64 } from './helpers'
-
-const CUSTOM_BACKEND = 'custom'
-
-type FileRow = { path: string; content: string }
 
 type FormData = {
   harness_type: string
@@ -34,11 +31,6 @@ type FormData = {
 }
 
 const ANTHROPIC_ROW: [string, string] = ['ANTHROPIC_API_KEY', 'unused-for-keyless-backends']
-
-// Tracks the currently auto-added pi extension files/secrets row so a provider
-// switch (or leaving harness pi) can remove exactly those rows without
-// touching anything the user added by hand.
-type GeneratedPi = { path: string; ref: string; envKey: string } | { path: string; ref: null; envKey: null }
 
 const INITIAL_DATA: FormData = {
   harness_type: 'claude',
@@ -71,39 +63,16 @@ export default function New({ profiles = [], providers = [] }: Props) {
   const harnessType = form.data.harness_type ?? 'claude'
   const providerOptions = compatibleProviders(providers, harnessType)
 
-  // Removes the previously auto-added files/secrets rows (if any), then, if
-  // newHarnessType is pi and providerId names a provider, fetches and adds
-  // its generated extension. Hand-added rows are never touched.
-  function syncPiExtension(newHarnessType: string, providerId: string) {
-    setPiExtensionError(null)
-    const stale = generatedPi
-    const files = stale ? form.data.files.filter((f) => f.path !== stale.path) : form.data.files
-    const secrets = stale?.ref
-      ? form.data.secrets.filter(([ref, name]) => !(ref === stale.ref && name === stale.envKey))
-      : form.data.secrets
-    if (stale) {
-      form.setData('files', files)
-      form.setData('secrets', secrets)
-      setGeneratedPi(null)
-    }
-
-    if (newHarnessType !== 'pi' || providerId === CUSTOM_BACKEND) return
-    const provider = providers.find((p) => String(p.id) === providerId)
-    if (!provider) return
-
-    fetchPiExtension(provider.id).then(({ extension, error }) => {
-      if (!extension) {
-        setPiExtensionError(error)
-        return
-      }
-      form.setData('files', [...files, { path: extension.path, content: extension.content }])
-      if (extension.env_key && provider.api_key_ref) {
-        form.setData('secrets', [...secrets, [provider.api_key_ref, extension.env_key]])
-        setGeneratedPi({ path: extension.path, ref: provider.api_key_ref, envKey: extension.env_key })
-      } else {
-        setGeneratedPi({ path: extension.path, ref: null, envKey: null })
-      }
-    })
+  function syncPi(newHarnessType: string, providerId: string) {
+    syncPiExtension(
+      newHarnessType,
+      providerId,
+      providers,
+      generatedPi,
+      setGeneratedPi,
+      setPiExtensionError,
+      (updater) => form.setData((prev) => ({ ...prev, ...updater(prev) })),
+    )
   }
 
   function selectProvider(id: string) {
@@ -113,7 +82,7 @@ export default function New({ profiles = [], providers = [] }: Props) {
 
     const provider = providerOptions.find((p) => String(p.id) === id)
     if (!provider) {
-      syncPiExtension(harnessType, CUSTOM_BACKEND)
+      syncPi(harnessType, CUSTOM_BACKEND)
       return
     }
     form.setData('base_url', provider.base_url)
@@ -124,7 +93,7 @@ export default function New({ profiles = [], providers = [] }: Props) {
       setModelsError(error)
     })
 
-    syncPiExtension(harnessType, id)
+    syncPi(harnessType, id)
   }
 
   function onHarnessTypeChange(newType: string) {
@@ -146,7 +115,7 @@ export default function New({ profiles = [], providers = [] }: Props) {
         setModelOptions([])
         setModelsError(null)
       }
-      syncPiExtension(newType, stillCompatible ? selectedProviderId : CUSTOM_BACKEND)
+      syncPi(newType, stillCompatible ? selectedProviderId : CUSTOM_BACKEND)
     }
   }
 
