@@ -145,9 +145,13 @@ export type Conversation = {
   children?: Array<{ id: number; title: string | null; session_id: string }>
 }
 
+// The five states in config/db/migrate/20260622000000_create_runs.rb's status
+// column (0=pending, 1=live, 2=complete, 3=failed, 4=canceled).
+export type RunStatus = 'pending' | 'live' | 'complete' | 'failed' | 'canceled'
+
 export type Run = {
   id: number
-  status: string
+  status: RunStatus
   published: boolean
   role: string | null
   harness: string | null
@@ -162,7 +166,7 @@ export type Run = {
 
 export type RunListItem = {
   id: number
-  status: string
+  status: RunStatus
   published: boolean
   harness: string | null
   model: string | null

@@ -13,6 +13,7 @@ const STATUS_VARIANT: Record<string, BadgeVariant> = {
   live: 'default',
   complete: 'secondary',
   failed: 'destructive',
+  canceled: 'outline',
 }
 
 export default function Index({ runs }: Props) {

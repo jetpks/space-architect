@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Head, Link } from '@inertiajs/react'
+import { Badge } from '@/components/ui/badge'
 import AppLayout from '@/layouts/AppLayout'
 import Message from '@/components/Message'
 import { buildToolResultIndex } from '@/lib/message-pairing'
@@ -8,6 +9,18 @@ import type { LiveMessage, SSEEvent } from '@/lib/sse-reducer'
 import type { Message as MessageType, Run } from '@/types'
 
 type Props = { run: Run }
+
+type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
+
+// Mirrors Runs/Index.tsx's STATUS_VARIANT — the five run statuses from
+// config/db/migrate/20260622000000_create_runs.rb.
+const STATUS_VARIANT: Record<string, BadgeVariant> = {
+  pending: 'outline',
+  live: 'default',
+  complete: 'secondary',
+  failed: 'destructive',
+  canceled: 'outline',
+}
 
 // Adapts a LiveMessage to the Message component's expected shape.
 // Uses the array index as the numeric id since live messages have no DB id.
@@ -113,8 +126,8 @@ export default function Show({ run }: Props) {
 
       <header className="mb-4 border-b border-border pb-4">
         <h1 className="text-2xl font-bold">Run #{run.id}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {run.status}
+        <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
+          <Badge variant={STATUS_VARIANT[run.status] ?? 'outline'}>{run.status}</Badge>
           {run.published && ' · published'}
           {state.status === 'live' && ' · streaming'}
         </p>

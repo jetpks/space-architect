@@ -66,6 +66,14 @@ describe('Runs/Index', () => {
     expect(container.textContent).not.toContain('do the thing')
   })
 
+  it('renders a distinct badge for a canceled run, not the failed styling', () => {
+    const run = { ...RUN, status: 'canceled' as const }
+    const { getByText } = render(<Index runs={[run]} />)
+    const badge = getByText('canceled')
+    expect(badge.getAttribute('data-variant')).toBe('outline')
+    expect(badge.getAttribute('data-variant')).not.toBe('destructive')
+  })
+
   it('distinguishes two rows by their identity fields', () => {
     const other: RunListItem = {
       id: 2,
