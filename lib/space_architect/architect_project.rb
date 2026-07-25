@@ -42,6 +42,13 @@ module Space::Architect
     # Hard per-gate timeout. Generous relative to the full suite (~55s).
     DEFAULT_GATE_TIMEOUT = 900
 
+    # Flags for matching a changed path against a lane's touch_set globs.
+    # PATHNAME keeps a single `*` from crossing `/`; EXTGLOB enables `{a,b}`;
+    # DOTMATCH lets a glob reach dotfile segments, so a `dir/**` touch set covers
+    # `dir/.github/workflows/ci.yml` — the standard deliverable for a lane preparing
+    # a directory to become a repo root.
+    TOUCH_FNM = File::FNM_PATHNAME | File::FNM_EXTGLOB | File::FNM_DOTMATCH
+
     # Legacy sentinel: worktree_add used to seed prompt.md with this placeholder
     # (dropped — the blind-overwrite tripped harness read-before-write guards, #48).
     # dispatch still refuses to launch on this content, so stubs in old spaces
@@ -404,10 +411,7 @@ module Space::Architect
         git_capture("-C", repo_path.to_s, "merge", "--abort")
         conflict_files = conflicts.split
         lane_touch_set = lane_entry["touch_set"] || []
-        fnm = File::FNM_PATHNAME | File::FNM_EXTGLOB
-        outside = conflict_files.reject do |f|
-          lane_touch_set.any? { |g| File.fnmatch(g, f, fnm) || (g.end_with?("/**") && File.fnmatch("#{g}/*", f, fnm)) }
-        end
+        outside = conflict_files.reject { |f| in_touch_set?(f, lane_touch_set) }
         if !lane_touch_set.empty? && outside.empty?
           raise Space::Core::Error,
             "Merge conflict integrating lane '#{lane}' (#{conflict_files.join(", ")}) — the lane plan was " \
@@ -1298,16 +1302,21 @@ module Space::Architect
           i += 1
           changed << orig if orig && !orig.empty?
         end
-        fnm = File::FNM_PATHNAME | File::FNM_EXTGLOB
-        changed.all? do |f|
-          touch_set.any? do |g|
-            File.fnmatch(g, f, fnm) ||
-              (g.end_with?("/**") && File.fnmatch("#{g}/*", f, fnm))
-          end
-        end
+        changed.all? { |f| in_touch_set?(f, touch_set) }
       end
 
       checks
+    end
+
+    # Is a changed path inside a lane's declared touch set? Single-sourced so the
+    # in-bounds check (d) and merge_lane!'s conflict classification can never drift.
+    # A trailing `dir/**` is matched twice: bare (PATHNAME stops it at direct
+    # children) and as `dir/**/*`, whose whole-component `**/` does cross `/`.
+    def in_touch_set?(path, globs)
+      globs.any? do |g|
+        File.fnmatch(g, path, TOUCH_FNM) ||
+          (g.end_with?("/**") && File.fnmatch("#{g}/*", path, TOUCH_FNM))
+      end
     end
 
     # Replace (or, with append:, extend) the body of a "## Heading" section, leaving

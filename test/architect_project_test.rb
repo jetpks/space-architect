@@ -1118,6 +1118,39 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # Without FNM_DOTMATCH no glob reaches a dotfile segment, so a lane creating the
+  # `.github/workflows/ci.yml` inside its own declared directory — the standard
+  # deliverable for a lane preparing a directory to become a repo root — was reported
+  # out-of-bounds and hard-blocked from integrating. Dotfiles outside the touch set
+  # must still reject.
+  def test_in_bounds_accepts_dotfile_dir_under_dir_glob
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.freeze!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["gems/my-gem/**"])
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    FileUtils.mkdir_p(File.join(wt, "gems", "my-gem", ".github", "workflows"))
+    File.write(File.join(wt, "gems", "my-gem", ".github", "workflows", "ci.yml"), "name: ci\n")
+
+    checks = project.verify("my-slice").first[:checks]
+    assert_equal true, checks[:in_bounds], "gems/my-gem/** must accept gems/my-gem/.github/workflows/ci.yml"
+
+    # A dotfile dir outside the touch set stays out-of-bounds — DOTMATCH must not loosen (d).
+    FileUtils.mkdir_p(File.join(wt, ".github", "workflows"))
+    File.write(File.join(wt, ".github", "workflows", "release.yml"), "name: release\n")
+
+    checks = project.verify("my-slice").first[:checks]
+    assert_equal false, checks[:in_bounds], "gems/my-gem/** must not accept a repo-root .github/workflows/release.yml"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # merge_lane! refuses a lane whose worktree carries builder commits (tamper).
   def test_merge_lane_refuses_builder_commits
     dir = Dir.mktmpdir("architect-project-test")
