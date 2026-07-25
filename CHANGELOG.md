@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.5.1] - 2026-07-25
+
+### Fixed
+
+- **Lane in-bounds check no longer false-FAILs on dotfile directories** — the
+  `touch_set` matcher built its `fnmatch` flags without `File::FNM_DOTMATCH`, so
+  a `dir/**` touch glob never matched a path with a dot-prefixed segment. Any
+  lane creating `.github/workflows/ci.yml` *inside its own declared directory*
+  was reported out-of-bounds by `architect verify` check (d) and hard-blocked by
+  `architect integrate` ("wrote outside its declared touch set"), with no
+  override — the touch set is frozen at spec time, so neither side of the
+  comparison could be adjusted legitimately and the merges had to be done by
+  hand. `merge_lane!`'s conflict classification carried the identical blind spot;
+  both sites now share one `in_touch_set?` predicate so the flags cannot drift
+  again.
+
 ## [5.5.0] - 2026-07-22
 
 ### Added
