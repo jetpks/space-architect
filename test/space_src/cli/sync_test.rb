@@ -200,6 +200,143 @@ class CLISyncTest < Minitest::Test
     end
   end
 
+  # The `--json` stream is documented as one JSON object per event line.
+  # The human-readable "synced N repo(s)" summary used to be appended to
+  # it unconditionally, leaving a trailing record no JSON consumer could
+  # parse. JsonReporter already emits a run_finished event carrying the
+  # summary, so the prose line is redundant there.
+  def test_sync_json_output_is_parseable_json_on_every_line
+    with_engine_home_2_repos do |_env, paths, base_dir, refs|
+      config = Config.new(
+        base_dir: base_dir,
+        refresh_interval: 3600,
+        concurrency: 2,
+        repos: refs,
+        orgs: []
+      )
+      Space::Src::Config::Store.write(paths.config_file, config)
+
+      out, _err = invoke_command(PristineCLI::Sync::Run, json: true)
+      assert_equal 0, PristineCLI.last_outcome.exit_code
+
+      events = assert_all_json_lines(out.string)
+      # The run_finished event is what carries the summary in JSON mode,
+      # so suppressing the prose line loses nothing.
+      assert_includes events, "run_finished"
+    end
+  end
+
+  # The scoped path prints its own prose notice ("scoping sync to: ...")
+  # before the reporter is even chosen, so it needs the same suppression.
+  # Easy to miss: an unscoped --json run never reaches that line.
+  def test_sync_scoped_json_output_is_parseable_json_on_every_line
+    with_engine_home_2_repos do |_env, paths, base_dir, refs|
+      config = Config.new(
+        base_dir: base_dir,
+        refresh_interval: 3600,
+        concurrency: 2,
+        repos: refs,
+        orgs: []
+      )
+      Space::Src::Config::Store.write(paths.config_file, config)
+
+      out, _err = invoke_command(PristineCLI::Sync::Run, repo: "github.com/foo/repo0", json: true)
+      assert_equal 0, PristineCLI.last_outcome.exit_code
+
+      refute_includes out.string, "scoping sync to:",
+        "the scoping notice is prose and must not land in the JSON stream"
+      assert_all_json_lines(out.string)
+    end
+  end
+
+  # Asserts every non-empty line of `output` parses as one JSON object.
+  # Returns the "event" of each line, for further assertions.
+  def assert_all_json_lines(output)
+    lines = output.lines.map(&:chomp).reject(&:empty?)
+    refute_empty lines, "json sync produced no output"
+    lines.map do |line|
+      JSON.parse(line)["event"]
+    rescue JSON::ParserError
+      flunk "non-JSON line in --json output: #{line.inspect}"
+    end
+  end
+
+  # A full sweep sees the complete tracked set, so rows for repos dropped
+  # from config stop accumulating.
+  def test_sync_unscoped_prunes_state_rows_for_untracked_repos
+    with_engine_home_2_repos do |_env, paths, base_dir, refs|
+      config = Config.new(
+        base_dir: base_dir,
+        refresh_interval: 3600,
+        concurrency: 2,
+        repos: refs,
+        orgs: []
+      )
+      Space::Src::Config::Store.write(paths.config_file, config)
+
+      Space::Src::State::Store.write(paths.state_file, Space::Src::State::Store::State.new(
+        repos: {
+          "github.com/gone/repo" => Space::Src::State::Store::Repo.new(
+            default_branch: "trunk", last_fetch_at: nil,
+            last_synced_at: "2000-01-01T00:00:00Z", status: "clean", last_error: nil
+          )
+        },
+        orgs: {}
+      ))
+
+      out, _err = invoke_command(PristineCLI::Sync::Run)
+      assert_equal 0, PristineCLI.last_outcome.exit_code
+      assert_includes out.string, "synced 2 repo(s)"
+
+      new_state = Space::Src::State::Store.load(paths.state_file).success
+      assert_nil new_state.repos["github.com/gone/repo"],
+        "untracked repo's state row survived a full sweep — rows accumulate forever"
+      # The tracked repos are of course still there.
+      refute_nil new_state.repos["github.com/foo/repo0"]
+      refute_nil new_state.repos["github.com/bar/repo1"]
+    end
+  end
+
+  # The catastrophic case. `sync --repo` narrows the config to one repo
+  # before handing it to the engine, so pruning on a scoped run would
+  # delete the state rows for every other tracked repo — 552 of them on
+  # a real machine. The CLI must pass prune: false whenever --repo is set.
+  def test_sync_scoped_does_not_prune_other_repos_state_rows
+    with_engine_home_2_repos do |_env, paths, base_dir, refs|
+      config = Config.new(
+        base_dir: base_dir,
+        refresh_interval: 3600,
+        concurrency: 2,
+        repos: refs,
+        orgs: []
+      )
+      Space::Src::Config::Store.write(paths.config_file, config)
+
+      seeded_row = Space::Src::State::Store::Repo.new(
+        default_branch: "trunk", last_fetch_at: nil,
+        last_synced_at: "2000-01-01T00:00:00Z", status: "clean", last_error: nil
+      )
+      Space::Src::State::Store.write(paths.state_file, Space::Src::State::Store::State.new(
+        repos: {
+          "github.com/foo/repo0" => seeded_row,
+          "github.com/bar/repo1" => seeded_row,
+          "github.com/gone/repo" => seeded_row
+        },
+        orgs: {}
+      ))
+
+      _out, _err = invoke_command(PristineCLI::Sync::Run, repo: "github.com/foo/repo0")
+      assert_equal 0, PristineCLI.last_outcome.exit_code
+
+      new_state = Space::Src::State::Store.load(paths.state_file).success
+      refute_nil new_state.repos["github.com/bar/repo1"],
+        "scoped sync pruned a tracked repo it did not process"
+      refute_nil new_state.repos["github.com/gone/repo"],
+        "scoped sync pruned an untracked row — pruning must never run on a scoped sweep"
+      refute_nil new_state.repos["github.com/foo/repo0"]
+    end
+  end
+
   def test_sync_repo_unknown_ref_exits_nonzero_with_stderr
     with_engine_home_2_repos do |_env, paths, base_dir, refs|
       config = Config.new(

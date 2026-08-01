@@ -904,6 +904,120 @@ class SyncEngineTest < Minitest::Test
   end
 
   # ===========================================================================
+  # prune: — build_new_state carries prev rows forward by default, so rows
+  # for repos dropped from config accumulate forever. `prune: true` drops
+  # them, but ONLY when the run saw the complete picture.
+  # ===========================================================================
+
+  # An org that stops listing a repo means the repo left the org, so its
+  # row should go.
+  def test_prune_drops_rows_for_repos_no_longer_listed_by_the_org
+    Dir.mktmpdir("repo-tender-prune-") do |base_dir|
+      with_paths(base_dir: base_dir) do |_env, paths|
+        org = OrgRef.new(host: "github.com", name: "socketry")
+        both = [
+          RepoRef.new(host: "github.com", owner: "socketry", name: "lib0"),
+          RepoRef.new(host: "github.com", owner: "socketry", name: "lib1")
+        ]
+        scm = -> {
+          StubSCM.new(
+            status_value: clean_status(branch: "trunk", ahead: 0, behind: 0),
+            next_status_value: clean_status(branch: "trunk", ahead: 0, behind: 0)
+          )
+        }
+        config = make_config(base_dir: base_dir, orgs: [org], concurrency: 2)
+
+        # Run 1: org lists both.
+        forge1 = StubForge.new(response_for: ->(_o) { Dry::Monads::Success(both) })
+        r1 = Engine.new(scm: scm.call, forge: forge1).call(config: config, paths: paths, prune: true)
+        assert r1.success?, "run 1 failed: #{r1.failure.inspect}"
+        after1 = StateStore.load(paths.state_file).success
+        assert after1.repos["github.com/socketry/lib0"]
+        assert after1.repos["github.com/socketry/lib1"]
+
+        # Run 2: org lists only lib0 — lib1 has left.
+        forge2 = StubForge.new(response_for: ->(_o) { Dry::Monads::Success([both.first]) })
+        r2 = Engine.new(scm: scm.call, forge: forge2).call(config: config, paths: paths, prune: true)
+        assert r2.success?, "run 2 failed: #{r2.failure.inspect}"
+
+        after2 = StateStore.load(paths.state_file).success
+        assert after2.repos["github.com/socketry/lib0"], "still-listed repo was pruned"
+        assert_nil after2.repos["github.com/socketry/lib1"],
+          "row for a repo no longer listed by the org should have been pruned"
+      end
+    end
+  end
+
+  # The dangerous case: a transient forge outage empties `discovered`
+  # through no fault of the config. Pruning on that would delete every
+  # row for the whole org. The listings_complete guard must suppress it.
+  def test_prune_is_suppressed_when_an_org_listing_fails
+    Dir.mktmpdir("repo-tender-prune-outage-") do |base_dir|
+      with_paths(base_dir: base_dir) do |_env, paths|
+        org = OrgRef.new(host: "github.com", name: "socketry")
+        discovered = [
+          RepoRef.new(host: "github.com", owner: "socketry", name: "lib0"),
+          RepoRef.new(host: "github.com", owner: "socketry", name: "lib1")
+        ]
+        scm = -> {
+          StubSCM.new(
+            status_value: clean_status(branch: "trunk", ahead: 0, behind: 0),
+            next_status_value: clean_status(branch: "trunk", ahead: 0, behind: 0)
+          )
+        }
+        config = make_config(base_dir: base_dir, orgs: [org], concurrency: 2)
+
+        forge1 = StubForge.new(response_for: ->(_o) { Dry::Monads::Success(discovered) })
+        r1 = Engine.new(scm: scm.call, forge: forge1).call(config: config, paths: paths, prune: true)
+        assert r1.success?, "run 1 failed: #{r1.failure.inspect}"
+
+        # Run 2: the forge is down. discovered is empty, so an unguarded
+        # prune would wipe both rows.
+        forge2 = StubForge.new(
+          response_for: ->(o) { Dry::Monads::Failure({org: o.name, reason: "rate limit"}) }
+        )
+        r2 = Engine.new(scm: scm.call, forge: forge2).call(config: config, paths: paths, prune: true)
+        assert r2.success?, "org-list failure must not abort: #{r2.failure.inspect}"
+
+        after2 = StateStore.load(paths.state_file).success
+        assert after2.repos["github.com/socketry/lib0"],
+          "lib0 deleted by a prune that should have been suppressed by the org-list failure"
+        assert after2.repos["github.com/socketry/lib1"],
+          "lib1 deleted by a prune that should have been suppressed by the org-list failure"
+      end
+    end
+  end
+
+  # prune defaults to false: a caller that says nothing never loses rows.
+  def test_prune_defaults_to_false_and_carries_unseen_rows_forward
+    Dir.mktmpdir("repo-tender-prune-default-") do |base_dir|
+      with_paths(base_dir: base_dir) do |_env, paths|
+        seeded = StateStore::State.new(
+          repos: {
+            "github.com/gone/repo" => StateStore::Repo.new(
+              default_branch: "trunk", last_fetch_at: nil,
+              last_synced_at: "2000-01-01T00:00:00Z", status: "clean", last_error: nil
+            )
+          },
+          orgs: {}
+        )
+        StateStore.write(paths.state_file, seeded)
+
+        config = make_config(base_dir: base_dir, repos: [], orgs: [], concurrency: 2)
+        result = Engine.new(scm: StubSCM.new(
+          status_value: clean_status(branch: "trunk", ahead: 0, behind: 0)
+        )).call(config: config, paths: paths)
+        assert result.success?, "engine failed: #{result.failure.inspect}"
+        assert_equal 0, result.success.processed
+
+        after = StateStore.load(paths.state_file).success
+        refute_nil after.repos["github.com/gone/repo"],
+          "default prune: false must not delete rows the run did not see"
+      end
+    end
+  end
+
+  # ===========================================================================
   # Slice 6 G1 — DEFAULT_URL_BUILDER emits scp-like SSH form
   # (`git@<host>:<owner>/<name>.git`). The previous HTTPS form
   # made a missing-repo clone prompt for
