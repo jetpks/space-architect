@@ -78,9 +78,8 @@ module Space::Src
             return fail_with(self, "sync failed: #{format_failure(result.failure)}")
           end
 
-          new_state = result.success
-          n = new_state.repos.size
-          out.puts "synced #{n} repo(s)"
+          report = result.success
+          out.puts "synced #{report.processed} repo(s)"
           CLI.record_outcome(Outcome.new(exit_code: 0))
         end
 

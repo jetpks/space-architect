@@ -144,6 +144,62 @@ class CLISyncTest < Minitest::Test
     end
   end
 
+  # Regression: the "synced N repo(s)" summary used to be derived from
+  # new_state.repos.size — the merged state file, which holds a row for
+  # every repo ever synced. A scoped run therefore reported the whole
+  # state (553 repo(s) on a real machine) instead of the one repo it
+  # touched, contradicting the "starting: 1 repo(s)" line above it.
+  #
+  # The state here is seeded with rows for THREE repos while only one is
+  # tracked and synced, so state size (3) and processed count (1) can't
+  # coincide — the assertion below fails loudly on a regression.
+  def test_sync_repo_summary_counts_processed_repos_not_state_rows
+    with_engine_home_2_repos do |_env, paths, base_dir, refs|
+      config = Config.new(
+        base_dir: base_dir,
+        refresh_interval: 3600,
+        concurrency: 2,
+        repos: refs,
+        orgs: []
+      )
+      Space::Src::Config::Store.write(paths.config_file, config)
+
+      old_time_string = "2000-01-01T00:00:00Z"
+      seeded_row = Space::Src::State::Store::Repo.new(
+        default_branch: "trunk", last_fetch_at: old_time_string,
+        last_synced_at: old_time_string, status: "clean", last_error: nil
+      )
+      # Three rows, one of them ("gone/repo") no longer tracked at all —
+      # build_new_state never prunes, so it stays in state and would be
+      # counted by the old expression.
+      Space::Src::State::Store.write(paths.state_file, Space::Src::State::Store::State.new(
+        repos: {
+          "github.com/foo/repo0" => seeded_row,
+          "github.com/bar/repo1" => seeded_row,
+          "github.com/gone/repo" => seeded_row
+        },
+        orgs: {}
+      ))
+
+      out, _err = invoke_command(PristineCLI::Sync::Run, repo: "github.com/foo/repo0")
+      assert_equal 0, PristineCLI.last_outcome.exit_code
+
+      assert_includes out.string, "synced 1 repo(s)",
+        "scoped sync must report the 1 repo it processed, not the state file's row count"
+      refute_includes out.string, "synced 3 repo(s)",
+        "summary counted state rows instead of processed repos"
+
+      # The summary must agree with the run header printed moments earlier.
+      assert_includes out.string, "starting: 1 repo(s)"
+
+      # Guard the seeding itself: the untracked row must survive, or the
+      # test would pass for the wrong reason (state pruned down to 1).
+      new_state = Space::Src::State::Store.load(paths.state_file).success
+      refute_nil new_state.repos["github.com/gone/repo"],
+        "untracked state row vanished — test no longer distinguishes the two counts"
+    end
+  end
+
   def test_sync_repo_unknown_ref_exits_nonzero_with_stderr
     with_engine_home_2_repos do |_env, paths, base_dir, refs|
       config = Config.new(

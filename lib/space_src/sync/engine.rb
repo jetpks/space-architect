@@ -13,6 +13,7 @@ require "space_src/state/store"
 require "space_src/state/lock"
 require "space_src/paths"
 require "space_src/sync/repo_plan"
+require "space_src/sync/report"
 require "space_src/ui/reporter"
 
 module Space::Src
@@ -79,7 +80,10 @@ module Space::Src
       # Runs one sync pass.
       # @param config [Config::Config] the validated config struct
       # @param paths  [Paths]         the XDG paths object
-      # @return [Dry::Monads::Result<State::Store::State>]
+      # @return [Dry::Monads::Result<Report>] the merged state plus the
+      #   count of repos this run processed. The two are distinct: state
+      #   accumulates every repo ever synced, `processed` is this run's
+      #   work (see Sync::Report).
       def call(config:, paths:)
         Sync do |task|
           semaphore = Async::Semaphore.new(config.concurrency, parent: task)
@@ -152,7 +156,10 @@ module Space::Src
               if write_result.failure?
                 write_result
               else
-                Dry::Monads::Success(new_state)
+                # results.size, not new_state.repos.size — the latter is
+                # the accumulated state file and would report every repo
+                # ever synced (553 on a scoped one-repo run).
+                Dry::Monads::Success(Report.new(state: new_state, processed: results.size))
               end
             ensure
               @reporter.detach
@@ -161,7 +168,11 @@ module Space::Src
 
           if lock_result == State::Lock::NOT_ACQUIRED
             warn "src: skipped — another sync in progress"
-            Dry::Monads::Success(State::Store.load(paths.state_file).success)
+            # Nothing ran, so processed is 0 — the state is returned only
+            # so callers still get a usable snapshot.
+            Dry::Monads::Success(
+              Report.new(state: State::Store.load(paths.state_file).success, processed: 0)
+            )
           else
             lock_result
           end
