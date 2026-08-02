@@ -23,6 +23,22 @@ class DispatchLivenessTest < Space::ArchitectTest
     exit 0
   RUBY
 
+  # Writes its init event after an explicit 0.2s sleep — later than the liveness_delay
+  # (0.35s) the late-write test injects, so the log is still empty at the fiber's first
+  # check and only grows on a later one. Stays alive a bit longer after writing so the
+  # liveness fiber's own poll gets a chance to observe the growth before child.wait
+  # returns and stops it.
+  FAKE_LATE_WRITER = <<~RUBY
+    #!/usr/bin/env ruby
+    require "json"
+    $stdin.read
+    sleep 0.2
+    puts JSON.generate("type" => "system", "subtype" => "init", "model" => "claude-sonnet-4-6")
+    STDOUT.flush
+    sleep 0.3
+    exit 0
+  RUBY
+
   def with_harness(script, model:)
     root = Dir.mktmpdir("liveness-test")
     bin = File.join(root, "fake")
@@ -92,6 +108,23 @@ class DispatchLivenessTest < Space::ArchitectTest
       assert_equal 0, code
       assert_equal 1, lines.length, "exactly one liveness line, got: #{err.string.inspect}"
       assert_match(/WARN no growth/, lines.first)
+    end
+  end
+
+  # AC2: a real run() against a child whose first write lands AFTER the injected
+  # liveness_delay (0.35s) must still produce the OK line — the fiber's bounded wait,
+  # not a single point-sample at the delay instant, is what makes this possible. This
+  # is the direct proof of A1: before it, the log is still empty at the fiber's first
+  # check, so this exact scenario used to emit "WARN no growth" for a healthy child.
+  def test_liveness_ok_line_when_child_writes_late
+    with_harness(FAKE_LATE_WRITER, model: "claude-sonnet-4-6") do |h, wt, prompt, log, err|
+      code = h.run(prompt_path: prompt, run_log_path: log, chdir: wt, liveness_delay: 0.35, err: err)
+      lines = liveness_lines(err)
+
+      assert_equal 0, code
+      assert_equal 1, lines.length, "exactly one liveness line, got: #{err.string.inspect}"
+      assert_match(/\Aliveness: OK streaming model=claude-sonnet-4-6 /, lines.first)
+      refute_match(/WARN/, lines.first)
     end
   end
 
