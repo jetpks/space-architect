@@ -384,7 +384,11 @@ running the acceptance criteria's gate commands and record the verbatim output. 
 git write command (commit/add/branch/reset/checkout) — the architect commits
 and merges after verification, and verifies you made no commits. Do NOT delete
 lock files or escalate privileges if a command fails; record the exact error
-and continue. Give every potentially long command an explicit timeout; if a
+and continue. Do NOT use `run_in_background` (or shell `&`) for your own work —
+this process terminates when you end your turn and reaps its own children, so
+backgrounded work is SIGTERMed and its output lost while the run still exits
+0; run long commands serially in the foreground instead. Give every
+potentially long command an explicit timeout; if a
 runtime will not start unattended (interactive prompt, server with no timeout),
 record the exact failure in your report and route around it — never busy-wait
 or retry in a loop. When done, write your report to the scratch file given to
