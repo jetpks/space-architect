@@ -176,6 +176,20 @@ class BugReportTest < Space::ArchitectTest
     refute_match(/^# /, result[:body])
   end
 
+  def test_blank_title_treated_as_absent
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now, title: "")
+
+    refute_match(/--title/, result[:command])
+    refute_match(/^# /, result[:body])
+  end
+
+  def test_whitespace_only_title_treated_as_absent
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now, title: "   ")
+
+    refute_match(/--title/, result[:command])
+    refute_match(/^# /, result[:body])
+  end
+
   def test_title_with_shell_metacharacters_round_trips_as_one_argument
     title = %q{Weird $HOME "quoted" `tick` it}
     result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now, title: title)
@@ -198,6 +212,22 @@ class BugReportTest < Space::ArchitectTest
 
         assert_match(/--title/, out)
         assert_match(/command/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_cli_no_title_nudge_names_rerun_form
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      Dir.chdir(@tmp) do
+        out, _err = invoke("bug-report")
+
+        assert_match(/architect bug-report --title/, out)
       end
     end
   ensure
