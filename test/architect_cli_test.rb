@@ -997,6 +997,114 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # A builder can exit 0 having written no report (e.g. it backgrounded its work
+  # and was reaped) — dispatch must warn the moment this happens rather than
+  # waiting for a later `architect verify`. Warning is additive: exit code and
+  # the existing "Builder exited with status 0" line are unchanged.
+  def test_dispatch_cli_warns_when_builder_exits_with_no_report
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake = File.join(setup[:root], "fake_claude_no_report")
+    File.write(fake, "#!/usr/bin/env ruby\n$stdin.gets\nexit 0\n")
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out, err = invoke("dispatch", "demo", "A")
+
+        assert_empty err
+        assert_match(/Builder exited with status 0/, out)
+        assert_match(/WARNING.*no report/i, out, "missing report must produce an unmissable warning")
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code,
+          "a missing report warns; it must not change the dispatch exit code"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # A whitespace-only report counts as no deliverable too (mirrors the existing
+  # `architect verify` "(c) scratch report exists" check).
+  def test_dispatch_cli_warns_when_builder_writes_blank_report
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake = File.join(setup[:root], "fake_claude_blank_report")
+    File.write(fake, "#!/usr/bin/env ruby\n$stdin.gets\nexit 0\n")
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+        File.write(File.join(build_dir, "report.md"), "  \n")
+
+        out, err = invoke("dispatch", "demo", "A")
+
+        assert_empty err
+        assert_match(/WARNING.*no report/i, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_dispatch_cli_no_warning_when_report_present
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    fake = File.join(setup[:root], "fake_claude_with_report")
+    File.write(fake, "#!/usr/bin/env ruby\n$stdin.gets\nexit 0\n")
+    File.chmod(0o755, fake)
+
+    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+        File.write(File.join(build_dir, "report.md"), "# Lane Report\nSTATUS: COMPLETE\n")
+
+        out, err = invoke("dispatch", "demo", "A")
+
+        assert_empty err
+        assert_match(/Builder exited with status 0/, out)
+        refute_match(/WARNING/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   def test_verify_reports_pass_when_clean
     setup = temp_env
     env = setup.fetch(:env)

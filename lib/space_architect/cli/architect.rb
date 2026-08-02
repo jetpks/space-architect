@@ -402,6 +402,9 @@ module Space::Architect
                   terminal.say "Report:  #{terminal.path(res[:report])}"
                   terminal.say "Ingest URL:  #{res[:push_url]}" if res[:push_url]
                   terminal.say "Builder exited with status #{res[:exit_code]}"
+                  unless res[:report].exist? && !res[:report].read.strip.empty?
+                    terminal.say "WARNING: no report at #{terminal.path(res[:report])} — the lane produced no deliverable."
+                  end
                   CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
                 end
               end
