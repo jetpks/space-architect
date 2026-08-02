@@ -146,6 +146,7 @@ module Space::Architect
       block = space.data["project"] || {}
       architecture_dir = space.path.join("architecture")
       iteration_files = if architecture_dir.exist?
+        # paths:exempt - the /\AI\d+-.+\.md\z/ filter structurally cannot match a dotfile-prefixed name, so raw enumeration is already dotfile-safe here
         architecture_dir.children
           .select { |f| f.basename.to_s.match?(/\AI\d+-.+\.md\z/) }
           .map { |f| f.basename.to_s }.sort
@@ -1028,6 +1029,7 @@ module Space::Architect
         end
       end
 
+      # paths:exempt - the /\AI\d+-.+\.md\z/ filter structurally cannot match a dotfile-prefixed name, so raw enumeration is already dotfile-safe here
       candidates = arch_dir.children.select { |f| f.basename.to_s.match?(/\AI\d+-.+\.md\z/) }
       return nil if candidates.empty?
       candidates.max_by { |f| f.basename.to_s[/\AI(\d+)/, 1].to_i }

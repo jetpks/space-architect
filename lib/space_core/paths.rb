@@ -4,6 +4,7 @@ require "pathname"
 
 module Space::Core
   module Paths
+    # paths:exempt-file - the shared module itself — this is the one home the guard defends
     module_function
 
     # Flags for matching a changed path against a lane's touch_set globs.
@@ -17,6 +18,7 @@ module Space::Core
     # dot-directory contents all included. `File::FNM_DOTMATCH` is what makes
     # dotfiles visible to `Dir.glob`, but it also emits a bogus `root/.`
     # self-entry — that trap is absorbed here so no callsite has to know about it.
+    # Returns Array<String> — Dir.glob's native return shape.
     def content_tree(root)
       Dir.glob(File.join(root.to_s, "**", "*"), File::FNM_DOTMATCH).reject { |p| File.basename(p) == "." }
     end
@@ -24,6 +26,7 @@ module Space::Core
     # The direct children of a fixed-depth structured directory layout (one
     # entry per iteration/skill/lane/space) where a leading dot never names a
     # real layout member — only tooling junk (.git, .DS_Store). Excludes them.
+    # Returns Array<Pathname> — Pathname#children's native return shape.
     def layout_children(dir)
       Pathname.new(dir).children.reject { |c| c.basename.to_s.start_with?(".") }
     end
