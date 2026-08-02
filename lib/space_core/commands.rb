@@ -25,8 +25,16 @@ module Space::Core
       start = 0
       in_squote = false
       in_dquote = false
+      escaped = false
       command.each_char.with_index do |ch, i|
+        if escaped
+          escaped = false
+          next
+        end
         case ch
+        # A backslash escapes the next character outside quotes and inside
+        # double quotes, but is a literal character inside single quotes.
+        when "\\" then escaped = true unless in_squote
         when "'" then in_squote = !in_squote unless in_dquote
         when '"' then in_dquote = !in_dquote unless in_squote
         when " "

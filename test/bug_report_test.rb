@@ -201,7 +201,7 @@ class BugReportTest < Space::ArchitectTest
     assert_equal title, parsed[i + 1]
   end
 
-  def test_cli_no_title_tells_user_to_set_it_on_the_command
+  def test_cli_no_title_prints_full_command_without_title_flag
     setup = temp_env
     env = setup.fetch(:env)
 
@@ -210,8 +210,13 @@ class BugReportTest < Space::ArchitectTest
       Dir.chdir(@tmp) do
         out, _err = invoke("bug-report")
 
-        assert_match(/--title/, out)
-        assert_match(/command/, out)
+        lines = out.lines
+        start = lines.index { |l| l.include?("gh issue create") }
+        refute_nil start, "expected the gh issue create command to be printed"
+        command_block = lines[start..].take_while { |l| !l.strip.empty? }.join
+
+        assert_match(/gh issue create -R jetpks\/space-architect/, command_block)
+        refute_match(/--title/, command_block)
       end
     end
   ensure
