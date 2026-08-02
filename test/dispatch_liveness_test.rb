@@ -3,45 +3,11 @@
 require_relative "test_helper"
 require "tmpdir"
 require "stringio"
+require "json"
 
 # AC2/AC3: ClaudeCodeHarness#run's transient liveness fiber reads the run log's
 # stream-json init event and emits exactly one bounded liveness line to err.
 class DispatchLivenessTest < Space::ArchitectTest
-  # Emits a stream-json init event naming the pinned --model, then holds long enough
-  # for the (short, injected) liveness delay to elapse before exiting.
-  FAKE_INIT_MATCH = <<~RUBY
-    #!/usr/bin/env ruby
-    require "json"
-    $stdin.read
-    i = ARGV.index("--model")
-    model = i ? ARGV[i + 1] : "unknown"
-    $stdout.puts JSON.generate("type" => "system", "subtype" => "init", "model" => model)
-    $stdout.flush
-    sleep 1.0
-    exit 0
-  RUBY
-
-  # Emits an init event naming a DIFFERENT model than whatever --model pins.
-  FAKE_INIT_MISMATCH = <<~RUBY
-    #!/usr/bin/env ruby
-    require "json"
-    $stdin.read
-    $stdout.puts JSON.generate("type" => "system", "subtype" => "init", "model" => "actually-a-different-model")
-    $stdout.flush
-    sleep 1.0
-    exit 0
-  RUBY
-
-  # Grows the log with non-init, non-JSON output (streamed_init_model finds no model).
-  FAKE_GARBAGE = <<~RUBY
-    #!/usr/bin/env ruby
-    $stdin.read
-    $stdout.puts "not json at all"
-    $stdout.flush
-    sleep 1.0
-    exit 0
-  RUBY
-
   # Never writes to the log; holds past the delay so the fiber sees an empty log.
   FAKE_SILENT = <<~RUBY
     #!/usr/bin/env ruby
@@ -77,13 +43,26 @@ class DispatchLivenessTest < Space::ArchitectTest
     err.string.lines.grep(/^liveness:/)
   end
 
+  # emit_liveness takes a PATH and is a pure function of the run log's contents
+  # (see harness.rb) — it never spawns or waits on a child. These three drive it
+  # directly against a pre-written log so the OK/WARN message shape is asserted
+  # without racing a real child process's VM boot + first write.
+  def with_liveness_log(model:)
+    root = Dir.mktmpdir("liveness-test")
+    log  = Pathname.new(File.join(root, "run.jsonl"))
+    harness = Space::Architect::Harness::ClaudeCodeHarness.new(model: model, max_turns: 5)
+    yield harness, log, StringIO.new
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
   # AC3: matching streamed model → exactly one non-WARN OK line naming the model.
   def test_liveness_ok_line_when_model_matches
-    with_harness(FAKE_INIT_MATCH, model: "claude-sonnet-4-6") do |h, wt, prompt, log, err|
-      code = h.run(prompt_path: prompt, run_log_path: log, chdir: wt, liveness_delay: 0.3, err: err)
+    with_liveness_log(model: "claude-sonnet-4-6") do |h, log, err|
+      log.write(JSON.generate("type" => "system", "subtype" => "init", "model" => "claude-sonnet-4-6") + "\n")
+      h.send(:emit_liveness, log, 0.3, err)
       lines = liveness_lines(err)
 
-      assert_equal 0, code
       assert_equal 1, lines.length, "exactly one liveness line, got: #{err.string.inspect}"
       assert_match(/\Aliveness: OK streaming model=claude-sonnet-4-6 /, lines.first)
       refute_match(/WARN/, lines.first)
@@ -92,11 +71,11 @@ class DispatchLivenessTest < Space::ArchitectTest
 
   # AC3: streamed model NOT matching the pinned --model → distinct WARN naming both.
   def test_liveness_warn_line_when_model_mismatches
-    with_harness(FAKE_INIT_MISMATCH, model: "claude-sonnet-4-6") do |h, wt, prompt, log, err|
-      code = h.run(prompt_path: prompt, run_log_path: log, chdir: wt, liveness_delay: 0.3, err: err)
+    with_liveness_log(model: "claude-sonnet-4-6") do |h, log, err|
+      log.write(JSON.generate("type" => "system", "subtype" => "init", "model" => "actually-a-different-model") + "\n")
+      h.send(:emit_liveness, log, 0.3, err)
       lines = liveness_lines(err)
 
-      assert_equal 0, code
       assert_equal 1, lines.length, "exactly one liveness line, got: #{err.string.inspect}"
       assert_match(/WARN model mismatch/, lines.first)
       assert_match(/pinned=claude-sonnet-4-6/, lines.first)
@@ -118,11 +97,11 @@ class DispatchLivenessTest < Space::ArchitectTest
 
   # AC2: log growing but no parseable init event → best-effort WARN, never raises.
   def test_liveness_warn_line_when_no_init_event
-    with_harness(FAKE_GARBAGE, model: "claude-sonnet-4-6") do |h, wt, prompt, log, err|
-      code = h.run(prompt_path: prompt, run_log_path: log, chdir: wt, liveness_delay: 0.3, err: err)
+    with_liveness_log(model: "claude-sonnet-4-6") do |h, log, err|
+      log.write("not json at all\n")
+      h.send(:emit_liveness, log, 0.3, err)
       lines = liveness_lines(err)
 
-      assert_equal 0, code
       assert_equal 1, lines.length, "exactly one liveness line, got: #{err.string.inspect}"
       assert_match(/WARN model unverified/, lines.first)
     end
