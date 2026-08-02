@@ -90,6 +90,7 @@ module Space::Core::CLI
     # members within a group, ordered by the declared order), with undeclared
     # children (namespaces) trailing in the default group.
     def grouped_listing(result)
+      # paths:exempt - result.children is a dry-cli command-tree node, not a filesystem path
       decorated = result.children.filter_map do |name, node|
         [name, node, phase_of(node)] unless node.hidden
       end
@@ -150,6 +151,7 @@ module Space::Core::CLI
     end
 
     def banner(node)
+      # paths:exempt - node.children? is a dry-cli command-tree predicate, not a filesystem path
       if node.command && node.leaf? && node.children?
         " [ARGUMENT|SUBCOMMAND]"
       elsif node.leaf?

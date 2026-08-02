@@ -69,6 +69,7 @@ module Space::Src
     def self.bare_query?(argv)
       return false if TOP_LEVEL_HELP.include?(argv)
       return false if VERSION_REQUEST.include?(argv)
+      # paths:exempt - Registry.get([]).children is a dry-cli command-tree node, not a filesystem path
       argv.length == 1 && !Registry.get([]).children.key?(argv[0])
     end
 

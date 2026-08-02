@@ -46,7 +46,7 @@ module Space
         end
 
         def source_skills
-          source_root.children.select(&:directory?)
+          Space::Core::Paths.layout_children(source_root).select(&:directory?)
         end
 
         private
