@@ -10,12 +10,24 @@ require_relative "../lib/space_architect"
 # Git fixture templates: process-wide singletons. Tests copy .git from these
 # templates instead of paying for git init + config + add + commit per call.
 module Space::GitFixtureTemplate
+  # Initializes an empty git repo at `dir`. Disables git's own auto-maintenance
+  # (see `git help config` on `maintenance.auto`, which "controls whether some
+  # commands run `git maintenance run --auto` after doing their normal work"):
+  # without this, the `git commit` calls below each spawn a detached
+  # `git maintenance run --auto --quiet --detach` process that briefly takes
+  # `.git/objects/maintenance.lock` in the background, racing FileUtils.cp_r's
+  # directory walk of these process-wide template singletons with ENOENT.
+  def self.init_repo(dir)
+    system("git", "-C", dir, "init", "-q", "-b", "main", exception: false) ||
+      system("git", "-C", dir, "init", "-q")
+    system("git", "-C", dir, "config", "maintenance.auto", "false")
+  end
+
   # Empty repo (init + config only) — used where the test controls its own first commit.
   def self.dir
     @dir ||= begin
       d = Dir.mktmpdir("architect-git-template")
-      system("git", "-C", d, "init", "-q", "-b", "main", exception: false) ||
-        system("git", "-C", d, "init", "-q")
+      init_repo(d)
       system("git", "-C", d, "config", "user.name", "Test Builder")
       system("git", "-C", d, "config", "user.email", "test@example.com")
       d
@@ -26,8 +38,7 @@ module Space::GitFixtureTemplate
   def self.repo_dir
     @repo_dir ||= begin
       d = Dir.mktmpdir("architect-repo-template")
-      system("git", "-C", d, "init", "-q", "-b", "main", exception: false) ||
-        system("git", "-C", d, "init", "-q")
+      init_repo(d)
       system("git", "-C", d, "config", "user.name", "Test Builder")
       system("git", "-C", d, "config", "user.email", "test@example.com")
       File.write(File.join(d, "README.md"), "# repo\n")
@@ -42,8 +53,7 @@ module Space::GitFixtureTemplate
     @space_dirs ||= {}
     @space_dirs[yaml] ||= begin
       d = Dir.mktmpdir("architect-space-template")
-      system("git", "-C", d, "init", "-q", "-b", "main", exception: false) ||
-        system("git", "-C", d, "init", "-q")
+      init_repo(d)
       system("git", "-C", d, "config", "user.name", "Test Builder")
       system("git", "-C", d, "config", "user.email", "test@example.com")
       File.write(File.join(d, "space.yaml"), yaml)
