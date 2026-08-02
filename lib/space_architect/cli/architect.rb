@@ -639,7 +639,7 @@ module Space::Architect
               title: title
             )
             unless title
-              terminal.say "No --title given — the body file does not set the issue title; add --title \"...\" to the command below (or gh will prompt you for one)."
+              terminal.say "No --title given — the body file does not set the issue title; re-run as architect bug-report --title \"...\" to set it in the command (or gh will prompt you for one)."
             end
             terminal.say "Fill the placeholders in #{terminal.path(result[:body_path].to_s)}, then run:"
             terminal.say result[:command]

@@ -58,4 +58,20 @@ class CoreCommandsTest < Space::ArchitectTest
     assert_equal "gh pr create \\", lines[0]
     assert_equal "  --base main", lines[1]
   end
+
+  def test_wrap_preserves_double_quoted_value_containing_double_dash_at_argv_level
+    cmd = Space::Core::Commands.wrap(%(printargs -R org/repo --title "dispatch -- lane fails" --body-file ~/f))
+    script = %(printargs() { for a in "$@"; do printf "[%s]\n" "$a"; done; }) + "\n" + cmd
+    out, _err, status = Open3.capture3("bash", "-c", script)
+    assert status.success?
+    assert_includes out, "[dispatch -- lane fails]\n"
+  end
+
+  def test_wrap_preserves_single_quoted_value_containing_double_dash_at_argv_level
+    cmd = Space::Core::Commands.wrap(%(printargs -R org/repo --title 'dispatch -- lane fails' --body-file ~/f))
+    script = %(printargs() { for a in "$@"; do printf "[%s]\n" "$a"; done; }) + "\n" + cmd
+    out, _err, status = Open3.capture3("bash", "-c", script)
+    assert status.success?
+    assert_includes out, "[dispatch -- lane fails]\n"
+  end
 end

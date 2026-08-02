@@ -15,7 +15,7 @@ module Space
           body = build_body(space, title)
           body_path.write(body)
           contracted = Space::Core::Paths.contract(body_path, env: env)
-          title_flag = title ? " --title #{quote_title(title)}" : ""
+          title_flag = blank_title?(title) ? "" : " --title #{quote_title(title)}"
           command = Space::Core::Commands.wrap(
             %(gh issue create -R #{REPO}#{title_flag} --body-file #{contracted})
           )
@@ -27,7 +27,11 @@ module Space
         # Double-quote a title for a POSIX shell: quotes preserve spaces
         # literally, only the characters special inside double quotes are escaped.
         def quote_title(title)
-          %("#{title.gsub(/(["\\$`])/) { "\\#{$1}" }}")
+          %("#{title.gsub(/["\\$`]/) { |m| "\\#{m}" }}")
+        end
+
+        def blank_title?(title)
+          title.to_s.strip.empty?
         end
 
         def resolve_body_path(space, cwd, now)
@@ -41,7 +45,7 @@ module Space
 
         def build_body(space, title)
           body = +""
-          body << "# #{title}\n\n" if title
+          body << "# #{title}\n\n" unless blank_title?(title)
           body << template_header
           body << diagnostics_section
           body << space_section(space) if space
