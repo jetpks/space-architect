@@ -627,15 +627,20 @@ module Space::Architect
       class BugReport < BaseCommand
         desc "Generate a prefilled GitHub issue template for filing bugs against space-architect"
         phase 54, "Project"
+        option :title, default: nil, desc: "Issue title, written into --title and the body's leading H1 (omit and gh will prompt for one interactively — the body file does not set it)"
 
-        def call(**opts)
+        def call(title: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             space = store.find.value_or(nil)
             result = Space::Architect::BugReport.generate(
               space: space,
-              env: project_config.env
+              env: project_config.env,
+              title: title
             )
+            unless title
+              terminal.say "No --title given — the body file does not set the issue title; add --title \"...\" to the command below (or gh will prompt you for one)."
+            end
             terminal.say "Fill the placeholders in #{terminal.path(result[:body_path].to_s)}, then run:"
             terminal.say result[:command]
             terminal.say ""
