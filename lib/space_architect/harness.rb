@@ -115,9 +115,18 @@ module Space::Architect
 
       TIMEOUT_EXIT_CODE = 124
 
-      # How long the liveness fiber waits before reading the run log's stream-json init
-      # event. Injectable via the run(liveness_delay:) kwarg so tests need not sleep seconds.
+      # The liveness fiber's total wait budget before it gives up on the run log's
+      # stream-json init event. Injectable via the run(liveness_delay:) kwarg so tests
+      # need not sleep seconds.
       LIVENESS_DELAY_SECONDS = 5.0
+
+      # The liveness fiber's actual deadline is liveness_delay * LIVENESS_BUDGET_FACTOR —
+      # a healthy child whose first write lands just after one delay window is still
+      # alive, not dead, so the budget spans several delay-lengths, not one.
+      LIVENESS_BUDGET_FACTOR = 3
+
+      # How often the liveness fiber re-checks the run log for growth while waiting.
+      LIVENESS_POLL_INTERVAL = 0.05
 
       def run(prompt_path:, run_log_path:, chdir:, push_url: nil, push_token: nil, push_client: nil, timeout: nil,
               liveness_delay: LIVENESS_DELAY_SECONDS, err: $stderr)
@@ -148,14 +157,20 @@ module Space::Architect
                 end
               end
 
-              # Liveness self-check: after a bounded delay, read the run log's stream-json
-              # init event and print ONE line naming the streamed model + confirming growth.
-              # transient: true so it never keeps the reactor alive; best-effort so it never
-              # raises into the run path. run_detached gets no such fiber.
+              # Liveness self-check: read the run log's stream-json init event and print ONE
+              # line naming the streamed model + confirming growth. A single point-sample right
+              # at liveness_delay would report a healthy child dead if its first write landed a
+              # moment later, so this polls (like Research::Mux#wait_for_file) to a deadline of
+              # several delay-lengths, emitting as soon as the log shows growth — a bounded wait,
+              # not an unbounded one. transient: true so it never keeps the reactor alive;
+              # best-effort so it never raises into the run path. run_detached gets no such fiber.
               liveness_task = nil
               if liveness_delay && liveness_delay > 0
                 liveness_task = Async(transient: true) do
-                  sleep liveness_delay
+                  deadline = Time.now + (liveness_delay * LIVENESS_BUDGET_FACTOR)
+                  until run_log_growing?(run_log_path) || Time.now >= deadline
+                    sleep LIVENESS_POLL_INTERVAL
+                  end
                   emit_liveness(run_log_path, liveness_delay, err)
                 end
               end
@@ -206,6 +221,10 @@ module Space::Architect
       end
 
       private
+
+      def run_log_growing?(run_log_path)
+        run_log_path.exist? && run_log_path.size > 0
+      end
 
       # Read the run log's stream-json init event and print exactly one bounded liveness
       # line to err. Best-effort: swallows any read/parse error so it never raises into run.
