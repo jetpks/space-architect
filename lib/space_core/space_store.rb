@@ -53,7 +53,7 @@ module Space::Core
     def list
       return [] unless spaces_dir.directory?
 
-      spaces_dir.children.select(&:directory?).filter_map do |child|
+      Paths.layout_children(spaces_dir).select(&:directory?).filter_map do |child|
         Space.load(child)
       rescue NotFoundError, Error
         nil

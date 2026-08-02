@@ -53,8 +53,10 @@ module Space::Architect
       end
 
       def files
-        pi = Dir.glob(File.join(@pi_root, "**", "*.jsonl")).map { |p| [p, SessionId.for_pi(p)] }
-        claude = Dir.glob(File.join(@claude_root, "**", "*.jsonl")).map { |p| [p, SessionId.for_claude(p)] }
+        pi = Space::Core::Paths.content_tree(@pi_root).select { |p| p.end_with?(".jsonl") }
+          .map { |p| [p, SessionId.for_pi(p)] }
+        claude = Space::Core::Paths.content_tree(@claude_root).select { |p| p.end_with?(".jsonl") }
+          .map { |p| [p, SessionId.for_claude(p)] }
         pi + claude
       end
     end

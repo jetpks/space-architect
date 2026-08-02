@@ -42,13 +42,6 @@ module Space::Architect
     # Hard per-gate timeout. Generous relative to the full suite (~55s).
     DEFAULT_GATE_TIMEOUT = 900
 
-    # Flags for matching a changed path against a lane's touch_set globs.
-    # PATHNAME keeps a single `*` from crossing `/`; EXTGLOB enables `{a,b}`;
-    # DOTMATCH lets a glob reach dotfile segments, so a `dir/**` touch set covers
-    # `dir/.github/workflows/ci.yml` — the standard deliverable for a lane preparing
-    # a directory to become a repo root.
-    TOUCH_FNM = File::FNM_PATHNAME | File::FNM_EXTGLOB | File::FNM_DOTMATCH
-
     # Legacy sentinel: worktree_add used to seed prompt.md with this placeholder
     # (dropped — the blind-overwrite tripped harness read-before-write guards, #48).
     # dispatch still refuses to launch on this content, so stubs in old spaces
@@ -789,7 +782,7 @@ module Space::Architect
     def worktree_list
       wt_base = space.path.join("build")
       return [] unless wt_base.exist?
-      wt_base.children.select(&:directory?).map { |p| p.basename.to_s }.sort
+      Space::Core::Paths.layout_children(wt_base).select(&:directory?).map { |p| p.basename.to_s }.sort
     end
 
     # Materialize the iteration's declared lanes: for each lane (or the one named via
@@ -1310,13 +1303,8 @@ module Space::Architect
 
     # Is a changed path inside a lane's declared touch set? Single-sourced so the
     # in-bounds check (d) and merge_lane!'s conflict classification can never drift.
-    # A trailing `dir/**` is matched twice: bare (PATHNAME stops it at direct
-    # children) and as `dir/**/*`, whose whole-component `**/` does cross `/`.
     def in_touch_set?(path, globs)
-      globs.any? do |g|
-        File.fnmatch(g, path, TOUCH_FNM) ||
-          (g.end_with?("/**") && File.fnmatch("#{g}/*", path, TOUCH_FNM))
-      end
+      globs.any? { |g| Space::Core::Paths.touch_match?(g, path) }
     end
 
     # Replace (or, with append:, extend) the body of a "## Heading" section, leaving
