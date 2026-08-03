@@ -279,14 +279,19 @@ contract, self-contained:
   declaration lives in a fenced ` ```lanes ` block in the Specification — one
   entry per lane (`name`, `repo`, `touch` globs) — the single frozen source of
   truth `architect freeze` records into `space.yaml` and `architect provision`
-  materializes — living *with* the frozen spec, so no `worktree add --touch`
-  flag can diverge from it. The same boundary is stated twice more — the
-  lane-prompt's may-touch list, and the scope gate that checks the lane's diff
-  at judge time — and all three must be one exhaustive enumeration: every file
-  listed, no glob standing in for the list; the scope gate's pattern is that
-  enumeration exactly; the prompt's list is generated from it. A mismatch
-  surfaces only after the freeze, where hard rule 3 forbids widening the
-  declaration — `integrate` refuses a correct lane. The scaffold ships a
+  materializes. The same boundary is stated twice more — the lane-prompt's
+  may-touch list, and the scope gate that checks the lane's diff at judge
+  time — and all three must be one exhaustive enumeration: every file listed,
+  no glob standing in for the list; the scope gate's pattern is that
+  enumeration exactly; the prompt's list is generated from it. Consistency is
+  not completeness — three statements drawn from one too-narrow search agree
+  and are wrong together — so before freezing a criterion that requires an
+  identifier to change name, grep the whole repo for it and confirm every hit
+  falls inside some lane's touch set; `architect rehearse` reports this
+  asymmetry, so the check is read, not remembered. Either defect surfaces
+  only after the freeze, where hard rule 3 forbids widening the declaration:
+  `integrate` refuses a correct lane, or the stray hit breaks a file no lane
+  may legally fix. The scaffold ships a
   commented ` ```lanes ` stub in the Specification (see
   `templates/iteration.md.erb`) — uncomment it. Lanes in
   *different* repos are inherently disjoint; same-repo lanes with any file
