@@ -365,7 +365,11 @@ PHASE 1 — Treat the shared contracts (schemas/interfaces) named in the spec,
 and the repo's existing public interfaces, as FROZEN: do not change them —
 other lanes depend on them. You have no access to the space's architecture/
 directory; the architect owns it. The ACCEPTANCE CRITERIA below are frozen —
-verify your work against them; never weaken or work around them.
+verify your work against them; never weaken or work around them. If an AC's
+letter can only be satisfied by making the artifact worse than the property the
+AC asserts, build the right thing and raise the conflict in your report — name
+the AC, the conflict, and the evidence. This is not permission to skip work or
+weaken a criterion: the conflict is reported, never silently resolved.
 
 PHASE 2 — Build YOUR LANE ONLY: exactly the files listed in BOUNDARIES. You
 are one of several parallel lane agents working in isolated worktrees; files
