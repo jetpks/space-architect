@@ -2,6 +2,7 @@
 
 require_relative "test_helper"
 require "async/condition"
+require "async/task"
 
 class SpaceStoreTest < Space::ArchitectTest
   def test_create_space_with_date_prefixed_unique_id_and_structure
@@ -181,7 +182,7 @@ class SpaceStoreTest < Space::ArchitectTest
       mise_client: mise_client
     )
 
-    assert add_result.success?
+    assert add_result.success?, -> { "add_repos_to failed: #{add_result.failure}" }
     results = add_result.value!
     assert_equal 6, results.length
     # Async::Semaphore only bounds concurrency from above (see Semaphore#wait/#release) —
@@ -363,6 +364,13 @@ class SpaceStoreTest < Space::ArchitectTest
 
     attr_reader :max_active, :clone_count, :cloned_urls
 
+    # Bounds #wait_for_rendezvous. Dispatch is greedy (Async::Task#async runs the task
+    # body immediately), so under the semaphore's current behavior the rendezvous
+    # resolves in well under a second; this only needs to be generous enough to never
+    # trip on a healthy run while still failing the suite instead of hanging it if a
+    # scheduling change ever stops driving concurrency to `target`.
+    RENDEZVOUS_TIMEOUT = 5
+
     # With `target` set, #clone rendezvouses: it blocks until `target` clones are
     # simultaneously active before any of them may proceed, so a caller that drives
     # concurrency up to `target` proves that deterministically instead of by the luck
@@ -392,7 +400,13 @@ class SpaceStoreTest < Space::ArchitectTest
     private
 
     def wait_for_rendezvous
-      @active >= @target ? @rendezvous.signal : @rendezvous.wait
+      return @rendezvous.signal if @active >= @target
+
+      Async::Task.current.with_timeout(
+        RENDEZVOUS_TIMEOUT, RuntimeError,
+        "TrackingSCM rendezvous timed out after #{RENDEZVOUS_TIMEOUT}s: never reached " \
+        "#{@target} simultaneously active clones (max_active reached was #{@max_active})"
+      ) { @rendezvous.wait }
     end
   end
 
