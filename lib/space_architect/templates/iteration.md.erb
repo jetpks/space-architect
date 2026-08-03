@@ -50,14 +50,19 @@ Write + commit: `architect section <%= @_name %> specification --from <file>`. -
 architect judges against. Calibrate precision to the property (SKILL.md §4): a
 property criterion is bounded from the defect's side only — freeze a floor, not
 an equality; exactness is for criteria whose number is itself the deliverable.
-Runnable checks live in the fenced ```gates block below
+A presence-grep gate on prose is a tripwire, never the proof — its criterion
+should say which. Runnable checks live in the fenced ```gates block below
 (parsed at freeze time — absent or empty is allowed; malformed fails freeze).
 Pre-freeze check — snapshot: no count/name-set/byte-identity frozen at merely
 today's value; control: every baseline actually run this session; mechanism: no
-*how* where the *what* is the requirement; dry-run: every gate cmd executed as
-written under /bin/sh (the gate runner's shell) — red on base discriminates, a
-syntax error is a broken gate.
-`architect freeze <%= @_name %>` commits this file and records its SHA as
+*how* where the *what* is the requirement; dry-run:
+`architect rehearse <%= @_name %>` — RED (clean non-zero) discriminates; GREEN
+is a declared regression guard or a gate that measures nothing; BROKEN is
+advisory (a correct RED can look broken — confirm it); EMPTY is no gates or an
+untouched placeholder.
+`architect freeze <%= @_name %>` needs a fresh rehearsal stamp — editing gates
+stales it; `--skip-rehearse REASON` records the skip. The stamp records that you
+looked, never that gates passed. Freeze commits this file and records its SHA as
 freeze_sha. Read-only afterward — any change to Grounds/Specification/Acceptance
 Criteria = automatic iteration FAIL. -->
 
@@ -68,12 +73,22 @@ Criteria = automatic iteration FAIL. -->
 
 ```gates
 # Each gate backs one prose AC above. Remove the comment markers to activate.
+# `cmd` paths resolve against the REPO TREE; `cwd` is relative to the SPACE
+# ROOT. The judge-time remap is asymmetric: a `cwd` under repos/<repo> is
+# remapped into the lane worktree, one outside it passes through unchanged.
+# End a multi-step `cmd` with `echo SENTINEL` + `stdout_match`: /bin/sh (the
+# gate runner's shell) has no `set -e`, so an early branch can exit 0 — the
+# sentinel proves the command reached its end.
+# Draft, then run `architect rehearse <%= @_name %>` — before the freeze, while
+# a bad gate still costs nothing.
 # - id: suite-green        # unique slug within the iteration (required)
 #   ac: AC1                # which prose AC this gate backs (required)
-#   cwd: repos/my-repo     # run dir, relative to space root (optional; consumed by I03)
-#   cmd: bundle exec rake test  # shell command (required, non-empty)
+#   cwd: repos/my-repo     # run dir, space-root-relative (optional)
+#   cmd: |-                # block style by default — a plain scalar breaks on `: `
+#     bundle exec rake test && echo SUITE_OK
 #   expect:                # at least one of: exit_code, stdout_match, threshold
 #     exit_code: 0
+#     stdout_match: SUITE_OK
 ```
 
 ## Builder Prompt

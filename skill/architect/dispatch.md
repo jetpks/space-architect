@@ -223,7 +223,7 @@ AC judgment into one later session.
 
 **Recipe:**
 
-Per iteration, freeze and dispatch as normal. In a fresh judging session, run
+Per iteration, rehearse, freeze, and dispatch as normal. In a fresh judging session, run
 post-flight, integrate, and gate — but **withhold `architect verdict`**:
 
 ```bash
@@ -340,7 +340,10 @@ builders toward the repo's existing test fixtures over hand-rolled long-running
 harnesses, and when a gate needs a runtime that can't run unattended
 (interactive prompts, servers without a timeout), have the builder record the
 exact failure as a disagreement/blocker and verify what it can — gate verdicts
-are architect-run anyway (hard rule 4). Write the gate file anticipating this.
+are architect-run anyway (hard rule 4). Write the gate file anticipating this —
+`architect rehearse` runs the drafted gates pre-freeze, so an unattended-hostile
+gate surfaces as **BROKEN** while still editable (advisory: a correct RED can
+look broken).
 
 ## Manual alternative (human-driven)
 
