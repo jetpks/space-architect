@@ -47,8 +47,16 @@ Write + commit: `architect section <%= @_name %> specification --from <file>`. -
 ## Acceptance Criteria
 
 <!-- PROOF. Write the prose conditions of correctness (AC1, AC2, …) that the
-architect judges against. Runnable checks live in the fenced ```gates block below
+architect judges against. Calibrate precision to the property (SKILL.md §4): a
+property criterion is bounded from the defect's side only — freeze a floor, not
+an equality; exactness is for criteria whose number is itself the deliverable.
+Runnable checks live in the fenced ```gates block below
 (parsed at freeze time — absent or empty is allowed; malformed fails freeze).
+Pre-freeze check — snapshot: no count/name-set/byte-identity frozen at merely
+today's value; control: every baseline actually run this session; mechanism: no
+*how* where the *what* is the requirement; dry-run: every gate cmd executed as
+written under /bin/sh (the gate runner's shell) — red on base discriminates, a
+syntax error is a broken gate.
 `architect freeze <%= @_name %>` commits this file and records its SHA as
 freeze_sha. Read-only afterward — any change to Grounds/Specification/Acceptance
 Criteria = automatic iteration FAIL. -->

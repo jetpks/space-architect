@@ -217,10 +217,32 @@ From Anthropic's evals guidance: rigid step-sequence grading is brittle; judge
 each gate as an independent dimension; give the judge an "unknown/INVALID"
 escape so unmeasured ≠ passed
 ([Demystifying Evals](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents)).
-Verdicts are per-gate: **PASS / FAIL / INVALID** (INVALID = not measured the way
-the gate specifies), then an iteration-level **kill / continue** call. Gate-pass
-is necessary, not sufficient — the architect reads the diff against the
-Specification's intent and the cited BRIEF §sections before the verdict.
+Verdicts are per-gate: **PASS / FAIL / INVALID** (INVALID = the instrument did
+not measure what the prose AC asserts; the architect proves the property
+directly and carries a corrected gate into the next freeze — a threshold the
+results simply missed is FAIL, never INVALID), then an iteration-level
+**kill / continue** call. Gate-pass is necessary, not sufficient — the architect
+reads the diff against the Specification's intent and the cited BRIEF §sections
+before the verdict.
+
+The rule also bites at authoring time. **Over-tight acceptance criteria** — a
+property frozen as an equality, a count frozen at today's value, a mechanism
+named where an outcome was meant — are a failure mode distinct from goalpost
+drift: drift loosens a criterion after results exist; over-tightness outlaws the
+correct result before any exist. It has shipped real defects: a gate freezing a
+gem's dependency set at "exactly eight names" left a lane whose transitive needs
+grew only one green path — declaring the ninth as a development dependency,
+which does not ship — so the built gem raised `LoadError` for every consumer,
+and the lane had diagnosed it exactly. Because a frozen criterion is never
+edited or widened after results (R2), the fix cannot land at judging time; it
+lands at authoring: property criteria bounded from the defect's side only (a
+floor, not an equality), exactness reserved for criteria whose number is itself
+the deliverable, and the pre-freeze check (snapshot, control, mechanism,
+dry-run) in SKILL.md §4. The builder side is the lane-prompt's
+letter-versus-spirit clause (dispatch.md): a lane that would have to degrade the
+artifact to satisfy an AC's letter builds the stated property and reports the
+conflict — a permission valve, so the honest path never requires tampering with
+a frozen gate.
 
 ### R5. Disagreement is mandatory, with citations
 The builder's PHASE 0 must surface every disagreement with the spec, citing real
@@ -538,6 +560,7 @@ without running the loop — it dispatches nothing, freezes nothing, judges noth
 | Reward hacking / gate tampering | Acceptance Criteria committed pre-dispatch (the freeze commit); builder never writes the iteration file (reports to scratch); post-flight `git diff <freeze-sha> HEAD` on the frozen region; any change = automatic FAIL (R2) |
 | Builder grades own work | Raw-results-only handoff; architect runs gates itself; fresh-session judgment; capability-gap review (R3, R10) |
 | Goalpost moving | Verbatim gate quoting; gates never edited after results; a missing gate is a spec defect, frozen for the next iteration only (R2, R4) |
+| Over-tight acceptance criteria (precision exceeds the property) | Authoring-time calibration: property criteria frozen as floors, exactness only where the number is itself the deliverable; pre-freeze check (snapshot/control/mechanism/dry-run); lane-prompt letter-versus-spirit clause + architect-side ruling that the defect is the criterion's authoring — while judging-time loosening stays illegal (R2, R4) |
 | Scope creep | Explicit out-of-scope list per iteration; silent scope additions = builder failure; architect flags creep by name (R5, R6) |
 | Context rot | Architect context holds judgment only; fresh builder process per iteration; the space's `architecture/` is the memory; SessionStart re-grounding (R1, R7) |
 | Merge conflicts between lanes | Overlap-checked `touch_set` lanes, ≤4, worktrees; a large tangled conflict = disjointness defect (kill/re-spec), a small contained one is hand-resolved at integration; parallel + fast-follow for the seam (R8) |

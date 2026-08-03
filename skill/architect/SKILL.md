@@ -170,8 +170,20 @@ re-prints them, or `git show <freeze-sha>:architecture/I<NN>-<name>.md`). For ea
 gate: run the gate command yourself — `architect gate <iteration>` runs the
 frozen gate commands in the resolved repo/worktree and streams raw output (it is a
 runner, never a judge), or run them by hand — then compare the output against the
-verbatim frozen text → **PASS / FAIL / INVALID** (INVALID = not measured the way
-the gate specifies). Check `git diff <freeze-sha> HEAD --
+verbatim frozen text → **PASS / FAIL / INVALID**. The line between the failing
+two is the mechanism. **FAIL**: the instrument measured exactly what the gate
+says, and the answer was wrong. **INVALID**: the instrument did not measure what
+the prose AC asserts — a quoting error, a `2>&1` capturing unrelated stderr, a
+command that dies in the runner's shell. INVALID is a legitimate, expected
+outcome, not a loop failure: prove the property directly with evidence gathered
+this session, and carry the corrected gate into the next iteration's freeze
+rather than leaving the defect to recur. It is never a loosening route — a
+threshold the results simply missed is FAIL, however near. A lane that raised a
+**letter-versus-spirit conflict** (per the lane-prompt clause: it built the AC's
+stated property rather than degrade the artifact to fit its letter, and reported
+the conflict with evidence) has done its job — the defect is the criterion's
+authoring (§4), and the lane is not penalized for it; rule on the conflict like
+any disagreement. Check `git diff <freeze-sha> HEAD --
 architecture/I<NN>-<name>.md` — any change to Grounds/Specification/Acceptance
 Criteria lines is an automatic FAIL.
 Gate-pass is necessary, not sufficient: read the diff against the
@@ -307,7 +319,41 @@ through the normal builder/lane machinery.
 Then write the **Acceptance Criteria** section — prose conditions (AC1, AC2, …)
 that the architect judges against, followed by a fenced ` ```gates ` block of
 runnable checks (each gate carries `id`, `ac`, `cmd`, and `expect`; `cwd` is
-optional) — and run `architect freeze <name>`. What must be frozen before
+optional). Calibrate each criterion's precision to the property it asserts —
+R4 ("grade the outcome, not the path") applied at authoring time, the only time
+it can be applied, because a frozen criterion is never loosened after results.
+Two kinds of criterion, two calibrations:
+
+- A criterion asserting a **property that must hold** is bounded from one side
+  only — the side the defect is on — freezing a floor, not an equality, so an
+  addition or change the lane discovers stays legal. "Exactly eight runtime
+  dependencies" freezes today's snapshot and outlaws the ninth a transitive
+  need later forces; the property it stood in for was "declares everything it
+  requires."
+- A criterion whose **number is itself the deliverable** may be exact — there
+  the precision is the point (a touch-set boundary, a wire-format constant).
+
+Writing the first kind as the second is the defect: it leaves the lane no
+sanctioned path except degrading the artifact to fit the number.
+
+**Pre-freeze check** — run against the drafted AC in the minutes before
+`architect freeze`, while a bad criterion still costs nothing:
+
+- **snapshot** — no AC or gate hard-codes a count, name-set, or byte-identity
+  that is merely what was known at freeze time;
+- **control** — every baseline or regression claim had its control actually run
+  in this session, not recalled or assumed;
+- **mechanism** — no AC names a *how* (an API signature, a helper, a file
+  layout) where the *what* is the requirement, such that a better shape the
+  lane discovers would be forbidden;
+- **dry-run** — every gate command executed as written, in the shell the gate
+  runner uses (`/bin/sh`, not your interactive shell). For a gate checking the
+  new work, a clean assertion failure on base is the healthy result — it
+  discriminates; green on base means it measures nothing. A regression guard is
+  green on base by design. A syntax or environment error either way means the
+  gate is broken, not red.
+
+Then run `architect freeze <name>`. What must be frozen before
 dispatch is the Acceptance Criteria: `architect freeze` lints the gates block
 (absent or empty gates is allowed but warns; malformed fails), commits any
 pending content in the frozen region (Grounds/Specification/Acceptance Criteria)
