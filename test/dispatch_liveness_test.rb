@@ -39,6 +39,32 @@ class DispatchLivenessTest < Space::ArchitectTest
     exit 0
   RUBY
 
+  # B1: never emits a stream-json init event, but stays alive well past the liveness
+  # deadline (0.35s * LIVENESS_BUDGET_FACTOR = 1.05s) so the liveness fiber reaches its
+  # own deadline rather than the child exiting first.
+  FAKE_NEVER_INITS = <<~RUBY
+    #!/usr/bin/env ruby
+    $stdin.read
+    sleep 2.0
+    exit 0
+  RUBY
+
+  # B1b: writes a non-JSON stderr line immediately (teed into the same run log), then
+  # its real stream-json init event 0.2s later — reproducing "one early stderr byte"
+  # landing before the parseable init event.
+  FAKE_STDERR_THEN_INIT = <<~RUBY
+    #!/usr/bin/env ruby
+    require "json"
+    $stdin.read
+    $stderr.puts "noisy stderr line"
+    STDERR.flush
+    sleep 0.2
+    puts JSON.generate("type" => "system", "subtype" => "init", "model" => "claude-sonnet-4-6")
+    STDOUT.flush
+    sleep 0.3
+    exit 0
+  RUBY
+
   def with_harness(script, model:)
     root = Dir.mktmpdir("liveness-test")
     bin = File.join(root, "fake")
@@ -108,6 +134,41 @@ class DispatchLivenessTest < Space::ArchitectTest
       assert_equal 0, code
       assert_equal 1, lines.length, "exactly one liveness line, got: #{err.string.inspect}"
       assert_match(/WARN no growth/, lines.first)
+    end
+  end
+
+  # B1a: the reported duration is the true elapsed wall-clock time, not the raw
+  # liveness_delay interpolated verbatim. Before the fix this always printed exactly
+  # "0.3s" (the injected delay) even though the fiber's own deadline is 3x that.
+  def test_liveness_line_reports_true_elapsed_not_raw_delay
+    with_harness(FAKE_NEVER_INITS, model: "claude-sonnet-4-6") do |h, wt, prompt, log, err|
+      liveness_delay = 0.3
+      h.run(prompt_path: prompt, run_log_path: log, chdir: wt, liveness_delay: liveness_delay, err: err)
+      lines = liveness_lines(err)
+
+      assert_equal 1, lines.length, "exactly one liveness line, got: #{err.string.inspect}"
+      reported = lines.first[/empty ([\d.]+)s after dispatch/, 1].to_f
+      true_deadline = liveness_delay * Space::Architect::Harness::ClaudeCodeHarness::LIVENESS_BUDGET_FACTOR
+
+      refute_in_delta liveness_delay, reported, 0.05,
+        "reported duration must not be the raw injected liveness_delay: #{lines.first.inspect}"
+      assert_in_delta true_deadline, reported, 0.2,
+        "reported duration must track the fiber's own true elapsed time (deadline=#{true_deadline}): #{lines.first.inspect}"
+    end
+  end
+
+  # B1b: a single early stderr byte (teed into the run log before the real init event)
+  # must not satisfy the wait predicate on its own. On base this produced a false
+  # "WARN model unverified" the instant the stderr line landed.
+  def test_liveness_waits_past_early_stderr_byte_for_init_event
+    with_harness(FAKE_STDERR_THEN_INIT, model: "claude-sonnet-4-6") do |h, wt, prompt, log, err|
+      code = h.run(prompt_path: prompt, run_log_path: log, chdir: wt, liveness_delay: 0.35, err: err)
+      lines = liveness_lines(err)
+
+      assert_equal 0, code
+      assert_equal 1, lines.length, "exactly one liveness line, got: #{err.string.inspect}"
+      assert_match(/\Aliveness: OK streaming model=claude-sonnet-4-6 /, lines.first)
+      refute_match(/WARN/, lines.first)
     end
   end
 
