@@ -293,10 +293,11 @@ contract, self-contained:
   **serial deferred judgment** (iterations run to gates-green with `architect
   verdict` withheld; one later batch session judges each against its own frozen
   AC — see `### Serial deferred judgment`).
-- **Effort call** — thinking budget set in the lane-prompt via the escalation
-  keywords (`think hard` … `ultrathink`); default unattended builder work high,
-  downgrade a routine, tightly-specified lane (record which and why). Claude
-  Code has no per-invocation effort flag — see `dispatch.md`.
+- **Effort call** — thinking budget set per dispatch with `architect dispatch
+  --effort <level>`, translated and clamped to the lane's harness (the
+  escalation keywords `think hard` … `ultrathink` still work in-prompt);
+  default unattended builder work high, downgrade a routine, tightly-specified
+  lane (record which and why). Levels and mechanics: `dispatch.md`.
 
 **Spike (probe) iterations.** When the open question is too uncertain for a
 build — the repo can't answer it and routine API-verification won't resolve it
@@ -351,6 +352,11 @@ architect-read.
 - **mechanism** — no AC names a *how* (an API signature, a helper, a file
   layout) where the *what* is the requirement, such that a better shape the
   lane discovers would be forbidden;
+- **interface** — any CLI surface a Specification names — a verb, a flag
+  spelling, a subcommand — is executed once before it is frozen: a frozen
+  interface is only safe if it is implementable, which is the assumption
+  every code/prose lane split rests on. No verb backs this item yet — unlike
+  dry-run, it is a discipline run by hand;
 - **dry-run** — `architect rehearse <name>`: it runs the drafted gates from
   the working tree through the same execution path `architect gate` uses
   (`/bin/sh`, same run-dir resolution, same evaluator) and classifies each —

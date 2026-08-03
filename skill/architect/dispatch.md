@@ -273,13 +273,15 @@ compound it.
   <builder-model>`). A floating alias (a bare "latest"/tier tag) drifts to
   whatever ships next — fine interactively, but automations pin the full id so a
   model bump can't silently change builder behavior mid-project.
-- Effort = thinking budget. Claude Code has no per-invocation effort flag the
-  way Codex exposed `model_reasoning_effort`; the builder sets thinking depth
-  **in the block** via the escalation keywords (`think` < `think hard` <
-  `think harder` < `ultrathink`), or you floor it with the `MAX_THINKING_TOKENS`
-  env var on the dispatch. Default unattended builder work to a high budget
-  (open the block with "Think harder…"); downgrade a routine,
-  tightly-specified lane to "think hard" (record which and why in the spec).
+- Effort = thinking budget. Set it per dispatch: `architect dispatch --effort
+  <level>` (aliases `--thinking`/`--reasoning`) accepts
+  `off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max` and translates it to the
+  lane's harness — `claude-code` passes `low`…`max` straight through to its own
+  `--effort` flag, unclamped (`minimal` clamps to `low`; `off` omits the flag).
+  The escalation keywords (`think` < `think hard` < `think harder` <
+  `ultrathink`) and the `MAX_THINKING_TOKENS` env var still raise depth from
+  inside the block. Default unattended builder work to a high budget; downgrade
+  a routine, tightly-specified lane (record which and why in the spec).
 - **Builders never commit, and the architect verifies it.** Claude Code has no
   sandbox to make `.git` read-only, so this is enforced by the deny rules at
   dispatch *and* checked after the run: before integrating a lane, confirm
