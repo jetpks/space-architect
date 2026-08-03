@@ -31,7 +31,9 @@ Write + commit: `architect section <%= @_name %> specification --from <file>`. -
   machine-readable declaration lives in the fenced ```lanes block below — the single
   frozen source of truth `architect freeze` records and `architect provision`
   materializes.
-- **Effort** — `think hard` … `ultrathink` per lane, with one line of why.
+- **Effort** — per lane, set at dispatch: `architect dispatch --effort <level>`,
+  translated + clamped to the lane's harness, with one line of why (the
+  escalation keywords `think hard` … `ultrathink` still work in-prompt).
 
 ```lanes
 # One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`

@@ -607,6 +607,7 @@ without running the loop — it dispatches nothing, freezes nothing, judges noth
 | Scope creep | Explicit out-of-scope list per iteration; silent scope additions = builder failure; architect flags creep by name (R5, R6) |
 | Context rot | Architect context holds judgment only; fresh builder process per iteration; the space's `architecture/` is the memory; SessionStart re-grounding (R1, R7) |
 | Merge conflicts between lanes | Overlap-checked `touch_set` lanes, ≤4, worktrees; a large tangled conflict = disjointness defect (kill/re-spec), a small contained one is hand-resolved at integration; parallel + fast-follow for the seam (R8) |
+| Boundary declarations drift (lanes-block globs vs lane-prompt may-touch list vs scope gate pattern) | All three authored from one exhaustive enumeration: every file listed, the scope gate's pattern is that enumeration exactly, the prompt's list generated from it — a mismatch surfaces post-freeze, where widening the frozen declaration is illegal, so `integrate` refuses a correct lane (R2, R8) |
 | Placeholder implementations | Gate commands are end-to-end and executable; "search before implementing; no placeholder code" in the lane-prompt (R4) |
 | Broken repo after a long run | One iteration per loop; recover with a same-iteration continue or a narrow fast-follow, or `git reset` + re-dispatch when the context is poisoned; lanes are cheap (R7) |
 | Fabricated status reports | Every status claim audited against a tool result, both sides; one `STATUS:` line (R10) |
