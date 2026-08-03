@@ -158,20 +158,23 @@ module Space::Architect
               end
 
               # Liveness self-check: read the run log's stream-json init event and print ONE
-              # line naming the streamed model + confirming growth. A single point-sample right
+              # line naming the streamed model + true elapsed time. A single point-sample right
               # at liveness_delay would report a healthy child dead if its first write landed a
               # moment later, so this polls (like Research::Mux#wait_for_file) to a deadline of
-              # several delay-lengths, emitting as soon as the log shows growth — a bounded wait,
-              # not an unbounded one. transient: true so it never keeps the reactor alive;
-              # best-effort so it never raises into the run path. run_detached gets no such fiber.
+              # several delay-lengths, emitting as soon as the log holds a parseable init event —
+              # a bounded wait, not an unbounded one, and not satisfied by mere non-emptiness (the
+              # child's stderr is teed into the same run log, so one early stderr byte must not
+              # count). transient: true so it never keeps the reactor alive; best-effort so it
+              # never raises into the run path. run_detached gets no such fiber.
               liveness_task = nil
               if liveness_delay && liveness_delay > 0
                 liveness_task = Async(transient: true) do
-                  deadline = Time.now + (liveness_delay * LIVENESS_BUDGET_FACTOR)
-                  until run_log_growing?(run_log_path) || Time.now >= deadline
+                  start    = Time.now
+                  deadline = start + (liveness_delay * LIVENESS_BUDGET_FACTOR)
+                  until init_event_ready?(run_log_path) || Time.now >= deadline
                     sleep LIVENESS_POLL_INTERVAL
                   end
-                  emit_liveness(run_log_path, liveness_delay, err)
+                  emit_liveness(run_log_path, Time.now - start, err)
                 end
               end
 
@@ -222,22 +225,29 @@ module Space::Architect
 
       private
 
-      def run_log_growing?(run_log_path)
-        run_log_path.exist? && run_log_path.size > 0
+      # The liveness fiber's wait predicate: ready once the run log holds a parseable
+      # stream-json init event — not merely once it holds any bytes, since the child's
+      # stderr is teed into the same run log and one early stderr byte must not satisfy it.
+      def init_event_ready?(run_log_path)
+        !streamed_init_model(run_log_path).nil?
+      rescue StandardError
+        false
       end
 
       # Read the run log's stream-json init event and print exactly one bounded liveness
-      # line to err. Best-effort: swallows any read/parse error so it never raises into run.
-      def emit_liveness(run_log_path, delay, err)
+      # line to err, naming the true elapsed wall-clock time since dispatch. Best-effort:
+      # swallows any read/parse error so it never raises into run.
+      def emit_liveness(run_log_path, elapsed, err)
         bytes = run_log_path.exist? ? run_log_path.size : 0
+        elapsed = elapsed.round(1)
         if bytes.zero?
-          err.puts "liveness: WARN no growth — run log still empty #{delay}s after dispatch"
+          err.puts "liveness: WARN no growth — run log still empty #{elapsed}s after dispatch"
           return
         end
 
         streamed = streamed_init_model(run_log_path)
         if streamed.nil?
-          err.puts "liveness: WARN model unverified — no stream-json init event after #{delay}s (run log #{bytes} bytes)"
+          err.puts "liveness: WARN model unverified — no stream-json init event after #{elapsed}s (run log #{bytes} bytes)"
         elsif streamed == @model
           err.puts "liveness: OK streaming model=#{streamed} (run log growing, #{bytes} bytes)"
         else
