@@ -6,8 +6,8 @@ module Space::Architect
       module Research
         class Dispatch < BaseCommand
           desc "Dispatch detached read-only research lanes (one per prompt file)"
-          argument :prompts, required: true,
-                             desc: "Prompt file(s) to dispatch (space-separated paths)"
+          argument :prompts, type: :array, required: true,
+            desc: "Prompt file(s) to dispatch (space-separated paths)"
           option :model,     default: nil, desc: "Researcher model override (default: the reference default claude-sonnet-4-6)"
           option :max_turns, default: "40", desc: "Max turns per researcher"
 
@@ -15,11 +15,10 @@ module Space::Architect
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               render(store.find(opts[:space])) do |sp|
-                paths = Array(prompts)
                 supervisor = Space::Architect::Research::Supervisor.new(space: sp)
                 kwargs = { max_turns: max_turns.to_i }
                 kwargs[:model] = model if model
-                runs = supervisor.dispatch(paths, **kwargs)
+                runs = supervisor.dispatch(prompts, **kwargs)
                 runs.each do |run|
                   terminal.say "dispatched #{run.id} (pid #{run.pid}) → #{terminal.path(run.run_log_path)}"
                 end
