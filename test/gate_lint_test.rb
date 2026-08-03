@@ -303,7 +303,7 @@ class GateLintTest < Space::ArchitectTest
     text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
     File.write(slice, text)
 
-    sha = project.freeze!("my-slice", no_rehearse_reason: "test setup — not exercising rehearsal")
+    sha = project.freeze!("my-slice", skip_rehearse_reason: "test setup — not exercising rehearsal")
     assert_match(/\A[0-9a-f]{40}\z/, sha)
   ensure
     FileUtils.rm_rf(dir)
@@ -325,7 +325,7 @@ class GateLintTest < Space::ArchitectTest
     File.write(slice, text)
 
     warnings = []
-    sha = project.freeze!("my-slice", warnings: warnings, no_rehearse_reason: "test setup — not exercising rehearsal")
+    sha = project.freeze!("my-slice", warnings: warnings, skip_rehearse_reason: "test setup — not exercising rehearsal")
     assert_match(/\A[0-9a-f]{40}\z/, sha)
     assert_equal 1, warnings.length
     assert_match(/no gates/, warnings[0])

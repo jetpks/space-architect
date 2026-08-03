@@ -176,7 +176,7 @@ module Space::Architect
     # any pending changes to the iteration file and records HEAD as freeze_sha. If
     # already frozen, refuses when the frozen region has changed since.
     # With force: true, re-freezes a changed frozen region if no lane is dispatched yet.
-    def freeze!(iteration, warnings: nil, message: nil, force: false, no_rehearse_reason: nil)
+    def freeze!(iteration, warnings: nil, message: nil, force: false, skip_rehearse_reason: nil)
       entry = slice_entry(iteration)
       rel = entry["file"]
       path = space.path.join(rel)
@@ -196,8 +196,8 @@ module Space::Architect
           "placeholder still freezes) before freezing."
       end
 
-      if no_rehearse_reason
-        raise Space::Core::Error, "--skip-rehearse requires a non-empty REASON" if no_rehearse_reason.to_s.strip.empty?
+      if skip_rehearse_reason
+        raise Space::Core::Error, "--skip-rehearse requires a non-empty REASON" if skip_rehearse_reason.to_s.strip.empty?
       else
         ensure_rehearsed!(iteration, entry, text)
       end
@@ -234,7 +234,7 @@ module Space::Architect
           next unless s["name"] == iteration
           s["freeze_sha"] = sha
           s["verdict"] ||= "pending"
-          s["rehearsal_skip_reason"] = no_rehearse_reason.strip if no_rehearse_reason
+          s["rehearsal_skip_reason"] = skip_rehearse_reason.strip if skip_rehearse_reason
           lanes = s["lanes"] || []
           declared.each do |d|
             fields = { "name" => d["name"], "repo" => d["repo"], "touch_set" => Array(d["touch"]) }
@@ -405,7 +405,10 @@ module Space::Architect
     # which stays an unconditional refusal (a builder commit is tampering, not an authoring
     # defect the architect can rule on). Modeled on freeze!'s --skip-rehearse: a non-empty
     # REASON is required whenever passed, recorded in space.yaml beside the lane, and
-    # returned for the caller to echo — the override can never be silent.
+    # returned for the caller to echo — the override can never be silent. Recorded only
+    # for THIS lane, and only when its in-bounds check actually failed — integrate! passes
+    # the same reason to every lane in the set, but a lane that was already in bounds gets
+    # neither the record nor the echo.
     def merge_lane!(iteration, lane, message: nil, commit_mode: nil, into: nil, accept_bounds_reason: nil)
       if accept_bounds_reason
         raise Space::Core::Error, "--accept-bounds requires a non-empty REASON" if accept_bounds_reason.to_s.strip.empty?
@@ -473,6 +476,8 @@ module Space::Architect
       merge_sha, = git_capture("-C", repo_path.to_s, "rev-parse", "HEAD")
       diffstat, = git_capture("-C", repo_path.to_s, "diff", "--stat", "#{base_sha}..HEAD")
 
+      bounds_override_reason = accept_bounds_reason.strip if accept_bounds_reason && checks[:in_bounds] == false
+
       update_architect_block do |b|
         b["integration_branch"] = integration_branch
         (b["iterations"] || []).each do |s|
@@ -481,7 +486,7 @@ module Space::Architect
             next unless l["name"] == lane
             l["integration_branch"] = integration_branch
             l["integrate_sha"] = integrate_sha
-            l["bounds_override_reason"] = accept_bounds_reason.strip if accept_bounds_reason
+            l["bounds_override_reason"] = bounds_override_reason if bounds_override_reason
           end
         end
         b
@@ -489,7 +494,7 @@ module Space::Architect
 
       { lane: lane, repo: repo, integration_branch: integration_branch, merge_sha: merge_sha.strip,
         base_sha: base_sha, diffstat: diffstat.strip, gates_run: false,
-        bounds_override_reason: accept_bounds_reason&.strip }
+        bounds_override_reason: bounds_override_reason }
     end
 
     # Loop merge_lane! over the architect-supplied passing set, in order. Stops on the
