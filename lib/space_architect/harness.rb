@@ -260,6 +260,13 @@ module Space::Architect
       # Read the run log's stream-json init event and print exactly one bounded liveness
       # line to err, naming the true elapsed wall-clock time since dispatch. Best-effort:
       # swallows any read/parse error so it never raises into run.
+      #
+      # Reuses init_event_ready?'s own incremental scan rather than re-parsing the
+      # whole log from the top: when the poll loop already found the init event,
+      # @liveness_model is set and this is a no-op re-check; when it ended on the
+      # deadline without one, this performs exactly one more forward scan from
+      # @liveness_offset, so bytes appended between the last poll and this call are
+      # still observed — a scan forward from the cached offset, never a skipped one.
       def emit_liveness(run_log_path, elapsed, err)
         bytes = run_log_path.exist? ? run_log_path.size : 0
         elapsed = elapsed.round(1)
@@ -268,7 +275,8 @@ module Space::Architect
           return
         end
 
-        streamed = streamed_init_model(run_log_path)
+        init_event_ready?(run_log_path)
+        streamed = @liveness_model
         if streamed.nil?
           err.puts "liveness: WARN model unverified — no stream-json init event after #{elapsed}s (run log #{bytes} bytes)"
         elsif streamed == @model
@@ -278,21 +286,6 @@ module Space::Architect
         end
       rescue StandardError
         # Best-effort: an internal read/parse failure must never break the run.
-      end
-
-      # The model named by the stream-json init event ({"type":"system","subtype":"init",...}),
-      # or nil if no such event has been logged yet.
-      def streamed_init_model(run_log_path)
-        run_log_path.each_line do |line|
-          ev = begin
-            JSON.parse(line)
-          rescue JSON::ParserError
-            next
-          end
-          next unless ev.is_a?(Hash) && ev["type"] == "system" && ev["subtype"] == "init"
-          return ev["model"]
-        end
-        nil
       end
 
       def argv

@@ -8,6 +8,7 @@ require "pathname"
 require "tempfile"
 require "time"
 require "digest"
+require "shellwords"
 
 module Space::Architect
   # Manages an architect-loop project inside a space: one self-contained file per
@@ -43,9 +44,11 @@ module Space::Architect
     # Hard per-gate timeout. Generous relative to the full suite (~55s).
     DEFAULT_GATE_TIMEOUT = 900
 
-    # The scaffold's untouched placeholder AC1 line (templates/iteration.md.erb:67).
-    # Pinned by contract with the authoring lane, which is forbidden from changing
-    # it, precisely so freeze!'s #73 hard-refuse (below) can key on it.
+    # The scaffold's untouched placeholder AC1 line — templates/iteration.md.erb's
+    # Acceptance Criteria section (named, not line-numbered: a pinned line number
+    # here has already drifted twice). Pinned by contract with the authoring
+    # lane, which is forbidden from changing it, precisely so freeze!'s #73
+    # hard-refuse (below) can key on it.
     AC1_PLACEHOLDER = "**AC1.** ..."
 
     # Rehearsal's BROKEN heuristic (I09/AC5): a command-not-found exit code or a
@@ -576,16 +579,16 @@ module Space::Architect
       text = path.read
 
       gates = parse_gates(text)
-      repo, base_dir, gate_results =
+      repo, base_dir, gate_results, scope_report =
         if gates.empty?
-          [nil, nil, []]
+          [nil, nil, [], nil]
         else
           r   = resolve_rehearsal_repo(iteration, text)
           dir = space.path.join("repos", r)
           raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
           results = execute_gates(gates, base_dir: dir, lane: nil, repo_root: nil)
                     .map { |g| g.merge(rehearsal: classify_rehearsal(g)) }
-          [r, dir, results]
+          [r, dir, results, scope_asymmetry_report(gates, text, dir)]
         end
 
       digest = gates_digest(text)
@@ -598,7 +601,7 @@ module Space::Architect
       end
 
       { iteration: iteration, repo: repo, base_dir: base_dir, gates: gate_results,
-        empty: gates.empty?, placeholder: untouched_ac_placeholder?(text) }
+        empty: gates.empty?, placeholder: untouched_ac_placeholder?(text), scope_asymmetry: scope_report }
     end
 
     # Emit grounding reads for the architect's SessionStart hook.
@@ -1217,6 +1220,228 @@ module Space::Architect
       return :broken if result[:timed_out] || result[:exit_code] == 127
       return :broken if BROKEN_STDERR_PATTERN.match?(result[:stderr].to_s)
       result[:status] == :pass ? :green : :red
+    end
+
+    # I12/AC3: rehearse's scope-asymmetry check. I11 shipped a bug its own new
+    # boundary discipline could not catch: a gate's grep-family search covered
+    # only `lib`, while the identifier it renamed also lived in a `test/` file
+    # no lane declared — three consistent statements, all drawn from the same
+    # too-narrow grep. For each gate whose command is a recognizable
+    # file-scoped grep invocation, re-run its own pattern across the whole repo
+    # and report anything that matches outside the gate's own declared paths,
+    # flagging loudest whatever also lies outside every declared lane's touch
+    # set (I12/AC4) — the file no lane may legally fix. touch_globs is that
+    # union; parse_lanes returns [] with no ```lanes``` block, which still
+    # yields the outside-every-lane half of the report. Reports only: never
+    # touches rehearse's exit code, RED/GREEN/BROKEN, or the rehearsal stamp.
+    SCOPE_GREP_BINARIES = %w[grep egrep fgrep].freeze
+
+    # Shellwords treats shell syntax — pipes, `&&`/`||`/`;`, `$(...)`, control
+    # keywords — as ordinary word characters, not structure (its own docs say
+    # plainly this isn't a command-line parser). These are the markers
+    # #shell_segments splits a token stream on, once #pad_shell_operators has
+    # made sure none of them can arrive glued to an adjacent word.
+    SCOPE_BOUNDARY_TOKENS = %w[| || && ; $( ( ) if elif then else fi do done while until case esac].freeze
+
+    # Flags that change what a pattern matches — safe to replay verbatim
+    # against the real grep binary, never reinterpreted in Ruby — vs flags
+    # that only change what's printed (irrelevant to a files-with-matches
+    # re-run).
+    SCOPE_MATCH_FLAGS = %w[E F G P w x].freeze
+    SCOPE_NOOP_FLAGS = %w[c i n o q r l z H h].freeze
+
+    # git grep, not a raw recursive grep: it skips .git's own object store (a
+    # raw `grep -r .` would trawl it) and matches "the tree" the way the rest
+    # of this corpus's git-based gates already do (diff-scope's own gates are
+    # git diff, not find/grep). Small fixed budget — runs once per recognized
+    # invocation, not per gate.
+    SCOPE_SEARCH_TIMEOUT = 30
+
+    def scope_asymmetry_report(gates, text, base_dir)
+      touch_globs = parse_lanes(text).flat_map { |l| l["touch"] || [] }
+      findings = []
+      not_analyzable = []
+
+      gates.each do |gate|
+        g = gate.transform_keys(&:to_s)
+        grep_invocations(g["cmd"].to_s).each do |inv|
+          if inv[:status] != :recognized
+            not_analyzable << { id: g["id"], reason: inv[:reason] }
+            next
+          end
+
+          finding = scope_finding(inv, base_dir, touch_globs)
+          if finding
+            findings << finding.merge(id: g["id"])
+          else
+            not_analyzable << { id: g["id"], reason: "whole-repo re-run failed" }
+          end
+        end
+      end
+
+      { findings: findings, not_analyzable: not_analyzable }
+    end
+
+    # Re-runs a recognized invocation's own pattern across the whole repo and
+    # splits what it finds into: the gate's own declared scope (expected —
+    # that's what the gate already searches, so it's not reported), elsewhere
+    # but inside some lane's touch set, and elsewhere outside every lane's
+    # touch set. nil signals the re-run itself failed (caller counts it as
+    # not-analyzable rather than reporting a guess).
+    def scope_finding(inv, base_dir, touch_globs)
+      matched = whole_repo_grep_matches(inv, base_dir)
+      return nil unless matched
+
+      elsewhere = matched.reject { |f| within_declared_scope?(f, inv[:paths], base_dir) }
+      outside_lanes, within_lanes = elsewhere.partition { |f| !in_touch_set?(f, touch_globs) }
+      { pattern: inv[:pattern], paths: inv[:paths], outside_lanes: outside_lanes.sort, within_lanes: within_lanes.sort }
+    end
+
+    # The files (relative paths) an invocation's own pattern matches anywhere
+    # in the repo, via the real git-grep binary with the same
+    # matching-relevant flags — never a Ruby reimplementation of grep's
+    # pattern semantics. nil on anything other than a clean "matched"/"no
+    # matches" outcome (exit 0/1); [] is a real, examined zero.
+    def whole_repo_grep_matches(inv, base_dir)
+      flags = ["-l", "-I"]
+      flags << "-i" if inv[:case_insensitive]
+      flags << "-#{inv[:mode]}" unless inv[:mode] == "G"
+      cmd = "git grep #{flags.join(' ')} -- #{Shellwords.escape(inv[:pattern])}"
+      captured = capture_with_timeout(cmd, dir: base_dir, timeout: SCOPE_SEARCH_TIMEOUT)
+      return [] if captured[:exit_code] == 1
+      return nil if captured[:timed_out] || captured[:exit_code] != 0
+
+      captured[:stdout].each_line.map(&:chomp).reject(&:empty?)
+    end
+
+    # Is relative_path inside one of an invocation's own declared search
+    # paths? A declared path that's a real directory at rehearsal time covers
+    # anything under it; a file (or a path a lane hasn't written yet, same
+    # BROKEN-adjacent case #classify_rehearsal already names) covers only
+    # itself.
+    def within_declared_scope?(relative_path, declared_paths, base_dir)
+      declared_paths.any? do |p|
+        p = p.sub(%r{/\z}, "")
+        relative_path == p || (base_dir.join(p).directory? && relative_path.start_with?("#{p}/"))
+      end
+    end
+
+    # Every grep-family invocation recognized in one gate's shell command. A
+    # command that never mentions grep/egrep/fgrep isn't this check's concern
+    # at all (silently absent, same as e.g. `bundle exec rake test`) — only a
+    # command that DOES attempt one and can't be cleanly recognized is
+    # reported not-analyzable (I12/AC4's "counted and identifiable").
+    def grep_invocations(cmd)
+      return [] unless cmd.match?(/\b(?:#{SCOPE_GREP_BINARIES.join('|')})\b/)
+
+      segments = shell_segments(cmd)
+      return [{ status: :not_analyzable, reason: "unparseable command" }] unless segments
+
+      found = segments.filter_map { |seg| grep_invocation(seg) }
+      return [{ status: :not_analyzable, reason: "could not locate a recognizable grep invocation" }] if found.empty?
+
+      found
+    end
+
+    # Splits a gate's shell command into simple-command segments at pipes,
+    # `&&`/`||`/`;`, command substitution, and control keywords (see
+    # SCOPE_BOUNDARY_TOKENS). Returns nil on anything Shellwords itself can't
+    # tokenize (an unmatched quote), so the caller counts it instead of
+    # guessing at it.
+    def shell_segments(cmd)
+      tokens = expand_quoted_substitutions(shell_tokenize(cmd))
+      segments = [[]]
+      tokens.each do |tok|
+        if SCOPE_BOUNDARY_TOKENS.include?(tok)
+          segments << []
+        else
+          segments.last << tok
+        end
+      end
+      segments.reject(&:empty?)
+    rescue ArgumentError
+      nil
+    end
+
+    def shell_tokenize(cmd)
+      Shellwords.split(pad_shell_operators(cmd))
+    end
+
+    # Shellwords treats shell operator/substitution punctuation as ordinary
+    # word characters whenever it isn't whitespace-separated (its own docs
+    # warn this isn't a command-line parser) — pads whitespace around
+    # `$(` `&&` `||` `;` `|` `(` `)` and folds a bare newline to `;` (its own
+    # statement terminator, otherwise invisible to Shellwords as anything but
+    # whitespace) so each always surfaces as its own token. Quoted spans and
+    # backslash-escapes are passed through untouched, so a pattern's own `|`
+    # or `$` — inside a quote — is never mistaken for shell syntax.
+    def pad_shell_operators(text)
+      out = String.new
+      text.scan(/'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^'"\\]+/m) do |chunk|
+        if chunk.start_with?("'", '"', "\\")
+          out << chunk
+        else
+          out << chunk.gsub(/\$\(|&&|\|\||[();|\n]/) { |op| op == "\n" ? " ; " : " #{op} " }
+        end
+      end
+      out
+    end
+
+    # A token that is ITSELF a whole `$(...)` survives #pad_shell_operators
+    # intact only when the substitution sat inside a still-open quote
+    # (protected, so nothing inside it got space-padded) — recurse into its
+    # contents exactly as the top-level command was tokenized.
+    def expand_quoted_substitutions(tokens)
+      tokens.flat_map do |tok|
+        m = tok.match(/\A\$\((.*)\)\z/m)
+        next [tok] unless m
+
+        ["$("] + expand_quoted_substitutions(shell_tokenize(m[1])) + [")"]
+      end
+    end
+
+    # Recognizes one simple-command segment as a file-scoped grep-family
+    # invocation, or declines with a specific reason. Never guesses: `-v`
+    # inverts per-line matching (fine for filtering a computed list, wrong for
+    # "does this pattern occur elsewhere") so it's declined rather than
+    # silently reinterpreted; so is any unsupported flag or a path operand
+    # that still carries an unresolved shell variable.
+    def grep_invocation(segment)
+      i = 0
+      i += 1 while segment[i] == "!"
+      return nil unless segment[i] && SCOPE_GREP_BINARIES.include?(segment[i])
+      i += 1
+
+      flag_chars = []
+      loop do
+        tok = segment[i]
+        break unless tok
+        if tok == "--"
+          i += 1
+          break
+        elsif tok.start_with?("-") && tok != "-"
+          flag_chars.concat(tok.delete_prefix("-").chars)
+          i += 1
+        else
+          break
+        end
+      end
+
+      unsupported = flag_chars - (SCOPE_MATCH_FLAGS + SCOPE_NOOP_FLAGS)
+      return { status: :not_analyzable, reason: "unsupported flag(s): #{unsupported.uniq.join(', ')}" } if unsupported.any?
+      return { status: :not_analyzable, reason: "-v (inverted match) semantics not safely reinterpreted" } if flag_chars.include?("v")
+
+      modes = (flag_chars & %w[E F G P]).uniq
+      return { status: :not_analyzable, reason: "ambiguous pattern flags: #{modes.join(', ')}" } if modes.size > 1
+      return { status: :not_analyzable, reason: "no pattern operand" } unless segment[i]
+
+      pattern = segment[i]
+      paths = segment[(i + 1)..] || []
+      return { status: :not_analyzable, reason: "no path operand (pipeline/stdin search)" } if paths.empty?
+      return { status: :not_analyzable, reason: "path operand contains an unresolved shell variable" } if paths.any? { |p| p.include?("$") }
+
+      { status: :recognized, pattern: pattern, paths: paths,
+        case_insensitive: flag_chars.include?("i"), mode: modes.first || "G" }
     end
 
     def iteration_id(entry)
