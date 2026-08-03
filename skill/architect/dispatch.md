@@ -404,7 +404,9 @@ or retry in a loop. When done, write your report to the scratch file given to
 you, build/<id>-<lane>/report.md (an absolute path outside your worktree),
 with RAW results only — tables, numbers, command output — no interpretation, no
 "promising". Every status claim must be backed by a command result from this
-run. Keep the report compact — tables and numbers, not prose. End it with
+run. Keep the report compact — tables and numbers, not prose. Do not title the
+report — the architect's tooling supplies the `### <lane>` heading when it
+transcribes; keep any headings inside the report at `###` or deeper. End it with
 exactly one status line: STATUS: COMPLETE | COMPLETE_WITH_CONCERNS (list them)
 | BLOCKED (exact blocker + what you tried). Verdicts belong to the architect
 and the human. Persist until your lane is fully handled end-to-end; do not stop

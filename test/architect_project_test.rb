@@ -2025,6 +2025,61 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # I13/A1 (AC3): reproduces the input that failed I12's AC4 — lib/w.rb has the
+  # word "word", test/w_test.rb has only the substring "swordfish". The gate's
+  # own -w must be replayed in the whole-repo re-run too, so the substring-only
+  # file no longer appears (neither outside every lane's touch set nor within
+  # one), while lib/w.rb stays correctly inside the gate's own declared scope.
+  def test_rehearse_scope_asymmetry_replays_word_boundary_flag
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+
+    FileUtils.mkdir_p(File.join(repo_dir, "lib"))
+    FileUtils.mkdir_p(File.join(repo_dir, "test"))
+    File.write(File.join(repo_dir, "lib", "w.rb"), "word\n")
+    File.write(File.join(repo_dir, "test", "w_test.rb"), "swordfish\n")
+    system("git", "-C", repo_dir, "add", "-A")
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "seed")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/w.rb\n"
+    gates_yaml = "- id: word-gate\n  ac: AC1\n  cmd: grep -rw 'word' lib\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+    finding = result[:scope_asymmetry][:findings].find { |f| f[:id] == "word-gate" }
+    assert_equal [], finding[:outside_lanes], "swordfish is a substring match only — -w must exclude it"
+    assert_equal [], finding[:within_lanes]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I13/A1 (AC4): git grep has no -x — an invocation carrying it is declined as
+  # not-analyzable (reason names the flag) rather than replayed wrong (as a
+  # bare substring search) or silently dropped.
+  def test_rehearse_scope_asymmetry_declines_x_flag
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - README.md\n"
+    gates_yaml = "- id: whole-line\n  ac: AC1\n  cmd: grep -x 'word' README.md\n  expect:\n    exit_code: 1\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+    assert_equal [{ id: "whole-line", reason: "-x (whole-line match) has no git-grep equivalent" }],
+      result[:scope_asymmetry][:not_analyzable]
+    assert_empty result[:scope_asymmetry][:findings]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # ── I09: freeze's rehearsal-stamp precondition (AC7) ───────────────────────
 
   def test_freeze_refuses_without_a_rehearsal_stamp
@@ -3052,6 +3107,64 @@ class ArchitectProjectTest < Space::ArchitectTest
     freeze_for_test!(project, dir, "my-slice")
 
     assert_equal [], project.integrate!("my-slice", teardown: true)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I13/A3 (AC5): merge_lane!'s integration_branch/integrate_sha only reach
+  # space.yaml on disk via update_architect_block — integrate! must commit that
+  # mutation itself, by pathspec, so it survives independently of a later
+  # `verdict`.
+  def test_integrate_bang_commits_space_yaml_mutation
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "wt", "feature.rb"), "def feature; end\n")
+
+    project.integrate!("my-slice", lanes: ["lane-a"])
+
+    status, = Open3.capture3("git", "-C", dir, "status", "--porcelain", "--", "space.yaml")
+    assert_equal "", status.strip, "space.yaml must be committed after integrate!, got:\n#{status}"
+
+    log, = Open3.capture3("git", "-C", dir, "log", "-1", "--name-only", "--pretty=format:%s")
+    assert_match(/space\.yaml/, log)
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lane = yml.dig("project", "iterations", 0, "lanes", 0)
+    refute_nil lane["integrate_sha"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I13/A3 (AC5): one commit per integrate! call, not one per lane merged.
+  def test_integrate_bang_makes_one_metadata_commit_for_multiple_lanes
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["allowed/**"])
+    project.worktree_add("my-repo", "my-slice", "lane-b", touch: ["allowed/**"])
+    FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-a", "wt", "allowed"))
+    FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-b", "wt", "allowed"))
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "wt", "allowed", "a.rb"), "a = 1\n")
+    File.write(File.join(dir, "build", "I01-my-slice-lane-b", "wt", "allowed", "b.rb"), "b = 1\n")
+
+    before, = Open3.capture3("git", "-C", dir, "rev-list", "--count", "HEAD")
+    project.integrate!("my-slice", lanes: ["lane-a", "lane-b"])
+    after, = Open3.capture3("git", "-C", dir, "rev-list", "--count", "HEAD")
+
+    assert_equal before.strip.to_i + 1, after.strip.to_i,
+      "integrate! over two lanes must make exactly one metadata commit, not one per lane"
   ensure
     FileUtils.rm_rf(dir)
   end

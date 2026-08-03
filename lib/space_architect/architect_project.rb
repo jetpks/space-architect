@@ -504,6 +504,12 @@ module Space::Architect
     # first conflict (a disjointness defect). Never decides which lanes pass. With no
     # lanes and teardown: true, tears down every lane recorded for the iteration instead
     # (the second, teardown-only call in the loop's integrate-then-teardown rhythm).
+    #
+    # merge_lane!/teardown_lanes! only save integration_branch/integrate_sha/worktree to
+    # space.yaml on disk (update_architect_block never commits) — one commit per call,
+    # here, by pathspec, so which lanes merged survives independently of whether a
+    # Verdict follows (I13/A3). Always attempted, success or raise, so a conflict that
+    # stops the loop midway doesn't lose the lanes already merged.
     def integrate!(iteration, lanes: nil, teardown: false, message: nil, commit_mode: nil, into: nil, accept_bounds_reason: nil)
       lanes = Array(lanes)
       return teardown_lanes!(iteration, slice_entry(iteration)["lanes"] || []) if lanes.empty? && teardown
@@ -520,6 +526,8 @@ module Space::Architect
 
       teardown_lanes!(iteration, merged) if teardown
       merged
+    ensure
+      commit_metadata_mutation!(iteration, message: message)
     end
 
     # Run the iteration's frozen Acceptance Criteria gate commands. Each gate is
@@ -1075,6 +1083,21 @@ module Space::Architect
       body.empty? ? composed : "#{composed}\n\n#{body}"
     end
 
+    # integrate!'s own space.yaml commit, by pathspec — like record_verdict!'s sweep, so
+    # other uncommitted work in the space isn't pulled in. A call that mutated nothing
+    # (teardown-only over lanes with no worktree, or a call that raised before touching
+    # anything) leaves git commit with nothing staged for that path; tolerate that exit
+    # via git_capture the way write_section! tolerates a no-op frozen-section commit,
+    # never git_run it.
+    def commit_metadata_mutation!(iteration, message:)
+      entries = (space.data["project"] || {})["iterations"] || []
+      ordinal = entries.find { |s| s["name"] == iteration }&.dig("ordinal") || 0
+      nn = format("%02d", ordinal)
+      git_capture("-C", space.path.to_s, "commit", "-m",
+        compose_message("I#{nn} integrate:", "I#{nn}: record integration", message),
+        "--", Space::Core::Space::METADATA_FILE)
+    end
+
     # Remove each lane's worktree and safe-delete (`-d`) its lane branch. Accepts
     # either merge_lane! results (symbol keys) or recorded lane entries (string
     # keys) — both carry a lane name and a repo.
@@ -1222,6 +1245,36 @@ module Space::Architect
       result[:status] == :pass ? :green : :red
     end
 
+    # grep-family binaries this check recognizes in a gate's shell command.
+    SCOPE_GREP_BINARIES = %w[grep egrep fgrep].freeze
+
+    # Shellwords treats shell syntax — pipes, `&&`/`||`/`;`, `$(...)`, control
+    # keywords — as ordinary word characters, not structure (its own docs say
+    # plainly this isn't a command-line parser). These are the markers
+    # #shell_segments splits a token stream on, once #pad_shell_operators has
+    # made sure none of them can arrive glued to an adjacent word.
+    SCOPE_BOUNDARY_TOKENS = %w[| || && ; $( ( ) if elif then else fi do done while until case esac].freeze
+
+    # Flags that change what a pattern matches and this check actually replays
+    # verbatim against the real grep binary — mode (E/F/G/P) and w, both
+    # threaded through to #whole_repo_grep_matches below — vs flags that only
+    # change what's printed (irrelevant to a files-with-matches re-run). A flag
+    # belongs here only once something below replays it.
+    SCOPE_MATCH_FLAGS = %w[E F G P w].freeze
+    SCOPE_NOOP_FLAGS = %w[c i n o q r l z H h].freeze
+
+    # Recognized flags git grep has no equivalent for (-w and -x are not
+    # symmetric) — declined as not-analyzable, reason naming the flag, rather
+    # than replayed wrong or silently dropped.
+    SCOPE_DECLINED_FLAGS = { "x" => "-x (whole-line match) has no git-grep equivalent" }.freeze
+
+    # git grep, not a raw recursive grep: it skips .git's own object store (a
+    # raw `grep -r .` would trawl it) and matches "the tree" the way the rest
+    # of this corpus's git-based gates already do (diff-scope's own gates are
+    # git diff, not find/grep). Small fixed budget — runs once per recognized
+    # invocation, not per gate.
+    SCOPE_SEARCH_TIMEOUT = 30
+
     # I12/AC3: rehearse's scope-asymmetry check. I11 shipped a bug its own new
     # boundary discipline could not catch: a gate's grep-family search covered
     # only `lib`, while the identifier it renamed also lived in a `test/` file
@@ -1234,29 +1287,6 @@ module Space::Architect
     # union; parse_lanes returns [] with no ```lanes``` block, which still
     # yields the outside-every-lane half of the report. Reports only: never
     # touches rehearse's exit code, RED/GREEN/BROKEN, or the rehearsal stamp.
-    SCOPE_GREP_BINARIES = %w[grep egrep fgrep].freeze
-
-    # Shellwords treats shell syntax — pipes, `&&`/`||`/`;`, `$(...)`, control
-    # keywords — as ordinary word characters, not structure (its own docs say
-    # plainly this isn't a command-line parser). These are the markers
-    # #shell_segments splits a token stream on, once #pad_shell_operators has
-    # made sure none of them can arrive glued to an adjacent word.
-    SCOPE_BOUNDARY_TOKENS = %w[| || && ; $( ( ) if elif then else fi do done while until case esac].freeze
-
-    # Flags that change what a pattern matches — safe to replay verbatim
-    # against the real grep binary, never reinterpreted in Ruby — vs flags
-    # that only change what's printed (irrelevant to a files-with-matches
-    # re-run).
-    SCOPE_MATCH_FLAGS = %w[E F G P w x].freeze
-    SCOPE_NOOP_FLAGS = %w[c i n o q r l z H h].freeze
-
-    # git grep, not a raw recursive grep: it skips .git's own object store (a
-    # raw `grep -r .` would trawl it) and matches "the tree" the way the rest
-    # of this corpus's git-based gates already do (diff-scope's own gates are
-    # git diff, not find/grep). Small fixed budget — runs once per recognized
-    # invocation, not per gate.
-    SCOPE_SEARCH_TIMEOUT = 30
-
     def scope_asymmetry_report(gates, text, base_dir)
       touch_globs = parse_lanes(text).flat_map { |l| l["touch"] || [] }
       findings = []
@@ -1293,7 +1323,7 @@ module Space::Architect
       return nil unless matched
 
       elsewhere = matched.reject { |f| within_declared_scope?(f, inv[:paths], base_dir) }
-      outside_lanes, within_lanes = elsewhere.partition { |f| !in_touch_set?(f, touch_globs) }
+      within_lanes, outside_lanes = elsewhere.partition { |f| in_touch_set?(f, touch_globs) }
       { pattern: inv[:pattern], paths: inv[:paths], outside_lanes: outside_lanes.sort, within_lanes: within_lanes.sort }
     end
 
@@ -1305,6 +1335,7 @@ module Space::Architect
     def whole_repo_grep_matches(inv, base_dir)
       flags = ["-l", "-I"]
       flags << "-i" if inv[:case_insensitive]
+      flags << "-w" if inv[:word_boundary]
       flags << "-#{inv[:mode]}" unless inv[:mode] == "G"
       cmd = "git grep #{flags.join(' ')} -- #{Shellwords.escape(inv[:pattern])}"
       captured = capture_with_timeout(cmd, dir: base_dir, timeout: SCOPE_SEARCH_TIMEOUT)
@@ -1427,9 +1458,12 @@ module Space::Architect
         end
       end
 
-      unsupported = flag_chars - (SCOPE_MATCH_FLAGS + SCOPE_NOOP_FLAGS)
+      unsupported = flag_chars - (SCOPE_MATCH_FLAGS + SCOPE_NOOP_FLAGS + SCOPE_DECLINED_FLAGS.keys)
       return { status: :not_analyzable, reason: "unsupported flag(s): #{unsupported.uniq.join(', ')}" } if unsupported.any?
       return { status: :not_analyzable, reason: "-v (inverted match) semantics not safely reinterpreted" } if flag_chars.include?("v")
+
+      declined = (flag_chars & SCOPE_DECLINED_FLAGS.keys).uniq
+      return { status: :not_analyzable, reason: declined.map { |f| SCOPE_DECLINED_FLAGS[f] }.join("; ") } if declined.any?
 
       modes = (flag_chars & %w[E F G P]).uniq
       return { status: :not_analyzable, reason: "ambiguous pattern flags: #{modes.join(', ')}" } if modes.size > 1
@@ -1440,8 +1474,8 @@ module Space::Architect
       return { status: :not_analyzable, reason: "no path operand (pipeline/stdin search)" } if paths.empty?
       return { status: :not_analyzable, reason: "path operand contains an unresolved shell variable" } if paths.any? { |p| p.include?("$") }
 
-      { status: :recognized, pattern: pattern, paths: paths,
-        case_insensitive: flag_chars.include?("i"), mode: modes.first || "G" }
+      { status: :recognized, pattern: pattern, paths: paths, case_insensitive: flag_chars.include?("i"),
+        word_boundary: flag_chars.include?("w"), mode: modes.first || "G" }
     end
 
     def iteration_id(entry)
