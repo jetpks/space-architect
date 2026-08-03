@@ -228,8 +228,31 @@ module Space::Architect
       # The liveness fiber's wait predicate: ready once the run log holds a parseable
       # stream-json init event — not merely once it holds any bytes, since the child's
       # stderr is teed into the same run log and one early stderr byte must not satisfy it.
+      #
+      # Scans only the bytes appended since the previous poll (remembering the offset
+      # in @liveness_offset) instead of re-parsing the whole log from the top on every
+      # 50ms tick — the child that never emits an init event would otherwise cost
+      # O(polls x log size) inside a fiber sharing the reactor with the dispatch itself.
       def init_event_ready?(run_log_path)
-        !streamed_init_model(run_log_path).nil?
+        return true if @liveness_model
+
+        @liveness_offset ||= 0
+        File.open(run_log_path, "r") do |f|
+          f.seek(@liveness_offset)
+          f.each_line do |line|
+            break unless line.end_with?("\n")
+            @liveness_offset = f.pos
+            ev = begin
+              JSON.parse(line)
+            rescue JSON::ParserError
+              next
+            end
+            next unless ev.is_a?(Hash) && ev["type"] == "system" && ev["subtype"] == "init"
+            @liveness_model = ev["model"]
+            break
+          end
+        end
+        !@liveness_model.nil?
       rescue StandardError
         false
       end
