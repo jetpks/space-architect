@@ -1008,6 +1008,70 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # A3: re-transcribing a lane replaces its "### <lane>" subsection in place —
+  # verbatim, byte-for-byte — instead of appending a duplicate, and leaves the
+  # other lanes' subsections (and their order) untouched.
+  def test_transcribe_evidence_replaces_existing_lane_subsection_in_place
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n- name: lane-b\n  repo: my-repo\n  touch:\n    - test/**\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml)
+    project.freeze!("my-slice", no_rehearse_reason: "test setup — not exercising rehearsal")
+
+    FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-a"))
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "report.md"), "first pass, 3 failures\n\nSTATUS: COMPLETE_WITH_CONCERNS\n")
+    project.transcribe_evidence!("my-slice", lane: "lane-a")
+
+    FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-b"))
+    File.write(File.join(dir, "build", "I01-my-slice-lane-b", "report.md"), "lane-b report\n\nSTATUS: COMPLETE\n")
+    project.transcribe_evidence!("my-slice", lane: "lane-b")
+
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "report.md"), "follow-up pass, 0 failures\n\nSTATUS: COMPLETE\n")
+    project.transcribe_evidence!("my-slice", lane: "lane-a")
+
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    refute_includes text, "first pass, 3 failures", "the superseded lane-a report must not survive"
+    assert_includes text, "follow-up pass, 0 failures"
+    assert_includes text, "lane-b report"
+    assert_equal 1, text.scan("### lane-a").size, "re-transcribing must not duplicate the ### lane-a heading"
+    assert_operator text.index("### lane-a"), :<, text.index("### lane-b"), "lane-a's original position must be preserved"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # A3: transcribing a lane that has no existing subsection still appends —
+  # only re-transcription replaces.
+  def test_transcribe_evidence_appends_a_lane_not_yet_present
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n- name: lane-b\n  repo: my-repo\n  touch:\n    - test/**\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml)
+    project.freeze!("my-slice", no_rehearse_reason: "test setup — not exercising rehearsal")
+
+    FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-a"))
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "report.md"), "lane-a report\n\nSTATUS: COMPLETE\n")
+    project.transcribe_evidence!("my-slice", lane: "lane-a")
+
+    FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-b"))
+    File.write(File.join(dir, "build", "I01-my-slice-lane-b", "report.md"), "lane-b report\n\nSTATUS: COMPLETE\n")
+    project.transcribe_evidence!("my-slice", lane: "lane-b")
+
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    assert_includes text, "lane-a report"
+    assert_includes text, "lane-b report"
+    assert_operator text.index("### lane-a"), :<, text.index("### lane-b")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # brief_new! scaffolds architecture/BRIEF.md with numbered §sections and commits it;
   # a second call without --force is refused.
   def test_brief_new_scaffolds_numbered_sections_and_guards
@@ -1147,6 +1211,96 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     checks = project.verify("my-slice").first[:checks]
     assert_equal false, checks[:in_bounds], "gems/my-gem/** must not accept a repo-root .github/workflows/release.yml"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # A2: merge_lane! refuses an out-of-bounds lane outright, with no override given.
+  def test_merge_lane_refuses_out_of_bounds_without_override
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["allowed/**"])
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "wt", "out-of-bounds.rb"), "x = 1\n")
+
+    err = assert_raises(Space::Core::Error) { project.merge_lane!("my-slice", "lane-a") }
+    assert_match(/wrote outside its declared touch set/, err.message)
+    assert_match(/--accept-bounds REASON/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # A2: --accept-bounds overrides ONLY the in-bounds check — the merge still
+  # succeeds, the reason is recorded beside the lane in space.yaml, and it comes
+  # back in the result for the caller to echo (never a silent override).
+  def test_merge_lane_accept_bounds_overrides_in_bounds_check_and_records_reason
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["allowed/**"])
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "wt", "out-of-bounds.rb"), "x = 1\n")
+
+    r = project.merge_lane!("my-slice", "lane-a", accept_bounds_reason: "glob typo'd allowed/** instead of **")
+    assert_equal "glob typo'd allowed/** instead of **", r[:bounds_override_reason]
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lane = yml.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal "glob typo'd allowed/** instead of **", lane["bounds_override_reason"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # A2: the reason is required to be non-empty whenever --accept-bounds is passed.
+  def test_merge_lane_accept_bounds_reason_must_be_non_empty
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["allowed/**"])
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "wt", "out-of-bounds.rb"), "x = 1\n")
+
+    err = assert_raises(Space::Core::Error) { project.merge_lane!("my-slice", "lane-a", accept_bounds_reason: "   ") }
+    assert_match(/--accept-bounds requires a non-empty REASON/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # A2: --accept-bounds is narrow — it never overrides the no-builder-commits
+  # check, because a builder commit is tampering, not an authoring defect.
+  def test_merge_lane_accept_bounds_does_not_override_builder_commits_check
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["allowed/**"])
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "out-of-bounds.rb"), "x = 1\n")
+    system("git", "-C", wt, "add", "out-of-bounds.rb")
+    system("git", "-C", wt, "commit", "-q", "-m", "builder commit")
+
+    err = assert_raises(Space::Core::Error) do
+      project.merge_lane!("my-slice", "lane-a", accept_bounds_reason: "override attempt")
+    end
+    assert_match(/builder commits/i, err.message)
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -1515,6 +1669,43 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # A4: Process.spawn only shell-routes a `cmd` string that contains a shell
+  # metacharacter — a bare, metacharacter-free command naming a missing binary
+  # (no space, no `;`, no pipe) previously Shellwords-split straight to exec and
+  # raised Errno::ENOENT out of capture_with_timeout instead of a clean 127, so
+  # rehearse's BROKEN classification never saw the case that motivated it.
+  def test_rehearse_classifies_metacharacter_free_missing_binary_as_broken
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = <<~YAML
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    gates_yaml = <<~YAML
+      - id: broken-gate
+        ac: AC1
+        cmd: this-binary-does-not-exist-anywhere
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+    gate = result[:gates].find { |g| g[:id] == "broken-gate" }
+    assert_equal :broken, gate[:rehearsal]
+    assert_equal 127, gate[:exit_code]
+    assert_match(/command not found|No such file/, gate[:stderr])
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # AC5: the resolved run directory is present on every gate result, so the
   # renderer can print it (as `architect gate` now also does — AC9(a)).
   def test_rehearse_includes_resolved_dir_on_every_gate
@@ -1709,6 +1900,11 @@ class ArchitectProjectTest < Space::ArchitectTest
     err = assert_raises(Space::Core::Error) { project.freeze!("my-slice") }
     assert_match(/has not been rehearsed/, err.message)
     assert_match(/architect rehearse my-slice/, err.message)
+    # A1: OptionParser cannot bind a value to a switch spelled --no-<word> (it's
+    # forced to a boolean negation), so the working escape valve is --skip-rehearse
+    # — the refusal must name the flag that actually works, not the design name.
+    assert_match(/--skip-rehearse REASON/, err.message)
+    refute_match(/--no-rehearse/, err.message)
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -1792,7 +1988,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     File.write(File.join(dir, "architecture", "I01-my-slice.md"), text)
 
     err = assert_raises(Space::Core::Error) { project.freeze!("my-slice", no_rehearse_reason: "   ") }
-    assert_match(/non-empty REASON/, err.message)
+    # A1: names --skip-rehearse (the working flag), not --no-rehearse (the design name).
+    assert_match(/--skip-rehearse requires a non-empty REASON/, err.message)
   ensure
     FileUtils.rm_rf(dir)
   end

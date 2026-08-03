@@ -640,9 +640,10 @@ module Space::Architect
         option   :teardown,    type: :boolean, default: false, desc: "Remove worktrees + delete lane branches after merge"
         option   :commit_mode, default: nil,    desc: "Commit mode override (strict|conductor); overrides space.yaml commit_mode for this run"
         option   :into,        required: false, desc: "Merge into this branch instead of the slug-derived project/<slug> default"
+        option   :accept_bounds, default: nil,  desc: "Escape valve: override the in-bounds check for these lanes when the frozen touch-set glob is itself the defect, recording REASON in space.yaml (never overrides the no-builder-commits check)"
         commit_message_options
 
-        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, commit_mode: nil, into: nil, **opts)
+        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, commit_mode: nil, into: nil, accept_bounds: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
@@ -653,7 +654,7 @@ module Space::Architect
               project = ArchitectProject.new(space: sp)
               results = project.integrate!(iteration, lanes: lane_names, teardown: teardown,
                 message: read_commit_message(message: message, message_from: message_from),
-                commit_mode: commit_mode, into: into)
+                commit_mode: commit_mode, into: into, accept_bounds_reason: accept_bounds)
               if lane_names.empty?
                 if results.empty?
                   terminal.say "Nothing to tear down for #{iteration}"
@@ -665,6 +666,7 @@ module Space::Architect
               else
                 results.each do |r|
                   terminal.say "Merged #{r[:lane]} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
+                  terminal.say "In-bounds check overridden for #{r[:lane]}: #{r[:bounds_override_reason]}" if r[:bounds_override_reason]
                 end
                 terminal.say "Gates NOT run — run gates: `architect gate #{iteration}`"
               end
