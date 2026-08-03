@@ -48,6 +48,31 @@ class ArchitectCLITest < Space::ArchitectTest
     repo_dir
   end
 
+  # Strip the scaffold's still-untouched AC1 placeholder (`**AC1.** ...`,
+  # lib/space_architect/templates/iteration.md.erb:67) from iteration <name>'s
+  # file under <base_dir>, if present — so tests that freeze an otherwise
+  # pristine scaffold as unrelated setup plumbing don't trip freeze!'s #73
+  # hard-refuse (I09/AC8). A no-op when the placeholder is already gone.
+  # Duplicated from ArchitectProjectTest's copy: test/test_helper.rb is
+  # outside this lane's declared touch set (test/*_test.rb), so the shared
+  # base class isn't where this lives.
+  def strip_ac1_placeholder!(base_dir, name)
+    Dir.glob(File.join(base_dir, "architecture", "I*-#{name}.md")).each do |f|
+      text = File.read(f)
+      stripped = text.sub(Space::Architect::ArchitectProject::AC1_PLACEHOLDER, "**AC1.** (exercised elsewhere).")
+      File.write(f, stripped) if stripped != text
+    end
+  end
+
+  # I09/AC7: freezes via `invoke`, bypassing the rehearsal-stamp precondition
+  # (the --skip-rehearse escape valve) for tests exercising something other
+  # than freeze/rehearse itself. Must run from inside a Dir.chdir(space_path)
+  # block, like every other `invoke("freeze", ...)` call site in this file.
+  def freeze_for_test(name, *extra_args)
+    strip_ac1_placeholder!(Dir.pwd, name)
+    invoke("freeze", name, "--skip-rehearse", "test setup — not exercising rehearsal", *extra_args)
+  end
+
   # ── init / status smoke ─────────────────────────────────────────────────────
 
   def test_architect_init_creates_handoff_and_yml_block
@@ -348,7 +373,7 @@ class ArchitectCLITest < Space::ArchitectTest
         slice_file = File.join(space_path, "architecture", "I01-slice-1.md")
 
         # First freeze — the scaffold already carries a "## Acceptance Criteria" section.
-        out, err = invoke("freeze", "slice-1")
+        out, err = freeze_for_test("slice-1")
         assert_empty err
         assert_match(/[0-9a-f]{7,40}/, out)
 
@@ -361,7 +386,7 @@ class ArchitectCLITest < Space::ArchitectTest
         # Appending BELOW the freeze boundary (Builder Prompt) is allowed —
         # re-freeze returns the same sha, no error.
         File.write(slice_file, File.read(slice_file) + "\n### Lane A\nsome dispatched prompt\n")
-        out2, err2 = invoke("freeze", "slice-1")
+        out2, err2 = freeze_for_test("slice-1")
         assert_empty err2
         assert_match(/#{freeze_sha[0, 7]}/, out2)
 
@@ -369,7 +394,7 @@ class ArchitectCLITest < Space::ArchitectTest
         text = File.read(slice_file)
         text = text.sub("## Acceptance Criteria", "## Acceptance Criteria\n\nGA9: tampered threshold")
         File.write(slice_file, text)
-        _out3, err3 = invoke("freeze", "slice-1")
+        _out3, err3 = freeze_for_test("slice-1")
         refute_empty err3
         assert_match(/refusing to re-freeze/i, err3)
       end
@@ -392,7 +417,7 @@ class ArchitectCLITest < Space::ArchitectTest
         slice_file = File.join(space_path, "architecture", "I01-no-rubric.md")
         File.write(slice_file, "# I01: no-rubric\n\n## Specification\n\njust a contract\n")
 
-        _out, err = invoke("freeze", "no-rubric")
+        _out, err = freeze_for_test("no-rubric")
         assert_match(/no '## Acceptance Criteria' section/, err)
       end
     end
@@ -440,7 +465,7 @@ class ArchitectCLITest < Space::ArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "s1")
-        invoke("freeze", "s1")
+        freeze_for_test("s1")
         invoke("worktree", "add", "my-repo", "s1", "lane-a")
 
         wt_path = File.join(space_path, "build", "I01-s1-lane-a", "wt")
@@ -472,7 +497,7 @@ class ArchitectCLITest < Space::ArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "s1")
-        invoke("freeze", "s1")
+        freeze_for_test("s1")
         invoke("worktree", "add", "my-repo", "s1", "lane-b")
 
         out, err = invoke("verify", "s1")
@@ -1117,7 +1142,7 @@ class ArchitectCLITest < Space::ArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "s1")
-        invoke("freeze", "s1")
+        freeze_for_test("s1")
         invoke("worktree", "add", "my-repo", "s1", "lane-c")
 
         # The builder's scratch report (non-empty) lives in build/.
@@ -1482,7 +1507,7 @@ class ArchitectCLITest < Space::ArchitectTest
           "\\1| G0 | `rake test` | green | §1 |\n")
         File.write(slice, text)
 
-        out, err = invoke("freeze", "s1")
+        out, err = freeze_for_test("s1")
         assert_empty err
         assert_match(/Frozen Acceptance Criteria/, out)
         assert_match(/rake test/, out)
@@ -1504,7 +1529,7 @@ class ArchitectCLITest < Space::ArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "s1")
-        invoke("freeze", "s1")
+        freeze_for_test("s1")
         invoke("worktree", "add", "my-repo", "s1", "lane-a")
 
         FileUtils.mkdir_p(File.join(space_path, "build", "I01-s1-lane-a"))
@@ -1555,7 +1580,7 @@ class ArchitectCLITest < Space::ArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "s1")
-        invoke("freeze", "s1")
+        freeze_for_test("s1")
         invoke("worktree", "add", "my-repo", "s1", "lane-a")
 
         wt = File.join(space_path, "build", "I01-s1-lane-a", "wt")
@@ -1584,7 +1609,7 @@ class ArchitectCLITest < Space::ArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "s1")
-        invoke("freeze", "s1")
+        freeze_for_test("s1")
 
         out, err = invoke("integrate", "s1")
         assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
@@ -1612,7 +1637,7 @@ class ArchitectCLITest < Space::ArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "s1")
-        invoke("freeze", "s1")
+        freeze_for_test("s1")
         invoke("worktree", "add", "my-repo", "s1", "lane-a")
 
         wt = File.join(space_path, "build", "I01-s1-lane-a", "wt")
@@ -1643,7 +1668,7 @@ class ArchitectCLITest < Space::ArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "s1")
-        invoke("freeze", "s1")
+        freeze_for_test("s1")
 
         out, err = invoke("integrate", "s1", "--teardown")
         assert_empty err
@@ -1973,7 +1998,7 @@ class ArchitectCLITest < Space::ArchitectTest
         YAML
         text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
         File.write(slice, text)
-        invoke("freeze", "demo")
+        freeze_for_test("demo")
         invoke("worktree", "add", "my-repo", "demo", "lane-a")
 
         out, err = invoke("gate", "demo", "lane-a")
@@ -2012,7 +2037,7 @@ class ArchitectCLITest < Space::ArchitectTest
         YAML
         text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
         File.write(slice, text)
-        invoke("freeze", "demo")
+        freeze_for_test("demo")
         invoke("worktree", "add", "my-repo", "demo", "lane-a")
 
         out_io  = StringIO.new
@@ -2030,6 +2055,231 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # AC9(a): `architect gate` prints each gate's resolved run directory.
+  def test_gate_command_prints_resolved_dir
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        gate_yaml = <<~YAML
+          - id: echo-pass
+            ac: AC1
+            cmd: echo gate-ok
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+        freeze_for_test("demo")
+        invoke("worktree", "add", "my-repo", "demo", "lane-a")
+
+        out, err = invoke("gate", "demo", "lane-a")
+
+        assert_empty err
+        assert_match(%r{dir:.*build/I01-demo-lane-a/wt}, out, "gate must print the resolved run directory")
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # ── rehearse: RED/GREEN/BROKEN/EMPTY reporting, dir, --record ─────────────
+
+  def test_rehearse_reports_red_green_and_dir_before_freeze
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        text  = text.sub(
+          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
+          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
+          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
+          "# - name: lane-a            # lane name (required)\n" \
+          "#   repo: my-repo           # target repo under repos/ (required)\n" \
+          "#   touch:                  # file globs this lane may write (required, non-empty)\n" \
+          "#     - lib/my_repo/**\n" \
+          "#     - test/my_repo_test.rb\n```",
+          "```lanes\n- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n```"
+        )
+        gate_yaml = <<~YAML
+          - id: green-gate
+            ac: AC1
+            cmd: echo ok
+            expect:
+              exit_code: 0
+          - id: red-gate
+            ac: AC1
+            cmd: sh -c 'exit 1'
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+
+        out, err = invoke("rehearse", "demo")
+
+        assert_empty err
+        assert_match(/\[GREEN\]/, out)
+        assert_match(/\[RED\]/, out)
+        assert_match(%r{dir:.*repos/my-repo}, out)
+        refute_match(/Dry-run at rehearsal time/, out, "bare rehearse must not emit the --record provenance block")
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_rehearse_record_flag_emits_provenance_block
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        text  = text.sub(
+          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
+          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
+          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
+          "# - name: lane-a            # lane name (required)\n" \
+          "#   repo: my-repo           # target repo under repos/ (required)\n" \
+          "#   touch:                  # file globs this lane may write (required, non-empty)\n" \
+          "#     - lib/my_repo/**\n" \
+          "#     - test/my_repo_test.rb\n```",
+          "```lanes\n- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n```"
+        )
+        gate_yaml = <<~YAML
+          - id: green-gate
+            ac: AC1
+            cmd: echo ok
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+
+        out, err = invoke("rehearse", "demo", "--record")
+
+        assert_empty err
+        assert_match(/Dry-run at rehearsal time/, out)
+        assert_match(/GREEN \(1/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_rehearse_reports_empty_on_untouched_scaffold
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        out, err = invoke("rehearse", "demo")
+
+        assert_empty err
+        assert_match(/EMPTY/, out)
+        assert_match(/placeholder/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # I09/AC4: the lifecycle placement — reachable, unfrozen, working-tree read.
+  def test_rehearse_runs_against_an_unfrozen_iteration
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
+        refute yml.dig("project", "iterations", 0, "freeze_sha"), "iteration must still be unfrozen"
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice).sub("**AC1.** ...", "**AC1.** README exists.")
+        text  = text.sub(/^```gates\n.*?^```/m, "```gates\n- id: g1\n  ac: AC1\n  cmd: test -f README.md\n  expect:\n    exit_code: 0\n```")
+        text  = text.sub(
+          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
+          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
+          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
+          "# - name: lane-a            # lane name (required)\n" \
+          "#   repo: my-repo           # target repo under repos/ (required)\n" \
+          "#   touch:                  # file globs this lane may write (required, non-empty)\n" \
+          "#     - lib/my_repo/**\n" \
+          "#     - test/my_repo_test.rb\n```",
+          "```lanes\n- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n```"
+        )
+        File.write(slice, text)
+
+        out, err = invoke("rehearse", "demo")
+        assert_empty err
+        assert_match(/\[GREEN\]/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_rehearse_help_lists_record_flag
+    out = IO.popen(["bundle", "exec", "architect", "rehearse", "--help"], err: [:child, :out], &:read)
+    assert_includes out, "--record"
+  end
+
+  def test_freeze_help_mentions_no_rehearse_escape_valve
+    out = IO.popen(["bundle", "exec", "architect", "freeze", "--help"], err: [:child, :out], &:read)
+    assert_includes out, "--no-rehearse"
+    assert_includes out, "--skip-rehearse"
+  end
+
+  # AC4: rehearse sits between section and freeze; freeze renumbers accordingly.
+  def test_architect_help_spec_group_orders_new_section_rehearse_freeze
+    out = IO.popen(["bundle", "exec", "architect", "--help"], err: [:child, :out], &:read)
+    spec_block = out[/^Spec$.*?(?=^\S|\z)/m]
+    names = spec_block.scan(/^  architect ([a-z-]+)/).flatten
+    assert_equal %w[new section rehearse freeze], names
+  end
+
   # Fix (2): no touch_set recorded → (d) in-bounds shows WARN, not FAIL or N/A.
   def test_verify_warns_when_no_touch_set_recorded
     setup = temp_env
@@ -2043,7 +2293,7 @@ class ArchitectCLITest < Space::ArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "s1")
-        invoke("freeze", "s1")
+        freeze_for_test("s1")
         invoke("worktree", "add", "my-repo", "s1", "lane-e")
 
         out, err = invoke("verify", "s1")
@@ -2072,7 +2322,7 @@ class ArchitectCLITest < Space::ArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "s1")
-        invoke("freeze", "s1")
+        freeze_for_test("s1")
         invoke("worktree", "add", "my-repo", "s1", "lane-f")
 
         wt_path = File.join(space_path, "build", "I01-s1-lane-f", "wt")
@@ -2109,7 +2359,7 @@ class ArchitectCLITest < Space::ArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "s1")
-        invoke("freeze", "s1")
+        freeze_for_test("s1")
         invoke("worktree", "add", "my-repo", "s1", "lane-a")
 
         wt_path = File.join(space_path, "build", "I01-s1-lane-a", "wt")
@@ -2184,7 +2434,7 @@ class ArchitectCLITest < Space::ArchitectTest
           ## Builder Prompt
         MD
 
-        invoke("freeze", "slice-1")
+        freeze_for_test("slice-1")
         out, err = invoke("provision", "slice-1")
 
         assert_empty err
