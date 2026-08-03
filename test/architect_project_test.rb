@@ -1020,7 +1020,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.new_iteration!("my-slice")
     lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n- name: lane-b\n  repo: my-repo\n  touch:\n    - test/**\n"
     write_iteration_with_lanes(dir, "my-slice", lanes_yaml)
-    project.freeze!("my-slice", no_rehearse_reason: "test setup — not exercising rehearsal")
+    project.freeze!("my-slice", skip_rehearse_reason: "test setup — not exercising rehearsal")
 
     FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-a"))
     File.write(File.join(dir, "build", "I01-my-slice-lane-a", "report.md"), "first pass, 3 failures\n\nSTATUS: COMPLETE_WITH_CONCERNS\n")
@@ -1054,7 +1054,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.new_iteration!("my-slice")
     lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n- name: lane-b\n  repo: my-repo\n  touch:\n    - test/**\n"
     write_iteration_with_lanes(dir, "my-slice", lanes_yaml)
-    project.freeze!("my-slice", no_rehearse_reason: "test setup — not exercising rehearsal")
+    project.freeze!("my-slice", skip_rehearse_reason: "test setup — not exercising rehearsal")
 
     FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-a"))
     File.write(File.join(dir, "build", "I01-my-slice-lane-a", "report.md"), "lane-a report\n\nSTATUS: COMPLETE\n")
@@ -1301,6 +1301,40 @@ class ArchitectProjectTest < Space::ArchitectTest
       project.merge_lane!("my-slice", "lane-a", accept_bounds_reason: "override attempt")
     end
     assert_match(/builder commits/i, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # A1: `integrate --accept-bounds REASON` threads the same reason to every lane
+  # in the set, but only the lane whose in-bounds check actually failed gets it
+  # recorded and echoed — a lane that was already in bounds gets neither.
+  def test_integrate_accept_bounds_only_records_for_the_lane_that_was_out_of_bounds
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["allowed/**"])
+    project.worktree_add("my-repo", "my-slice", "lane-b", touch: ["allowed/**"])
+
+    FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-a", "wt", "allowed"))
+    File.write(File.join(dir, "build", "I01-my-slice-lane-a", "wt", "allowed", "feature.rb"), "x = 1\n")
+    File.write(File.join(dir, "build", "I01-my-slice-lane-b", "wt", "out-of-bounds.rb"), "x = 1\n")
+
+    results = project.integrate!("my-slice", lanes: ["lane-a", "lane-b"], accept_bounds_reason: "glob typo'd allowed/** instead of **")
+    by_lane = results.each_with_object({}) { |r, h| h[r[:lane]] = r }
+    assert_nil by_lane["lane-a"][:bounds_override_reason], "lane-a was already in bounds — must not carry an override"
+    assert_equal "glob typo'd allowed/** instead of **", by_lane["lane-b"][:bounds_override_reason]
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lanes = yml.dig("project", "iterations", 0, "lanes")
+    lane_a = lanes.find { |l| l["name"] == "lane-a" }
+    lane_b = lanes.find { |l| l["name"] == "lane-b" }
+    assert_nil lane_a["bounds_override_reason"]
+    assert_equal "glob typo'd allowed/** instead of **", lane_b["bounds_override_reason"]
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -1614,7 +1648,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
 
     rehearsed = project.rehearse("my-slice")
-    project.freeze!("my-slice", no_rehearse_reason: "already rehearsed above, freeze! only needs the stamp check to pass")
+    project.freeze!("my-slice", skip_rehearse_reason: "already rehearsed above, freeze! only needs the stamp check to pass")
     project.worktree_add("my-repo", "my-slice", "lane-a")
     judged = project.run_gates("my-slice", lane: "lane-a")
 
@@ -1976,7 +2010,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  def test_freeze_no_rehearse_reason_must_be_non_empty
+  def test_freeze_skip_rehearse_reason_must_be_non_empty
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
 
@@ -1987,7 +2021,7 @@ class ArchitectProjectTest < Space::ArchitectTest
       .sub("**AC1.** ...", "**AC1.** Prose only.")
     File.write(File.join(dir, "architecture", "I01-my-slice.md"), text)
 
-    err = assert_raises(Space::Core::Error) { project.freeze!("my-slice", no_rehearse_reason: "   ") }
+    err = assert_raises(Space::Core::Error) { project.freeze!("my-slice", skip_rehearse_reason: "   ") }
     # A1: names --skip-rehearse (the working flag), not --no-rehearse (the design name).
     assert_match(/--skip-rehearse requires a non-empty REASON/, err.message)
   ensure
@@ -2005,7 +2039,7 @@ class ArchitectProjectTest < Space::ArchitectTest
       .sub("**AC1.** ...", "**AC1.** Prose only.")
     File.write(File.join(dir, "architecture", "I01-my-slice.md"), text)
 
-    project.freeze!("my-slice", no_rehearse_reason: "docs-only iteration, no gates possible")
+    project.freeze!("my-slice", skip_rehearse_reason: "docs-only iteration, no gates possible")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     entry = yml.dig("project", "iterations", 0)
@@ -2962,7 +2996,7 @@ class ArchitectProjectTest < Space::ArchitectTest
   # so I09/AC8's hard-refuse doesn't trip unrelated setup plumbing either.
   def freeze_for_test!(project, dir, name, **kwargs)
     strip_ac1_placeholder!(dir, name)
-    project.freeze!(name, no_rehearse_reason: "test setup — not exercising rehearsal", **kwargs)
+    project.freeze!(name, skip_rehearse_reason: "test setup — not exercising rehearsal", **kwargs)
   end
 
   # AC1: freeze parses the ```lanes block and writes name/repo/touch_set into the

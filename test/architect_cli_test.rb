@@ -1669,6 +1669,47 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # A1: a mixed `--lanes a,b --accept-bounds REASON` invocation — one lane out
+  # of bounds, one already in bounds — only overrides and echoes for the lane
+  # that actually needed it.
+  def test_integrate_cli_accept_bounds_mixed_lanes_overrides_only_the_out_of_bounds_lane
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        freeze_for_test("s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a", "--touch", "allowed/**")
+        invoke("worktree", "add", "my-repo", "s1", "lane-b", "--touch", "allowed/**")
+
+        File.write(File.join(space_path, "build", "I01-s1-lane-a", "wt", "out-of-bounds.rb"), "x = 1\n")
+        wt_b = File.join(space_path, "build", "I01-s1-lane-b", "wt")
+        FileUtils.mkdir_p(File.join(wt_b, "allowed"))
+        File.write(File.join(wt_b, "allowed", "feature.rb"), "x = 1\n")
+
+        out, err = invoke("integrate", "s1", "--lanes", "lane-a,lane-b", "--accept-bounds", "glob was wrong")
+        assert_empty err
+        assert_match(/In-bounds check overridden for lane-a: glob was wrong/, out)
+        refute_match(/In-bounds check overridden for lane-b/, out)
+
+        yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
+        lanes = yml.dig("project", "iterations", 0, "lanes")
+        lane_a = lanes.find { |l| l["name"] == "lane-a" }
+        lane_b = lanes.find { |l| l["name"] == "lane-b" }
+        assert_equal "glob was wrong", lane_a["bounds_override_reason"]
+        assert_nil lane_b["bounds_override_reason"]
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   # AC1: neither --lanes nor --teardown must exit 1 with a friendly usage
   # message, not a raw ArgumentError backtrace from a missing keyword.
   def test_integrate_cli_without_lanes_or_teardown_gives_usage_error_not_backtrace

@@ -316,7 +316,7 @@ module Space::Architect
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
               warnings = []
-              sha = project.freeze!(iteration, warnings: warnings, force: force, no_rehearse_reason: skip_rehearse,
+              sha = project.freeze!(iteration, warnings: warnings, force: force, skip_rehearse_reason: skip_rehearse,
                 message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Frozen #{iteration} at #{sha}"
               terminal.say "Rehearsal requirement skipped — #{skip_rehearse}" if skip_rehearse
