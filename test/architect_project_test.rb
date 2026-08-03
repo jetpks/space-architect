@@ -69,7 +69,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     FileUtils.mkdir_p(File.join(dir, "build", "I01-my-slice-lane-a"))
@@ -94,7 +94,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     bare_wt_rel = "tmp/architect/wt/my-slice-lane-a"
     bare_wt_path = File.join(dir, bare_wt_rel)
@@ -643,7 +643,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.variant_add("my-repo", "my-slice",
                         [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
     # non-variant lane must be EXCLUDED from the compare result
@@ -824,7 +824,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     err = assert_raises(Space::Core::Error) do
       project.write_section!("my-slice", "specification", body: "tampered")
@@ -1040,7 +1040,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["allowed/**"])
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
@@ -1067,7 +1067,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["allowed/*.rb"])
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
@@ -1097,7 +1097,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["roles/cilium/**"])
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
@@ -1131,7 +1131,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["gems/my-gem/**"])
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
@@ -1160,7 +1160,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
@@ -1184,7 +1184,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
@@ -1218,13 +1218,13 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
 
     project.new_iteration!("s1")
-    project.freeze!("s1")
+    freeze_for_test!(project, dir, "s1")
     project.worktree_add("my-repo", "s1", "lane-a")
     File.write(File.join(dir, "build", "I01-s1-lane-a", "wt", "feature1.rb"), "def f1; end\n")
     r1 = project.merge_lane!("s1", "lane-a")
 
     project.new_iteration!("s2")
-    project.freeze!("s2")
+    freeze_for_test!(project, dir, "s2")
     project.worktree_add("my-repo", "s2", "lane-b")
     File.write(File.join(dir, "build", "I02-s2-lane-b", "wt", "feature2.rb"), "def f2; end\n")
     r2 = project.merge_lane!("s2", "lane-b")
@@ -1251,7 +1251,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
@@ -1294,7 +1294,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
@@ -1336,7 +1336,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     YAML
     text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
     File.write(slice, text)
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     results = project.run_gates("my-slice", lane: "lane-a")
@@ -1374,7 +1374,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     YAML
     text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
     File.write(slice, text)
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     results = project.run_gates("my-slice", lane: "lane-a")
@@ -1406,7 +1406,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     YAML
     text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
     File.write(slice, text)
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     t0 = Time.now
@@ -1420,6 +1420,523 @@ class ArchitectProjectTest < Space::ArchitectTest
     # capture_with_timeout waits a fixed 0.5s between TERM and KILL, so the
     # floor here is ~0.2s (gate timeout) + 0.5s, not the gate timeout alone.
     assert elapsed < 3, "timeout-kill test took #{elapsed.round(1)}s — expected ~0.7s"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── I09: rehearse ────────────────────────────────────────────────────────
+
+  # AC3, the identical-instrument property, proven BEHAVIORALLY: the same
+  # gates block, unfrozen then frozen, run through #rehearse and #run_gates
+  # respectively, must agree exit-code-for-exit-code and stdout-for-stdout —
+  # not merely "both call #execute_gates" (a method-name assertion would not
+  # catch a drifted cwd-remap or a divergent evaluator).
+  def test_rehearse_and_gate_agree_exit_codes_and_stdout_on_unchanged_tree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = <<~YAML
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    gates_yaml = <<~YAML
+      - id: pass-gate
+        ac: AC1
+        cmd: echo hi
+        expect:
+          exit_code: 0
+      - id: fail-gate
+        ac: AC2
+        cmd: sh -c 'exit 3'
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    rehearsed = project.rehearse("my-slice")
+    project.freeze!("my-slice", no_rehearse_reason: "already rehearsed above, freeze! only needs the stamp check to pass")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    judged = project.run_gates("my-slice", lane: "lane-a")
+
+    assert_equal judged.map { |r| r[:exit_code] }, rehearsed[:gates].map { |r| r[:exit_code] }
+    assert_equal judged.map { |r| r[:stdout] },     rehearsed[:gates].map { |r| r[:stdout] }
+    assert_equal judged.map { |r| r[:status] },     rehearsed[:gates].map { |r| r[:status] }
+    assert_equal %i[green red], rehearsed[:gates].map { |g| g[:rehearsal] }
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_rehearse_classifies_red_green_and_broken
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = <<~YAML
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    gates_yaml = <<~YAML
+      - id: red-gate
+        ac: AC1
+        cmd: sh -c 'exit 1'
+        expect:
+          exit_code: 0
+      - id: green-gate
+        ac: AC2
+        cmd: echo ok
+        expect:
+          exit_code: 0
+      - id: broken-gate
+        ac: AC3
+        cmd: this-binary-does-not-exist-anywhere;
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+    by_id = result[:gates].to_h { |g| [g[:id], g[:rehearsal]] }
+    assert_equal :red, by_id["red-gate"]
+    assert_equal :green, by_id["green-gate"]
+    assert_equal :broken, by_id["broken-gate"]
+    assert_equal 127, result[:gates].find { |g| g[:id] == "broken-gate" }[:exit_code]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5: the resolved run directory is present on every gate result, so the
+  # renderer can print it (as `architect gate` now also does — AC9(a)).
+  def test_rehearse_includes_resolved_dir_on_every_gate
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = "- id: g1\n  ac: AC1\n  cmd: echo ok\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+    assert_equal File.join(dir, "repos", "my-repo"), result[:gates][0][:dir].to_s
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4, the pre-freeze blocker's corollary: rehearsal always runs in the repo
+  # checkout, never a lane worktree, even when a lane worktree already exists
+  # (worktree_add is legal pre-freeze) — space.yaml's recorded lanes are not
+  # consulted; only the DRAFTED ```lanes``` block is.
+  def test_rehearse_runs_in_repo_checkout_never_lane_worktree
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "marker.txt"), "worktree-only\n")
+
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = "- id: marker-gate\n  ac: AC1\n  cmd: cat marker.txt\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+    gate = result[:gates].first
+    assert_equal File.join(dir, "repos", "my-repo"), gate[:dir].to_s
+    refute_equal 0, gate[:exit_code], "marker.txt only exists in the lane worktree — rehearsal must not find it in the repo checkout"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_rehearse_resolves_repo_from_single_declared_lane
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = "- id: g1\n  ac: AC1\n  cmd: echo ok\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+    assert_equal "my-repo", result[:repo]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: with no drafted lanes block and exactly one repo tracked in
+  # space.yaml, that repo is used.
+  def test_rehearse_falls_back_to_sole_tracked_repo_when_no_lanes_declared
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    space.data["repos"] = [{ "name" => "my-repo" }]
+    space.save
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+      .sub("**AC1.** ...", "**AC1.** README exists.")
+      .sub(/^```gates\n.*?^```/m, "```gates\n- id: g1\n  ac: AC1\n  cmd: test -f README.md\n  expect:\n    exit_code: 0\n```")
+    File.write(File.join(dir, "architecture", "I01-my-slice.md"), text)
+
+    result = project.rehearse("my-slice")
+    assert_equal "my-repo", result[:repo]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: genuinely ambiguous — no lanes declared, more than one repo tracked —
+  # fails with a message that says what to do, rather than guessing.
+  def test_rehearse_raises_when_repo_ambiguous_with_no_lanes_and_multiple_repos
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "repo-a")
+    create_real_repo(dir, "repo-b")
+    space.data["repos"] = [{ "name" => "repo-a" }, { "name" => "repo-b" }]
+    space.save
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+      .sub("**AC1.** ...", "**AC1.** README exists.")
+      .sub(/^```gates\n.*?^```/m, "```gates\n- id: g1\n  ac: AC1\n  cmd: test -f README.md\n  expect:\n    exit_code: 0\n```")
+    File.write(File.join(dir, "architecture", "I01-my-slice.md"), text)
+
+    err = assert_raises(Space::Core::Error) { project.rehearse("my-slice") }
+    assert_match(/Cannot resolve a repo/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: also ambiguous the other way — the drafted lanes block itself names
+  # more than one repo; rehearsal runs once, against one repo checkout.
+  def test_rehearse_raises_when_drafted_lanes_name_multiple_repos
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "repo-a")
+    create_real_repo(dir, "repo-b")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: repo-a\n  touch:\n    - lib/**\n- name: lane-b\n  repo: repo-b\n  touch:\n    - lib/**\n"
+    gates_yaml = "- id: g1\n  ac: AC1\n  cmd: echo ok\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    err = assert_raises(Space::Core::Error) { project.rehearse("my-slice") }
+    assert_match(/Cannot resolve a single repo/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5: EMPTY — no gates drafted yet; nothing executes, no repo resolution is
+  # even attempted (so an EMPTY spike with an ambiguous/undeclared repo can
+  # still be rehearsed and stamped).
+  def test_rehearse_is_empty_with_no_gates_drafted_and_still_stamps
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+      .sub("**AC1.** ...", "**AC1.** This spike needs no runnable gate.")
+    File.write(File.join(dir, "architecture", "I01-my-slice.md"), text)
+
+    result = project.rehearse("my-slice")
+    assert_equal [], result[:gates]
+    assert result[:empty]
+    refute result[:placeholder]
+    assert_nil result[:repo]
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    entry = yml.dig("project", "iterations", 0)
+    assert entry["rehearsal"]["gates_digest"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5: EMPTY also covers the untouched scaffold placeholder case.
+  def test_rehearse_flags_untouched_placeholder
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    result = project.rehearse("my-slice")
+    assert result[:empty]
+    assert result[:placeholder]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── I09: freeze's rehearsal-stamp precondition (AC7) ───────────────────────
+
+  def test_freeze_refuses_without_a_rehearsal_stamp
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = "- id: g1\n  ac: AC1\n  cmd: echo ok\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    err = assert_raises(Space::Core::Error) { project.freeze!("my-slice") }
+    assert_match(/has not been rehearsed/, err.message)
+    assert_match(/architect rehearse my-slice/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_freeze_succeeds_when_rehearsal_stamp_matches_current_gates
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = "- id: g1\n  ac: AC1\n  cmd: echo ok\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    project.rehearse("my-slice")
+    sha = project.freeze!("my-slice")
+    assert_match(/\A[0-9a-f]{40}\z/, sha)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC7: any subsequent edit to the gates block invalidates the stamp — the
+  # digest is keyed to the block's content, not merely "rehearsal happened".
+  def test_freeze_refuses_when_gates_block_edited_after_rehearsal
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = "- id: g1\n  ac: AC1\n  cmd: echo ok\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+    project.rehearse("my-slice")
+
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    edited = File.read(slice).sub("cmd: echo ok", "cmd: echo something-else")
+    File.write(slice, edited)
+
+    err = assert_raises(Space::Core::Error) { project.freeze!("my-slice") }
+    assert_match(/has not been rehearsed/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC7: the stamp records that the architect looked, never that gates
+  # passed — an all-RED rehearsal stamps exactly like an all-GREEN one.
+  def test_freeze_stamp_is_identical_regardless_of_gate_outcomes
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    all_red_gates = "- id: g1\n  ac: AC1\n  cmd: sh -c 'exit 1'\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: all_red_gates)
+
+    result = project.rehearse("my-slice")
+    assert_equal [:red], result[:gates].map { |g| g[:rehearsal] }
+    sha = project.freeze!("my-slice")
+    assert_match(/\A[0-9a-f]{40}\z/, sha,
+      "an all-RED rehearsal must stamp identically to an all-GREEN one — freeze must not refuse on gate outcome")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_freeze_no_rehearse_reason_must_be_non_empty
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+      .sub("**AC1.** ...", "**AC1.** Prose only.")
+    File.write(File.join(dir, "architecture", "I01-my-slice.md"), text)
+
+    err = assert_raises(Space::Core::Error) { project.freeze!("my-slice", no_rehearse_reason: "   ") }
+    assert_match(/non-empty REASON/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_freeze_no_rehearse_records_reason_in_space_yaml
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+      .sub("**AC1.** ...", "**AC1.** Prose only.")
+    File.write(File.join(dir, "architecture", "I01-my-slice.md"), text)
+
+    project.freeze!("my-slice", no_rehearse_reason: "docs-only iteration, no gates possible")
+
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    entry = yml.dig("project", "iterations", 0)
+    assert_equal "docs-only iteration, no gates possible", entry["rehearsal_skip_reason"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── I09: #73, narrowly (AC8) ────────────────────────────────────────────────
+
+  def test_freeze_refuses_untouched_scaffold_placeholder_with_no_gates
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    err = assert_raises(Space::Core::Error) { project.freeze!("my-slice") }
+    assert_match(/\*\*AC1\.\*\* \.\.\./, err.message)
+    assert_match(/no active gate/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_freeze_succeeds_with_hand_written_prose_only_ac_no_placeholder
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+      .sub("**AC1.** ...", "**AC1.** This spike is judged on prose alone; no gate applies.")
+    File.write(File.join(dir, "architecture", "I01-my-slice.md"), text)
+
+    project.rehearse("my-slice")
+    warnings = []
+    sha = project.freeze!("my-slice", warnings: warnings)
+    assert_match(/\A[0-9a-f]{40}\z/, sha)
+    assert_match(/no gates/, warnings.first)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # A placeholder AC1 combined with a REAL gate elsewhere is not the #73 case
+  # (the refuse is scoped to "no active gate", never a heuristic on AC1 alone).
+  def test_freeze_does_not_refuse_placeholder_ac1_when_other_gates_exist
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    space.data["repos"] = [{ "name" => "my-repo" }]
+    space.save
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice)
+    text = text.sub(/^```gates\n.*?^```/m, "```gates\n- id: g1\n  ac: AC2\n  cmd: echo ok\n  expect:\n    exit_code: 0\n```")
+    File.write(slice, text)
+
+    project.rehearse("my-slice")
+    sha = project.freeze!("my-slice")
+    assert_match(/\A[0-9a-f]{40}\z/, sha)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── I09: #39(b), the bare repos/<name>/ prefix warning (AC9) ────────────────
+
+  def test_lint_gates_warns_on_bare_repo_prefix_with_no_cwd
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = "- id: g1\n  ac: AC1\n  cmd: cat repos/my-repo/README.md\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    project.rehearse("my-slice")
+    warnings = []
+    project.freeze!("my-slice", warnings: warnings)
+    assert(warnings.any? { |w| w.include?("repos/<name>/") && w.include?("g1") },
+      "expected a warning naming the bare repos/<name>/ prefix; got: #{warnings.inspect}")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_lint_gates_does_not_warn_when_cwd_is_set
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = "- id: g1\n  ac: AC1\n  cwd: repos/my-repo\n  cmd: cat repos/my-repo/README.md\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    project.rehearse("my-slice")
+    warnings = []
+    project.freeze!("my-slice", warnings: warnings)
+    refute warnings.any? { |w| w.include?("repos/<name>/") }
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_lint_gates_does_not_warn_on_ordinary_cmd
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = "- id: g1\n  ac: AC1\n  cmd: bundle exec rake test\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    project.rehearse("my-slice")
+    warnings = []
+    project.freeze!("my-slice", warnings: warnings)
+    assert_empty warnings
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -1571,7 +2088,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a", touch: ["lib/*.rb"])
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
@@ -2010,7 +2527,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     YAML
     text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
     File.write(slice, text)
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     # Write marker ONLY in the worktree — not present in repos/my-repo
@@ -2047,7 +2564,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     YAML
     text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
     File.write(slice, text)
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     # Create subdir ONLY in the worktree and write marker there
@@ -2085,7 +2602,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     YAML
     text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
     File.write(slice, text)
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     # Write canary in architecture/ (outside repos/my-repo)
@@ -2120,7 +2637,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     YAML
     text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
     File.write(slice, text)
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
@@ -2144,7 +2661,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     err = assert_raises(Space::Core::Error) { project.integrate!("my-slice") }
     assert_match(/No lanes given to integrate/, err.message)
@@ -2163,7 +2680,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
@@ -2193,7 +2710,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     assert_equal [], project.integrate!("my-slice", teardown: true)
   ensure
@@ -2228,6 +2745,29 @@ class ArchitectProjectTest < Space::ArchitectTest
     MD
   end
 
+  # Strip the scaffold's still-untouched AC1 placeholder (`**AC1.** ...`,
+  # lib/space_architect/templates/iteration.md.erb:67) from iteration <name>'s
+  # file under <base_dir>, if present — so tests that freeze an otherwise
+  # pristine scaffold as unrelated setup plumbing don't trip freeze!'s #73
+  # hard-refuse (I09/AC8). A no-op when the placeholder is already gone.
+  def strip_ac1_placeholder!(base_dir, name)
+    Dir.glob(File.join(base_dir, "architecture", "I*-#{name}.md")).each do |f|
+      text = File.read(f)
+      stripped = text.sub(Space::Architect::ArchitectProject::AC1_PLACEHOLDER, "**AC1.** (exercised elsewhere).")
+      File.write(f, stripped) if stripped != text
+    end
+  end
+
+  # I09/AC7: freeze bypassing the rehearsal-stamp precondition, for tests that
+  # exercise something other than freeze/rehearse itself (rehearse's own
+  # behavior — the stamp, staleness, --skip-rehearse — gets dedicated tests
+  # below). Also strips the scaffold's untouched AC1 placeholder if present,
+  # so I09/AC8's hard-refuse doesn't trip unrelated setup plumbing either.
+  def freeze_for_test!(project, dir, name, **kwargs)
+    strip_ac1_placeholder!(dir, name)
+    project.freeze!(name, no_rehearse_reason: "test setup — not exercising rehearsal", **kwargs)
+  end
+
   # AC1: freeze parses the ```lanes block and writes name/repo/touch_set into the
   # iteration's space.yaml lane entries in the freeze operation.
   def test_freeze_populates_lane_entries_from_lanes_block
@@ -2249,7 +2789,7 @@ class ArchitectProjectTest < Space::ArchitectTest
           - test/**
     YAML
 
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     lanes = yml.dig("project", "iterations", 0, "lanes")
@@ -2279,14 +2819,14 @@ class ArchitectProjectTest < Space::ArchitectTest
           - lib/**
     YAML
 
-    sha = project.freeze!("my-slice")
+    sha = freeze_for_test!(project, dir, "my-slice")
 
     lanes = space.data.dig("project", "iterations", 0, "lanes")
     assert_equal 1, lanes.length, "declared lane must merge into the recorded entry, not duplicate"
     assert_equal ["lib/**"], lanes[0]["touch_set"]
     assert_equal "opencode", lanes[0]["harness"], "worktree_add fields survive freeze-populate"
 
-    assert_equal sha, project.freeze!("my-slice"), "re-freeze returns the same sha"
+    assert_equal sha, freeze_for_test!(project, dir, "my-slice"), "re-freeze returns the same sha"
     assert_equal 1, space.data.dig("project", "iterations", 0, "lanes").length
   ensure
     FileUtils.rm_rf(dir)
@@ -2307,7 +2847,7 @@ class ArchitectProjectTest < Space::ArchitectTest
           - lib/**
     YAML
 
-    err = assert_raises(Space::Core::Error) { project.freeze!("my-slice") }
+    err = assert_raises(Space::Core::Error) { freeze_for_test!(project, dir, "my-slice") }
     assert_match(/ill-formed lanes block/, err.message)
     assert_match(/missing 'repo'/, err.message)
   ensure
@@ -2329,7 +2869,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     slice = File.join(dir, "architecture", "I01-my-slice.md")
     File.write(slice, File.read(slice) + "\nAC1 — the seam holds.\n")
 
-    freeze_sha = project.freeze!("my-slice")
+    freeze_sha = freeze_for_test!(project, dir, "my-slice")
 
     # (a) space.yaml committed — no dirty working tree
     status, = Open3.capture3("git", "-C", dir, "status", "--porcelain")
@@ -2369,7 +2909,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     err = assert_raises(Space::Core::Error) { project.provision("my-slice") }
     assert_match(/not frozen/, err.message)
 
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     created = project.provision("my-slice")
     assert_equal ["lane-a"], created.map { |r| r[:lane] }
@@ -2411,7 +2951,7 @@ class ArchitectProjectTest < Space::ArchitectTest
           exit_code: 0
     GATES
 
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     refute_path_exists File.join(dir, "build", "I01-my-slice-lane-a", "wt")
 
     results = project.run_gates("my-slice", lane: "lane-a")
@@ -2578,7 +3118,7 @@ class ArchitectProjectTest < Space::ArchitectTest
         touch:
           - lib/**
     YAML
-    project.freeze!("demo")
+    freeze_for_test!(project, dir, "demo")
     # Record harness/model/variant/effort onto the frozen lane via worktree_add.
     project.worktree_add("my-repo", "demo", "V",
                          harness: "opencode",
@@ -2644,7 +3184,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice") # scaffold carries only a commented (inert) lanes stub
+    freeze_for_test!(project, dir, "my-slice") # scaffold carries only a commented (inert) lanes stub
 
     assert_equal [], space.data.dig("project", "iterations", 0, "lanes"),
       "an absent/commented lanes block populates nothing"
@@ -2760,7 +3300,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     slice = File.join(dir, "architecture", "I01-my-slice.md")
     File.write(slice, File.read(slice) + "\nAC1 — the seam holds.\n")
 
-    project.freeze!("my-slice", message: "AC pinned to BRIEF §3\n\nGate g1 covers the seam;\ng2 covers idempotence.")
+    freeze_for_test!(project, dir, "my-slice", message: "AC pinned to BRIEF §3\n\nGate g1 covers the seam;\ng2 covers idempotence.")
 
     assert_equal "I01 freeze: AC pinned to BRIEF §3", last_commit(dir, "%s")
     assert_match(/g2 covers idempotence\./, last_commit(dir, "%b"))
@@ -2835,7 +3375,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
@@ -2864,7 +3404,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     # (a) branch absent — must be created off base_sha
     project.new_iteration!("s1")
-    project.freeze!("s1")
+    freeze_for_test!(project, dir, "s1")
     project.worktree_add("my-repo", "s1", "lane-a")
     File.write(File.join(dir, "build", "I01-s1-lane-a", "wt", "feature.rb"), "def f; end\n")
 
@@ -2882,7 +3422,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     # (b) branch already exists — must be checked out and merged into
     project.new_iteration!("s2")
-    project.freeze!("s2")
+    freeze_for_test!(project, dir, "s2")
     project.worktree_add("my-repo", "s2", "lane-b")
     File.write(File.join(dir, "build", "I02-s2-lane-b", "wt", "feature2.rb"), "def f2; end\n")
 
@@ -2909,7 +3449,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     # (outside touch_set) — lane has no touch_set; conflict on other.rb → branch-mismatch
     project.new_iteration!("s1")
-    project.freeze!("s1")
+    freeze_for_test!(project, dir, "s1")
     project.worktree_add("my-repo", "s1", "lane-a")
 
     base_sha, = Open3.capture3("git", "-C", repo, "rev-parse", "HEAD")
@@ -2932,7 +3472,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     # (inside touch_set) — lane touch_set covers the conflicting file → spec defect
     project.new_iteration!("s2")
-    project.freeze!("s2")
+    freeze_for_test!(project, dir, "s2")
     project.worktree_add("my-repo", "s2", "lane-b", touch: ["feature.rb"])
 
     base_sha2, = Open3.capture3("git", "-C", repo, "rev-parse", "HEAD")
@@ -3107,14 +3647,14 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    freeze_sha_1 = project.freeze!("my-slice")
+    freeze_sha_1 = freeze_for_test!(project, dir, "my-slice")
 
     # Amend the frozen region (Grounds is above ## Builder Prompt)
     slice = File.join(dir, "architecture", "I01-my-slice.md")
     text = File.read(slice)
     File.write(slice, text.sub("## Grounds", "## Grounds\n\nAmended grounds for re-freeze."))
 
-    freeze_sha_2 = project.freeze!("my-slice", force: true)
+    freeze_sha_2 = freeze_for_test!(project, dir, "my-slice", force: true)
 
     refute_equal freeze_sha_1, freeze_sha_2, "force re-freeze must produce a new sha"
 
@@ -3138,7 +3678,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     # Simulate dispatch
     space.data.dig("project", "iterations").find { |s| s["name"] == "my-slice" }
@@ -3149,7 +3689,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     File.write(slice, text.sub("## Grounds", "## Grounds\n\nTamper attempt."))
 
     err = assert_raises(Space::Core::Error) do
-      project.freeze!("my-slice", force: true)
+      freeze_for_test!(project, dir, "my-slice", force: true)
     end
     assert_match(/lane-a/, err.message)
     assert_match(/dispatched/, err.message)
@@ -3165,14 +3705,14 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     slice = File.join(dir, "architecture", "I01-my-slice.md")
     text = File.read(slice)
     File.write(slice, text.sub("## Grounds", "## Grounds\n\nChanged."))
 
     err = assert_raises(Space::Core::Error) do
-      project.freeze!("my-slice")
+      freeze_for_test!(project, dir, "my-slice")
     end
     assert_match(/refusing to re-freeze/, err.message)
   ensure
@@ -3187,7 +3727,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     res = project.write_section!("my-slice", "specification", body: "Amended spec.", force: true)
     assert res[:committed]
@@ -3208,7 +3748,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     # Simulate post-integrate via integrate_sha
     space.data.dig("project", "iterations").find { |s| s["name"] == "my-slice" }
@@ -3231,7 +3771,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     err = assert_raises(Space::Core::Error) do
       project.write_section!("my-slice", "specification", body: "Tampered spec.")
@@ -3250,7 +3790,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
@@ -3352,7 +3892,7 @@ class ArchitectProjectTest < Space::ArchitectTest
         touch:
           - lib/**
     YAML
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
     FileUtils.mkdir_p(stray_dir)
@@ -3380,7 +3920,7 @@ class ArchitectProjectTest < Space::ArchitectTest
         touch:
           - lib/**
     YAML
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
     FileUtils.mkdir_p(stray_dir)
@@ -3433,7 +3973,7 @@ class ArchitectProjectTest < Space::ArchitectTest
         touch:
           - lib/**
     YAML
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
 
     stray_dir = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
     FileUtils.mkdir_p(stray_dir)
@@ -3456,7 +3996,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.freeze!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
     wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")

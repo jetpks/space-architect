@@ -7,6 +7,7 @@ require "fileutils"
 require "pathname"
 require "tempfile"
 require "time"
+require "digest"
 
 module Space::Architect
   # Manages an architect-loop project inside a space: one self-contained file per
@@ -41,6 +42,21 @@ module Space::Architect
 
     # Hard per-gate timeout. Generous relative to the full suite (~55s).
     DEFAULT_GATE_TIMEOUT = 900
+
+    # The scaffold's untouched placeholder AC1 line (templates/iteration.md.erb:67).
+    # Pinned by contract with the authoring lane, which is forbidden from changing
+    # it, precisely so freeze!'s #73 hard-refuse (below) can key on it.
+    AC1_PLACEHOLDER = "**AC1.** ..."
+
+    # Rehearsal's BROKEN heuristic (I09/AC5): a command-not-found exit code or a
+    # shell parse failure, distinct from a clean non-zero (RED — the gate
+    # discriminates). Advisory, not authoritative — see #classify_rehearsal.
+    BROKEN_STDERR_PATTERN = /\bsyntax error\b|unexpected end of file|unexpected eof/i
+
+    # I09/AC9(b): a gate `cmd` that carries a literal 'repos/<name>/' prefix
+    # with no `cwd` — legal, occasionally correct, but usually a leftover
+    # space-root-relative path since `cmd` already resolves against the repo tree.
+    BARE_REPO_PREFIX = %r{(?<![\w./-])repos/[^/\s'"]+/}
 
     # Legacy sentinel: worktree_add used to seed prompt.md with this placeholder
     # (dropped — the blind-overwrite tripped harness read-before-write guards, #48).
@@ -160,7 +176,7 @@ module Space::Architect
     # any pending changes to the iteration file and records HEAD as freeze_sha. If
     # already frozen, refuses when the frozen region has changed since.
     # With force: true, re-freezes a changed frozen region if no lane is dispatched yet.
-    def freeze!(iteration, warnings: nil, message: nil, force: false)
+    def freeze!(iteration, warnings: nil, message: nil, force: false, no_rehearse_reason: nil)
       entry = slice_entry(iteration)
       rel = entry["file"]
       path = space.path.join(rel)
@@ -172,6 +188,19 @@ module Space::Architect
 
       lint_gates!(text, warnings: warnings)
       lint_lanes!(text)
+
+      if untouched_ac_placeholder?(text)
+        raise Space::Core::Error,
+          "#{rel}'s Acceptance Criteria still carries the scaffold placeholder '#{AC1_PLACEHOLDER}' with no " \
+          "active gate — write the real Acceptance Criteria (a hand-authored prose-only AC without the " \
+          "placeholder still freezes) before freezing."
+      end
+
+      if no_rehearse_reason
+        raise Space::Core::Error, "--no-rehearse requires a non-empty REASON" if no_rehearse_reason.to_s.strip.empty?
+      else
+        ensure_rehearsed!(iteration, entry, text)
+      end
 
       if entry["freeze_sha"]
         sha = entry["freeze_sha"]
@@ -205,6 +234,7 @@ module Space::Architect
           next unless s["name"] == iteration
           s["freeze_sha"] = sha
           s["verdict"] ||= "pending"
+          s["rehearsal_skip_reason"] = no_rehearse_reason.strip if no_rehearse_reason
           lanes = s["lanes"] || []
           declared.each do |d|
             fields = { "name" => d["name"], "repo" => d["repo"], "touch_set" => Array(d["touch"]) }
@@ -464,7 +494,10 @@ module Space::Architect
     # a hard timeout, and evaluated against its `expect` block. Returns an array
     # of result hashes with :status (:pass/:fail) and :reason in addition to the
     # raw :stdout/:stderr/:exit_code. The mechanical verdict belongs here; the AC
-    # verdict remains the architect's.
+    # verdict remains the architect's. WHERE the gate text comes from (the frozen
+    # commit) is resolved here; HOW gates execute is #execute_gates, shared
+    # byte-for-byte with #rehearse so the two can never run gates through
+    # different instruments (I09/AC3).
     def run_gates(iteration, lane: nil)
       entry = slice_entry(iteration)
       freeze_sha = entry["freeze_sha"]
@@ -492,37 +525,50 @@ module Space::Architect
         end
       raise Space::Core::Error, "directory does not exist: #{base_dir}" unless base_dir.exist?
 
-      gates.map do |gate|
-        g   = gate.transform_keys(&:to_s)
-        dir =
-          if (cwd = g["cwd"])
-            gate_cwd = space.path.join(cwd)
-            if lane && repo_root && (gate_cwd == repo_root || gate_cwd.to_s.start_with?("#{repo_root}/"))
-              base_dir.join(gate_cwd.relative_path_from(repo_root)).cleanpath
-            else
-              gate_cwd
-            end
-          else
-            base_dir
-          end
-        raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
+      execute_gates(gates, base_dir: base_dir, lane: lane, repo_root: repo_root)
+    end
 
-        effective = g["timeout"] || DEFAULT_GATE_TIMEOUT
-        captured = capture_with_timeout(g["cmd"], dir: dir, timeout: effective)
+    # Rehearse the DRAFTED gates in the WORKING-TREE iteration file — before the
+    # freeze, while they can still be fixed — through the identical execution
+    # path #run_gates uses at judge time (#execute_gates). space.yaml records no
+    # lanes until freeze! writes them (#freeze!, :~209), so the run directory is
+    # resolved from the DRAFTED ```lanes``` block instead of the recorded one;
+    # rehearsal always runs in the repo checkout (repos/<repo>), never a lane
+    # worktree, because lane worktrees are not provisioned until after the
+    # freeze. Classifies each result RED/GREEN/BROKEN (I09/AC5) and stamps the
+    # iteration as rehearsed, keyed to the gates block's content (I09/AC7) — the
+    # stamp records that the architect looked, never that gates passed.
+    def rehearse(iteration, now: Time.now)
+      entry = slice_entry(iteration)
+      rel = entry["file"]
+      path = space.path.join(rel)
+      raise Space::Core::Error, "#{rel} does not exist — run `architect new #{iteration}` first" unless path.exist?
+      text = path.read
 
-        if captured[:timed_out]
-          status = :fail
-          reason = "timed out after #{effective}s"
+      gates = parse_gates(text)
+      repo, base_dir, gate_results =
+        if gates.empty?
+          [nil, nil, []]
         else
-          ev     = GateEvaluator.call(stdout: captured[:stdout], exit_code: captured[:exit_code], expect: g["expect"] || {})
-          status = ev.pass? ? :pass : :fail
-          reason = ev.reason
+          r   = resolve_rehearsal_repo(iteration, text)
+          dir = space.path.join("repos", r)
+          raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
+          results = execute_gates(gates, base_dir: dir, lane: nil, repo_root: nil)
+                    .map { |g| g.merge(rehearsal: classify_rehearsal(g)) }
+          [r, dir, results]
         end
 
-        { id: g["id"], ac: g["ac"].to_s, cmd: g["cmd"], expect: g["expect"],
-          stdout: captured[:stdout], stderr: captured[:stderr], exit_code: captured[:exit_code],
-          dir: dir, status: status, reason: reason }
+      digest = gates_digest(text)
+      update_architect_block do |b|
+        (b["iterations"] || []).each do |s|
+          next unless s["name"] == iteration
+          s["rehearsal"] = { "gates_digest" => digest, "at" => now.iso8601 }
+        end
+        b
       end
+
+      { iteration: iteration, repo: repo, base_dir: base_dir, gates: gate_results,
+        empty: gates.empty?, placeholder: untouched_ac_placeholder?(text) }
     end
 
     # Emit grounding reads for the architect's SessionStart hook.
@@ -1071,6 +1117,78 @@ module Space::Architect
       err_f&.close!
     end
 
+    # HOW gates execute — the one instrument #run_gates (judge time) and
+    # #rehearse (pre-freeze) both call, byte-for-byte: same cwd-remap semantics,
+    # same shell (capture_with_timeout's Process.spawn), same GateEvaluator,
+    # same timeout handling (I09/AC3). repo_root/lane are nil outside a lane
+    # context (rehearsal never has one — it always runs in the repo checkout).
+    def execute_gates(gates, base_dir:, lane:, repo_root:)
+      gates.map do |gate|
+        g   = gate.transform_keys(&:to_s)
+        dir =
+          if (cwd = g["cwd"])
+            gate_cwd = space.path.join(cwd)
+            if lane && repo_root && (gate_cwd == repo_root || gate_cwd.to_s.start_with?("#{repo_root}/"))
+              base_dir.join(gate_cwd.relative_path_from(repo_root)).cleanpath
+            else
+              gate_cwd
+            end
+          else
+            base_dir
+          end
+        raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
+
+        effective = g["timeout"] || DEFAULT_GATE_TIMEOUT
+        captured = capture_with_timeout(g["cmd"], dir: dir, timeout: effective)
+
+        if captured[:timed_out]
+          status = :fail
+          reason = "timed out after #{effective}s"
+        else
+          ev     = GateEvaluator.call(stdout: captured[:stdout], exit_code: captured[:exit_code], expect: g["expect"] || {})
+          status = ev.pass? ? :pass : :fail
+          reason = ev.reason
+        end
+
+        { id: g["id"], ac: g["ac"].to_s, cmd: g["cmd"], expect: g["expect"],
+          stdout: captured[:stdout], stderr: captured[:stderr], exit_code: captured[:exit_code],
+          dir: dir, status: status, reason: reason, timed_out: captured[:timed_out] }
+      end
+    end
+
+    # I09/AC4: resolve rehearsal's run repo from the DRAFTED ```lanes``` block —
+    # one repo, unambiguously declared or inferable, else a message naming what
+    # to do. Never from space.yaml (no lanes are recorded there pre-freeze).
+    def resolve_rehearsal_repo(iteration, text)
+      declared = parse_lanes(text).filter_map { |l| l["repo"] }.uniq
+      return declared.first if declared.size == 1
+
+      if declared.empty?
+        tracked = space.repos.map { |r| r["name"] }
+        return tracked.first if tracked.size == 1
+        raise Space::Core::Error,
+          "Cannot resolve a repo to rehearse '#{iteration}' against — no lane declares a repo and the space " \
+          "tracks #{tracked.size} repos (#{tracked.join(', ')}). Declare a ```lanes``` block in the " \
+          "Specification, naming the repo to rehearse against."
+      end
+
+      raise Space::Core::Error,
+        "Cannot resolve a single repo to rehearse '#{iteration}' against — the drafted lanes block names " \
+        "multiple repos (#{declared.join(', ')}). Rehearsal runs once, against one repo checkout; narrow the " \
+        "```lanes``` block before rehearsing."
+    end
+
+    # I09/AC5: RED (clean non-zero — discriminates) vs GREEN (passes on base) vs
+    # BROKEN (127, timeout, or a shell parse failure). BROKEN is advisory, not
+    # authoritative: a correct RED can look broken (e.g. `grep -q x new_file`
+    # exits 2 — "No such file" — when the file is one the lane will write); the
+    # CLI names this suspicion, the architect confirms it.
+    def classify_rehearsal(result)
+      return :broken if result[:timed_out] || result[:exit_code] == 127
+      return :broken if BROKEN_STDERR_PATTERN.match?(result[:stderr].to_s)
+      result[:status] == :pass ? :green : :red
+    end
+
     def iteration_id(entry)
       "I#{format('%02d', entry['ordinal'])}-#{entry['name']}"
     end
@@ -1355,16 +1473,56 @@ module Space::Architect
       lines[(start + 1)...finish].join.strip
     end
 
+    # The raw (unparsed) text inside the fenced ```gates block, or nil when the
+    # block itself is absent. Single-sourced so #parse_gates and the rehearsal
+    # stamp's content digest (#gates_digest) can never read two different
+    # slices of the same section.
+    def gates_block_source(text)
+      body = section_body(text, "## Acceptance Criteria")
+      return nil unless body
+      match = body.match(/^```gates\n(.*?)^```/m)
+      match && match[1]
+    end
+
     # Extract and parse the fenced ```gates block from the Acceptance Criteria section.
     # Returns an array of gate hashes (string-keyed). Returns [] when the block is
     # absent, empty, or contains only YAML comments.
     def parse_gates(text)
-      body = section_body(text, "## Acceptance Criteria")
-      return [] unless body
-      match = body.match(/^```gates\n(.*?)^```/m)
-      return [] unless match
-      parsed = YAML.safe_load(match[1], aliases: false)
+      raw = gates_block_source(text)
+      return [] unless raw
+      parsed = YAML.safe_load(raw, aliases: false)
       parsed.is_a?(Array) ? parsed : []
+    end
+
+    # A stable digest of the gates block's raw content — the key the I09/AC7
+    # rehearsal stamp is validated against. Any byte edit to the fenced block
+    # (add, remove, reorder, reword) changes this and invalidates the stamp.
+    def gates_digest(text)
+      Digest::SHA256.hexdigest(gates_block_source(text).to_s)
+    end
+
+    # #73, narrowly (I09/AC8): true only when the AC section still carries the
+    # scaffold's untouched placeholder AND there is no active gate — a
+    # hand-authored prose-only AC (placeholder replaced, still no gates) is not
+    # this. Call only after lint_gates! has validated the block parses cleanly.
+    def untouched_ac_placeholder?(text)
+      body = section_body(text, "## Acceptance Criteria")
+      return false unless body
+      body.include?(AC1_PLACEHOLDER) && parse_gates(text).empty?
+    end
+
+    # I09/AC7: freeze! refuses without a fresh rehearsal stamp — one whose
+    # gates_digest matches the CURRENT (about-to-be-frozen) gates block. Stale
+    # (gates edited since) or absent (never rehearsed) both refuse identically;
+    # the stamp records that the architect looked, never that gates passed.
+    def ensure_rehearsed!(iteration, entry, text)
+      stamp = entry["rehearsal"]
+      return if stamp && stamp["gates_digest"] == gates_digest(text)
+
+      raise Space::Core::Error,
+        "Iteration '#{iteration}' has not been rehearsed against its current gates — " \
+        "run `architect rehearse #{iteration}` first, or `architect freeze #{iteration} " \
+        "--no-rehearse REASON` to skip deliberately."
     end
 
     # Extract and parse the fenced ```lanes block from the Specification section.
@@ -1419,8 +1577,26 @@ module Space::Architect
         return
       end
       result = GateLint.call(gates)
-      return if result.success?
-      raise Space::Core::Error, "ill-formed gates block:\n#{result.failure.join("\n")}"
+      raise Space::Core::Error, "ill-formed gates block:\n#{result.failure.join("\n")}" unless result.success?
+
+      warn_bare_repo_prefix!(gates, warnings) if warnings
+    end
+
+    # I09/AC9(b), #39: a gate whose `cmd` carries a literal `repos/<name>/` prefix
+    # with no `cwd` set is warned about, not failed — `cmd` already resolves
+    # against the repo tree (`cwd` is what's space-root-relative), so this
+    # pattern is usually a leftover space-root-relative path, but is legal and
+    # occasionally correct. Threaded through the same warnings: channel
+    # lint_gates! already carries, never a second channel.
+    def warn_bare_repo_prefix!(gates, warnings)
+      gates.each do |g|
+        g = g.transform_keys(&:to_s)
+        next if g["cwd"]
+        next unless g["cmd"].to_s.match?(BARE_REPO_PREFIX)
+        warnings << "gate '#{g["id"]}': cmd contains a literal 'repos/<name>/' path with no cwd set — " \
+          "cmd already resolves against the repo tree, so this is likely a leftover space-root-relative " \
+          "path (legal, occasionally correct — verify it)"
+      end
     end
 
     # Raises if any lane in the entry has been dispatched (dispatched_at or integrate_sha set).

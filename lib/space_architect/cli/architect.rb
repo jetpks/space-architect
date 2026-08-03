@@ -226,23 +226,100 @@ module Space::Architect
         end
       end
 
+      class Rehearse < BaseCommand
+        desc "Rehearse the DRAFTED (unfrozen, working-tree) gates against the repo checkout and report RED/GREEN/BROKEN/EMPTY — runs and reports, never judges"
+        phase 12, "Spec"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        # type: :flag (not :boolean): dry-cli renders a :boolean option as
+        # "--[no-]record" in --help, which does not contain the literal
+        # substring "--record" that a presence-check on the flag would look
+        # for; :flag renders unbracketed ("--record") and is presence-only,
+        # which is all this needs.
+        option   :record, type: :flag, default: false, desc: "Emit a paste-able provenance block summarizing the run, shaped to drop into an Acceptance Criteria preamble"
+
+        def call(iteration:, space: nil, record: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              result = project.rehearse(iteration)
+              render_rehearsal(result)
+              terminal.say ""
+              terminal.say render_record(result) if record
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+
+        private
+
+        def render_rehearsal(result)
+          if result[:empty]
+            reason = result[:placeholder] ? "the scaffold placeholder '#{ArchitectProject::AC1_PLACEHOLDER}' with no active gate" : "no gates drafted yet"
+            terminal.say "EMPTY — #{reason}. Nothing to rehearse; the pre-freeze look is still stamped."
+          else
+            terminal.say "Rehearsing #{result[:iteration]} against #{terminal.path(result[:base_dir])} (repo: #{result[:repo]})"
+            result[:gates].each { |g| render_gate(g) }
+          end
+          terminal.say ""
+          terminal.say "Discrimination report only — this runs and reports; it never judges whether these gates are good, bad, or ready."
+        end
+
+        def render_gate(g)
+          terminal.say ""
+          terminal.say "── #{g[:ac].empty? ? "(gate)" : g[:ac]}: #{g[:cmd]}  (exit #{g[:exit_code].inspect})  [#{g[:rehearsal].to_s.upcase}]"
+          terminal.say "   dir: #{terminal.path(g[:dir])}"
+          terminal.say "   reason: #{g[:reason]}" unless g[:reason].to_s.empty?
+          if g[:rehearsal] == :broken
+            terminal.say "   BROKEN is advisory, not certain — a correct RED can look broken (e.g. a file the lane " \
+              "hasn't written yet). Confirm before treating it as a defect."
+          end
+          terminal.say g[:stdout].rstrip unless g[:stdout].strip.empty?
+          terminal.say g[:stderr].rstrip unless g[:stderr].strip.empty?
+        end
+
+        def render_record(result)
+          return "> Rehearsed #{result[:iteration]} — no gates drafted; nothing to record." if result[:empty]
+
+          by  = result[:gates].group_by { |g| g[:rehearsal] }
+          ids = ->(sym) { (by[sym] || []).map { |g| g[:id] }.join(", ") }
+          [
+            "> **Dry-run at rehearsal time, recorded for transparency.** All #{result[:gates].size} gate command(s) " \
+              "were executed as written against `#{result[:repo]}` under `/bin/sh` — the shell `architect gate` uses.",
+            ">",
+            "> - **RED (#{(by[:red] || []).size} — discriminate):** #{ids.call(:red).empty? ? "(none)" : ids.call(:red)}",
+            "> - **GREEN (#{(by[:green] || []).size} — regression guard or non-discriminating):** #{ids.call(:green).empty? ? "(none)" : ids.call(:green)}",
+            "> - **BROKEN (#{(by[:broken] || []).size} — advisory, confirm each):** #{ids.call(:broken).empty? ? "(none)" : ids.call(:broken)}"
+          ].join("\n")
+        end
+      end
+
       class Freeze < BaseCommand
         desc "Freeze the iteration's frozen region (Grounds/Specification/Acceptance Criteria) and record the freeze SHA"
-        phase 12, "Spec"
+        phase 13, "Spec"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :force, type: :boolean, default: false, desc: "Re-freeze even if the frozen region changed (pre-dispatch only)"
+        # Named --skip-rehearse, not --no-rehearse: Ruby's OptionParser (dry-cli's
+        # underlying parser, verified against the live dry-cli 1.4.1 in this repo)
+        # treats ANY switch literally named --no-<word> as a boolean negation and
+        # silently discards its value, regardless of declared type — so a REASON
+        # cannot bind to a flag spelled --no-rehearse. --skip-rehearse is the
+        # working escape valve; --no-rehearse is the name this design uses for it.
+        option   :skip_rehearse, default: nil, desc: "Escape valve (design name: --no-rehearse): skip the fresh-rehearsal requirement, recording REASON in space.yaml (bare freeze refuses without a matching `architect rehearse` stamp)"
         commit_message_options
 
-        def call(iteration:, space: nil, message: nil, message_from: nil, force: false, **opts)
+        def call(iteration:, space: nil, message: nil, message_from: nil, force: false, skip_rehearse: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
               warnings = []
-              sha = project.freeze!(iteration, warnings: warnings, force: force,
+              sha = project.freeze!(iteration, warnings: warnings, force: force, no_rehearse_reason: skip_rehearse,
                 message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Frozen #{iteration} at #{sha}"
+              terminal.say "Rehearsal requirement skipped — #{skip_rehearse}" if skip_rehearse
               warnings.each { |w| terminal.say "Warning: #{w}" }
               ac = project.acceptance_criteria(iteration)
               unless ac.to_s.strip.empty?
@@ -614,6 +691,7 @@ module Space::Architect
                 marker = r[:status] == :pass ? "PASS" : "FAIL"
                 terminal.say ""
                 terminal.say "── #{r[:ac].empty? ? "(gate)" : r[:ac]}: #{r[:cmd]}  (exit #{r[:exit_code]})  [#{marker}]"
+                terminal.say "   dir: #{terminal.path(r[:dir])}"
                 terminal.say "   reason: #{r[:reason]}" if r[:status] == :fail && !r[:reason].to_s.empty?
                 terminal.say r[:stdout].rstrip unless r[:stdout].strip.empty?
                 terminal.say r[:stderr].rstrip unless r[:stderr].strip.empty?
@@ -1098,6 +1176,7 @@ Space::Architect::CLI::Registry.register "ground", Space::Architect::CLI::Archit
 Space::Architect::CLI::Registry.register "new",    Space::Architect::CLI::Architect::New
 Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Architect::Status
 Space::Architect::CLI::Registry.register "sync",   Space::Architect::CLI::Architect::Sync
+Space::Architect::CLI::Registry.register "rehearse", Space::Architect::CLI::Architect::Rehearse
 Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
 Space::Architect::CLI::Registry.register "verify", Space::Architect::CLI::Architect::Verify
 Space::Architect::CLI::Registry.register "provision", Space::Architect::CLI::Architect::Provision
