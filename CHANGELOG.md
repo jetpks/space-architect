@@ -5,6 +5,116 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] - 2026-08-03
+
+Twelve iterations of the Architect Loop run against this repo's own tooling, each
+frozen before dispatch and judged by a separate session against criteria written
+before results existed. Major because `architect freeze` gains two hard
+preconditions it did not have — see the **BREAKING** items under Changed.
+
+Roughly half the release is machinery that stops the next papercut being written:
+gates you can execute *before* freezing them, lane boundaries that cannot silently
+disagree with themselves, and an escape valve for the case where the frozen
+contract is the thing that is wrong. Suite: 1212 → 1297 runs, 4811 → 5148
+assertions, green throughout, with the last known flake causally explained rather
+than retried away.
+
+### Added
+
+- **`architect rehearse ITERATION`** — the phase between authoring and freeze
+  (#81, consolidating #73, #39, #34). Runs the *drafted* (unfrozen, working-tree)
+  gates through the identical execution path `architect gate` uses — `execute_gates`
+  is extracted byte-for-byte, so the two can never diverge — and classifies each
+  RED / GREEN / BROKEN / EMPTY. Prints the resolved `dir` that was always in the
+  result hash and never rendered. `--record` emits a paste-able provenance block
+  for the iteration's AC preamble.
+- **Scope-asymmetry reporting in `rehearse`** — for each gate whose command is a
+  recognizable file-scoped grep invocation, the gate's own pattern is re-run across
+  the whole repo via `git grep` and anything matching outside the gate's declared
+  paths is named, loudest when it also falls outside every declared lane's touch
+  set. Catches the failure mode where a boundary is stated consistently in three
+  places and is wrong in all three because all three were drawn from one too-narrow
+  grep. Reports only: it never touches `rehearse`'s exit code, its RED/GREEN/BROKEN
+  classification, or the rehearsal stamp. An invocation carrying a flag `git grep`
+  has no equivalent for (`-x`) is declined by name and counted as not-analyzed
+  rather than answered wrong.
+- **`architect integrate --accept-bounds REASON`** — merges a lane that wrote
+  outside its declared touch set when the *declaration* is the defect and the freeze
+  rules correctly forbid widening it after the fact. Recorded per-lane in
+  `space.yaml` against the lane that was actually out of bounds, never silently, and
+  never able to override the no-builder-commits check.
+- **`architect freeze --skip-rehearse REASON`** — the deliberate escape from the new
+  rehearsal precondition, with the reason recorded in `space.yaml`. An empty REASON
+  is refused.
+- **`Space::Core::Paths` glob helpers** — one documented decision about when a
+  content-tree glob includes dotfiles, guarded by `test/paths_guard_test.rb` so the
+  flags cannot drift apart again across call sites.
+
+### Changed
+
+- **BREAKING — `architect freeze` requires a fresh rehearsal stamp.** The stamp is
+  digest-keyed to the gates block, so editing one byte of a gate after rehearsing
+  invalidates it; it records that the architect *looked*, never that the gates
+  passed. An iteration that froze cleanly on 5.x now errors with
+  `has not been rehearsed against its current gates`. Run `architect rehearse
+  ITERATION` first, or `architect freeze ITERATION --skip-rehearse REASON` to skip
+  deliberately.
+- **BREAKING — `architect freeze` refuses an untouched scaffold placeholder.** An
+  Acceptance Criteria section still carrying the template's placeholder AC1 with no
+  active gate is now an error rather than a successful freeze (#73). Narrow by
+  design: a hand-authored prose-only AC without the placeholder still freezes, so
+  the spike path the skill sanctions is untouched.
+- **`architect integrate` commits its own `space.yaml` mutation.** It previously
+  wrote `integration_branch`/`integrate_sha` to disk and deferred the commit to
+  whatever committing command ran next, leaving a window in which a dying session
+  lost the record of which lanes had merged — which happened, and cost a full
+  judging session. The commit is made by pathspec so unrelated dirty files are not
+  swept in, once per call rather than once per lane, and from an `ensure` so a merge
+  conflict partway through the lane set still preserves what already merged.
+- **`architect evidence` replaces a lane's subsection instead of appending.**
+  Re-transcribing a corrected report no longer leaves both copies in Builder Report.
+- **Gate commands are spawned through an explicit `/bin/sh -c`**, so the documented
+  shell is the actual shell regardless of the invoking environment.
+- **Skill prose (`skill/architect/`, `docs/DESIGN.md`).** The lane-prompt template
+  tells builders not to title their scratch report (the CLI supplies the `### <lane>`
+  heading) and to keep internal headings at `###` or deeper; `SKILL.md` §4 carries
+  the boundary-enumeration discipline and the content rule that a criterion renaming
+  an identifier must be drawn from a whole-repo grep, not `lib/` alone. These are
+  load-bearing: lane prompts are assembled from `dispatch.md`, and at least one
+  defect in this release was caused by prose and code disagreeing.
+
+### Fixed
+
+- **`architect research dispatch` silently launched only the first prompt (#83).**
+  Given five prompt paths it launched one, exited 0, and printed nothing on stderr —
+  destroying evidence the architect then writes research grounds from. dry-cli binds
+  only the first positional to a scalar `argument` and drops the rest into the
+  options hash; `Supervisor#dispatch` had always handled an array correctly. Fixed
+  with dry-cli's own `type: :array`, the established idiom at
+  `space_src/cli/clone.rb:19`. Net −1 line.
+- **`architect bug-report` buried the title in an HTML comment `gh` ignores (#41)**,
+  forcing a manual `--title` on every filing.
+- **The dispatch liveness check was a point-sample race in production**, not only in
+  tests. It now waits for a real stream-json init event and reports true elapsed
+  time, and scans the run log incrementally instead of re-parsing it from the top
+  every 50ms — 92.6MB → 615KB of reads over a 300-poll worst case.
+- **`Commands.wrap`'s quote scanner was not backslash-aware.** Verified at the
+  property level with `bash` as the oracle over an eight-command battery, rather than
+  by adding another example.
+- **`Dir.glob` calls silently skipped dotfiles** in `SkillInstaller.same_content?`
+  and its siblings; consolidated behind the new `Space::Core::Paths` decision.
+- **The last suite flake, explained rather than retried.** `FileUtils.cp_r` of the
+  git fixture templates raced `git maintenance --detach`, which outlived `system()`
+  and mutated `.git/objects/` mid-copy. Stress: 13/24 failures → 0/24, twice.
+- **A clone-concurrency test's fiber rendezvous was unbounded** — correct only by an
+  accident of `Async::Task#async`'s greedy dispatch, and would have hung `rake test`
+  forever with no message if scheduling ever shifted. Now bounded, failing legibly
+  while keeping the exact peak-concurrency assertion it was written for.
+- **The scope-asymmetry check overstated its own certainty.** It replayed a gate's
+  pattern but dropped the gate's `-w`, so the whole-repo re-run was *broader* than
+  the gate it stood in for and printed the surplus under its loudest line ("no lane
+  may legally fix these"). `-w` is now replayed and `-x` declined by name.
+
 ## [5.5.1] - 2026-07-25
 
 ### Fixed
