@@ -197,7 +197,7 @@ module Space::Architect
       end
 
       if no_rehearse_reason
-        raise Space::Core::Error, "--no-rehearse requires a non-empty REASON" if no_rehearse_reason.to_s.strip.empty?
+        raise Space::Core::Error, "--skip-rehearse requires a non-empty REASON" if no_rehearse_reason.to_s.strip.empty?
       else
         ensure_rehearsed!(iteration, entry, text)
       end
@@ -345,6 +345,9 @@ module Space::Architect
 
     # Transcribe a lane's scratch report (build/<id>[-<lane>]/report.md) VERBATIM into
     # the Builder Report section and commit. Byte-for-byte: no summarization, no judgment.
+    # Re-transcribing a lane replaces its existing "### <lane>" subsection in place
+    # (preserving the order lanes were already transcribed in) instead of appending a
+    # duplicate; a lane not yet present still appends.
     def transcribe_evidence!(iteration, lane: nil, message: nil)
       entry = slice_entry(iteration)
       rel = entry["file"]
@@ -357,8 +360,15 @@ module Space::Architect
       raw = report.read
       raise Space::Core::Error, "builder report is empty: #{report}" if raw.strip.empty?
 
-      block = lane ? "### #{lane}\n\n#{raw.rstrip}" : raw.rstrip
-      path.write(replace_section_body(path.read, "## Builder Report", block, append: !lane.nil?))
+      text = path.read
+      new_body =
+        if lane
+          lane_names = (entry["lanes"] || []).map { |l| l["name"] }
+          replace_lane_report(section_body(text, "## Builder Report").to_s, lane, raw.rstrip, lane_names)
+        else
+          raw.rstrip
+        end
+      path.write(replace_section_body(text, "## Builder Report", new_body, append: false))
 
       nn = format("%02d", entry["ordinal"] || 0)
       git_capture("-C", space.path.to_s, "commit", "-m",
@@ -390,7 +400,17 @@ module Space::Architect
     # the lane branch, then merge --no-ff into the repo's lane/<id> integration branch.
     # Runs NO gates and makes NO pass/fail decision. Refuses a mechanically-failing lane
     # (builder commits / out-of-bounds) and aborts cleanly on a merge conflict.
-    def merge_lane!(iteration, lane, message: nil, commit_mode: nil, into: nil)
+    #
+    # accept_bounds_reason overrides ONLY the in-bounds check — never no_builder_commits,
+    # which stays an unconditional refusal (a builder commit is tampering, not an authoring
+    # defect the architect can rule on). Modeled on freeze!'s --skip-rehearse: a non-empty
+    # REASON is required whenever passed, recorded in space.yaml beside the lane, and
+    # returned for the caller to echo — the override can never be silent.
+    def merge_lane!(iteration, lane, message: nil, commit_mode: nil, into: nil, accept_bounds_reason: nil)
+      if accept_bounds_reason
+        raise Space::Core::Error, "--accept-bounds requires a non-empty REASON" if accept_bounds_reason.to_s.strip.empty?
+      end
+
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
@@ -400,8 +420,10 @@ module Space::Architect
       if checks[:no_builder_commits] == false
         raise Space::Core::Error, "Lane '#{lane}' has builder commits — the worktree is tampered (hard rule 7). Reset and re-dispatch; do not merge."
       end
-      if checks[:in_bounds] == false
-        raise Space::Core::Error, "Lane '#{lane}' wrote outside its declared touch set — out-of-bounds fails the lane. Reset and re-dispatch."
+      if checks[:in_bounds] == false && !accept_bounds_reason
+        raise Space::Core::Error, "Lane '#{lane}' wrote outside its declared touch set — out-of-bounds fails the lane. Reset " \
+          "and re-dispatch, or `architect integrate #{iteration} --lanes #{lane} --accept-bounds REASON` to override when " \
+          "the touch-set declaration itself is the defect."
       end
 
       repo = lane_entry["repo"]
@@ -459,27 +481,30 @@ module Space::Architect
             next unless l["name"] == lane
             l["integration_branch"] = integration_branch
             l["integrate_sha"] = integrate_sha
+            l["bounds_override_reason"] = accept_bounds_reason.strip if accept_bounds_reason
           end
         end
         b
       end
 
-      { lane: lane, repo: repo, integration_branch: integration_branch,
-        merge_sha: merge_sha.strip, base_sha: base_sha, diffstat: diffstat.strip, gates_run: false }
+      { lane: lane, repo: repo, integration_branch: integration_branch, merge_sha: merge_sha.strip,
+        base_sha: base_sha, diffstat: diffstat.strip, gates_run: false,
+        bounds_override_reason: accept_bounds_reason&.strip }
     end
 
     # Loop merge_lane! over the architect-supplied passing set, in order. Stops on the
     # first conflict (a disjointness defect). Never decides which lanes pass. With no
     # lanes and teardown: true, tears down every lane recorded for the iteration instead
     # (the second, teardown-only call in the loop's integrate-then-teardown rhythm).
-    def integrate!(iteration, lanes: nil, teardown: false, message: nil, commit_mode: nil, into: nil)
+    def integrate!(iteration, lanes: nil, teardown: false, message: nil, commit_mode: nil, into: nil, accept_bounds_reason: nil)
       lanes = Array(lanes)
       return teardown_lanes!(iteration, slice_entry(iteration)["lanes"] || []) if lanes.empty? && teardown
       raise Space::Core::Error, "No lanes given to integrate" if lanes.empty?
 
       merged = []
       lanes.each do |lane|
-        merged << merge_lane!(iteration, lane, message: message, commit_mode: commit_mode, into: into)
+        merged << merge_lane!(iteration, lane, message: message, commit_mode: commit_mode, into: into,
+          accept_bounds_reason: accept_bounds_reason)
       rescue Space::Core::Error => e
         done = merged.map { |m| m[:lane] }.join(", ")
         raise Space::Core::Error, "Integrated #{done.empty? ? "(none)" : done} then stopped at '#{lane}': #{e.message}"
@@ -1087,7 +1112,7 @@ module Space::Architect
     def capture_with_timeout(cmd, dir:, timeout:)
       out_f = Tempfile.new(["gate-stdout", ".log"])
       err_f = Tempfile.new(["gate-stderr", ".log"])
-      pid   = Process.spawn(cmd, pgroup: true, chdir: dir.to_s, out: out_f.path, err: err_f.path)
+      pid   = Process.spawn("/bin/sh", "-c", cmd, pgroup: true, chdir: dir.to_s, out: out_f.path, err: err_f.path)
 
       deadline  = Time.now + timeout
       status    = nil
@@ -1427,6 +1452,28 @@ module Space::Architect
       globs.any? { |g| Space::Core::Paths.touch_match?(g, path) }
     end
 
+    # Merge a lane's verbatim block into the current "## Builder Report" body for
+    # #transcribe_evidence!: replace its own "### <lane>" subsection in place if
+    # present (preserving the order lanes were already transcribed in), else append
+    # a new one after the others. Subsection boundaries are matched against the
+    # iteration's declared lane names (like KNOWN_HEADINGS for top-level sections),
+    # not any "### " line, so a verbatim report containing its own "### " heading
+    # can't fool the parser.
+    def replace_lane_report(body, lane, raw, lane_names)
+      block = "### #{lane}\n\n#{raw}"
+      return block if placeholder_body?(body)
+
+      headings = lane_names.map { |n| "### #{n}" }
+      lines = body.lines
+      start = lines.index { |l| l.chomp == "### #{lane}" }
+      return "#{body.strip}\n\n#{block}" unless start
+
+      finish = ((start + 1)...lines.length).find { |i| headings.include?(lines[i].chomp) } || lines.length
+      before = lines[0...start].join.strip
+      after = lines[finish..].join.strip
+      [before, block, after].reject(&:empty?).join("\n\n")
+    end
+
     # Replace (or, with append:, extend) the body of a "## Heading" section, leaving
     # every other section byte-untouched. Append replaces a placeholder body (only a
     # template comment) the first time, then stacks subsections after it. A supplied
@@ -1522,7 +1569,7 @@ module Space::Architect
       raise Space::Core::Error,
         "Iteration '#{iteration}' has not been rehearsed against its current gates — " \
         "run `architect rehearse #{iteration}` first, or `architect freeze #{iteration} " \
-        "--no-rehearse REASON` to skip deliberately."
+        "--skip-rehearse REASON` to skip deliberately."
     end
 
     # Extract and parse the fenced ```lanes block from the Specification section.

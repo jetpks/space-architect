@@ -1548,6 +1548,42 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # A3: re-running `architect evidence` for the same lane replaces its subsection
+  # instead of appending a duplicate.
+  def test_evidence_cli_re_transcribing_a_lane_replaces_not_appends
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        freeze_for_test("s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+
+        FileUtils.mkdir_p(File.join(space_path, "build", "I01-s1-lane-a"))
+        File.write(File.join(space_path, "build", "I01-s1-lane-a", "report.md"), "first pass\nSTATUS: COMPLETE_WITH_CONCERNS\n")
+        invoke("evidence", "s1", "--lane", "lane-a")
+
+        File.write(File.join(space_path, "build", "I01-s1-lane-a", "report.md"), "follow-up pass\nSTATUS: COMPLETE\n")
+        out, err = invoke("evidence", "s1", "--lane", "lane-a")
+        assert_empty err
+        assert_match(/Builder STATUS: STATUS: COMPLETE$/, out)
+
+        text = File.read(File.join(space_path, "architecture", "I01-s1.md"))
+        assert_includes text, "follow-up pass"
+        refute_includes text, "first pass"
+        assert_equal 1, text.scan("### lane-a").size
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   def test_brief_new_cli_scaffolds_brief
     setup = temp_env
     env = setup.fetch(:env)
@@ -1589,6 +1625,44 @@ class ArchitectCLITest < Space::ArchitectTest
         out, err = invoke("integrate", "s1", "--lanes", "lane-a")
         assert_empty err
         assert_match(%r{Merged lane-a → project/test-space}, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # A2: `integrate --accept-bounds REASON` overrides the in-bounds check, echoes
+  # the reason in its output, and records it beside the lane in space.yaml.
+  def test_integrate_cli_accept_bounds_overrides_and_echoes_reason
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        freeze_for_test("s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a", "--touch", "allowed/**")
+
+        wt = File.join(space_path, "build", "I01-s1-lane-a", "wt")
+        File.write(File.join(wt, "out-of-bounds.rb"), "x = 1\n")
+
+        out, err = invoke("integrate", "s1", "--lanes", "lane-a")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/wrote outside its declared touch set/, err)
+
+        out, err = invoke("integrate", "s1", "--lanes", "lane-a", "--accept-bounds", "glob was wrong")
+        assert_empty err
+        assert_match(%r{Merged lane-a → project/test-space}, out)
+        assert_match(/In-bounds check overridden for lane-a: glob was wrong/, out)
+
+        yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
+        lane = yml.dig("project", "iterations", 0, "lanes", 0)
+        assert_equal "glob was wrong", lane["bounds_override_reason"]
       end
     end
   ensure
