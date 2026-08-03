@@ -23,7 +23,7 @@ Specification / Acceptance Criteria / Builder Prompt / Builder Report /
 Verdict), **one commit per section** — the commits give the differentiation and
 git gives the change guarantees, so there are no separate `gates/`/`lanes/`/`prd/`
 directories. The `architect` command family
-(`init`/`new`/`freeze`/`worktree`/`dispatch`/`verify`/`gate`/`integrate`/`land`/`status`)
+(`init`/`new`/`rehearse`/`freeze`/`worktree`/`dispatch`/`verify`/`gate`/`integrate`/`land`/`status`)
 is the primary workspace mechanism, wrapping plain git: the freeze is the commit
 that adds the Acceptance Criteria, worktrees are `git worktree`, and verification
 is `git diff` + `git log`.
@@ -244,6 +244,27 @@ artifact to satisfy an AC's letter builds the stated property and reports the
 conflict — a permission valve, so the honest path never requires tampering with
 a frozen gate.
 
+The pre-freeze dry-run has a verb, and the reason is structural: gates were
+authored blind because no command sat between authoring and freeze —
+`architect gate` is a judge-phase command and refuses by construction to run
+earlier, so a broken or non-discriminating gate first failed at judge time,
+exactly when the frozen criteria could no longer be fixed. `architect rehearse`
+runs the drafted gates from the working tree through the same execution path
+`gate` uses and classifies each: **RED** (clean non-zero — it discriminates),
+**GREEN** (passes on base — a declared regression guard, or a gate that
+measures nothing), **BROKEN** (a 127, shell syntax error, unexpected EOF, or
+timeout — advisory, because a correct RED can look broken: the tool names the
+suspicion, the architect confirms), **EMPTY** (no gates, or an untouched
+scaffold placeholder). `freeze` requires a fresh rehearsal stamp keyed to the
+gates block's content — editing a gate stales it — with `freeze --skip-rehearse
+REASON` as the recorded escape valve. The stamp records that the architect
+looked, never that gates passed: an all-RED and an all-GREEN run stamp
+identically, which is what keeps the CLI out of the judging seat. Rehearsal
+moves the authoring-time check earlier; it licenses no change after the freeze
+(R2). A companion authoring rule, from the same verdict lineage: a
+presence-grep gate on prose is a tripwire, never the proof — write its
+criterion to say which.
+
 ### R5. Disagreement is mandatory, with citations
 The builder's PHASE 0 must surface every disagreement with the spec, citing real
 files; silent compliance is a defect the architect flags. This is the loop's
@@ -448,8 +469,8 @@ plan's quotas). Treat the specific dates/pools as dated facts (§8).
   as `~/…` in human output; color auto-detects the TTY and honors
   `--color=auto|always|never`.
 - The CLI *runs* gates and *reports* mechanical checks; it never judges. Every
-  runner (`gate`, `verify`) prints raw output and defers the verdict to the
-  architect.
+  runner (`gate`, `verify`, `rehearse`) prints raw output and defers the
+  verdict to the architect.
 
 ---
 
@@ -464,8 +485,9 @@ one work block:
   2. Judge     — run the gates yourself; per-gate PASS/FAIL/INVALID vs the
                  verbatim frozen Acceptance Criteria → KILL/CONTINUE (→ Verdict)
   3. Spec      — write Grounds (if researched) + Specification + Acceptance
-                 Criteria into architecture/I<NN>-<name>.md; `architect freeze`
-                 snapshots the frozen region ❄ (one commit)
+                 Criteria into architecture/I<NN>-<name>.md; `architect rehearse`
+                 dry-runs the drafted gates (RED/GREEN/BROKEN/EMPTY); `architect
+                 freeze` snapshots the frozen region ❄ (one commit)
   4. Dispatch  — 1-4 parallel headless builder lanes, one git worktree each
                  (background, fresh context); record each lane-prompt in Builder
                  Prompt. Per lane: PHASE 0 disagree-or-fail → PHASE 1 shared
@@ -561,6 +583,7 @@ without running the loop — it dispatches nothing, freezes nothing, judges noth
 | Builder grades own work | Raw-results-only handoff; architect runs gates itself; fresh-session judgment; capability-gap review (R3, R10) |
 | Goalpost moving | Verbatim gate quoting; gates never edited after results; a missing gate is a spec defect, frozen for the next iteration only (R2, R4) |
 | Over-tight acceptance criteria (precision exceeds the property) | Authoring-time calibration: property criteria frozen as floors, exactness only where the number is itself the deliverable; pre-freeze check (snapshot/control/mechanism/dry-run); lane-prompt letter-versus-spirit clause + architect-side ruling that the defect is the criterion's authoring — while judging-time loosening stays illegal (R2, R4) |
+| Gates authored blind (first failure at judge time, post-freeze) | `architect rehearse` runs drafted gates pre-freeze through the same path `gate` uses, classifying RED/GREEN/BROKEN/EMPTY (BROKEN advisory); freeze requires a fresh rehearsal stamp keyed to the gates block, `--skip-rehearse REASON` recorded; the stamp records that the architect looked, never that gates passed (R2, R4) |
 | Scope creep | Explicit out-of-scope list per iteration; silent scope additions = builder failure; architect flags creep by name (R5, R6) |
 | Context rot | Architect context holds judgment only; fresh builder process per iteration; the space's `architecture/` is the memory; SessionStart re-grounding (R1, R7) |
 | Merge conflicts between lanes | Overlap-checked `touch_set` lanes, ≤4, worktrees; a large tangled conflict = disjointness defect (kill/re-spec), a small contained one is hand-resolved at integration; parallel + fast-follow for the seam (R8) |

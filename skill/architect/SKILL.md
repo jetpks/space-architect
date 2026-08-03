@@ -336,6 +336,11 @@ Two kinds of criterion, two calibrations:
 Writing the first kind as the second is the defect: it leaves the lane no
 sanctioned path except degrading the artifact to fit the number.
 
+Say, too, what each gate proves: a presence-grep gate on prose is a
+**tripwire**, never the proof — it shows a keyword landed, not that the thing
+works — and its criterion should say which it is, leaving the substance
+architect-read.
+
 **Pre-freeze check** — run against the drafted AC in the minutes before
 `architect freeze`, while a bad criterion still costs nothing:
 
@@ -346,14 +351,24 @@ sanctioned path except degrading the artifact to fit the number.
 - **mechanism** — no AC names a *how* (an API signature, a helper, a file
   layout) where the *what* is the requirement, such that a better shape the
   lane discovers would be forbidden;
-- **dry-run** — every gate command executed as written, in the shell the gate
-  runner uses (`/bin/sh`, not your interactive shell). For a gate checking the
-  new work, a clean assertion failure on base is the healthy result — it
-  discriminates; green on base means it measures nothing. A regression guard is
-  green on base by design. A syntax or environment error either way means the
-  gate is broken, not red.
+- **dry-run** — `architect rehearse <name>`: it runs the drafted gates from
+  the working tree through the same execution path `architect gate` uses
+  (`/bin/sh`, same run-dir resolution, same evaluator) and classifies each —
+  **RED**, a clean non-zero: the gate discriminates, the healthy pre-freeze
+  result; **GREEN**, passes on base: a declared regression guard, or a gate
+  that measures nothing; **BROKEN**, a 127 / syntax error / timeout —
+  advisory, because a correct RED can look broken (`grep -q x` on a file the
+  lane will write exits 2): the tool names the suspicion, you confirm;
+  **EMPTY**, no gates or an untouched placeholder. `--record` emits a
+  paste-able provenance block for the AC preamble. It reports; which GREENs
+  are guards and which are defects stays your call.
 
-Then run `architect freeze <name>`. What must be frozen before
+Then run `architect freeze <name>`. Freeze requires a fresh rehearsal stamp —
+`rehearse` records one in `space.yaml`, keyed to the gates block's content, so
+editing a gate afterward stales it; `architect freeze --skip-rehearse REASON`
+(non-empty, recorded) is the escape valve. The stamp records that you looked,
+never that gates passed — an all-RED and an all-GREEN run stamp identically.
+What must be frozen before
 dispatch is the Acceptance Criteria: `architect freeze` lints the gates block
 (absent or empty gates is allowed but warns; malformed fails), commits any
 pending content in the frozen region (Grounds/Specification/Acceptance Criteria)
@@ -365,12 +380,16 @@ once a frozen section changed afterward.
 
 ### 5. Dispatch (one fresh `claude -p` per lane, worktree-isolated)
 
-Per the mechanics in `dispatch.md`. The lane lifecycle is **declare → freeze →
-provision → write prompts → dispatch** — every lane gets a worktree; there is no
-dispatch-in-the-checkout path:
+Per the mechanics in `dispatch.md`. The lane lifecycle is **declare → rehearse
+→ freeze → provision → write prompts → dispatch** — every lane gets a worktree;
+there is no dispatch-in-the-checkout path:
 
 - **Declare** — at spec time, each lane is one entry in the Specification's
   fenced ` ```lanes ` block (§4): `name`, `repo`, `touch` globs.
+- **Rehearse** — `architect rehearse <iteration>` dry-runs the drafted gates
+  from the working tree (§4's pre-freeze check), resolving its run dir from the
+  drafted ` ```lanes ` block, and stamps `space.yaml`; `freeze` refuses without
+  a fresh stamp.
 - **Freeze** — `architect freeze` parses that block and records each lane
   (name, repo, touch_set) into `space.yaml`.
 - **Provision** — `architect provision <iteration>` materializes every declared
