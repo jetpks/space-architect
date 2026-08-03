@@ -55,7 +55,9 @@ should say which. Runnable checks live in the fenced ```gates block below
 (parsed at freeze time — absent or empty is allowed; malformed fails freeze).
 Pre-freeze check — snapshot: no count/name-set/byte-identity frozen at merely
 today's value; control: every baseline actually run this session; mechanism: no
-*how* where the *what* is the requirement; dry-run:
+*how* where the *what* is the requirement; interface: every CLI surface the
+Specification names (verb, flag spelling, subcommand) executed once before it
+freezes; dry-run:
 `architect rehearse <%= @_name %>` — RED (clean non-zero) discriminates; GREEN
 is a declared regression guard or a gate that measures nothing; BROKEN is
 advisory (a correct RED can look broken — confirm it); EMPTY is no gates or an

@@ -23,7 +23,7 @@ Specification / Acceptance Criteria / Builder Prompt / Builder Report /
 Verdict), **one commit per section** — the commits give the differentiation and
 git gives the change guarantees, so there are no separate `gates/`/`lanes/`/`prd/`
 directories. The `architect` command family
-(`init`/`new`/`rehearse`/`freeze`/`worktree`/`dispatch`/`verify`/`gate`/`integrate`/`land`/`status`)
+(`init`/`new`/`rehearse`/`freeze`/`worktree`/`dispatch`/`verify`/`gate`/`integrate`/`status`)
 is the primary workspace mechanism, wrapping plain git: the freeze is the commit
 that adds the Acceptance Criteria, worktrees are `git worktree`, and verification
 is `git diff` + `git log`.
@@ -250,7 +250,9 @@ authored blind because no command sat between authoring and freeze —
 earlier, so a broken or non-discriminating gate first failed at judge time,
 exactly when the frozen criteria could no longer be fixed. `architect rehearse`
 runs the drafted gates from the working tree through the same execution path
-`gate` uses and classifies each: **RED** (clean non-zero — it discriminates),
+`gate` uses — both spawn an explicit `/bin/sh -c`, so the shell the docs name
+is guaranteed by construction — and classifies each: **RED** (clean non-zero —
+it discriminates),
 **GREEN** (passes on base — a declared regression guard, or a gate that
 measures nothing), **BROKEN** (a 127, shell syntax error, unexpected EOF, or
 timeout — advisory, because a correct RED can look broken: the tool names the
@@ -264,6 +266,21 @@ moves the authoring-time check earlier; it licenses no change after the freeze
 (R2). A companion authoring rule, from the same verdict lineage: a
 presence-grep gate on prose is a tripwire, never the proof — write its
 criterion to say which.
+
+Gates are not the only thing authored blind — the same defect recurs one level
+up, at the interfaces a Specification names. A frozen escape-valve spelling,
+`--no-rehearse REASON`, turned out unimplementable: Ruby's `OptionParser` —
+dry-cli's parser — treats any `--no-<word>` switch as the negated form of a
+boolean and silently discards its argument. The code lane verified that against
+the live gem and shipped a working `--skip-rehearse`; the prose lane, writing
+faithfully against the frozen contract exactly as a code/prose split intends,
+documented the broken spelling in four places. Hence the pre-freeze
+**interface** item (SKILL.md §4): any CLI surface a Specification names — a
+verb, a flag spelling, a subcommand — is executed once before it is frozen,
+because **a frozen interface is only safe if it is implementable** — precisely
+the assumption a code/prose lane split rests on when it says the lanes need not
+see each other's code. Unlike the dry-run, this item has no verb yet; it is a
+discipline, run by hand.
 
 ### R5. Disagreement is mandatory, with citations
 The builder's PHASE 0 must surface every disagreement with the spec, citing real
@@ -406,12 +423,14 @@ encodes:
   run genuinely fenced. (Neither makes `.git` read-only — "builders never commit"
   stays enforced by the layers in the commit-guarantee note below and checked in
   R8.)
-- **Thinking budget** is set per harness — there is no one mechanism. Some CLIs
-  take a reasoning-effort flag, driven through `architect dispatch --effort`; the
-  reference `claude-code` harness has no such flag, so depth is raised with
-  in-prompt escalation keywords (`think` < `think hard` < `think harder` <
-  `ultrathink`) or the `MAX_THINKING_TOKENS` env var. Builders default high;
-  researchers stay modest.
+- **Thinking budget** is set per harness — there is no one mechanism, so
+  `architect dispatch --effort` (aliases `--thinking`/`--reasoning`) takes one
+  level and translates it to each harness's own flag, clamping levels the
+  harness lacks. The reference `claude-code` harness takes a per-invocation
+  `--effort` flag accepting `low`/`medium`/`high`/`xhigh`/`max`, passed through
+  unclamped; in-prompt escalation keywords (`think` < `think hard` <
+  `think harder` < `ultrathink`) and the `MAX_THINKING_TOKENS` env var still
+  work. Builders default high; researchers stay modest.
 - **Prompt input is stdin** — the lane-prompt is written to
   `build/<id>-<lane>/prompt.md` and fed on stdin, sidestepping shells that mangle
   quotes in big prompts. The reference CLI has no `@file` and no `-C`/working-dir
@@ -584,6 +603,7 @@ without running the loop — it dispatches nothing, freezes nothing, judges noth
 | Goalpost moving | Verbatim gate quoting; gates never edited after results; a missing gate is a spec defect, frozen for the next iteration only (R2, R4) |
 | Over-tight acceptance criteria (precision exceeds the property) | Authoring-time calibration: property criteria frozen as floors, exactness only where the number is itself the deliverable; pre-freeze check (snapshot/control/mechanism/dry-run); lane-prompt letter-versus-spirit clause + architect-side ruling that the defect is the criterion's authoring — while judging-time loosening stays illegal (R2, R4) |
 | Gates authored blind (first failure at judge time, post-freeze) | `architect rehearse` runs drafted gates pre-freeze through the same path `gate` uses, classifying RED/GREEN/BROKEN/EMPTY (BROKEN advisory); freeze requires a fresh rehearsal stamp keyed to the gates block, `--skip-rehearse REASON` recorded; the stamp records that the architect looked, never that gates passed (R2, R4) |
+| Interfaces frozen unexecuted (a spec names a CLI verb/flag/subcommand no implementation can honor) | Pre-freeze **interface** check: any CLI surface a Specification names is executed once before it freezes — a frozen interface is only safe if it is implementable; no verb backs it yet, a hand-run discipline (R2, R4) |
 | Scope creep | Explicit out-of-scope list per iteration; silent scope additions = builder failure; architect flags creep by name (R5, R6) |
 | Context rot | Architect context holds judgment only; fresh builder process per iteration; the space's `architecture/` is the memory; SessionStart re-grounding (R1, R7) |
 | Merge conflicts between lanes | Overlap-checked `touch_set` lanes, ≤4, worktrees; a large tangled conflict = disjointness defect (kill/re-spec), a small contained one is hand-resolved at integration; parallel + fast-follow for the seam (R8) |
