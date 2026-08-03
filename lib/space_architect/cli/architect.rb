@@ -226,23 +226,127 @@ module Space::Architect
         end
       end
 
+      class Rehearse < BaseCommand
+        desc "Rehearse the DRAFTED (unfrozen, working-tree) gates against the repo checkout and report RED/GREEN/BROKEN/EMPTY — runs and reports, never judges"
+        phase 12, "Spec"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        # type: :flag (not :boolean): dry-cli renders a :boolean option as
+        # "--[no-]record" in --help, which does not contain the literal
+        # substring "--record" that a presence-check on the flag would look
+        # for; :flag renders unbracketed ("--record") and is presence-only,
+        # which is all this needs.
+        option   :record, type: :flag, default: false, desc: "Emit a paste-able provenance block summarizing the run, shaped to drop into an Acceptance Criteria preamble"
+
+        def call(iteration:, space: nil, record: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              result = project.rehearse(iteration)
+              render_rehearsal(result)
+              terminal.say ""
+              terminal.say render_record(result) if record
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+
+        private
+
+        def render_rehearsal(result)
+          if result[:empty]
+            reason = result[:placeholder] ? "the scaffold placeholder '#{ArchitectProject::AC1_PLACEHOLDER}' with no active gate" : "no gates drafted yet"
+            terminal.say "EMPTY — #{reason}. Nothing to rehearse; the pre-freeze look is still stamped."
+          else
+            terminal.say "Rehearsing #{result[:iteration]} against #{terminal.path(result[:base_dir])} (repo: #{result[:repo]})"
+            result[:gates].each { |g| render_gate(g) }
+            render_scope_asymmetry(result[:scope_asymmetry])
+          end
+          terminal.say ""
+          terminal.say "Discrimination report only — this runs and reports; it never judges whether these gates are good, bad, or ready."
+        end
+
+        def render_gate(g)
+          terminal.say ""
+          terminal.say "── #{g[:ac].empty? ? "(gate)" : g[:ac]}: #{g[:cmd]}  (exit #{g[:exit_code].inspect})  [#{g[:rehearsal].to_s.upcase}]"
+          terminal.say "   dir: #{terminal.path(g[:dir])}"
+          terminal.say "   reason: #{g[:reason]}" unless g[:reason].to_s.empty?
+          if g[:rehearsal] == :broken
+            terminal.say "   BROKEN is advisory, not certain — a correct RED can look broken (e.g. a file the lane " \
+              "hasn't written yet). Confirm before treating it as a defect."
+          end
+          terminal.say g[:stdout].rstrip unless g[:stdout].strip.empty?
+          terminal.say g[:stderr].rstrip unless g[:stderr].strip.empty?
+        end
+
+        # I12/AC3-AC4: reports scope asymmetry only — never affects RED/GREEN/
+        # BROKEN, rehearse's exit code, or the stamp. A file outside every
+        # declared lane's touch set is flagged loudest: it's the one no lane
+        # may legally fix. not_analyzable is rendered too, and counted, so a
+        # reader can tell "nothing matched" from "nothing was examined".
+        def render_scope_asymmetry(report)
+          return if report.nil? || (report[:findings].empty? && report[:not_analyzable].empty?)
+
+          terminal.say ""
+          terminal.say "Scope-asymmetry check (grep-family gates only):"
+          report[:findings].each do |f|
+            terminal.say "── #{f[:id]}: pattern #{f[:pattern].inspect} searched #{f[:paths].join(', ')}"
+            if f[:outside_lanes].any?
+              terminal.say "   OUTSIDE ANY LANE'S TOUCH SET — no lane may legally fix these:"
+              f[:outside_lanes].each { |file| terminal.say "     #{file}" }
+            end
+            terminal.say "   also matches (within a declared lane's touch set): #{f[:within_lanes].join(', ')}" if f[:within_lanes].any?
+            terminal.say "   0 files elsewhere match" if f[:outside_lanes].empty? && f[:within_lanes].empty?
+          end
+
+          return if report[:not_analyzable].empty?
+          terminal.say ""
+          terminal.say "Not analyzed (#{report[:not_analyzable].size} grep invocation(s)) — counted, not silently skipped:"
+          report[:not_analyzable].each { |na| terminal.say "   #{na[:id]}: #{na[:reason]}" }
+        end
+
+        def render_record(result)
+          return "> Rehearsed #{result[:iteration]} — no gates drafted; nothing to record." if result[:empty]
+
+          by  = result[:gates].group_by { |g| g[:rehearsal] }
+          ids = ->(sym) { (by[sym] || []).map { |g| g[:id] }.join(", ") }
+          [
+            "> **Dry-run at rehearsal time, recorded for transparency.** All #{result[:gates].size} gate command(s) " \
+              "were executed as written against `#{result[:repo]}` under `/bin/sh` — the shell `architect gate` uses.",
+            ">",
+            "> - **RED (#{(by[:red] || []).size} — discriminate):** #{ids.call(:red).empty? ? "(none)" : ids.call(:red)}",
+            "> - **GREEN (#{(by[:green] || []).size} — regression guard or non-discriminating):** #{ids.call(:green).empty? ? "(none)" : ids.call(:green)}",
+            "> - **BROKEN (#{(by[:broken] || []).size} — advisory, confirm each):** #{ids.call(:broken).empty? ? "(none)" : ids.call(:broken)}"
+          ].join("\n")
+        end
+      end
+
       class Freeze < BaseCommand
         desc "Freeze the iteration's frozen region (Grounds/Specification/Acceptance Criteria) and record the freeze SHA"
-        phase 12, "Spec"
+        phase 13, "Spec"
         argument :iteration, required: true, desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :force, type: :boolean, default: false, desc: "Re-freeze even if the frozen region changed (pre-dispatch only)"
+        # Named --skip-rehearse, not --no-rehearse: Ruby's OptionParser (dry-cli's
+        # underlying parser, verified against the live dry-cli 1.4.1 in this repo)
+        # treats ANY switch literally named --no-<word> as a boolean negation and
+        # silently discards its value, regardless of declared type — so a REASON
+        # cannot bind to a flag spelled --no-rehearse. --skip-rehearse is the
+        # working escape valve; --no-rehearse is the name this design uses for it.
+        option   :skip_rehearse, default: nil, desc: "Escape valve (design name: --no-rehearse): skip the fresh-rehearsal requirement, recording REASON in space.yaml (bare freeze refuses without a matching `architect rehearse` stamp)"
         commit_message_options
 
-        def call(iteration:, space: nil, message: nil, message_from: nil, force: false, **opts)
+        def call(iteration:, space: nil, message: nil, message_from: nil, force: false, skip_rehearse: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
               warnings = []
-              sha = project.freeze!(iteration, warnings: warnings, force: force,
+              sha = project.freeze!(iteration, warnings: warnings, force: force, skip_rehearse_reason: skip_rehearse,
                 message: read_commit_message(message: message, message_from: message_from))
               terminal.say "Frozen #{iteration} at #{sha}"
+              terminal.say "Rehearsal requirement skipped — #{skip_rehearse}" if skip_rehearse
               warnings.each { |w| terminal.say "Warning: #{w}" }
               ac = project.acceptance_criteria(iteration)
               unless ac.to_s.strip.empty?
@@ -402,6 +506,9 @@ module Space::Architect
                   terminal.say "Report:  #{terminal.path(res[:report])}"
                   terminal.say "Ingest URL:  #{res[:push_url]}" if res[:push_url]
                   terminal.say "Builder exited with status #{res[:exit_code]}"
+                  unless res[:report].exist? && !res[:report].read.strip.empty?
+                    terminal.say "WARNING: no report at #{terminal.path(res[:report])} — the lane produced no deliverable."
+                  end
                   CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
                 end
               end
@@ -560,9 +667,10 @@ module Space::Architect
         option   :teardown,    type: :boolean, default: false, desc: "Remove worktrees + delete lane branches after merge"
         option   :commit_mode, default: nil,    desc: "Commit mode override (strict|conductor); overrides space.yaml commit_mode for this run"
         option   :into,        required: false, desc: "Merge into this branch instead of the slug-derived project/<slug> default"
+        option   :accept_bounds, default: nil,  desc: "Escape valve: override the in-bounds check for these lanes when the frozen touch-set glob is itself the defect, recording REASON in space.yaml (never overrides the no-builder-commits check)"
         commit_message_options
 
-        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, commit_mode: nil, into: nil, **opts)
+        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, commit_mode: nil, into: nil, accept_bounds: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
@@ -573,7 +681,7 @@ module Space::Architect
               project = ArchitectProject.new(space: sp)
               results = project.integrate!(iteration, lanes: lane_names, teardown: teardown,
                 message: read_commit_message(message: message, message_from: message_from),
-                commit_mode: commit_mode, into: into)
+                commit_mode: commit_mode, into: into, accept_bounds_reason: accept_bounds)
               if lane_names.empty?
                 if results.empty?
                   terminal.say "Nothing to tear down for #{iteration}"
@@ -585,6 +693,7 @@ module Space::Architect
               else
                 results.each do |r|
                   terminal.say "Merged #{r[:lane]} → #{r[:integration_branch]} (#{r[:merge_sha][0, 8]})"
+                  terminal.say "In-bounds check overridden for #{r[:lane]}: #{r[:bounds_override_reason]}" if r[:bounds_override_reason]
                 end
                 terminal.say "Gates NOT run — run gates: `architect gate #{iteration}`"
               end
@@ -611,6 +720,7 @@ module Space::Architect
                 marker = r[:status] == :pass ? "PASS" : "FAIL"
                 terminal.say ""
                 terminal.say "── #{r[:ac].empty? ? "(gate)" : r[:ac]}: #{r[:cmd]}  (exit #{r[:exit_code]})  [#{marker}]"
+                terminal.say "   dir: #{terminal.path(r[:dir])}"
                 terminal.say "   reason: #{r[:reason]}" if r[:status] == :fail && !r[:reason].to_s.empty?
                 terminal.say r[:stdout].rstrip unless r[:stdout].strip.empty?
                 terminal.say r[:stderr].rstrip unless r[:stderr].strip.empty?
@@ -627,15 +737,20 @@ module Space::Architect
       class BugReport < BaseCommand
         desc "Generate a prefilled GitHub issue template for filing bugs against space-architect"
         phase 54, "Project"
+        option :title, default: nil, desc: "Issue title, written into --title and the body's leading H1 (omit and gh will prompt for one interactively — the body file does not set it)"
 
-        def call(**opts)
+        def call(title: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             space = store.find.value_or(nil)
             result = Space::Architect::BugReport.generate(
               space: space,
-              env: project_config.env
+              env: project_config.env,
+              title: title
             )
+            unless title
+              terminal.say "No --title given — the body file does not set the issue title; re-run as architect bug-report --title \"...\" to set it in the command (or gh will prompt you for one)."
+            end
             terminal.say "Fill the placeholders in #{terminal.path(result[:body_path].to_s)}, then run:"
             terminal.say result[:command]
             terminal.say ""
@@ -1090,6 +1205,7 @@ Space::Architect::CLI::Registry.register "ground", Space::Architect::CLI::Archit
 Space::Architect::CLI::Registry.register "new",    Space::Architect::CLI::Architect::New
 Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Architect::Status
 Space::Architect::CLI::Registry.register "sync",   Space::Architect::CLI::Architect::Sync
+Space::Architect::CLI::Registry.register "rehearse", Space::Architect::CLI::Architect::Rehearse
 Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
 Space::Architect::CLI::Registry.register "verify", Space::Architect::CLI::Architect::Verify
 Space::Architect::CLI::Registry.register "provision", Space::Architect::CLI::Architect::Provision

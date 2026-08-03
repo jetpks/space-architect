@@ -46,7 +46,7 @@ module Space
         end
 
         def source_skills
-          source_root.children.select(&:directory?)
+          Space::Core::Paths.layout_children(source_root).select(&:directory?)
         end
 
         private
@@ -93,8 +93,8 @@ module Space
         def same_content?(source, dest)
           return false unless dest.directory?
 
-          source_files = Dir.glob("#{source}/**/*").reject { |f| File.directory?(f) }
-          dest_files = Dir.glob("#{dest}/**/*").reject { |f| File.directory?(f) }
+          source_files = Space::Core::Paths.content_tree(source).reject { |f| File.directory?(f) }
+          dest_files = Space::Core::Paths.content_tree(dest).reject { |f| File.directory?(f) }
 
           return false if source_files.length != dest_files.length
 

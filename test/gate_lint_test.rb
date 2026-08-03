@@ -303,13 +303,16 @@ class GateLintTest < Space::ArchitectTest
     text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
     File.write(slice, text)
 
-    sha = project.freeze!("my-slice")
+    sha = project.freeze!("my-slice", skip_rehearse_reason: "test setup — not exercising rehearsal")
     assert_match(/\A[0-9a-f]{40}\z/, sha)
   ensure
     FileUtils.rm_rf(dir)
   end
 
-  def test_freeze_succeeds_with_empty_gates_block_and_warns
+  # #73, the "still works" half (I09/AC8): a hand-authored, prose-only AC —
+  # the placeholder replaced with real prose, still no gates — keeps the
+  # original warn-and-succeed path; spike iterations depend on it.
+  def test_freeze_succeeds_with_hand_written_prose_only_ac_and_warns
     dir = Dir.mktmpdir("gate-lint-test")
     space = create_real_space(dir)
 
@@ -317,11 +320,33 @@ class GateLintTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
 
+    slice = File.join(dir, "architecture", "I01-my-slice.md")
+    text = File.read(slice).sub("**AC1.** ...", "**AC1.** This spike needs no runnable gate; judged on prose alone.")
+    File.write(slice, text)
+
     warnings = []
-    sha = project.freeze!("my-slice", warnings: warnings)
+    sha = project.freeze!("my-slice", warnings: warnings, skip_rehearse_reason: "test setup — not exercising rehearsal")
     assert_match(/\A[0-9a-f]{40}\z/, sha)
     assert_equal 1, warnings.length
     assert_match(/no gates/, warnings[0])
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #73, narrowly (I09/AC8): the OLD bug — a completely untouched scaffold
+  # (the placeholder AC1 line AND an empty gates block) used to freeze clean
+  # on a soft warning. That is now a hard refuse.
+  def test_freeze_refuses_untouched_scaffold_placeholder_with_no_gates
+    dir = Dir.mktmpdir("gate-lint-test")
+    space = create_real_space(dir)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    err = assert_raises(Space::Core::Error) { project.freeze!("my-slice") }
+    assert_match(/\*\*AC1\.\*\* \.\.\./, err.message)
+    assert_match(/no active gate/, err.message)
   ensure
     FileUtils.rm_rf(dir)
   end

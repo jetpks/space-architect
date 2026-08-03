@@ -2,6 +2,6 @@
 
 module Space
   module Core
-    VERSION = "5.5.1"
+    VERSION = "6.0.0"
   end
 end

@@ -7,6 +7,8 @@ require "fileutils"
 require "pathname"
 require "tempfile"
 require "time"
+require "digest"
+require "shellwords"
 
 module Space::Architect
   # Manages an architect-loop project inside a space: one self-contained file per
@@ -42,12 +44,22 @@ module Space::Architect
     # Hard per-gate timeout. Generous relative to the full suite (~55s).
     DEFAULT_GATE_TIMEOUT = 900
 
-    # Flags for matching a changed path against a lane's touch_set globs.
-    # PATHNAME keeps a single `*` from crossing `/`; EXTGLOB enables `{a,b}`;
-    # DOTMATCH lets a glob reach dotfile segments, so a `dir/**` touch set covers
-    # `dir/.github/workflows/ci.yml` — the standard deliverable for a lane preparing
-    # a directory to become a repo root.
-    TOUCH_FNM = File::FNM_PATHNAME | File::FNM_EXTGLOB | File::FNM_DOTMATCH
+    # The scaffold's untouched placeholder AC1 line — templates/iteration.md.erb's
+    # Acceptance Criteria section (named, not line-numbered: a pinned line number
+    # here has already drifted twice). Pinned by contract with the authoring
+    # lane, which is forbidden from changing it, precisely so freeze!'s #73
+    # hard-refuse (below) can key on it.
+    AC1_PLACEHOLDER = "**AC1.** ..."
+
+    # Rehearsal's BROKEN heuristic (I09/AC5): a command-not-found exit code or a
+    # shell parse failure, distinct from a clean non-zero (RED — the gate
+    # discriminates). Advisory, not authoritative — see #classify_rehearsal.
+    BROKEN_STDERR_PATTERN = /\bsyntax error\b|unexpected end of file|unexpected eof/i
+
+    # I09/AC9(b): a gate `cmd` that carries a literal 'repos/<name>/' prefix
+    # with no `cwd` — legal, occasionally correct, but usually a leftover
+    # space-root-relative path since `cmd` already resolves against the repo tree.
+    BARE_REPO_PREFIX = %r{(?<![\w./-])repos/[^/\s'"]+/}
 
     # Legacy sentinel: worktree_add used to seed prompt.md with this placeholder
     # (dropped — the blind-overwrite tripped harness read-before-write guards, #48).
@@ -153,6 +165,7 @@ module Space::Architect
       block = space.data["project"] || {}
       architecture_dir = space.path.join("architecture")
       iteration_files = if architecture_dir.exist?
+        # paths:exempt - the /\AI\d+-.+\.md\z/ filter structurally cannot match a dotfile-prefixed name, so raw enumeration is already dotfile-safe here
         architecture_dir.children
           .select { |f| f.basename.to_s.match?(/\AI\d+-.+\.md\z/) }
           .map { |f| f.basename.to_s }.sort
@@ -166,7 +179,7 @@ module Space::Architect
     # any pending changes to the iteration file and records HEAD as freeze_sha. If
     # already frozen, refuses when the frozen region has changed since.
     # With force: true, re-freezes a changed frozen region if no lane is dispatched yet.
-    def freeze!(iteration, warnings: nil, message: nil, force: false)
+    def freeze!(iteration, warnings: nil, message: nil, force: false, skip_rehearse_reason: nil)
       entry = slice_entry(iteration)
       rel = entry["file"]
       path = space.path.join(rel)
@@ -178,6 +191,19 @@ module Space::Architect
 
       lint_gates!(text, warnings: warnings)
       lint_lanes!(text)
+
+      if untouched_ac_placeholder?(text)
+        raise Space::Core::Error,
+          "#{rel}'s Acceptance Criteria still carries the scaffold placeholder '#{AC1_PLACEHOLDER}' with no " \
+          "active gate — write the real Acceptance Criteria (a hand-authored prose-only AC without the " \
+          "placeholder still freezes) before freezing."
+      end
+
+      if skip_rehearse_reason
+        raise Space::Core::Error, "--skip-rehearse requires a non-empty REASON" if skip_rehearse_reason.to_s.strip.empty?
+      else
+        ensure_rehearsed!(iteration, entry, text)
+      end
 
       if entry["freeze_sha"]
         sha = entry["freeze_sha"]
@@ -211,6 +237,7 @@ module Space::Architect
           next unless s["name"] == iteration
           s["freeze_sha"] = sha
           s["verdict"] ||= "pending"
+          s["rehearsal_skip_reason"] = skip_rehearse_reason.strip if skip_rehearse_reason
           lanes = s["lanes"] || []
           declared.each do |d|
             fields = { "name" => d["name"], "repo" => d["repo"], "touch_set" => Array(d["touch"]) }
@@ -321,6 +348,9 @@ module Space::Architect
 
     # Transcribe a lane's scratch report (build/<id>[-<lane>]/report.md) VERBATIM into
     # the Builder Report section and commit. Byte-for-byte: no summarization, no judgment.
+    # Re-transcribing a lane replaces its existing "### <lane>" subsection in place
+    # (preserving the order lanes were already transcribed in) instead of appending a
+    # duplicate; a lane not yet present still appends.
     def transcribe_evidence!(iteration, lane: nil, message: nil)
       entry = slice_entry(iteration)
       rel = entry["file"]
@@ -333,8 +363,15 @@ module Space::Architect
       raw = report.read
       raise Space::Core::Error, "builder report is empty: #{report}" if raw.strip.empty?
 
-      block = lane ? "### #{lane}\n\n#{raw.rstrip}" : raw.rstrip
-      path.write(replace_section_body(path.read, "## Builder Report", block, append: !lane.nil?))
+      text = path.read
+      new_body =
+        if lane
+          lane_names = (entry["lanes"] || []).map { |l| l["name"] }
+          replace_lane_report(section_body(text, "## Builder Report").to_s, lane, raw.rstrip, lane_names)
+        else
+          raw.rstrip
+        end
+      path.write(replace_section_body(text, "## Builder Report", new_body, append: false))
 
       nn = format("%02d", entry["ordinal"] || 0)
       git_capture("-C", space.path.to_s, "commit", "-m",
@@ -366,7 +403,20 @@ module Space::Architect
     # the lane branch, then merge --no-ff into the repo's lane/<id> integration branch.
     # Runs NO gates and makes NO pass/fail decision. Refuses a mechanically-failing lane
     # (builder commits / out-of-bounds) and aborts cleanly on a merge conflict.
-    def merge_lane!(iteration, lane, message: nil, commit_mode: nil, into: nil)
+    #
+    # accept_bounds_reason overrides ONLY the in-bounds check — never no_builder_commits,
+    # which stays an unconditional refusal (a builder commit is tampering, not an authoring
+    # defect the architect can rule on). Modeled on freeze!'s --skip-rehearse: a non-empty
+    # REASON is required whenever passed, recorded in space.yaml beside the lane, and
+    # returned for the caller to echo — the override can never be silent. Recorded only
+    # for THIS lane, and only when its in-bounds check actually failed — integrate! passes
+    # the same reason to every lane in the set, but a lane that was already in bounds gets
+    # neither the record nor the echo.
+    def merge_lane!(iteration, lane, message: nil, commit_mode: nil, into: nil, accept_bounds_reason: nil)
+      if accept_bounds_reason
+        raise Space::Core::Error, "--accept-bounds requires a non-empty REASON" if accept_bounds_reason.to_s.strip.empty?
+      end
+
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
@@ -376,8 +426,10 @@ module Space::Architect
       if checks[:no_builder_commits] == false
         raise Space::Core::Error, "Lane '#{lane}' has builder commits — the worktree is tampered (hard rule 7). Reset and re-dispatch; do not merge."
       end
-      if checks[:in_bounds] == false
-        raise Space::Core::Error, "Lane '#{lane}' wrote outside its declared touch set — out-of-bounds fails the lane. Reset and re-dispatch."
+      if checks[:in_bounds] == false && !accept_bounds_reason
+        raise Space::Core::Error, "Lane '#{lane}' wrote outside its declared touch set — out-of-bounds fails the lane. Reset " \
+          "and re-dispatch, or `architect integrate #{iteration} --lanes #{lane} --accept-bounds REASON` to override when " \
+          "the touch-set declaration itself is the defect."
       end
 
       repo = lane_entry["repo"]
@@ -427,6 +479,8 @@ module Space::Architect
       merge_sha, = git_capture("-C", repo_path.to_s, "rev-parse", "HEAD")
       diffstat, = git_capture("-C", repo_path.to_s, "diff", "--stat", "#{base_sha}..HEAD")
 
+      bounds_override_reason = accept_bounds_reason.strip if accept_bounds_reason && checks[:in_bounds] == false
+
       update_architect_block do |b|
         b["integration_branch"] = integration_branch
         (b["iterations"] || []).each do |s|
@@ -435,27 +489,36 @@ module Space::Architect
             next unless l["name"] == lane
             l["integration_branch"] = integration_branch
             l["integrate_sha"] = integrate_sha
+            l["bounds_override_reason"] = bounds_override_reason if bounds_override_reason
           end
         end
         b
       end
 
-      { lane: lane, repo: repo, integration_branch: integration_branch,
-        merge_sha: merge_sha.strip, base_sha: base_sha, diffstat: diffstat.strip, gates_run: false }
+      { lane: lane, repo: repo, integration_branch: integration_branch, merge_sha: merge_sha.strip,
+        base_sha: base_sha, diffstat: diffstat.strip, gates_run: false,
+        bounds_override_reason: bounds_override_reason }
     end
 
     # Loop merge_lane! over the architect-supplied passing set, in order. Stops on the
     # first conflict (a disjointness defect). Never decides which lanes pass. With no
     # lanes and teardown: true, tears down every lane recorded for the iteration instead
     # (the second, teardown-only call in the loop's integrate-then-teardown rhythm).
-    def integrate!(iteration, lanes: nil, teardown: false, message: nil, commit_mode: nil, into: nil)
+    #
+    # merge_lane!/teardown_lanes! only save integration_branch/integrate_sha/worktree to
+    # space.yaml on disk (update_architect_block never commits) — one commit per call,
+    # here, by pathspec, so which lanes merged survives independently of whether a
+    # Verdict follows (I13/A3). Always attempted, success or raise, so a conflict that
+    # stops the loop midway doesn't lose the lanes already merged.
+    def integrate!(iteration, lanes: nil, teardown: false, message: nil, commit_mode: nil, into: nil, accept_bounds_reason: nil)
       lanes = Array(lanes)
       return teardown_lanes!(iteration, slice_entry(iteration)["lanes"] || []) if lanes.empty? && teardown
       raise Space::Core::Error, "No lanes given to integrate" if lanes.empty?
 
       merged = []
       lanes.each do |lane|
-        merged << merge_lane!(iteration, lane, message: message, commit_mode: commit_mode, into: into)
+        merged << merge_lane!(iteration, lane, message: message, commit_mode: commit_mode, into: into,
+          accept_bounds_reason: accept_bounds_reason)
       rescue Space::Core::Error => e
         done = merged.map { |m| m[:lane] }.join(", ")
         raise Space::Core::Error, "Integrated #{done.empty? ? "(none)" : done} then stopped at '#{lane}': #{e.message}"
@@ -463,6 +526,8 @@ module Space::Architect
 
       teardown_lanes!(iteration, merged) if teardown
       merged
+    ensure
+      commit_metadata_mutation!(iteration, message: message)
     end
 
     # Run the iteration's frozen Acceptance Criteria gate commands. Each gate is
@@ -470,7 +535,10 @@ module Space::Architect
     # a hard timeout, and evaluated against its `expect` block. Returns an array
     # of result hashes with :status (:pass/:fail) and :reason in addition to the
     # raw :stdout/:stderr/:exit_code. The mechanical verdict belongs here; the AC
-    # verdict remains the architect's.
+    # verdict remains the architect's. WHERE the gate text comes from (the frozen
+    # commit) is resolved here; HOW gates execute is #execute_gates, shared
+    # byte-for-byte with #rehearse so the two can never run gates through
+    # different instruments (I09/AC3).
     def run_gates(iteration, lane: nil)
       entry = slice_entry(iteration)
       freeze_sha = entry["freeze_sha"]
@@ -498,37 +566,50 @@ module Space::Architect
         end
       raise Space::Core::Error, "directory does not exist: #{base_dir}" unless base_dir.exist?
 
-      gates.map do |gate|
-        g   = gate.transform_keys(&:to_s)
-        dir =
-          if (cwd = g["cwd"])
-            gate_cwd = space.path.join(cwd)
-            if lane && repo_root && (gate_cwd == repo_root || gate_cwd.to_s.start_with?("#{repo_root}/"))
-              base_dir.join(gate_cwd.relative_path_from(repo_root)).cleanpath
-            else
-              gate_cwd
-            end
-          else
-            base_dir
-          end
-        raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
+      execute_gates(gates, base_dir: base_dir, lane: lane, repo_root: repo_root)
+    end
 
-        effective = g["timeout"] || DEFAULT_GATE_TIMEOUT
-        captured = capture_with_timeout(g["cmd"], dir: dir, timeout: effective)
+    # Rehearse the DRAFTED gates in the WORKING-TREE iteration file — before the
+    # freeze, while they can still be fixed — through the identical execution
+    # path #run_gates uses at judge time (#execute_gates). space.yaml records no
+    # lanes until freeze! writes them (#freeze!, :~209), so the run directory is
+    # resolved from the DRAFTED ```lanes``` block instead of the recorded one;
+    # rehearsal always runs in the repo checkout (repos/<repo>), never a lane
+    # worktree, because lane worktrees are not provisioned until after the
+    # freeze. Classifies each result RED/GREEN/BROKEN (I09/AC5) and stamps the
+    # iteration as rehearsed, keyed to the gates block's content (I09/AC7) — the
+    # stamp records that the architect looked, never that gates passed.
+    def rehearse(iteration, now: Time.now)
+      entry = slice_entry(iteration)
+      rel = entry["file"]
+      path = space.path.join(rel)
+      raise Space::Core::Error, "#{rel} does not exist — run `architect new #{iteration}` first" unless path.exist?
+      text = path.read
 
-        if captured[:timed_out]
-          status = :fail
-          reason = "timed out after #{effective}s"
+      gates = parse_gates(text)
+      repo, base_dir, gate_results, scope_report =
+        if gates.empty?
+          [nil, nil, [], nil]
         else
-          ev     = GateEvaluator.call(stdout: captured[:stdout], exit_code: captured[:exit_code], expect: g["expect"] || {})
-          status = ev.pass? ? :pass : :fail
-          reason = ev.reason
+          r   = resolve_rehearsal_repo(iteration, text)
+          dir = space.path.join("repos", r)
+          raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
+          results = execute_gates(gates, base_dir: dir, lane: nil, repo_root: nil)
+                    .map { |g| g.merge(rehearsal: classify_rehearsal(g)) }
+          [r, dir, results, scope_asymmetry_report(gates, text, dir)]
         end
 
-        { id: g["id"], ac: g["ac"].to_s, cmd: g["cmd"], expect: g["expect"],
-          stdout: captured[:stdout], stderr: captured[:stderr], exit_code: captured[:exit_code],
-          dir: dir, status: status, reason: reason }
+      digest = gates_digest(text)
+      update_architect_block do |b|
+        (b["iterations"] || []).each do |s|
+          next unless s["name"] == iteration
+          s["rehearsal"] = { "gates_digest" => digest, "at" => now.iso8601 }
+        end
+        b
       end
+
+      { iteration: iteration, repo: repo, base_dir: base_dir, gates: gate_results,
+        empty: gates.empty?, placeholder: untouched_ac_placeholder?(text), scope_asymmetry: scope_report }
     end
 
     # Emit grounding reads for the architect's SessionStart hook.
@@ -789,7 +870,7 @@ module Space::Architect
     def worktree_list
       wt_base = space.path.join("build")
       return [] unless wt_base.exist?
-      wt_base.children.select(&:directory?).map { |p| p.basename.to_s }.sort
+      Space::Core::Paths.layout_children(wt_base).select(&:directory?).map { |p| p.basename.to_s }.sort
     end
 
     # Materialize the iteration's declared lanes: for each lane (or the one named via
@@ -1002,6 +1083,21 @@ module Space::Architect
       body.empty? ? composed : "#{composed}\n\n#{body}"
     end
 
+    # integrate!'s own space.yaml commit, by pathspec — like record_verdict!'s sweep, so
+    # other uncommitted work in the space isn't pulled in. A call that mutated nothing
+    # (teardown-only over lanes with no worktree, or a call that raised before touching
+    # anything) leaves git commit with nothing staged for that path; tolerate that exit
+    # via git_capture the way write_section! tolerates a no-op frozen-section commit,
+    # never git_run it.
+    def commit_metadata_mutation!(iteration, message:)
+      entries = (space.data["project"] || {})["iterations"] || []
+      ordinal = entries.find { |s| s["name"] == iteration }&.dig("ordinal") || 0
+      nn = format("%02d", ordinal)
+      git_capture("-C", space.path.to_s, "commit", "-m",
+        compose_message("I#{nn} integrate:", "I#{nn}: record integration", message),
+        "--", Space::Core::Space::METADATA_FILE)
+    end
+
     # Remove each lane's worktree and safe-delete (`-d`) its lane branch. Accepts
     # either merge_lane! results (symbol keys) or recorded lane entries (string
     # keys) — both carry a lane name and a repo.
@@ -1035,6 +1131,7 @@ module Space::Architect
         end
       end
 
+      # paths:exempt - the /\AI\d+-.+\.md\z/ filter structurally cannot match a dotfile-prefixed name, so raw enumeration is already dotfile-safe here
       candidates = arch_dir.children.select { |f| f.basename.to_s.match?(/\AI\d+-.+\.md\z/) }
       return nil if candidates.empty?
       candidates.max_by { |f| f.basename.to_s[/\AI(\d+)/, 1].to_i }
@@ -1046,7 +1143,7 @@ module Space::Architect
     def capture_with_timeout(cmd, dir:, timeout:)
       out_f = Tempfile.new(["gate-stdout", ".log"])
       err_f = Tempfile.new(["gate-stderr", ".log"])
-      pid   = Process.spawn(cmd, pgroup: true, chdir: dir.to_s, out: out_f.path, err: err_f.path)
+      pid   = Process.spawn("/bin/sh", "-c", cmd, pgroup: true, chdir: dir.to_s, out: out_f.path, err: err_f.path)
 
       deadline  = Time.now + timeout
       status    = nil
@@ -1074,6 +1171,311 @@ module Space::Architect
     ensure
       out_f&.close!
       err_f&.close!
+    end
+
+    # HOW gates execute — the one instrument #run_gates (judge time) and
+    # #rehearse (pre-freeze) both call, byte-for-byte: same cwd-remap semantics,
+    # same shell (capture_with_timeout's Process.spawn), same GateEvaluator,
+    # same timeout handling (I09/AC3). repo_root/lane are nil outside a lane
+    # context (rehearsal never has one — it always runs in the repo checkout).
+    def execute_gates(gates, base_dir:, lane:, repo_root:)
+      gates.map do |gate|
+        g   = gate.transform_keys(&:to_s)
+        dir =
+          if (cwd = g["cwd"])
+            gate_cwd = space.path.join(cwd)
+            if lane && repo_root && (gate_cwd == repo_root || gate_cwd.to_s.start_with?("#{repo_root}/"))
+              base_dir.join(gate_cwd.relative_path_from(repo_root)).cleanpath
+            else
+              gate_cwd
+            end
+          else
+            base_dir
+          end
+        raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
+
+        effective = g["timeout"] || DEFAULT_GATE_TIMEOUT
+        captured = capture_with_timeout(g["cmd"], dir: dir, timeout: effective)
+
+        if captured[:timed_out]
+          status = :fail
+          reason = "timed out after #{effective}s"
+        else
+          ev     = GateEvaluator.call(stdout: captured[:stdout], exit_code: captured[:exit_code], expect: g["expect"] || {})
+          status = ev.pass? ? :pass : :fail
+          reason = ev.reason
+        end
+
+        { id: g["id"], ac: g["ac"].to_s, cmd: g["cmd"], expect: g["expect"],
+          stdout: captured[:stdout], stderr: captured[:stderr], exit_code: captured[:exit_code],
+          dir: dir, status: status, reason: reason, timed_out: captured[:timed_out] }
+      end
+    end
+
+    # I09/AC4: resolve rehearsal's run repo from the DRAFTED ```lanes``` block —
+    # one repo, unambiguously declared or inferable, else a message naming what
+    # to do. Never from space.yaml (no lanes are recorded there pre-freeze).
+    def resolve_rehearsal_repo(iteration, text)
+      declared = parse_lanes(text).filter_map { |l| l["repo"] }.uniq
+      return declared.first if declared.size == 1
+
+      if declared.empty?
+        tracked = space.repos.map { |r| r["name"] }
+        return tracked.first if tracked.size == 1
+        raise Space::Core::Error,
+          "Cannot resolve a repo to rehearse '#{iteration}' against — no lane declares a repo and the space " \
+          "tracks #{tracked.size} repos (#{tracked.join(', ')}). Declare a ```lanes``` block in the " \
+          "Specification, naming the repo to rehearse against."
+      end
+
+      raise Space::Core::Error,
+        "Cannot resolve a single repo to rehearse '#{iteration}' against — the drafted lanes block names " \
+        "multiple repos (#{declared.join(', ')}). Rehearsal runs once, against one repo checkout; narrow the " \
+        "```lanes``` block before rehearsing."
+    end
+
+    # I09/AC5: RED (clean non-zero — discriminates) vs GREEN (passes on base) vs
+    # BROKEN (127, timeout, or a shell parse failure). BROKEN is advisory, not
+    # authoritative: a correct RED can look broken (e.g. `grep -q x new_file`
+    # exits 2 — "No such file" — when the file is one the lane will write); the
+    # CLI names this suspicion, the architect confirms it.
+    def classify_rehearsal(result)
+      return :broken if result[:timed_out] || result[:exit_code] == 127
+      return :broken if BROKEN_STDERR_PATTERN.match?(result[:stderr].to_s)
+      result[:status] == :pass ? :green : :red
+    end
+
+    # grep-family binaries this check recognizes in a gate's shell command.
+    SCOPE_GREP_BINARIES = %w[grep egrep fgrep].freeze
+
+    # Shellwords treats shell syntax — pipes, `&&`/`||`/`;`, `$(...)`, control
+    # keywords — as ordinary word characters, not structure (its own docs say
+    # plainly this isn't a command-line parser). These are the markers
+    # #shell_segments splits a token stream on, once #pad_shell_operators has
+    # made sure none of them can arrive glued to an adjacent word.
+    SCOPE_BOUNDARY_TOKENS = %w[| || && ; $( ( ) if elif then else fi do done while until case esac].freeze
+
+    # Flags that change what a pattern matches and this check actually replays
+    # verbatim against the real grep binary — mode (E/F/G/P) and w, both
+    # threaded through to #whole_repo_grep_matches below — vs flags that only
+    # change what's printed (irrelevant to a files-with-matches re-run). A flag
+    # belongs here only once something below replays it.
+    SCOPE_MATCH_FLAGS = %w[E F G P w].freeze
+    SCOPE_NOOP_FLAGS = %w[c i n o q r l z H h].freeze
+
+    # Recognized flags git grep has no equivalent for (-w and -x are not
+    # symmetric) — declined as not-analyzable, reason naming the flag, rather
+    # than replayed wrong or silently dropped.
+    SCOPE_DECLINED_FLAGS = { "x" => "-x (whole-line match) has no git-grep equivalent" }.freeze
+
+    # git grep, not a raw recursive grep: it skips .git's own object store (a
+    # raw `grep -r .` would trawl it) and matches "the tree" the way the rest
+    # of this corpus's git-based gates already do (diff-scope's own gates are
+    # git diff, not find/grep). Small fixed budget — runs once per recognized
+    # invocation, not per gate.
+    SCOPE_SEARCH_TIMEOUT = 30
+
+    # I12/AC3: rehearse's scope-asymmetry check. I11 shipped a bug its own new
+    # boundary discipline could not catch: a gate's grep-family search covered
+    # only `lib`, while the identifier it renamed also lived in a `test/` file
+    # no lane declared — three consistent statements, all drawn from the same
+    # too-narrow grep. For each gate whose command is a recognizable
+    # file-scoped grep invocation, re-run its own pattern across the whole repo
+    # and report anything that matches outside the gate's own declared paths,
+    # flagging loudest whatever also lies outside every declared lane's touch
+    # set (I12/AC4) — the file no lane may legally fix. touch_globs is that
+    # union; parse_lanes returns [] with no ```lanes``` block, which still
+    # yields the outside-every-lane half of the report. Reports only: never
+    # touches rehearse's exit code, RED/GREEN/BROKEN, or the rehearsal stamp.
+    def scope_asymmetry_report(gates, text, base_dir)
+      touch_globs = parse_lanes(text).flat_map { |l| l["touch"] || [] }
+      findings = []
+      not_analyzable = []
+
+      gates.each do |gate|
+        g = gate.transform_keys(&:to_s)
+        grep_invocations(g["cmd"].to_s).each do |inv|
+          if inv[:status] != :recognized
+            not_analyzable << { id: g["id"], reason: inv[:reason] }
+            next
+          end
+
+          finding = scope_finding(inv, base_dir, touch_globs)
+          if finding
+            findings << finding.merge(id: g["id"])
+          else
+            not_analyzable << { id: g["id"], reason: "whole-repo re-run failed" }
+          end
+        end
+      end
+
+      { findings: findings, not_analyzable: not_analyzable }
+    end
+
+    # Re-runs a recognized invocation's own pattern across the whole repo and
+    # splits what it finds into: the gate's own declared scope (expected —
+    # that's what the gate already searches, so it's not reported), elsewhere
+    # but inside some lane's touch set, and elsewhere outside every lane's
+    # touch set. nil signals the re-run itself failed (caller counts it as
+    # not-analyzable rather than reporting a guess).
+    def scope_finding(inv, base_dir, touch_globs)
+      matched = whole_repo_grep_matches(inv, base_dir)
+      return nil unless matched
+
+      elsewhere = matched.reject { |f| within_declared_scope?(f, inv[:paths], base_dir) }
+      within_lanes, outside_lanes = elsewhere.partition { |f| in_touch_set?(f, touch_globs) }
+      { pattern: inv[:pattern], paths: inv[:paths], outside_lanes: outside_lanes.sort, within_lanes: within_lanes.sort }
+    end
+
+    # The files (relative paths) an invocation's own pattern matches anywhere
+    # in the repo, via the real git-grep binary with the same
+    # matching-relevant flags — never a Ruby reimplementation of grep's
+    # pattern semantics. nil on anything other than a clean "matched"/"no
+    # matches" outcome (exit 0/1); [] is a real, examined zero.
+    def whole_repo_grep_matches(inv, base_dir)
+      flags = ["-l", "-I"]
+      flags << "-i" if inv[:case_insensitive]
+      flags << "-w" if inv[:word_boundary]
+      flags << "-#{inv[:mode]}" unless inv[:mode] == "G"
+      cmd = "git grep #{flags.join(' ')} -- #{Shellwords.escape(inv[:pattern])}"
+      captured = capture_with_timeout(cmd, dir: base_dir, timeout: SCOPE_SEARCH_TIMEOUT)
+      return [] if captured[:exit_code] == 1
+      return nil if captured[:timed_out] || captured[:exit_code] != 0
+
+      captured[:stdout].each_line.map(&:chomp).reject(&:empty?)
+    end
+
+    # Is relative_path inside one of an invocation's own declared search
+    # paths? A declared path that's a real directory at rehearsal time covers
+    # anything under it; a file (or a path a lane hasn't written yet, same
+    # BROKEN-adjacent case #classify_rehearsal already names) covers only
+    # itself.
+    def within_declared_scope?(relative_path, declared_paths, base_dir)
+      declared_paths.any? do |p|
+        p = p.sub(%r{/\z}, "")
+        relative_path == p || (base_dir.join(p).directory? && relative_path.start_with?("#{p}/"))
+      end
+    end
+
+    # Every grep-family invocation recognized in one gate's shell command. A
+    # command that never mentions grep/egrep/fgrep isn't this check's concern
+    # at all (silently absent, same as e.g. `bundle exec rake test`) — only a
+    # command that DOES attempt one and can't be cleanly recognized is
+    # reported not-analyzable (I12/AC4's "counted and identifiable").
+    def grep_invocations(cmd)
+      return [] unless cmd.match?(/\b(?:#{SCOPE_GREP_BINARIES.join('|')})\b/)
+
+      segments = shell_segments(cmd)
+      return [{ status: :not_analyzable, reason: "unparseable command" }] unless segments
+
+      found = segments.filter_map { |seg| grep_invocation(seg) }
+      return [{ status: :not_analyzable, reason: "could not locate a recognizable grep invocation" }] if found.empty?
+
+      found
+    end
+
+    # Splits a gate's shell command into simple-command segments at pipes,
+    # `&&`/`||`/`;`, command substitution, and control keywords (see
+    # SCOPE_BOUNDARY_TOKENS). Returns nil on anything Shellwords itself can't
+    # tokenize (an unmatched quote), so the caller counts it instead of
+    # guessing at it.
+    def shell_segments(cmd)
+      tokens = expand_quoted_substitutions(shell_tokenize(cmd))
+      segments = [[]]
+      tokens.each do |tok|
+        if SCOPE_BOUNDARY_TOKENS.include?(tok)
+          segments << []
+        else
+          segments.last << tok
+        end
+      end
+      segments.reject(&:empty?)
+    rescue ArgumentError
+      nil
+    end
+
+    def shell_tokenize(cmd)
+      Shellwords.split(pad_shell_operators(cmd))
+    end
+
+    # Shellwords treats shell operator/substitution punctuation as ordinary
+    # word characters whenever it isn't whitespace-separated (its own docs
+    # warn this isn't a command-line parser) — pads whitespace around
+    # `$(` `&&` `||` `;` `|` `(` `)` and folds a bare newline to `;` (its own
+    # statement terminator, otherwise invisible to Shellwords as anything but
+    # whitespace) so each always surfaces as its own token. Quoted spans and
+    # backslash-escapes are passed through untouched, so a pattern's own `|`
+    # or `$` — inside a quote — is never mistaken for shell syntax.
+    def pad_shell_operators(text)
+      out = String.new
+      text.scan(/'[^']*'|"(?:[^"\\]|\\.)*"|\\.|[^'"\\]+/m) do |chunk|
+        if chunk.start_with?("'", '"', "\\")
+          out << chunk
+        else
+          out << chunk.gsub(/\$\(|&&|\|\||[();|\n]/) { |op| op == "\n" ? " ; " : " #{op} " }
+        end
+      end
+      out
+    end
+
+    # A token that is ITSELF a whole `$(...)` survives #pad_shell_operators
+    # intact only when the substitution sat inside a still-open quote
+    # (protected, so nothing inside it got space-padded) — recurse into its
+    # contents exactly as the top-level command was tokenized.
+    def expand_quoted_substitutions(tokens)
+      tokens.flat_map do |tok|
+        m = tok.match(/\A\$\((.*)\)\z/m)
+        next [tok] unless m
+
+        ["$("] + expand_quoted_substitutions(shell_tokenize(m[1])) + [")"]
+      end
+    end
+
+    # Recognizes one simple-command segment as a file-scoped grep-family
+    # invocation, or declines with a specific reason. Never guesses: `-v`
+    # inverts per-line matching (fine for filtering a computed list, wrong for
+    # "does this pattern occur elsewhere") so it's declined rather than
+    # silently reinterpreted; so is any unsupported flag or a path operand
+    # that still carries an unresolved shell variable.
+    def grep_invocation(segment)
+      i = 0
+      i += 1 while segment[i] == "!"
+      return nil unless segment[i] && SCOPE_GREP_BINARIES.include?(segment[i])
+      i += 1
+
+      flag_chars = []
+      loop do
+        tok = segment[i]
+        break unless tok
+        if tok == "--"
+          i += 1
+          break
+        elsif tok.start_with?("-") && tok != "-"
+          flag_chars.concat(tok.delete_prefix("-").chars)
+          i += 1
+        else
+          break
+        end
+      end
+
+      unsupported = flag_chars - (SCOPE_MATCH_FLAGS + SCOPE_NOOP_FLAGS + SCOPE_DECLINED_FLAGS.keys)
+      return { status: :not_analyzable, reason: "unsupported flag(s): #{unsupported.uniq.join(', ')}" } if unsupported.any?
+      return { status: :not_analyzable, reason: "-v (inverted match) semantics not safely reinterpreted" } if flag_chars.include?("v")
+
+      declined = (flag_chars & SCOPE_DECLINED_FLAGS.keys).uniq
+      return { status: :not_analyzable, reason: declined.map { |f| SCOPE_DECLINED_FLAGS[f] }.join("; ") } if declined.any?
+
+      modes = (flag_chars & %w[E F G P]).uniq
+      return { status: :not_analyzable, reason: "ambiguous pattern flags: #{modes.join(', ')}" } if modes.size > 1
+      return { status: :not_analyzable, reason: "no pattern operand" } unless segment[i]
+
+      pattern = segment[i]
+      paths = segment[(i + 1)..] || []
+      return { status: :not_analyzable, reason: "no path operand (pipeline/stdin search)" } if paths.empty?
+      return { status: :not_analyzable, reason: "path operand contains an unresolved shell variable" } if paths.any? { |p| p.include?("$") }
+
+      { status: :recognized, pattern: pattern, paths: paths, case_insensitive: flag_chars.include?("i"),
+        word_boundary: flag_chars.include?("w"), mode: modes.first || "G" }
     end
 
     def iteration_id(entry)
@@ -1310,13 +1712,30 @@ module Space::Architect
 
     # Is a changed path inside a lane's declared touch set? Single-sourced so the
     # in-bounds check (d) and merge_lane!'s conflict classification can never drift.
-    # A trailing `dir/**` is matched twice: bare (PATHNAME stops it at direct
-    # children) and as `dir/**/*`, whose whole-component `**/` does cross `/`.
     def in_touch_set?(path, globs)
-      globs.any? do |g|
-        File.fnmatch(g, path, TOUCH_FNM) ||
-          (g.end_with?("/**") && File.fnmatch("#{g}/*", path, TOUCH_FNM))
-      end
+      globs.any? { |g| Space::Core::Paths.touch_match?(g, path) }
+    end
+
+    # Merge a lane's verbatim block into the current "## Builder Report" body for
+    # #transcribe_evidence!: replace its own "### <lane>" subsection in place if
+    # present (preserving the order lanes were already transcribed in), else append
+    # a new one after the others. Subsection boundaries are matched against the
+    # iteration's declared lane names (like KNOWN_HEADINGS for top-level sections),
+    # not any "### " line, so a verbatim report containing its own "### " heading
+    # can't fool the parser.
+    def replace_lane_report(body, lane, raw, lane_names)
+      block = "### #{lane}\n\n#{raw}"
+      return block if placeholder_body?(body)
+
+      headings = lane_names.map { |n| "### #{n}" }
+      lines = body.lines
+      start = lines.index { |l| l.chomp == "### #{lane}" }
+      return "#{body.strip}\n\n#{block}" unless start
+
+      finish = ((start + 1)...lines.length).find { |i| headings.include?(lines[i].chomp) } || lines.length
+      before = lines[0...start].join.strip
+      after = lines[finish..].join.strip
+      [before, block, after].reject(&:empty?).join("\n\n")
     end
 
     # Replace (or, with append:, extend) the body of a "## Heading" section, leaving
@@ -1365,16 +1784,56 @@ module Space::Architect
       lines[(start + 1)...finish].join.strip
     end
 
+    # The raw (unparsed) text inside the fenced ```gates block, or nil when the
+    # block itself is absent. Single-sourced so #parse_gates and the rehearsal
+    # stamp's content digest (#gates_digest) can never read two different
+    # slices of the same section.
+    def gates_block_source(text)
+      body = section_body(text, "## Acceptance Criteria")
+      return nil unless body
+      match = body.match(/^```gates\n(.*?)^```/m)
+      match && match[1]
+    end
+
     # Extract and parse the fenced ```gates block from the Acceptance Criteria section.
     # Returns an array of gate hashes (string-keyed). Returns [] when the block is
     # absent, empty, or contains only YAML comments.
     def parse_gates(text)
-      body = section_body(text, "## Acceptance Criteria")
-      return [] unless body
-      match = body.match(/^```gates\n(.*?)^```/m)
-      return [] unless match
-      parsed = YAML.safe_load(match[1], aliases: false)
+      raw = gates_block_source(text)
+      return [] unless raw
+      parsed = YAML.safe_load(raw, aliases: false)
       parsed.is_a?(Array) ? parsed : []
+    end
+
+    # A stable digest of the gates block's raw content — the key the I09/AC7
+    # rehearsal stamp is validated against. Any byte edit to the fenced block
+    # (add, remove, reorder, reword) changes this and invalidates the stamp.
+    def gates_digest(text)
+      Digest::SHA256.hexdigest(gates_block_source(text).to_s)
+    end
+
+    # #73, narrowly (I09/AC8): true only when the AC section still carries the
+    # scaffold's untouched placeholder AND there is no active gate — a
+    # hand-authored prose-only AC (placeholder replaced, still no gates) is not
+    # this. Call only after lint_gates! has validated the block parses cleanly.
+    def untouched_ac_placeholder?(text)
+      body = section_body(text, "## Acceptance Criteria")
+      return false unless body
+      body.include?(AC1_PLACEHOLDER) && parse_gates(text).empty?
+    end
+
+    # I09/AC7: freeze! refuses without a fresh rehearsal stamp — one whose
+    # gates_digest matches the CURRENT (about-to-be-frozen) gates block. Stale
+    # (gates edited since) or absent (never rehearsed) both refuse identically;
+    # the stamp records that the architect looked, never that gates passed.
+    def ensure_rehearsed!(iteration, entry, text)
+      stamp = entry["rehearsal"]
+      return if stamp && stamp["gates_digest"] == gates_digest(text)
+
+      raise Space::Core::Error,
+        "Iteration '#{iteration}' has not been rehearsed against its current gates — " \
+        "run `architect rehearse #{iteration}` first, or `architect freeze #{iteration} " \
+        "--skip-rehearse REASON` to skip deliberately."
     end
 
     # Extract and parse the fenced ```lanes block from the Specification section.
@@ -1429,8 +1888,26 @@ module Space::Architect
         return
       end
       result = GateLint.call(gates)
-      return if result.success?
-      raise Space::Core::Error, "ill-formed gates block:\n#{result.failure.join("\n")}"
+      raise Space::Core::Error, "ill-formed gates block:\n#{result.failure.join("\n")}" unless result.success?
+
+      warn_bare_repo_prefix!(gates, warnings) if warnings
+    end
+
+    # I09/AC9(b), #39: a gate whose `cmd` carries a literal `repos/<name>/` prefix
+    # with no `cwd` set is warned about, not failed — `cmd` already resolves
+    # against the repo tree (`cwd` is what's space-root-relative), so this
+    # pattern is usually a leftover space-root-relative path, but is legal and
+    # occasionally correct. Threaded through the same warnings: channel
+    # lint_gates! already carries, never a second channel.
+    def warn_bare_repo_prefix!(gates, warnings)
+      gates.each do |g|
+        g = g.transform_keys(&:to_s)
+        next if g["cwd"]
+        next unless g["cmd"].to_s.match?(BARE_REPO_PREFIX)
+        warnings << "gate '#{g["id"]}': cmd contains a literal 'repos/<name>/' path with no cwd set — " \
+          "cmd already resolves against the repo tree, so this is likely a leftover space-root-relative " \
+          "path (legal, occasionally correct — verify it)"
+      end
     end
 
     # Raises if any lane in the entry has been dispatched (dispatched_at or integrate_sha set).

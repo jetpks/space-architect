@@ -19,7 +19,7 @@ class DispatchAsJobTest < Space::ArchitectTest
         "repos" => [], "notes" => [], "tickets" => [], "tags" => []
       }
       File.write(File.join(space_dir, "space.yaml"), YAML.dump(data))
-      system("git", "-C", space_dir, "init", "-q")
+      Space::GitFixtureTemplate.init_repo(space_dir)
       system("git", "-C", space_dir, "config", "user.email", "t@t")
       system("git", "-C", space_dir, "config", "user.name", "t")
       system("git", "-C", space_dir, "add", "space.yaml")
@@ -27,7 +27,7 @@ class DispatchAsJobTest < Space::ArchitectTest
 
       repo_dir = File.join(space_dir, "repos", "my-repo")
       FileUtils.mkdir_p(repo_dir)
-      system("git", "-C", repo_dir, "init", "-q")
+      Space::GitFixtureTemplate.init_repo(repo_dir)
       system("git", "-C", repo_dir, "config", "user.email", "t@t")
       system("git", "-C", repo_dir, "config", "user.name", "t")
       File.write(File.join(repo_dir, "f.txt"), "x")

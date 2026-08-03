@@ -31,7 +31,9 @@ Write + commit: `architect section <%= @_name %> specification --from <file>`. -
   machine-readable declaration lives in the fenced ```lanes block below — the single
   frozen source of truth `architect freeze` records and `architect provision`
   materializes.
-- **Effort** — `think hard` … `ultrathink` per lane, with one line of why.
+- **Effort** — per lane, set at dispatch: `architect dispatch --effort <level>`,
+  translated + clamped to the lane's harness, with one line of why (the
+  escalation keywords `think hard` … `ultrathink` still work in-prompt).
 
 ```lanes
 # One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`
@@ -39,17 +41,33 @@ Write + commit: `architect section <%= @_name %> specification --from <file>`. -
 # materializes the worktrees + lane branches. Remove the comment markers to activate.
 # - name: lane-a            # lane name (required)
 #   repo: my-repo           # target repo under repos/ (required)
-#   touch:                  # file globs this lane may write (required, non-empty)
-#     - lib/my_repo/**
+#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)
+#     - lib/my_repo/foo.rb
+#     - lib/my_repo/bar.rb
 #     - test/my_repo_test.rb
 ```
 
 ## Acceptance Criteria
 
 <!-- PROOF. Write the prose conditions of correctness (AC1, AC2, …) that the
-architect judges against. Runnable checks live in the fenced ```gates block below
+architect judges against. Calibrate precision to the property (SKILL.md §4): a
+property criterion is bounded from the defect's side only — freeze a floor, not
+an equality; exactness is for criteria whose number is itself the deliverable.
+A presence-grep gate on prose is a tripwire, never the proof — its criterion
+should say which. Runnable checks live in the fenced ```gates block below
 (parsed at freeze time — absent or empty is allowed; malformed fails freeze).
-`architect freeze <%= @_name %>` commits this file and records its SHA as
+Pre-freeze check — snapshot: no count/name-set/byte-identity frozen at merely
+today's value; control: every baseline actually run this session; mechanism: no
+*how* where the *what* is the requirement; interface: every CLI surface the
+Specification names (verb, flag spelling, subcommand) executed once before it
+freezes; dry-run:
+`architect rehearse <%= @_name %>` — RED (clean non-zero) discriminates; GREEN
+is a declared regression guard or a gate that measures nothing; BROKEN is
+advisory (a correct RED can look broken — confirm it); EMPTY is no gates or an
+untouched placeholder.
+`architect freeze <%= @_name %>` needs a fresh rehearsal stamp — editing gates
+stales it; `--skip-rehearse REASON` records the skip. The stamp records that you
+looked, never that gates passed. Freeze commits this file and records its SHA as
 freeze_sha. Read-only afterward — any change to Grounds/Specification/Acceptance
 Criteria = automatic iteration FAIL. -->
 
@@ -60,12 +78,22 @@ Criteria = automatic iteration FAIL. -->
 
 ```gates
 # Each gate backs one prose AC above. Remove the comment markers to activate.
+# `cmd` paths resolve against the REPO TREE; `cwd` is relative to the SPACE
+# ROOT. The judge-time remap is asymmetric: a `cwd` under repos/<repo> is
+# remapped into the lane worktree, one outside it passes through unchanged.
+# End a multi-step `cmd` with `echo SENTINEL` + `stdout_match`: /bin/sh (the
+# gate runner's shell) has no `set -e`, so an early branch can exit 0 — the
+# sentinel proves the command reached its end.
+# Draft, then run `architect rehearse <%= @_name %>` — before the freeze, while
+# a bad gate still costs nothing.
 # - id: suite-green        # unique slug within the iteration (required)
 #   ac: AC1                # which prose AC this gate backs (required)
-#   cwd: repos/my-repo     # run dir, relative to space root (optional; consumed by I03)
-#   cmd: bundle exec rake test  # shell command (required, non-empty)
+#   cwd: repos/my-repo     # run dir, space-root-relative (optional)
+#   cmd: |-                # block style by default — a plain scalar breaks on `: `
+#     bundle exec rake test && echo SUITE_OK
 #   expect:                # at least one of: exit_code, stdout_match, threshold
 #     exit_code: 0
+#     stdout_match: SUITE_OK
 ```
 
 ## Builder Prompt

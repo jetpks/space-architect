@@ -170,8 +170,20 @@ re-prints them, or `git show <freeze-sha>:architecture/I<NN>-<name>.md`). For ea
 gate: run the gate command yourself — `architect gate <iteration>` runs the
 frozen gate commands in the resolved repo/worktree and streams raw output (it is a
 runner, never a judge), or run them by hand — then compare the output against the
-verbatim frozen text → **PASS / FAIL / INVALID** (INVALID = not measured the way
-the gate specifies). Check `git diff <freeze-sha> HEAD --
+verbatim frozen text → **PASS / FAIL / INVALID**. The line between the failing
+two is the mechanism. **FAIL**: the instrument measured exactly what the gate
+says, and the answer was wrong. **INVALID**: the instrument did not measure what
+the prose AC asserts — a quoting error, a `2>&1` capturing unrelated stderr, a
+command that dies in the runner's shell. INVALID is a legitimate, expected
+outcome, not a loop failure: prove the property directly with evidence gathered
+this session, and carry the corrected gate into the next iteration's freeze
+rather than leaving the defect to recur. It is never a loosening route — a
+threshold the results simply missed is FAIL, however near. A lane that raised a
+**letter-versus-spirit conflict** (per the lane-prompt clause: it built the AC's
+stated property rather than degrade the artifact to fit its letter, and reported
+the conflict with evidence) has done its job — the defect is the criterion's
+authoring (§4), and the lane is not penalized for it; rule on the conflict like
+any disagreement. Check `git diff <freeze-sha> HEAD --
 architecture/I<NN>-<name>.md` — any change to Grounds/Specification/Acceptance
 Criteria lines is an automatic FAIL.
 Gate-pass is necessary, not sufficient: read the diff against the
@@ -267,10 +279,21 @@ contract, self-contained:
   declaration lives in a fenced ` ```lanes ` block in the Specification — one
   entry per lane (`name`, `repo`, `touch` globs) — the single frozen source of
   truth `architect freeze` records into `space.yaml` and `architect provision`
-  materializes. The touch-set now lives *with* the frozen spec by design: it
-  closes the drift where a `worktree add --touch` flag could diverge from the
-  spec's intent. The scaffold ships a commented ` ```lanes ` stub in the
-  Specification (see `templates/iteration.md.erb`) — uncomment it. Lanes in
+  materializes. The same boundary is stated twice more — the lane-prompt's
+  may-touch list, and the scope gate that checks the lane's diff at judge
+  time — and all three must be one exhaustive enumeration: every file listed,
+  no glob standing in for the list; the scope gate's pattern is that
+  enumeration exactly; the prompt's list is generated from it. Consistency is
+  not completeness — three statements drawn from one too-narrow search agree
+  and are wrong together — so before freezing a criterion that requires an
+  identifier to change name, grep the whole repo for it and confirm every hit
+  falls inside some lane's touch set; `architect rehearse` reports this
+  asymmetry, so the check is read, not remembered. Either defect surfaces
+  only after the freeze, where hard rule 3 forbids widening the declaration:
+  `integrate` refuses a correct lane, or the stray hit breaks a file no lane
+  may legally fix. The scaffold ships a
+  commented ` ```lanes ` stub in the Specification (see
+  `templates/iteration.md.erb`) — uncomment it. Lanes in
   *different* repos are inherently disjoint; same-repo lanes with any file
   overlap run as one. Each lane gets its own objective, output format, and
   boundaries. Most
@@ -281,10 +304,11 @@ contract, self-contained:
   **serial deferred judgment** (iterations run to gates-green with `architect
   verdict` withheld; one later batch session judges each against its own frozen
   AC — see `### Serial deferred judgment`).
-- **Effort call** — thinking budget set in the lane-prompt via the escalation
-  keywords (`think hard` … `ultrathink`); default unattended builder work high,
-  downgrade a routine, tightly-specified lane (record which and why). Claude
-  Code has no per-invocation effort flag — see `dispatch.md`.
+- **Effort call** — thinking budget set per dispatch with `architect dispatch
+  --effort <level>`, translated and clamped to the lane's harness (the
+  escalation keywords `think hard` … `ultrathink` still work in-prompt);
+  default unattended builder work high, downgrade a routine, tightly-specified
+  lane (record which and why). Levels and mechanics: `dispatch.md`.
 
 **Spike (probe) iterations.** When the open question is too uncertain for a
 build — the repo can't answer it and routine API-verification won't resolve it
@@ -307,7 +331,61 @@ through the normal builder/lane machinery.
 Then write the **Acceptance Criteria** section — prose conditions (AC1, AC2, …)
 that the architect judges against, followed by a fenced ` ```gates ` block of
 runnable checks (each gate carries `id`, `ac`, `cmd`, and `expect`; `cwd` is
-optional) — and run `architect freeze <name>`. What must be frozen before
+optional). Calibrate each criterion's precision to the property it asserts —
+R4 ("grade the outcome, not the path") applied at authoring time, the only time
+it can be applied, because a frozen criterion is never loosened after results.
+Two kinds of criterion, two calibrations:
+
+- A criterion asserting a **property that must hold** is bounded from one side
+  only — the side the defect is on — freezing a floor, not an equality, so an
+  addition or change the lane discovers stays legal. "Exactly eight runtime
+  dependencies" freezes today's snapshot and outlaws the ninth a transitive
+  need later forces; the property it stood in for was "declares everything it
+  requires."
+- A criterion whose **number is itself the deliverable** may be exact — there
+  the precision is the point (a touch-set boundary, a wire-format constant).
+
+Writing the first kind as the second is the defect: it leaves the lane no
+sanctioned path except degrading the artifact to fit the number.
+
+Say, too, what each gate proves: a presence-grep gate on prose is a
+**tripwire**, never the proof — it shows a keyword landed, not that the thing
+works — and its criterion should say which it is, leaving the substance
+architect-read.
+
+**Pre-freeze check** — run against the drafted AC in the minutes before
+`architect freeze`, while a bad criterion still costs nothing:
+
+- **snapshot** — no AC or gate hard-codes a count, name-set, or byte-identity
+  that is merely what was known at freeze time;
+- **control** — every baseline or regression claim had its control actually run
+  in this session, not recalled or assumed;
+- **mechanism** — no AC names a *how* (an API signature, a helper, a file
+  layout) where the *what* is the requirement, such that a better shape the
+  lane discovers would be forbidden;
+- **interface** — any CLI surface a Specification names — a verb, a flag
+  spelling, a subcommand — is executed once before it is frozen: a frozen
+  interface is only safe if it is implementable, which is the assumption
+  every code/prose lane split rests on. No verb backs this item yet — unlike
+  dry-run, it is a discipline run by hand;
+- **dry-run** — `architect rehearse <name>`: it runs the drafted gates from
+  the working tree through the same execution path `architect gate` uses
+  (`/bin/sh`, same run-dir resolution, same evaluator) and classifies each —
+  **RED**, a clean non-zero: the gate discriminates, the healthy pre-freeze
+  result; **GREEN**, passes on base: a declared regression guard, or a gate
+  that measures nothing; **BROKEN**, a 127 / syntax error / timeout —
+  advisory, because a correct RED can look broken (`grep -q x` on a file the
+  lane will write exits 2): the tool names the suspicion, you confirm;
+  **EMPTY**, no gates or an untouched placeholder. `--record` emits a
+  paste-able provenance block for the AC preamble. It reports; which GREENs
+  are guards and which are defects stays your call.
+
+Then run `architect freeze <name>`. Freeze requires a fresh rehearsal stamp —
+`rehearse` records one in `space.yaml`, keyed to the gates block's content, so
+editing a gate afterward stales it; `architect freeze --skip-rehearse REASON`
+(non-empty, recorded) is the escape valve. The stamp records that you looked,
+never that gates passed — an all-RED and an all-GREEN run stamp identically.
+What must be frozen before
 dispatch is the Acceptance Criteria: `architect freeze` lints the gates block
 (absent or empty gates is allowed but warns; malformed fails), commits any
 pending content in the frozen region (Grounds/Specification/Acceptance Criteria)
@@ -319,12 +397,16 @@ once a frozen section changed afterward.
 
 ### 5. Dispatch (one fresh `claude -p` per lane, worktree-isolated)
 
-Per the mechanics in `dispatch.md`. The lane lifecycle is **declare → freeze →
-provision → write prompts → dispatch** — every lane gets a worktree; there is no
-dispatch-in-the-checkout path:
+Per the mechanics in `dispatch.md`. The lane lifecycle is **declare → rehearse
+→ freeze → provision → write prompts → dispatch** — every lane gets a worktree;
+there is no dispatch-in-the-checkout path:
 
 - **Declare** — at spec time, each lane is one entry in the Specification's
   fenced ` ```lanes ` block (§4): `name`, `repo`, `touch` globs.
+- **Rehearse** — `architect rehearse <iteration>` dry-runs the drafted gates
+  from the working tree (§4's pre-freeze check), resolving its run dir from the
+  drafted ` ```lanes ` block, and stamps `space.yaml`; `freeze` refuses without
+  a fresh stamp.
 - **Freeze** — `architect freeze` parses that block and records each lane
   (name, repo, touch_set) into `space.yaml`.
 - **Provision** — `architect provision <iteration>` materializes every declared

@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
+require "async/condition"
+require "async/task"
 
 class SpaceStoreTest < Space::ArchitectTest
   def test_create_space_with_date_prefixed_unique_id_and_structure
@@ -169,7 +171,8 @@ class SpaceStoreTest < Space::ArchitectTest
     setup = temp_env
     store = build_store(env: setup.fetch(:env))
     space = store.create("Concurrent Clones").value!
-    fake_scm = TrackingSCM.new
+    limit = Space::Core::SpaceStore::MAX_CONCURRENT_CLONES
+    fake_scm = TrackingSCM.new(target: limit)
     mise_client = TrackingMiseClient.new
 
     add_result = store.add_repos_to(
@@ -179,11 +182,15 @@ class SpaceStoreTest < Space::ArchitectTest
       mise_client: mise_client
     )
 
-    assert add_result.success?
+    assert add_result.success?, -> { "add_repos_to failed: #{add_result.failure}" }
     results = add_result.value!
     assert_equal 6, results.length
-    assert_equal Space::Core::SpaceStore::MAX_CONCURRENT_CLONES, fake_scm.max_active
-    assert_operator fake_scm.clone_count, :>, fake_scm.max_active
+    # Async::Semaphore only bounds concurrency from above (see Semaphore#wait/#release) —
+    # it never guarantees the bound is reached. TrackingSCM#clone rendezvouses at `target`
+    # simultaneously-active clones before any may proceed, so reaching exactly `limit`
+    # here is forced by construction, not a scheduling race (was flaky under the old
+    # sleep-timed fake: a clone could finish before the fifth started).
+    assert_equal limit, fake_scm.max_active
     assert_equal 6, mise_client.trust_count
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
@@ -357,11 +364,25 @@ class SpaceStoreTest < Space::ArchitectTest
 
     attr_reader :max_active, :clone_count, :cloned_urls
 
-    def initialize
+    # Bounds #wait_for_rendezvous. Dispatch is greedy (Async::Task#async runs the task
+    # body immediately), so under the semaphore's current behavior the rendezvous
+    # resolves in well under a second; this only needs to be generous enough to never
+    # trip on a healthy run while still failing the suite instead of hanging it if a
+    # scheduling change ever stops driving concurrency to `target`.
+    RENDEZVOUS_TIMEOUT = 5
+
+    # With `target` set, #clone rendezvouses: it blocks until `target` clones are
+    # simultaneously active before any of them may proceed, so a caller that drives
+    # concurrency up to `target` proves that deterministically instead of by the luck
+    # of sleep-timed scheduling. Without `target`, #clone just sleeps briefly, for
+    # callers that only care that clones happened, not how concurrently.
+    def initialize(target: nil)
       @active = 0
       @max_active = 0
       @clone_count = 0
       @cloned_urls = []
+      @target = target
+      @rendezvous = Async::Condition.new
     end
 
     def clone(url, dest)
@@ -369,11 +390,23 @@ class SpaceStoreTest < Space::ArchitectTest
       @clone_count += 1
       @cloned_urls << url
       @max_active = [@max_active, @active].max
-      sleep 0.01
+      @target ? wait_for_rendezvous : sleep(0.01)
       FileUtils.mkdir_p(File.join(dest, ".git"))
       Success(dest)
     ensure
       @active -= 1
+    end
+
+    private
+
+    def wait_for_rendezvous
+      return @rendezvous.signal if @active >= @target
+
+      Async::Task.current.with_timeout(
+        RENDEZVOUS_TIMEOUT, RuntimeError,
+        "TrackingSCM rendezvous timed out after #{RENDEZVOUS_TIMEOUT}s: never reached " \
+        "#{@target} simultaneously active clones (max_active reached was #{@max_active})"
+      ) { @rendezvous.wait }
     end
   end
 

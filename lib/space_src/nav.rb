@@ -16,6 +16,7 @@ module Space::Src
     def self.scan(base_dir)
       pattern = File.join(base_dir, "*", "*", "*")
       prefix = base_dir.chomp("/") + "/"
+      # paths:exempt - layout intent (depth-3 checkout scan); space_src is deliberately independent of space_core and must not require it
       Dir.glob(pattern).filter_map do |path|
         next unless File.directory?(path)
         relative = path.delete_prefix(prefix)

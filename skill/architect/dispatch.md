@@ -223,7 +223,7 @@ AC judgment into one later session.
 
 **Recipe:**
 
-Per iteration, freeze and dispatch as normal. In a fresh judging session, run
+Per iteration, rehearse, freeze, and dispatch as normal. In a fresh judging session, run
 post-flight, integrate, and gate — but **withhold `architect verdict`**:
 
 ```bash
@@ -273,13 +273,15 @@ compound it.
   <builder-model>`). A floating alias (a bare "latest"/tier tag) drifts to
   whatever ships next — fine interactively, but automations pin the full id so a
   model bump can't silently change builder behavior mid-project.
-- Effort = thinking budget. Claude Code has no per-invocation effort flag the
-  way Codex exposed `model_reasoning_effort`; the builder sets thinking depth
-  **in the block** via the escalation keywords (`think` < `think hard` <
-  `think harder` < `ultrathink`), or you floor it with the `MAX_THINKING_TOKENS`
-  env var on the dispatch. Default unattended builder work to a high budget
-  (open the block with "Think harder…"); downgrade a routine,
-  tightly-specified lane to "think hard" (record which and why in the spec).
+- Effort = thinking budget. Set it per dispatch: `architect dispatch --effort
+  <level>` (aliases `--thinking`/`--reasoning`) accepts
+  `off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max` and translates it to the
+  lane's harness — `claude-code` passes `low`…`max` straight through to its own
+  `--effort` flag, unclamped (`minimal` clamps to `low`; `off` omits the flag).
+  The escalation keywords (`think` < `think hard` < `think harder` <
+  `ultrathink`) and the `MAX_THINKING_TOKENS` env var still raise depth from
+  inside the block. Default unattended builder work to a high budget; downgrade
+  a routine, tightly-specified lane (record which and why in the spec).
 - **Builders never commit, and the architect verifies it.** Claude Code has no
   sandbox to make `.git` read-only, so this is enforced by the deny rules at
   dispatch *and* checked after the run: before integrating a lane, confirm
@@ -340,7 +342,10 @@ builders toward the repo's existing test fixtures over hand-rolled long-running
 harnesses, and when a gate needs a runtime that can't run unattended
 (interactive prompts, servers without a timeout), have the builder record the
 exact failure as a disagreement/blocker and verify what it can — gate verdicts
-are architect-run anyway (hard rule 4). Write the gate file anticipating this.
+are architect-run anyway (hard rule 4). Write the gate file anticipating this —
+`architect rehearse` runs the drafted gates pre-freeze, so an unattended-hostile
+gate surfaces as **BROKEN** while still editable (advisory: a correct RED can
+look broken).
 
 ## Manual alternative (human-driven)
 
@@ -365,7 +370,11 @@ PHASE 1 — Treat the shared contracts (schemas/interfaces) named in the spec,
 and the repo's existing public interfaces, as FROZEN: do not change them —
 other lanes depend on them. You have no access to the space's architecture/
 directory; the architect owns it. The ACCEPTANCE CRITERIA below are frozen —
-verify your work against them; never weaken or work around them.
+verify your work against them; never weaken or work around them. If an AC's
+letter can only be satisfied by making the artifact worse than the property the
+AC asserts, build the right thing and raise the conflict in your report — name
+the AC, the conflict, and the evidence. This is not permission to skip work or
+weaken a criterion: the conflict is reported, never silently resolved.
 
 PHASE 2 — Build YOUR LANE ONLY: exactly the files listed in BOUNDARIES. You
 are one of several parallel lane agents working in isolated worktrees; files
@@ -384,14 +393,20 @@ running the acceptance criteria's gate commands and record the verbatim output. 
 git write command (commit/add/branch/reset/checkout) — the architect commits
 and merges after verification, and verifies you made no commits. Do NOT delete
 lock files or escalate privileges if a command fails; record the exact error
-and continue. Give every potentially long command an explicit timeout; if a
+and continue. Do NOT use `run_in_background` (or shell `&`) for your own work —
+this process terminates when you end your turn and reaps its own children, so
+backgrounded work is SIGTERMed and its output lost while the run still exits
+0; run long commands serially in the foreground instead. Give every
+potentially long command an explicit timeout; if a
 runtime will not start unattended (interactive prompt, server with no timeout),
 record the exact failure in your report and route around it — never busy-wait
 or retry in a loop. When done, write your report to the scratch file given to
 you, build/<id>-<lane>/report.md (an absolute path outside your worktree),
 with RAW results only — tables, numbers, command output — no interpretation, no
 "promising". Every status claim must be backed by a command result from this
-run. Keep the report compact — tables and numbers, not prose. End it with
+run. Keep the report compact — tables and numbers, not prose. Do not title the
+report — the architect's tooling supplies the `### <lane>` heading when it
+transcribes; keep any headings inside the report at `###` or deeper. End it with
 exactly one status line: STATUS: COMPLETE | COMPLETE_WITH_CONCERNS (list them)
 | BLOCKED (exact blocker + what you tried). Verdicts belong to the architect
 and the human. Persist until your lane is fully handled end-to-end; do not stop

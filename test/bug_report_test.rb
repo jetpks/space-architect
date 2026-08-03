@@ -2,6 +2,7 @@
 
 require_relative "test_helper"
 require "yaml"
+require "shellwords"
 
 class BugReportTest < Space::ArchitectTest
   def setup
@@ -150,6 +151,109 @@ class BugReportTest < Space::ArchitectTest
     # Unquoted means no surrounding quotes around the ~ path
     refute_match(/--body-file "~/, result[:command])
     assert_match(/--body-file ~/, result[:command])
+  end
+
+  # ── Title ───────────────────────────────────────────────────────────────────
+
+  def test_title_flows_into_command_and_body_h1
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now, title: "Widget breaks on save")
+
+    assert_match(/--title "Widget breaks on save"/, result[:command])
+    refute_match(/<one-line summary>/, result[:command])
+    assert_equal "# Widget breaks on save", result[:body].lines.first.strip
+  end
+
+  def test_no_inert_title_comment_anywhere
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now, title: "Anything")
+
+    refute_match(/<!-- Title:/, result[:body])
+  end
+
+  def test_no_title_generates_successfully_without_title_flag_or_h1
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now)
+
+    refute_match(/--title/, result[:command])
+    refute_match(/^# /, result[:body])
+  end
+
+  def test_blank_title_treated_as_absent
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now, title: "")
+
+    refute_match(/--title/, result[:command])
+    refute_match(/^# /, result[:body])
+  end
+
+  def test_whitespace_only_title_treated_as_absent
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now, title: "   ")
+
+    refute_match(/--title/, result[:command])
+    refute_match(/^# /, result[:body])
+  end
+
+  def test_title_with_shell_metacharacters_round_trips_as_one_argument
+    title = %q{Weird $HOME "quoted" `tick` it}
+    result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now, title: title)
+
+    flat = result[:command].gsub(/ \\\n\s*/, " ")
+    parsed = Shellwords.split(flat)
+    i = parsed.index("--title")
+    refute_nil i, "expected --title in command"
+    assert_equal title, parsed[i + 1]
+  end
+
+  def test_cli_no_title_prints_full_command_without_title_flag
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      Dir.chdir(@tmp) do
+        out, _err = invoke("bug-report")
+
+        lines = out.lines
+        start = lines.index { |l| l.include?("gh issue create") }
+        refute_nil start, "expected the gh issue create command to be printed"
+        command_block = lines[start..].take_while { |l| !l.strip.empty? }.join
+
+        assert_match(/gh issue create -R jetpks\/space-architect/, command_block)
+        refute_match(/--title/, command_block)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_cli_no_title_nudge_names_rerun_form
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      Dir.chdir(@tmp) do
+        out, _err = invoke("bug-report")
+
+        assert_match(/architect bug-report --title/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_cli_title_option_threads_through_to_command
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      Dir.chdir(@tmp) do
+        out, err = invoke("bug-report", "--title", "From the CLI")
+
+        assert_empty err
+        assert_match(/--title "From the CLI"/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
   end
 
   # ── CLI command ─────────────────────────────────────────────────────────────

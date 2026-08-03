@@ -83,6 +83,29 @@ class SkillInstallerTest < Space::ArchitectTest
     assert_includes names, "architect-vocabulary"
   end
 
+  def test_install_excludes_dot_directories_from_skill_source
+    si = Space::Architect::SkillInstaller
+    original_source_root = si.method(:source_root)
+
+    Dir.mktmpdir("skill-src-test") do |src_dir|
+      src = Pathname.new(src_dir)
+      FileUtils.mkdir_p(src.join("real-skill"))
+      File.write(src.join("real-skill", "SKILL.md"), "# real\n")
+      FileUtils.mkdir_p(src.join(".claude-plugin"))
+      File.write(src.join(".claude-plugin", "plugin.json"), "{}\n")
+
+      si.define_singleton_method(:source_root) { src }
+
+      result = si.install("claude", project: false, force: false, env: env)
+      names = result[:skills].map { |s| s[:name] }
+
+      assert_includes names, "real-skill"
+      refute names.any? { |n| n.start_with?(".") }
+    end
+  ensure
+    si.define_singleton_method(:source_root, original_source_root)
+  end
+
   # install — copies skills to dest
 
   def test_install_copies_all_skills

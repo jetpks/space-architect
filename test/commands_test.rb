@@ -58,4 +58,47 @@ class CoreCommandsTest < Space::ArchitectTest
     assert_equal "gh pr create \\", lines[0]
     assert_equal "  --base main", lines[1]
   end
+
+  def test_wrap_preserves_double_quoted_value_containing_double_dash_at_argv_level
+    cmd = Space::Core::Commands.wrap(%(printargs -R org/repo --title "dispatch -- lane fails" --body-file ~/f))
+    script = %(printargs() { for a in "$@"; do printf "[%s]\n" "$a"; done; }) + "\n" + cmd
+    out, _err, status = Open3.capture3("bash", "-c", script)
+    assert status.success?
+    assert_includes out, "[dispatch -- lane fails]\n"
+  end
+
+  def test_wrap_preserves_single_quoted_value_containing_double_dash_at_argv_level
+    cmd = Space::Core::Commands.wrap(%(printargs -R org/repo --title 'dispatch -- lane fails' --body-file ~/f))
+    script = %(printargs() { for a in "$@"; do printf "[%s]\n" "$a"; done; }) + "\n" + cmd
+    out, _err, status = Open3.capture3("bash", "-c", script)
+    assert status.success?
+    assert_includes out, "[dispatch -- lane fails]\n"
+  end
+
+  # AC3: wrapping never changes argv. bash is the oracle: run the raw command
+  # and the wrapped command through the same script and compare argv, not the
+  # rendered string a wrapped command that merely passes `bash -n` can still
+  # desync mid-argument.
+  def test_wrap_preserves_argv_across_a_battery_of_commands
+    printargs = %(printargs() { for a in "$@"; do printf "[%s]\n" "$a"; done; })
+    commands = [
+      %(printargs -R o/r --title "plain -- here" --body-file ~/f),
+      %(printargs -R o/r --title "odd \\" quote -- tail" --body-file ~/f),
+      %(printargs -R o/r --title "two \\" q \\" here -- tail" --body-file ~/f),
+      %(printargs -R o/r --title 'single -- quoted' --body-file ~/f),
+      %(printargs -R o/r --title 'back\\slash -- in single' --body-file ~/f),
+      %(printargs -R o/r --title "dollar $x -- tail" --body-file ~/f),
+      %(printargs --only one),
+      %(printargs -R o/r --a "x" --b "y -- z" --c "w")
+    ]
+
+    commands.each do |cmd|
+      raw_out, _raw_err, raw_status = Open3.capture3("bash", "-c", "#{printargs}\n#{cmd}")
+      wrapped_out, _wrapped_err, wrapped_status = Open3.capture3("bash", "-c", "#{printargs}\n#{Space::Core::Commands.wrap(cmd)}")
+
+      assert raw_status.success?, "raw command failed: #{cmd}"
+      assert wrapped_status.success?, "wrapped command failed: #{cmd}"
+      assert_equal raw_out, wrapped_out, "wrap changed argv for: #{cmd}"
+    end
+  end
 end
