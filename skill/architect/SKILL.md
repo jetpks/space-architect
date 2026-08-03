@@ -279,10 +279,16 @@ contract, self-contained:
   declaration lives in a fenced ` ```lanes ` block in the Specification — one
   entry per lane (`name`, `repo`, `touch` globs) — the single frozen source of
   truth `architect freeze` records into `space.yaml` and `architect provision`
-  materializes. The touch-set now lives *with* the frozen spec by design: it
-  closes the drift where a `worktree add --touch` flag could diverge from the
-  spec's intent. The scaffold ships a commented ` ```lanes ` stub in the
-  Specification (see `templates/iteration.md.erb`) — uncomment it. Lanes in
+  materializes — living *with* the frozen spec, so no `worktree add --touch`
+  flag can diverge from it. The same boundary is stated twice more — the
+  lane-prompt's may-touch list, and the scope gate that checks the lane's diff
+  at judge time — and all three must be one exhaustive enumeration: every file
+  listed, no glob standing in for the list; the scope gate's pattern is that
+  enumeration exactly; the prompt's list is generated from it. A mismatch
+  surfaces only after the freeze, where hard rule 3 forbids widening the
+  declaration — `integrate` refuses a correct lane. The scaffold ships a
+  commented ` ```lanes ` stub in the Specification (see
+  `templates/iteration.md.erb`) — uncomment it. Lanes in
   *different* repos are inherently disjoint; same-repo lanes with any file
   overlap run as one. Each lane gets its own objective, output format, and
   boundaries. Most
