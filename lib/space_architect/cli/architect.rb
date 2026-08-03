@@ -261,6 +261,7 @@ module Space::Architect
           else
             terminal.say "Rehearsing #{result[:iteration]} against #{terminal.path(result[:base_dir])} (repo: #{result[:repo]})"
             result[:gates].each { |g| render_gate(g) }
+            render_scope_asymmetry(result[:scope_asymmetry])
           end
           terminal.say ""
           terminal.say "Discrimination report only — this runs and reports; it never judges whether these gates are good, bad, or ready."
@@ -277,6 +278,32 @@ module Space::Architect
           end
           terminal.say g[:stdout].rstrip unless g[:stdout].strip.empty?
           terminal.say g[:stderr].rstrip unless g[:stderr].strip.empty?
+        end
+
+        # I12/AC3-AC4: reports scope asymmetry only — never affects RED/GREEN/
+        # BROKEN, rehearse's exit code, or the stamp. A file outside every
+        # declared lane's touch set is flagged loudest: it's the one no lane
+        # may legally fix. not_analyzable is rendered too, and counted, so a
+        # reader can tell "nothing matched" from "nothing was examined".
+        def render_scope_asymmetry(report)
+          return if report.nil? || (report[:findings].empty? && report[:not_analyzable].empty?)
+
+          terminal.say ""
+          terminal.say "Scope-asymmetry check (grep-family gates only):"
+          report[:findings].each do |f|
+            terminal.say "── #{f[:id]}: pattern #{f[:pattern].inspect} searched #{f[:paths].join(', ')}"
+            if f[:outside_lanes].any?
+              terminal.say "   OUTSIDE ANY LANE'S TOUCH SET — no lane may legally fix these:"
+              f[:outside_lanes].each { |file| terminal.say "     #{file}" }
+            end
+            terminal.say "   also matches (within a declared lane's touch set): #{f[:within_lanes].join(', ')}" if f[:within_lanes].any?
+            terminal.say "   0 files elsewhere match" if f[:outside_lanes].empty? && f[:within_lanes].empty?
+          end
+
+          return if report[:not_analyzable].empty?
+          terminal.say ""
+          terminal.say "Not analyzed (#{report[:not_analyzable].size} grep invocation(s)) — counted, not silently skipped:"
+          report[:not_analyzable].each { |na| terminal.say "   #{na[:id]}: #{na[:reason]}" }
         end
 
         def render_record(result)

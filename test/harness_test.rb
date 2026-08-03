@@ -882,4 +882,28 @@ class HarnessTest < Space::ArchitectTest
     assert_includes output, "--include-partial-messages",
       "claude --help must list --include-partial-messages; got:\n#{output}"
   end
+
+  # I12/AC7: emit_liveness now reuses init_event_ready?'s own incremental scan
+  # instead of re-parsing the whole log from the top — but a scan forward from
+  # the cached offset must never lose bytes appended between the poll loop's
+  # last check and this call. Reproduces exactly that tail: the predicate runs
+  # once against an empty log (memoizing offset 0, finding nothing), the init
+  # event lands afterward, and emit_liveness must still observe it.
+  def test_emit_liveness_observes_init_event_written_after_last_poll
+    root = Dir.mktmpdir("harness-liveness-tail-test")
+    log = Pathname.new(File.join(root, "run.jsonl"))
+    harness = Space::Architect::Harness::ClaudeCodeHarness.new(model: "claude-sonnet-4-6", max_turns: 5)
+
+    File.write(log, "")
+    refute harness.send(:init_event_ready?, log), "empty log must not report an init event yet"
+
+    log.open("a") { |f| f.write(JSON.generate("type" => "system", "subtype" => "init", "model" => "claude-sonnet-4-6") + "\n") }
+
+    err = StringIO.new
+    harness.send(:emit_liveness, log, 0.4, err)
+
+    assert_match(/\Aliveness: OK streaming model=claude-sonnet-4-6 /, err.string.lines.first)
+  ensure
+    FileUtils.rm_rf(root)
+  end
 end

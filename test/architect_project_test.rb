@@ -1917,6 +1917,114 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # ── I12: rehearse's scope-asymmetry check (AC3/AC4) ────────────────────────
+
+  # AC3: reconstructs I11's own shape — a gate greps an identifier under `lib`
+  # only, but the identifier also lives in a test/ file no lane declares. The
+  # check names that file, and the gate's own RED/GREEN/BROKEN classification
+  # is unaffected — it reports, it never refuses.
+  def test_rehearse_scope_asymmetry_flags_file_outside_every_lanes_touch_set
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+
+    FileUtils.mkdir_p(File.join(repo_dir, "lib"))
+    FileUtils.mkdir_p(File.join(repo_dir, "test"))
+    File.write(File.join(repo_dir, "lib", "foo.rb"), "# no_rehearse_reason\n")
+    File.write(File.join(repo_dir, "test", "gate_lint_test.rb"), "# no_rehearse_reason too\n")
+    system("git", "-C", repo_dir, "add", "-A")
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "seed")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/foo.rb\n"
+    gates_yaml = <<~YAML
+      - id: kwarg-renamed
+        ac: AC1
+        cmd: |-
+          hits=$(grep -rc 'no_rehearse_reason' lib | awk -F: '{s+=$2} END {print s+0}')
+          test "$hits" -eq 0 && echo KWARG_RENAMED
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+    finding = result[:scope_asymmetry][:findings].find { |f| f[:id] == "kwarg-renamed" }
+    assert_equal ["test/gate_lint_test.rb"], finding[:outside_lanes]
+    assert_equal :red, result[:gates].first[:rehearsal],
+      "the scope check must not change the gate's own RED/GREEN/BROKEN classification"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: an iteration with no ```lanes``` block at all still gets the
+  # outside-the-gate's-scope half of the report — the union of touch sets is
+  # empty, so everything elsewhere correctly counts as outside all of them.
+  def test_rehearse_scope_asymmetry_reports_with_no_lanes_block
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+    space.data["repos"] = [{ "name" => "my-repo" }]
+    space.save
+
+    FileUtils.mkdir_p(File.join(repo_dir, "lib"))
+    FileUtils.mkdir_p(File.join(repo_dir, "test"))
+    File.write(File.join(repo_dir, "lib", "foo.rb"), "# no_rehearse_reason\n")
+    File.write(File.join(repo_dir, "test", "gate_lint_test.rb"), "# no_rehearse_reason too\n")
+    system("git", "-C", repo_dir, "add", "-A")
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "seed")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    gates_block = <<~MD
+      ```gates
+      - id: kwarg-renamed
+        ac: AC1
+        cmd: |-
+          hits=$(grep -rc 'no_rehearse_reason' lib | awk -F: '{s+=$2} END {print s+0}')
+          test "$hits" -eq 0 && echo KWARG_RENAMED
+        expect:
+          exit_code: 0
+      ```
+    MD
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+      .sub("**AC1.** ...", "**AC1.** identifier gone from lib.")
+      .sub(/^```gates\n.*?^```\n/m, gates_block)
+    File.write(File.join(dir, "architecture", "I01-my-slice.md"), text)
+
+    result = project.rehearse("my-slice")
+    finding = result[:scope_asymmetry][:findings].find { |f| f[:id] == "kwarg-renamed" }
+    assert_equal ["test/gate_lint_test.rb"], finding[:outside_lanes]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: a pipeline grep with no path operand is declined, not silently
+  # skipped — it's counted in not_analyzable with a specific reason, and never
+  # reported as a (bogus) finding.
+  def test_rehearse_scope_asymmetry_counts_pipeline_grep_as_not_analyzable
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - README.md\n"
+    gates_yaml = "- id: help-flag\n  ac: AC1\n  cmd: echo '--title' | grep -q -- '--title'\n  expect:\n    exit_code: 0\n"
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+    assert_equal [{ id: "help-flag", reason: "no path operand (pipeline/stdin search)" }],
+      result[:scope_asymmetry][:not_analyzable]
+    assert_empty result[:scope_asymmetry][:findings]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # ── I09: freeze's rehearsal-stamp precondition (AC7) ───────────────────────
 
   def test_freeze_refuses_without_a_rehearsal_stamp
@@ -2976,9 +3084,9 @@ class ArchitectProjectTest < Space::ArchitectTest
     MD
   end
 
-  # Strip the scaffold's still-untouched AC1 placeholder (`**AC1.** ...`,
-  # lib/space_architect/templates/iteration.md.erb:67) from iteration <name>'s
-  # file under <base_dir>, if present — so tests that freeze an otherwise
+  # Strip the scaffold's still-untouched AC1 placeholder (`**AC1.** ...`, from
+  # templates/iteration.md.erb's Acceptance Criteria section) from iteration
+  # <name>'s file under <base_dir>, if present — so tests that freeze an otherwise
   # pristine scaffold as unrelated setup plumbing don't trip freeze!'s #73
   # hard-refuse (I09/AC8). A no-op when the placeholder is already gone.
   def strip_ac1_placeholder!(base_dir, name)

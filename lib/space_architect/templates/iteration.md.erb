@@ -41,8 +41,9 @@ Write + commit: `architect section <%= @_name %> specification --from <file>`. -
 # materializes the worktrees + lane branches. Remove the comment markers to activate.
 # - name: lane-a            # lane name (required)
 #   repo: my-repo           # target repo under repos/ (required)
-#   touch:                  # file globs this lane may write (required, non-empty)
-#     - lib/my_repo/**
+#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)
+#     - lib/my_repo/foo.rb
+#     - lib/my_repo/bar.rb
 #     - test/my_repo_test.rb
 ```
 

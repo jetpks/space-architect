@@ -48,9 +48,9 @@ class ArchitectCLITest < Space::ArchitectTest
     repo_dir
   end
 
-  # Strip the scaffold's still-untouched AC1 placeholder (`**AC1.** ...`,
-  # lib/space_architect/templates/iteration.md.erb:67) from iteration <name>'s
-  # file under <base_dir>, if present — so tests that freeze an otherwise
+  # Strip the scaffold's still-untouched AC1 placeholder (`**AC1.** ...`, from
+  # templates/iteration.md.erb's Acceptance Criteria section) from iteration
+  # <name>'s file under <base_dir>, if present — so tests that freeze an otherwise
   # pristine scaffold as unrelated setup plumbing don't trip freeze!'s #73
   # hard-refuse (I09/AC8). A no-op when the placeholder is already gone.
   # Duplicated from ArchitectProjectTest's copy: test/test_helper.rb is
@@ -2231,8 +2231,9 @@ class ArchitectCLITest < Space::ArchitectTest
           "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
           "# - name: lane-a            # lane name (required)\n" \
           "#   repo: my-repo           # target repo under repos/ (required)\n" \
-          "#   touch:                  # file globs this lane may write (required, non-empty)\n" \
-          "#     - lib/my_repo/**\n" \
+          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
+          "#     - lib/my_repo/foo.rb\n" \
+          "#     - lib/my_repo/bar.rb\n" \
           "#     - test/my_repo_test.rb\n```",
           "```lanes\n- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n```"
         )
@@ -2264,6 +2265,69 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # I12/AC3: reconstructs I11's own shape at the CLI layer — a gate greps an
+  # identifier under `lib` only, but the identifier also lives in a test/ file
+  # no lane declares. `architect rehearse` names that file, loudest, and the
+  # gate's own RED classification and rehearse's exit code are unaffected.
+  def test_rehearse_reports_scope_asymmetry_outside_declared_lanes
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      repo_dir = create_real_repo(space_path, "my-repo")
+
+      FileUtils.mkdir_p(File.join(repo_dir, "lib"))
+      FileUtils.mkdir_p(File.join(repo_dir, "test"))
+      File.write(File.join(repo_dir, "lib", "foo.rb"), "# no_rehearse_reason\n")
+      File.write(File.join(repo_dir, "test", "gate_lint_test.rb"), "# no_rehearse_reason too\n")
+      system("git", "-C", repo_dir, "add", "-A")
+      system("git", "-C", repo_dir, "commit", "-q", "-m", "seed")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        text  = text.sub(
+          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
+          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
+          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
+          "# - name: lane-a            # lane name (required)\n" \
+          "#   repo: my-repo           # target repo under repos/ (required)\n" \
+          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
+          "#     - lib/my_repo/foo.rb\n" \
+          "#     - lib/my_repo/bar.rb\n" \
+          "#     - test/my_repo_test.rb\n```",
+          "```lanes\n- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/foo.rb\n```"
+        )
+        gate_yaml = <<~YAML
+          - id: kwarg-renamed
+            ac: AC1
+            cmd: |-
+              hits=$(grep -rc 'no_rehearse_reason' lib | awk -F: '{s+=$2} END {print s+0}')
+              test "$hits" -eq 0 && echo KWARG_RENAMED
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+
+        out, err = invoke("rehearse", "demo")
+
+        assert_empty err
+        assert_match(/Scope-asymmetry check/, out)
+        assert_match(/OUTSIDE ANY LANE'S TOUCH SET/, out)
+        assert_match(/test\/gate_lint_test\.rb/, out)
+        assert_match(/\[RED\]/, out, "the scope check must not change the gate's own RED classification")
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   def test_rehearse_record_flag_emits_provenance_block
     setup = temp_env
     env   = setup.fetch(:env)
@@ -2285,8 +2349,9 @@ class ArchitectCLITest < Space::ArchitectTest
           "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
           "# - name: lane-a            # lane name (required)\n" \
           "#   repo: my-repo           # target repo under repos/ (required)\n" \
-          "#   touch:                  # file globs this lane may write (required, non-empty)\n" \
-          "#     - lib/my_repo/**\n" \
+          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
+          "#     - lib/my_repo/foo.rb\n" \
+          "#     - lib/my_repo/bar.rb\n" \
           "#     - test/my_repo_test.rb\n```",
           "```lanes\n- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n```"
         )
@@ -2360,8 +2425,9 @@ class ArchitectCLITest < Space::ArchitectTest
           "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
           "# - name: lane-a            # lane name (required)\n" \
           "#   repo: my-repo           # target repo under repos/ (required)\n" \
-          "#   touch:                  # file globs this lane may write (required, non-empty)\n" \
-          "#     - lib/my_repo/**\n" \
+          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
+          "#     - lib/my_repo/foo.rb\n" \
+          "#     - lib/my_repo/bar.rb\n" \
           "#     - test/my_repo_test.rb\n```",
           "```lanes\n- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n```"
         )
