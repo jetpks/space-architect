@@ -33,25 +33,21 @@ GEM
   specs:
     addressable (2.9.0)
       public_suffix (>= 2.0.2, < 8.0)
-    async (2.39.0)
+    async (2.44.1)
       console (~> 1.29)
       fiber-annotation
       io-event (~> 1.11)
-      metrics (~> 0.12)
-      traces (~> 0.18)
-    async-container (0.35.1)
-      async (~> 2.22)
-    async-http (0.95.1)
-      async (>= 2.10.2)
+    async-container (0.38.0)
+      async (~> 2.44)
+    async-http (0.99.0)
+      async (>= 2.35.1)
       async-pool (~> 0.11)
       io-endpoint (~> 0.14)
-      io-stream (~> 0.6)
-      metrics (~> 0.12)
-      protocol-http (~> 0.62)
+      io-stream (~> 0.14)
+      protocol-http (~> 0.66)
       protocol-http1 (~> 0.39)
       protocol-http2 (~> 0.26)
       protocol-url (~> 0.2)
-      traces (~> 0.10)
     async-http-cache (0.4.6)
       async-http (~> 0.56)
     async-job (0.11.1)
@@ -68,7 +64,7 @@ GEM
       io-endpoint (~> 0.10)
       io-stream (~> 0.4)
       protocol-redis (~> 0.11)
-    async-service (0.24.1)
+    async-service (0.25.0)
       async
       async-container (~> 0.34)
       string-format (~> 0.2)
@@ -82,7 +78,7 @@ GEM
     base64 (0.3.0)
     bigdecimal (3.3.1)
     concurrent-ruby (1.3.6)
-    console (1.36.0)
+    console (1.37.0)
       fiber-annotation
       fiber-local (~> 1.1)
       json
@@ -166,10 +162,10 @@ GEM
     erb (6.0.4)
     faker (3.8.0)
       i18n (>= 1.8.11, < 2)
-    falcon (0.55.5)
+    falcon (0.56.0)
       async
       async-container (~> 0.20)
-      async-http (~> 0.75)
+      async-http (~> 0.97)
       async-http-cache (~> 0.4)
       async-service (~> 0.19)
       async-utilization (~> 0.3)
@@ -239,20 +235,20 @@ GEM
     ice_nine (0.11.2)
     io-console (0.8.2)
     io-endpoint (0.17.2)
-    io-event (1.16.2)
-    io-stream (0.13.1)
+    io-event (1.19.4)
+    io-stream (0.14.0)
+      openssl (>= 3.3)
     irb (1.18.0)
       pp (>= 0.6.0)
       prism (>= 1.3.0)
       rdoc (>= 4.0.0)
       reline (>= 0.4.2)
-    json (2.19.9)
+    json (2.21.2)
     jwt (3.2.0)
       base64
     localhost (1.8.0)
       bake
     logger (1.7.0)
-    metrics (0.15.0)
     minitest (6.0.6)
       drb (~> 2.0)
       prism (~> 1.5)
@@ -299,10 +295,10 @@ GEM
     prettyprint (0.2.0)
     prism (1.9.0)
     protocol-hpack (1.5.1)
-    protocol-http (0.62.2)
-    protocol-http1 (0.39.0)
-      protocol-http (~> 0.62)
-    protocol-http2 (0.26.0)
+    protocol-http (0.69.0)
+    protocol-http1 (0.40.2)
+      protocol-http (~> 0.68)
+    protocol-http2 (0.26.2)
       protocol-hpack (~> 1.4)
       protocol-http (~> 0.62)
     protocol-rack (0.22.1)
@@ -310,7 +306,7 @@ GEM
       protocol-http (~> 0.58)
       rack (>= 1.0)
     protocol-redis (0.13.0)
-    protocol-url (0.4.0)
+    protocol-url (0.10.0)
     psych (5.4.0)
       date
       stringio
@@ -366,7 +362,7 @@ GEM
       dry-types (~> 1.8)
       rom (~> 5.4)
       sequel (>= 4.49)
-    samovar (2.4.2)
+    samovar (2.5.1)
       console (~> 1.0)
     sequel (5.105.0)
       bigdecimal
@@ -378,7 +374,6 @@ GEM
       version_gem (>= 1.1.8, < 3)
     string-format (0.2.0)
     stringio (3.2.0)
-    traces (0.18.2)
     transproc (1.1.1)
     tsort (0.2.0)
     uri (1.1.1)
@@ -412,7 +407,7 @@ DEPENDENCIES
   dry-types (= 1.9.1)
   dry-validation (= 1.11.1)
   faker
-  falcon (= 0.55.5)
+  falcon (= 0.56.0)
   hanami (= 2.3.2)
   hanami-cli (= 2.3.5)
   hanami-controller (= 2.3.2)
@@ -438,22 +433,22 @@ DEPENDENCIES
 
 CHECKSUMS
   addressable (2.9.0) sha256=7fdf6ac3660f7f4e867a0838be3f6cf722ace541dd97767fa42bc6cfa980c7af
-  async (2.39.0) sha256=df18730073f2bbb45788077dfa20cb365ecc1b9453969f44de6796b5191a00aa
-  async-container (0.35.1) sha256=a7a59914b53c6b3013c71f069cb5ab5a2c7d479e582ea533ce091e8d5cfab525
-  async-http (0.95.1) sha256=0c3dd458c204c06d5c4b20b01bbec4794a1203db627fb2ce536e1799ec14786c
+  async (2.44.1) sha256=079bce0d019fb27cc58ec110fd9b9af4991d97b801d1c6cc6def1d1954dcf9b2
+  async-container (0.38.0) sha256=71479d8551870d684e602f463d7b8368909c835a64e38b555e1821512ffffc88
+  async-http (0.99.0) sha256=665eba5e530b05a9682c78b3aa5a51e97dd67b8b25b71ba76530b60cf6c26a11
   async-http-cache (0.4.6) sha256=2038d1f093182f16b50b4db271c25085e3938da10bfcfc2904cadb0530fddfd6
   async-job (0.11.1) sha256=6a43c732597d490dd0dabc4fa390faed0b0fde9226a3a33f25979ff356a096a1
   async-job-processor-redis (0.3.1) sha256=0fb9ec6ab32dc034e20ce280fad89046e81c4b4acf802c5067a17a18ee7c759c
   async-pool (0.11.2) sha256=0a43a17b02b04d9c451b7d12fafa9a50e55dc6dd00d4369aca00433f16a7e3ed
   async-redis (0.13.1) sha256=c3e3a03209257c4e7cbe06dba0ca2856581bc1c583bea7f7fe5974867314ed81
-  async-service (0.24.1) sha256=3ee313fa2d6c1427ffac68f42f272889c496fa1088cf1432b1e7a5f5bff56b06
+  async-service (0.25.0) sha256=71d9d75c2898dddf6549150cecd57156453e5b61da69fa87f10a0c97becfb6d1
   async-utilization (0.4.0) sha256=4da53cb1733a12c9cf70ff22bd37d29c10fa9162a03ddb10f34e12acd171fe32
   auth-sanitizer (0.2.1) sha256=917dcf01f7589b06c26726afe90568cf2fb29d37a1f94facfc664f11967cc577
   bake (0.25.0) sha256=a47bdc6a26addc048827debc36fe27bb4d5d71ac2958ad910b5386e9baf49869
   base64 (0.3.0) sha256=27337aeabad6ffae05c265c450490628ef3ebd4b67be58257393227588f5a97b
   bigdecimal (3.3.1) sha256=eaa01e228be54c4f9f53bf3cc34fe3d5e845c31963e7fcc5bedb05a4e7d52218
   concurrent-ruby (1.3.6) sha256=6b56837e1e7e5292f9864f34b69c5a2cbc75c0cf5338f1ce9903d10fa762d5ab
-  console (1.36.0) sha256=45599ea906cf80a73d8941f03abf873fe66a6a954e0bac5bc1c01e2cdc406f07
+  console (1.37.0) sha256=8093b286c2595a063849c098594fee5155ecc7967d36f3aa8cbe7569c8f3efd7
   content_disposition (1.0.0) sha256=aa153da9c1543a45413a3f5f281d8dd50384bb0fba864fe1bd42ba80d88da516
   csv (3.3.5) sha256=6e5134ac3383ef728b7f02725d9872934f523cb40b961479f69cf3afa6c8e73f
   date (3.5.1) sha256=750d06384d7b9c15d562c76291407d89e368dda4d4fff957eb94962d325a0dc0
@@ -481,7 +476,7 @@ CHECKSUMS
   dry-validation (1.11.1) sha256=70900bb5a2d911c8aab566d3e360c6bff389b8bf92ea8e04885ce51c41ff8085
   erb (6.0.4) sha256=38e3803694be357fe2bfe312487c74beaf9fb4e5beb3e22498952fe1645b95d9
   faker (3.8.0) sha256=c147b308df73a90f27a4fc84f18d4c22ef0ad9c2a64b2b61c86fd0ca71753efc
-  falcon (0.55.5) sha256=8622db11361b6678578dd7e06b953aaef10e5006929ced618069bb62b0ff118d
+  falcon (0.56.0) sha256=fb16f00af77850b3f200d5a19f39ad9f792f5814be2ab12dcd97ebe37a084b41
   faraday (2.14.2) sha256=73ccb9994a9e8648f010e32eca2ae82e41c57860aa10932cda29418b9e0223ad
   faraday-net_http (3.4.4) sha256=0e78af151747ed1b00f33e25973b4bc220d7f16c00c39676817c8b12331eb588
   fiber-annotation (0.2.0) sha256=7abfadf1d119f508867d4103bf231c0354d019cc39a5738945dec2edadaf6c03
@@ -503,14 +498,13 @@ CHECKSUMS
   inertia-hanami (0.1.0)
   io-console (0.8.2) sha256=d6e3ae7a7cc7574f4b8893b4fca2162e57a825b223a177b7afa236c5ef9814cc
   io-endpoint (0.17.2) sha256=3feaf766c116b35839c11fac68b6aaadc47887bb488902a57bf8e1d288fb3338
-  io-event (1.16.2) sha256=9f9cb0a96ea5c3850a672606c65f27bc96d7621399ef6196acbfe2be0cd1279c
-  io-stream (0.13.1) sha256=570d7c4dfb0fbd767480b4a222048a2be6d9b78febc1ec68258d0e0a4cde20de
+  io-event (1.19.4) sha256=c291146e2e70849b9d6b64078f8e98f0154bfd3bc4f9759861ff13e9895e0cce
+  io-stream (0.14.0) sha256=07d9b13ea2066ccbbc761fff8d69ad5a31e47561d31e02cc271f3ed9c1a8f1cd
   irb (1.18.0) sha256=de9454a0703a54704b9811a5ef31a60c86949fbf4013fcf244fabc7c775248e3
-  json (2.19.9) sha256=9b9025b7cdddafa38d316eca0b2358488e42d417045c1b90d216a9fefe46b79a
+  json (2.21.2) sha256=1f1d3b7cf2b3ba1a69beca0bb6db13d5438b80bff3cd54cdaaa620b9b07c1c6a
   jwt (3.2.0) sha256=5419b1fe37b1da0982bd07051f573a8b8789ab724c2aa7e785e4784a3ed217d7
   localhost (1.8.0) sha256=df7ea825b4f64949c588c17efac86bc47ddc4460d723778abe933b71759b2701
   logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
-  metrics (0.15.0) sha256=61ded5bac95118e995b1bc9ed4a5f19bc9814928a312a85b200abbdac9039072
   minitest (6.0.6) sha256=153ea36d1d987a62942382b61075745042a2b3123b1cd48f4c3675af9cc7d6f1
   multi_xml (0.9.1) sha256=7ce766b59c17241ed62976caeae1fae9b2431b263398c35396239a68c4a64e57
   mustermann (3.1.1) sha256=4c6170c7234d5499c345562ba7c7dfe73e1754286dcc1abb053064d66a127198
@@ -534,12 +528,12 @@ CHECKSUMS
   prettyprint (0.2.0) sha256=2bc9e15581a94742064a3cc8b0fb9d45aae3d03a1baa6ef80922627a0766f193
   prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
   protocol-hpack (1.5.1) sha256=6feca238b8078da1cd295677d6f306c6001af92d75fe0643d33e6956cbc3ad91
-  protocol-http (0.62.2) sha256=e1c1f2f56029c1af8c4e2b8a67d0d096c76620f3afd8d99d1dcd2f6b8ffa773b
-  protocol-http1 (0.39.0) sha256=e49b3f4cda6f5d94c76a323d2b7f6977cba3ebd082d2da437039594da77ad8eb
-  protocol-http2 (0.26.0) sha256=bac89cd78082b241ccd0cf7246f5160e4bb0c9c975fb4bf7deef5f88cc317486
+  protocol-http (0.69.0) sha256=787d3b722db663c8067a6e58dac08ed2c2d009b8064537173b8189e52a15ba25
+  protocol-http1 (0.40.2) sha256=add1191f06f16077b2e319ec5cf38c8623a2d2a9829f88a36ebaf8ecf80748a9
+  protocol-http2 (0.26.2) sha256=1457cfaa31877512c349051e0094ea170b8913a62d966b82ff7cd14e4b1a3ede
   protocol-rack (0.22.1) sha256=1185d245927ef9849a603700d6991ca353bc89724fbf98efa4a4333ed62a9fc3
   protocol-redis (0.13.0) sha256=e458797120db530469ef8fc04daa1834dba403b5d92033d49ca69eff6c06639d
-  protocol-url (0.4.0) sha256=64d4c03b6b51ad815ac6fdaf77a1d91e5baf9220d26becb846c5459dacdea9e1
+  protocol-url (0.10.0) sha256=427ac29e6de221acc01def248d1c6f7e2c1ab7bc7a2380577acce93a7a669b0b
   psych (5.4.0) sha256=14f72d69a611af663d7d70e4a7b67d9eb1f3ae9f8d916b478961d5a0075ba5b7
   public_suffix (7.0.5) sha256=1a8bb08f1bbea19228d3bed6e5ed908d1cb4f7c2726d18bd9cadf60bc676f623
   rack (3.2.6) sha256=5ed78e1f73b2e25679bec7d45ee2d4483cc4146eb1be0264fc4d94cb5ef212c2
@@ -556,13 +550,12 @@ CHECKSUMS
   rom-factory (0.13.0) sha256=b6a3d45f79a2c48117ae1550a0790d1cd6b26b27fdff6307e7368ddb7a65ef85
   rom-repository (5.4.3) sha256=a45477c6e01241ed9361c6d5e457c398882f97e376f7a0ac1276e0aa8c013557
   rom-sql (3.7.0) sha256=56ba0714603d72d7ab5ad3247b6526d04ae83b6fcc807f4a1fa953cd7a65a639
-  samovar (2.4.2) sha256=4626ef3d8297cb29dc83a17b562ba52e81116d53fcb7b32096bc453926c3e9ae
+  samovar (2.5.1) sha256=8a9fc41eb8868084f0321eb41678c485cfbc7d282fb306c0be67c3284b1d2394
   sequel (5.105.0) sha256=4191d5e5d011b7229ff8a3401ca6beac047c4d35b1ec6703376513b4b25b2e67
   shrine (3.8.0) sha256=658cc1fe1c5ec836a6c10bace7f214313e7d878acea09b6b658fe15fa19ea109
   snaky_hash (2.0.6) sha256=3663cae48cdef582b517025cf8a39d8789996eaf0b4ed89e2f0624836505654a
   string-format (0.2.0) sha256=bc981c14116b061f12134549f32fa2d61a17b5a35dd6fd36596c21722a789af6
   stringio (3.2.0) sha256=c37cb2e58b4ffbd33fe5cd948c05934af997b36e0b6ca6fdf43afa234cf222e1
-  traces (0.18.2) sha256=80f1649cb4daace1d7174b81f3b3b7427af0b93047759ba349960cb8f315e214
   transproc (1.1.1) sha256=b2f9a85ecaf7064f0b3893ffac929de9fd713b13f5aaf822b0bd091fd6f5c8c2
   tsort (0.2.0) sha256=9650a793f6859a43b6641671278f79cfead60ac714148aabe4e3f0060480089f
   uri (1.1.1) sha256=379fa58d27ffb1387eaada68c749d1426738bd0f654d812fcc07e7568f5c57c6
