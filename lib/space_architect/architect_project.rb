@@ -591,12 +591,12 @@ module Space::Architect
         if gates.empty?
           [nil, nil, [], nil]
         else
-          r   = resolve_rehearsal_repo(iteration, text)
-          dir = space.path.join("repos", r)
-          raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
+          r   = resolve_rehearsal_repo(iteration, text, gates)
+          dir = r ? space.path.join("repos", r) : nil
+          raise Space::Core::Error, "directory does not exist: #{dir}" if dir && !dir.exist?
           results = execute_gates(gates, base_dir: dir, lane: nil, repo_root: nil)
                     .map { |g| g.merge(rehearsal: classify_rehearsal(g)) }
-          [r, dir, results, scope_asymmetry_report(gates, text, dir)]
+          [r, dir, results, scope_asymmetry_report(results, text)]
         end
 
       digest = gates_digest(text)
@@ -688,8 +688,15 @@ module Space::Architect
       repos.map { |r| sync_one_repo(r["name"]) }
     end
 
-    def worktree_add(repo, iteration, lane, base: nil, harness: nil, model: nil, variant: false,
-                     effort: nil, touch: nil, force: false, err: $stderr)
+    # base_explicit distinguishes an operator-given --base (enforce it — refuse or
+    # re-point per #88's three cases) from an auto-materializing call (just attach
+    # whatever's there, never refuse, never move a branch nobody asked to move).
+    # Defaults from whether base: itself was given, which is exactly right for a
+    # direct `worktree_add`/CLI `worktree add --base` call; ensure_lane_materialized
+    # always resolves SOME base internally (it has to, to create a lane from
+    # scratch), so it overrides this explicitly to false.
+    def worktree_add(repo, iteration, lane, base: nil, base_explicit: !base.nil?, harness: nil, model: nil,
+                     variant: false, effort: nil, touch: nil, force: false, err: $stderr)
       model, suffix_level = Harness.parse_model_suffix(model)
       harness, model = resolve_harness_model(harness, model)
       resolved_level = effort || suffix_level || project_defaults["effort"]
@@ -712,6 +719,7 @@ module Space::Architect
       base_sha = base_sha.strip
 
       branch = "lane/#{id}-#{lane}"
+      recorded_base = (entry["lanes"] || []).find { |l| l["name"] == lane }&.dig("base_sha")
 
       # Guard: an existing directory that is not a registered worktree is ambiguous.
       if wt_path.exist? && !worktree_registered?(repo_path, wt_path)
@@ -724,16 +732,8 @@ module Space::Architect
         end
       end
 
-      # Skip git worktree add when the branch and worktree already exist (idempotent re-run).
-      unless branch_exists?(repo_path, branch) && worktree_registered?(repo_path, wt_path)
-        if branch_exists?(repo_path, branch)
-          # The worktree was removed but its lane branch survived — re-attach the branch
-          # (carrying its own tip) instead of `-b`, which would fail "branch already exists".
-          git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, branch)
-        else
-          git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
-        end
-      end
+      outcome, base_sha = attach_lane_branch!(repo_path, wt_path, branch, base_ref, base_sha, recorded_base,
+                                              base_explicit: base_explicit, force: force)
 
       new_fields = {
         "name" => lane,
@@ -763,7 +763,7 @@ module Space::Architect
         b
       end
 
-      { worktree: wt_path, base_sha: base_sha }
+      { worktree: wt_path, base_sha: base_sha, outcome: outcome }
     end
 
     # Declare a variant set for an iteration: one competing lane per (harness, model) pair,
@@ -842,6 +842,12 @@ module Space::Architect
       }
     end
 
+    # #88 (smaller, same area): a removed worktree does not touch its lane branch —
+    # remove-then-provision re-points that surviving branch (or refuses if it has
+    # its own commits), it is not a reset. Names it in the return so a human
+    # reading `worktree remove`'s output isn't misled into thinking it is.
+    # Never deletes the branch itself: that would discard lane work with no
+    # confirmation.
     def worktree_remove(iteration, lane)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
@@ -855,6 +861,8 @@ module Space::Architect
         space.path.join("build", "#{iteration_id(entry)}-#{lane}", "wt")
       end
 
+      branch = worktree_branch(repo_path, wt_path) || "lane/#{iteration_id(entry)}-#{lane}"
+
       git_run("-C", repo_path.to_s, "worktree", "remove", "--force", wt_path.to_s)
       git_run("-C", repo_path.to_s, "worktree", "prune")
 
@@ -865,6 +873,8 @@ module Space::Architect
         end
         b
       end
+
+      { lane: lane, branch: branch, branch_survives: branch_exists?(repo_path, branch) }
     end
 
     def worktree_list
@@ -875,9 +885,13 @@ module Space::Architect
 
     # Materialize the iteration's declared lanes: for each lane (or the one named via
     # `lane:`), create its worktree + lane/<id>-<lane> branch from the resolved base and
-    # record worktree/base_sha/integration_branch. Idempotent — an already-materialized
-    # lane is skipped, not re-created. Refuses until the iteration is frozen, because
-    # declarations are not authoritative until then.
+    # record worktree/base_sha/integration_branch. Idempotent — a bare re-run (no
+    # explicit --base) over an already-materialized lane changes nothing. An explicit
+    # --base is always enforced, even against an already-materialized lane (#88's
+    # "blind spot" — a short-circuit that trusted the recorded state without checking
+    # it against what was actually asked for). Refuses until the iteration is frozen,
+    # because declarations are not authoritative until then. outcome on each result is
+    # :created / :unchanged / :repointed (#88/AC4 — tellable apart by a human reader).
     def provision(iteration, base: nil, lane: nil, force: false)
       entry = slice_entry(iteration)
       raise Space::Core::Error,
@@ -888,17 +902,12 @@ module Space::Architect
       lanes = lanes.select { |l| l["name"] == lane } if lane
       raise Space::Core::Error, "No lane '#{lane}' declared for iteration '#{iteration}'" if lane && lanes.empty?
 
+      base_explicit = !base.nil?
       lanes.map do |l|
         name = l["name"]
-        repo_path = space.path.join("repos", l["repo"])
-        wt_path = space.path.join(l["worktree"] || "build/#{iteration_id(entry)}-#{name}/wt")
-        if wt_path.exist? && worktree_registered?(repo_path, wt_path)
-          { lane: name, worktree: wt_path, base_sha: l["base_sha"], created: false }
-        else
-          result = worktree_add(l["repo"], iteration, name, base: resolve_lane_base(l["repo"], base),
-                                force: force, **recorded_lane_fields(l))
-          { lane: name, worktree: result[:worktree], base_sha: result[:base_sha], created: true }
-        end
+        result = worktree_add(l["repo"], iteration, name, base: resolve_lane_base(l["repo"], base),
+                              base_explicit: base_explicit, force: force, **recorded_lane_fields(l))
+        { lane: name, worktree: result[:worktree], base_sha: result[:base_sha], outcome: result[:outcome] }
       end
     end
 
@@ -1212,10 +1221,18 @@ module Space::Architect
       end
     end
 
-    # I09/AC4: resolve rehearsal's run repo from the DRAFTED ```lanes``` block —
-    # one repo, unambiguously declared or inferable, else a message naming what
-    # to do. Never from space.yaml (no lanes are recorded there pre-freeze).
-    def resolve_rehearsal_repo(iteration, text)
+    # I09/AC4, #90/AC5-AC6: resolve the repo to default for gates that declare no
+    # `cwd` of their own — only those gates need one, and only they are ambiguous
+    # when the drafted ```lanes``` block names more than one repo. A gate with its
+    # own `cwd` rehearses in its own declared directory regardless of how many
+    # repos are declared, so an iteration whose gates all declare `cwd` never
+    # needs a default and never reaches this method's refusals. Never resolves
+    # from space.yaml (no lanes are recorded there pre-freeze).
+    def resolve_rehearsal_repo(iteration, text, gates)
+      needing_default = gates.reject { |g| g.transform_keys(&:to_s)["cwd"] }
+      return nil if needing_default.empty?
+
+      ids = needing_default.map { |g| g.transform_keys(&:to_s)["id"] }
       declared = parse_lanes(text).filter_map { |l| l["repo"] }.uniq
       return declared.first if declared.size == 1
 
@@ -1225,13 +1242,13 @@ module Space::Architect
         raise Space::Core::Error,
           "Cannot resolve a repo to rehearse '#{iteration}' against — no lane declares a repo and the space " \
           "tracks #{tracked.size} repos (#{tracked.join(', ')}). Declare a ```lanes``` block in the " \
-          "Specification, naming the repo to rehearse against."
+          "Specification naming the repo, or give gate(s) #{ids.join(', ')} an explicit `cwd`."
       end
 
       raise Space::Core::Error,
-        "Cannot resolve a single repo to rehearse '#{iteration}' against — the drafted lanes block names " \
-        "multiple repos (#{declared.join(', ')}). Rehearsal runs once, against one repo checkout; narrow the " \
-        "```lanes``` block before rehearsing."
+        "Cannot default a repo for gate(s) #{ids.join(', ')} — the drafted lanes block names multiple repos " \
+        "(#{declared.join(', ')}) and #{ids.size == 1 ? "it declares" : "they declare"} no `cwd`. Give " \
+        "#{ids.size == 1 ? "it" : "them"} an explicit `cwd`, or narrow the ```lanes``` block to one repo."
     end
 
     # I09/AC5: RED (clean non-zero — discriminates) vs GREEN (passes on base) vs
@@ -1287,29 +1304,42 @@ module Space::Architect
     # union; parse_lanes returns [] with no ```lanes``` block, which still
     # yields the outside-every-lane half of the report. Reports only: never
     # touches rehearse's exit code, RED/GREEN/BROKEN, or the rehearsal stamp.
-    def scope_asymmetry_report(gates, text, base_dir)
+    #
+    # #90/AC7: takes the already-EXECUTED gate results, not a single base_dir —
+    # each gate's own resolved `dir` (execute_gates already computed it, per gate)
+    # is what the re-run replays against, so a cross-repo iteration is covered
+    # gate-by-gate in its own repo, and each finding names the repo it came from.
+    def scope_asymmetry_report(gate_results, text)
       touch_globs = parse_lanes(text).flat_map { |l| l["touch"] || [] }
       findings = []
       not_analyzable = []
 
-      gates.each do |gate|
-        g = gate.transform_keys(&:to_s)
-        grep_invocations(g["cmd"].to_s).each do |inv|
+      gate_results.each do |g|
+        grep_invocations(g[:cmd].to_s).each do |inv|
           if inv[:status] != :recognized
-            not_analyzable << { id: g["id"], reason: inv[:reason] }
+            not_analyzable << { id: g[:id], reason: inv[:reason] }
             next
           end
 
-          finding = scope_finding(inv, base_dir, touch_globs)
+          finding = scope_finding(inv, g[:dir], touch_globs)
           if finding
-            findings << finding.merge(id: g["id"])
+            findings << finding.merge(id: g[:id], repo: repo_name_for(g[:dir]))
           else
-            not_analyzable << { id: g["id"], reason: "whole-repo re-run failed" }
+            not_analyzable << { id: g[:id], reason: "whole-repo re-run failed" }
           end
         end
       end
 
       { findings: findings, not_analyzable: not_analyzable }
+    end
+
+    # Best-effort label for a scope-asymmetry finding: the repos/<name> a gate's
+    # resolved dir sits under, or nil for a `cwd` outside repos/ entirely (legal —
+    # #test_run_gates_honors_cwd_outside_repo — just not attributable to one repo).
+    def repo_name_for(dir)
+      repos_root = space.path.join("repos")
+      return nil unless dir.to_s.start_with?("#{repos_root}/")
+      dir.relative_path_from(repos_root).to_s.split("/").first
     end
 
     # Re-runs a recognized invocation's own pattern across the whole repo and
@@ -1493,6 +1523,10 @@ module Space::Architect
     # identically to `provision` (same base resolution, same worktree_add primitive)
     # so no dispatch/integrate/gate path dead-ends on a missing worktree. Returns the
     # (possibly refreshed) lane entry; a no-op when already materialized or undeclared.
+    # base_explicit: false — this call never had an operator-given --base to honor, so
+    # a surviving lane branch (e.g. dispatched work, worktree since removed) is always
+    # just reattached at its own tip, never refused or re-pointed (#88 is about an
+    # explicit ask being dropped; this path never has one to drop).
     def ensure_lane_materialized(iteration, lane)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
@@ -1504,7 +1538,7 @@ module Space::Architect
       return lane_entry if wt_path.exist? && worktree_registered?(repo_path, wt_path)
 
       worktree_add(lane_entry["repo"], iteration, lane, base: resolve_lane_base(lane_entry["repo"], nil),
-                   **recorded_lane_fields(lane_entry))
+                   base_explicit: false, **recorded_lane_fields(lane_entry))
       (slice_entry(iteration)["lanes"] || []).find { |l| l["name"] == lane }
     end
 
@@ -2014,6 +2048,74 @@ module Space::Architect
       out, _, _ = git_capture("-C", repo_path.to_s, "worktree", "list", "--porcelain")
       real = File.exist?(wt_path.to_s) ? File.realpath(wt_path.to_s) : wt_path.to_s
       out.lines.any? { |l| l.start_with?("worktree ") && l.chomp.delete_prefix("worktree ") == real }
+    end
+
+    # The branch checked out at wt_path, per `git worktree list --porcelain`
+    # (read before removal, since the entry disappears once the worktree is
+    # gone) — nil if wt_path isn't a registered worktree of repo_path at all.
+    def worktree_branch(repo_path, wt_path)
+      out, _, _ = git_capture("-C", repo_path.to_s, "worktree", "list", "--porcelain")
+      real = File.exist?(wt_path.to_s) ? File.realpath(wt_path.to_s) : wt_path.to_s
+      entry = out.split("\n\n").find { |e| e.lines.any? { |l| l.chomp == "worktree #{real}" } }
+      entry&.lines&.find { |l| l.start_with?("branch ") }&.chomp&.delete_prefix("branch refs/heads/")
+    end
+
+    # #88: attach `branch` at wt_path, choosing among the three lane-branch states
+    # the issue distinguishes — absent (create), present with no commits beyond the
+    # base it was recorded from (safe to re-point — the fast-follow case), or
+    # present with commits of its own (refuse unless force). Returns [outcome,
+    # base_sha], where base_sha is the commit the worktree actually ends up on —
+    # never the freshly-resolved one when nothing about the tree moved (the
+    # provenance half of the bug).
+    #
+    # base_explicit: false short-circuits to "just attach whatever's there" —
+    # never refuses, never re-points, and preserves the previously recorded
+    # base_sha instead of overwriting it with a base nobody asked for (see
+    # ensure_lane_materialized).
+    def attach_lane_branch!(repo_path, wt_path, branch, base_ref, base_sha, recorded_base, base_explicit:, force:)
+      unless branch_exists?(repo_path, branch)
+        git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
+        return [:created, base_sha]
+      end
+
+      registered = worktree_registered?(repo_path, wt_path)
+      tip_out, _, tip_st = git_capture("-C", repo_path.to_s, "rev-parse", branch)
+      tip_sha = tip_st.success? ? tip_out.strip : nil
+
+      unless base_explicit
+        return [:unchanged, recorded_base || base_sha] if registered
+        git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, branch)
+        return [:created, recorded_base || tip_sha]
+      end
+
+      if tip_sha == base_sha
+        return [:unchanged, base_sha] if registered
+        git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, branch)
+        return [:created, base_sha]
+      end
+
+      if !force && carries_own_commits?(repo_path, recorded_base, tip_sha)
+        raise Space::Core::Error,
+          "Lane branch '#{branch}' carries commits of its own — it is at #{tip_sha ? tip_sha[0, 8] : "?"}, but " \
+          "base '#{base_ref}' (#{base_sha[0, 8]}) was requested. Re-pointing would discard its commits — " \
+          "dispatch or integrate it first, or re-run with --force to discard them and re-point onto the new base."
+      end
+
+      if registered
+        git_run("-C", wt_path.to_s, "reset", "--hard", base_sha)
+      else
+        git_run("-C", repo_path.to_s, "worktree", "add", "-B", branch, wt_path.to_s, base_sha)
+      end
+      [:repointed, base_sha]
+    end
+
+    # #88/AC2-AC3: does the branch carry commits beyond the base it was recorded
+    # from? Unrecorded provenance can't be proven safe, so it counts as "carries
+    # its own" — conservative by design, not merely by omission.
+    def carries_own_commits?(repo_path, recorded_base, tip_sha)
+      return true if recorded_base.nil? || tip_sha.nil?
+      out, _, st = git_capture("-C", repo_path.to_s, "rev-list", "--count", "#{recorded_base}..#{tip_sha}")
+      !(st.success? && out.strip.to_i.zero?)
     end
   end
 end

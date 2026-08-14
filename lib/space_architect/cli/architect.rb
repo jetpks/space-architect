@@ -259,12 +259,23 @@ module Space::Architect
             reason = result[:placeholder] ? "the scaffold placeholder '#{ArchitectProject::AC1_PLACEHOLDER}' with no active gate" : "no gates drafted yet"
             terminal.say "EMPTY — #{reason}. Nothing to rehearse; the pre-freeze look is still stamped."
           else
-            terminal.say "Rehearsing #{result[:iteration]} against #{terminal.path(result[:base_dir])} (repo: #{result[:repo]})"
+            terminal.say rehearsal_header(result)
             result[:gates].each { |g| render_gate(g) }
             render_scope_asymmetry(result[:scope_asymmetry])
           end
           terminal.say ""
           terminal.say "Discrimination report only — this runs and reports; it never judges whether these gates are good, bad, or ready."
+        end
+
+        # #90/AC7: with a single defaultable repo, name it as before; a cross-repo
+        # run (or one where every gate declares its own `cwd`) has no one repo to
+        # name — each gate's own "dir:" line (below) already says where it ran.
+        def rehearsal_header(result)
+          if result[:repo]
+            "Rehearsing #{result[:iteration]} against #{terminal.path(result[:base_dir])} (repo: #{result[:repo]})"
+          else
+            "Rehearsing #{result[:iteration]} — #{result[:gates].size} gate(s), each in its own declared cwd"
+          end
         end
 
         def render_gate(g)
@@ -291,7 +302,7 @@ module Space::Architect
           terminal.say ""
           terminal.say "Scope-asymmetry check (grep-family gates only):"
           report[:findings].each do |f|
-            terminal.say "── #{f[:id]}: pattern #{f[:pattern].inspect} searched #{f[:paths].join(', ')}"
+            terminal.say "── #{f[:id]} (#{f[:repo]}): pattern #{f[:pattern].inspect} searched #{f[:paths].join(', ')}"
             if f[:outside_lanes].any?
               terminal.say "   OUTSIDE ANY LANE'S TOUCH SET — no lane may legally fix these:"
               f[:outside_lanes].each { |file| terminal.say "     #{file}" }
@@ -311,9 +322,10 @@ module Space::Architect
 
           by  = result[:gates].group_by { |g| g[:rehearsal] }
           ids = ->(sym) { (by[sym] || []).map { |g| g[:id] }.join(", ") }
+          ran_against = result[:repo] ? "against `#{result[:repo]}`" : "each in its own declared `cwd`"
           [
             "> **Dry-run at rehearsal time, recorded for transparency.** All #{result[:gates].size} gate command(s) " \
-              "were executed as written against `#{result[:repo]}` under `/bin/sh` — the shell `architect gate` uses.",
+              "were executed as written #{ran_against} under `/bin/sh` — the shell `architect gate` uses.",
             ">",
             "> - **RED (#{(by[:red] || []).size} — discriminate):** #{ids.call(:red).empty? ? "(none)" : ids.call(:red)}",
             "> - **GREEN (#{(by[:green] || []).size} — regression guard or non-discriminating):** #{ids.call(:green).empty? ? "(none)" : ids.call(:green)}",
@@ -536,7 +548,11 @@ module Space::Architect
                 terminal.say "No declared lanes to provision for '#{iteration}'"
               else
                 results.each do |r|
-                  state = r[:created] ? "created" : "already present"
+                  state = case r[:outcome]
+                  when :created   then "created"
+                  when :repointed then "re-pointed"
+                  else                 "already present"
+                  end
                   terminal.say "#{r[:lane]}: #{terminal.path(r[:worktree])} (#{state})"
                 end
               end
@@ -831,8 +847,12 @@ module Space::Architect
             handle_errors do
               render(store.find) do |sp|
                 project = ArchitectProject.new(space: sp)
-                project.worktree_remove(iteration, lane)
+                result = project.worktree_remove(iteration, lane)
                 terminal.say "Removed worktree for #{iteration}/#{lane}"
+                if result[:branch_survives]
+                  terminal.say "Lane branch '#{result[:branch]}' survives — this is not a reset; " \
+                    "re-provisioning re-points or refuses it, it does not start it over."
+                end
                 CLI.record_outcome(Outcome.new(exit_code: 0))
               end
             end
