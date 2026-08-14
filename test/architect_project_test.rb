@@ -1853,8 +1853,9 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # AC4: also ambiguous the other way — the drafted lanes block itself names
-  # more than one repo; rehearsal runs once, against one repo checkout.
+  # #90/AC6: also ambiguous the other way — the drafted lanes block itself names
+  # more than one repo, and the sole gate declares no `cwd` of its own to default
+  # around — the refusal names that gate specifically.
   def test_rehearse_raises_when_drafted_lanes_name_multiple_repos
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
@@ -1869,7 +1870,87 @@ class ArchitectProjectTest < Space::ArchitectTest
     write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
 
     err = assert_raises(Space::Core::Error) { project.rehearse("my-slice") }
-    assert_match(/Cannot resolve a single repo/, err.message)
+    assert_match(/Cannot default a repo/, err.message)
+    assert_match(/g1/, err.message)
+    assert_match(/cwd/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #90/AC5: a cross-repo iteration whose gates each declare an explicit `cwd`
+  # rehearses in one pass — no refusal on "more than one repo declared", and
+  # each gate runs in its own declared directory.
+  def test_rehearse_cross_repo_runs_in_one_pass_when_every_gate_declares_cwd
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "repo-a")
+    create_real_repo(dir, "repo-b")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: repo-a\n  touch:\n    - lib/**\n- name: lane-b\n  repo: repo-b\n  touch:\n    - lib/**\n"
+    gates_yaml = <<~YAML
+      - id: g-a
+        ac: AC1
+        cwd: repos/repo-a
+        cmd: cat README.md
+        expect:
+          exit_code: 0
+      - id: g-b
+        ac: AC1
+        cwd: repos/repo-b
+        cmd: cat README.md
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+    assert_nil result[:repo], "no single repo to default — every gate declared its own cwd"
+    assert_equal 2, result[:gates].length
+    assert_equal [:pass, :pass], result[:gates].map { |g| g[:status] }
+    assert_equal File.join(dir, "repos", "repo-a"), result[:gates][0][:dir].to_s
+    assert_equal File.join(dir, "repos", "repo-b"), result[:gates][1][:dir].to_s
+
+    # AC5: sufficient for freeze without --skip-rehearse.
+    sha = project.freeze!("my-slice")
+    assert_match(/\A[0-9a-f]{40}\z/, sha)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #90/AC6: when a repo can't be defaulted, only the gate(s) actually lacking a
+  # `cwd` are named as ambiguous — a gate that already declares its own `cwd`
+  # is never refused just because other repos are in play.
+  def test_rehearse_names_only_the_gate_missing_cwd_when_repo_ambiguous
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "repo-a")
+    create_real_repo(dir, "repo-b")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: repo-a\n  touch:\n    - lib/**\n- name: lane-b\n  repo: repo-b\n  touch:\n    - lib/**\n"
+    gates_yaml = <<~YAML
+      - id: has-cwd
+        ac: AC1
+        cwd: repos/repo-a
+        cmd: echo ok
+        expect:
+          exit_code: 0
+      - id: no-cwd
+        ac: AC1
+        cmd: echo ok
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    err = assert_raises(Space::Core::Error) { project.rehearse("my-slice") }
+    assert_match(/no-cwd/, err.message)
+    refute_match(/has-cwd/, err.message)
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -3365,7 +3446,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     created = project.provision("my-slice")
     assert_equal ["lane-a"], created.map { |r| r[:lane] }
-    assert created[0][:created], "first provision creates the worktree"
+    assert_equal :created, created[0][:outcome], "first provision creates the worktree"
     assert_path_exists created[0][:worktree].to_s
     branch_ref = File.join(dir, "repos", "my-repo", ".git", "refs", "heads", "lane", "I01-my-slice-lane-a")
     assert_path_exists branch_ref
@@ -3375,7 +3456,164 @@ class ArchitectProjectTest < Space::ArchitectTest
     assert_match(/\A[0-9a-f]{40}\z/, lane["base_sha"])
 
     again = project.provision("my-slice")
-    refute again[0][:created], "second provision skips the already-materialized lane"
+    assert_equal :unchanged, again[0][:outcome], "second provision (bare re-run) is a no-op, not a re-point"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #88/AC1: a lane branch that survived a worktree removal, with no commits of
+  # its own beyond the base it was recorded from, is re-pointed at an explicit
+  # --base — the fast-follow case (a lane provisioned early, never dispatched,
+  # forking from an integrated tip after the fact).
+  def test_provision_base_fast_follow_repoints_undispatched_branch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    freeze_for_test!(project, dir, "my-slice")
+
+    project.provision("my-slice")
+    original_base = space.data.dig("project", "iterations", 0, "lanes", 0)["base_sha"]
+
+    # Simulate integration happening elsewhere: the repo's tip moves past the
+    # lane's original base while the (never-dispatched) lane branch does not.
+    File.write(File.join(repo_dir, "integrated.txt"), "integrated\n")
+    system("git", "-C", repo_dir, "add", "integrated.txt", out: File::NULL, err: File::NULL)
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "integrate")
+    new_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    new_tip = new_tip.strip
+    refute_equal original_base, new_tip
+
+    project.worktree_remove("my-slice", "lane-a")
+
+    results = project.provision("my-slice", base: new_tip)
+    assert_equal :repointed, results[0][:outcome]
+    assert_equal new_tip, results[0][:base_sha]
+
+    wt_head, = Open3.capture3("git", "-C", results[0][:worktree].to_s, "rev-parse", "HEAD")
+    assert_equal new_tip, wt_head.strip, "the re-pointed worktree's HEAD is the requested base's commit"
+
+    lane_after = space.data.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal new_tip, lane_after["base_sha"], "recorded base_sha matches the base the tree is actually on"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #88/AC2-AC3: an explicit --base that already matches where the (materialized)
+  # worktree sits is a true no-op — not a refusal, not a re-point, and no git
+  # mutation — even though the ask was explicit.
+  def test_provision_explicit_base_matching_current_tip_is_unchanged
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    freeze_for_test!(project, dir, "my-slice")
+
+    project.provision("my-slice")
+    base_sha = space.data.dig("project", "iterations", 0, "lanes", 0)["base_sha"]
+
+    result = project.provision("my-slice", base: base_sha)
+    assert_equal :unchanged, result[0][:outcome]
+    assert_equal base_sha, result[0][:base_sha]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #88/AC2-AC3: a lane branch carrying commits of its own refuses a disagreeing
+  # --base, naming the branch/tip/requested base and doing nothing — no worktree,
+  # no branch move, no space.yaml write. --force overrides and discards them.
+  def test_provision_base_refuses_dirty_branch_then_force_repoints
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    freeze_for_test!(project, dir, "my-slice")
+
+    project.provision("my-slice")
+    original_base = space.data.dig("project", "iterations", 0, "lanes", 0)["base_sha"]
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "work.txt"), "builder work\n")
+    system("git", "-C", wt, "add", "work.txt", out: File::NULL, err: File::NULL)
+    system("git", "-C", wt, "commit", "-q", "-m", "builder work")
+    branch_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "lane/I01-my-slice-lane-a")
+    branch_tip = branch_tip.strip
+    refute_equal original_base, branch_tip
+
+    project.worktree_remove("my-slice", "lane-a")
+
+    File.write(File.join(repo_dir, "integrated.txt"), "integrated\n")
+    system("git", "-C", repo_dir, "add", "integrated.txt", out: File::NULL, err: File::NULL)
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "integrate")
+    new_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    new_tip = new_tip.strip
+
+    err = assert_raises(Space::Core::Error) { project.provision("my-slice", base: new_tip) }
+    assert_match(/lane\/I01-my-slice-lane-a/, err.message, "names the branch")
+    assert_match(/#{branch_tip[0, 8]}/, err.message, "names the commit it sits at")
+    assert_match(/#{new_tip[0, 8]}/, err.message, "names the base that was asked for")
+    assert_match(/--force/, err.message, "says what to do about it")
+
+    refute_path_exists wt, "refusal creates no worktree"
+    unchanged_lane = space.data.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal original_base, unchanged_lane["base_sha"], "refusal writes no space.yaml base_sha change"
+    still_at_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "lane/I01-my-slice-lane-a")
+    assert_equal branch_tip, still_at_tip.strip, "refusal does not move the branch"
+
+    forced = project.provision("my-slice", base: new_tip, force: true)
+    assert_equal :repointed, forced[0][:outcome]
+    assert_equal new_tip, forced[0][:base_sha]
+    forced_head, = Open3.capture3("git", "-C", forced[0][:worktree].to_s, "rev-parse", "HEAD")
+    assert_equal new_tip, forced_head.strip, "--force discards the branch's own commits and re-points"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #88/AC4: worktree_remove names the lane branch that survives it (and never
+  # deletes it) — remove-then-provision is not a reset.
+  def test_worktree_remove_reports_surviving_branch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    result = project.worktree_remove("my-slice", "lane-a")
+    assert_equal "lane/I01-my-slice-lane-a", result[:branch]
+    assert result[:branch_survives]
+
+    repo_path = File.join(dir, "repos", "my-repo")
+    assert project.send(:branch_exists?, Pathname.new(repo_path), "lane/I01-my-slice-lane-a"),
+      "worktree_remove must not delete the surviving branch"
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -3644,7 +3882,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.worktree_add("my-repo", "my-slice", "lane-a")
     results = project.provision("my-slice")
     assert_equal ["lane-a"], results.map { |r| r[:lane] }
-    refute results[0][:created], "provision reads the pre-existing worktree_add entry, already materialized"
+    assert_equal :unchanged, results[0][:outcome], "provision reads the pre-existing worktree_add entry, already materialized"
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -4351,7 +4589,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     results = project.provision("my-slice", force: true)
     assert_equal 1, results.length
-    assert results[0][:created], "force provision must create the worktree (created: true)"
+    assert_equal :created, results[0][:outcome], "force provision must create the worktree"
     assert_path_exists results[0][:worktree].to_s
   ensure
     FileUtils.rm_rf(dir)

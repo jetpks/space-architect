@@ -2442,6 +2442,122 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # #90/AC5, AC7: a cross-repo iteration whose gates each declare an explicit
+  # cwd rehearses in one pass at the CLI layer too — readable output naming
+  # each gate's own dir, no refusal on "more than one repo declared".
+  def test_rehearse_cross_repo_runs_in_one_pass
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "repo-a")
+      create_real_repo(space_path, "repo-b")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        text  = text.sub(
+          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
+          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
+          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
+          "# - name: lane-a            # lane name (required)\n" \
+          "#   repo: my-repo           # target repo under repos/ (required)\n" \
+          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
+          "#     - lib/my_repo/foo.rb\n" \
+          "#     - lib/my_repo/bar.rb\n" \
+          "#     - test/my_repo_test.rb\n```",
+          "```lanes\n- name: lane-a\n  repo: repo-a\n  touch:\n    - lib/**\n" \
+          "- name: lane-b\n  repo: repo-b\n  touch:\n    - lib/**\n```"
+        )
+        gate_yaml = <<~YAML
+          - id: g-a
+            ac: AC1
+            cwd: repos/repo-a
+            cmd: cat README.md
+            expect:
+              exit_code: 0
+          - id: g-b
+            ac: AC1
+            cwd: repos/repo-b
+            cmd: cat README.md
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+
+        out, err = invoke("rehearse", "demo")
+
+        assert_empty err
+        refute_match(/Cannot (resolve|default)/, out, "must not refuse for having two repos declared")
+        assert_match(%r{dir:.*repos/repo-a}, out)
+        assert_match(%r{dir:.*repos/repo-b}, out)
+        assert_equal 2, out.scan(/\[GREEN\]/).length
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # #90/AC6: at the CLI layer, the residual ambiguity (a gate with no cwd, more
+  # than one repo declared) refuses with a clean, non-zero-exit error naming the
+  # gate — not a stack trace, and not a blanket "multiple repos" refusal.
+  def test_rehearse_cli_refuses_naming_gate_missing_cwd
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "repo-a")
+      create_real_repo(space_path, "repo-b")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        text  = text.sub(
+          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
+          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
+          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
+          "# - name: lane-a            # lane name (required)\n" \
+          "#   repo: my-repo           # target repo under repos/ (required)\n" \
+          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
+          "#     - lib/my_repo/foo.rb\n" \
+          "#     - lib/my_repo/bar.rb\n" \
+          "#     - test/my_repo_test.rb\n```",
+          "```lanes\n- name: lane-a\n  repo: repo-a\n  touch:\n    - lib/**\n" \
+          "- name: lane-b\n  repo: repo-b\n  touch:\n    - lib/**\n```"
+        )
+        gate_yaml = <<~YAML
+          - id: no-cwd-gate
+            ac: AC1
+            cmd: echo ok
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+
+        _out, err = invoke("rehearse", "demo")
+
+        assert_match(/no-cwd-gate/, err)
+        assert_match(/cwd/, err)
+        refute_match(/trace/, err)
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   def test_rehearse_help_lists_record_flag
     out = IO.popen(["bundle", "exec", "architect", "rehearse", "--help"], err: [:child, :out], &:read)
     assert_includes out, "--record"
@@ -2624,6 +2740,63 @@ class ArchitectCLITest < Space::ArchitectTest
 
         out2, = invoke("provision", "slice-1")
         assert_match(/already present/, out2)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # #88/AC1, AC4: `worktree remove` names the surviving lane branch (not a
+  # reset), and a subsequent `provision --base <ref>` re-points that
+  # undispatched branch, reported as "(re-pointed)" — distinct from "(created)".
+  def test_worktree_remove_reports_branch_then_provision_base_repoints
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      repo_dir = create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "slice-1")
+        slice_file = File.join(space_path, "architecture", "I01-slice-1.md")
+        File.write(slice_file, <<~MD)
+          # I01: slice-1
+
+          ## Specification
+
+          ```lanes
+          - name: lane-a
+            repo: my-repo
+            touch:
+              - lib/**
+          ```
+
+          ## Acceptance Criteria
+
+          ## Builder Prompt
+        MD
+
+        freeze_for_test("slice-1")
+        invoke("provision", "slice-1")
+
+        out, err = invoke("worktree", "remove", "slice-1", "lane-a")
+        assert_empty err
+        assert_match(/Removed worktree/, out)
+        assert_match(/lane\/I01-slice-1-lane-a.*survives/, out)
+
+        system("git", "-C", repo_dir, "commit", "-q", "--allow-empty", "-m", "integrate")
+        new_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+        new_tip = new_tip.strip
+
+        out2, err2 = invoke("provision", "slice-1", "--base", new_tip)
+        assert_empty err2
+        assert_match(%r{lane-a:.*\(re-pointed\)}, out2)
+
+        head, = Open3.capture3("git", "-C", File.join(space_path, "build", "I01-slice-1-lane-a", "wt"), "rev-parse", "HEAD")
+        assert_equal new_tip, head.strip
       end
     end
   ensure
