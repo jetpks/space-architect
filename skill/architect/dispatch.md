@@ -261,6 +261,66 @@ rests on a foundation that a later KILL at N would revert. Accept this coupling
 only consciously, and always judge oldest-first so a KILL stops you before you
 compound it.
 
+### Long-running sweep (detached, two-phase)
+
+Use when a lane's own work *is* a long-running detached process — a 30–70
+minute sweep, migration, or batch run the lane must launch, let run
+unattended, and then audit once it exits. A metered builder session paying
+tokens to sit in a poll loop is the wrong instrument for that wait: split the
+lane across two builder sessions instead, one before the process runs and one
+after.
+
+**Recipe:**
+
+1. **Phase A — launch, prove liveness, stop deliberately.** The lane-prompt's
+   PHASE 2 tells the builder to launch the process detached (backgrounded and
+   redirected to a log file, survives the builder's own process exit), capture
+   its pid, prove it's alive with one command result (e.g. `ps -p <pid>` plus a
+   growing log tail — not an assertion), pre-structure the report with the
+   sections phase B will fill in, and end the session there — not mid-poll —
+   at:
+   ```
+   STATUS: SWEEP_RUNNING (pid <pid>, run dir <path>)
+   ```
+   `SWEEP_RUNNING` is the fixed token spec authors and architects grep for;
+   the pid and run dir ride in the same line because nothing else in the loop
+   captures them.
+
+2. **The wait belongs to the architect's harness, not the builder session.**
+   Between phase A and B, a process-exit monitor on the architect's side —
+   notification-driven, not a poll loop — watches for the pid to exit. A
+   builder session spends tokens to sit idle in a wait; the harness doesn't.
+   Do not dispatch a phase-B session, or resume one, until the process has
+   actually exited.
+
+3. **Phase B — resume and audit.** Once the process has exited, resume the
+   same lane worktree with `--continue` — the one sanctioned use of
+   `--continue` beyond same-lane follow-ups (see `## Operating guidance`
+   below) — and hand it the post-run audit as the new instruction:
+   ```bash
+   ( cd build/<id>-<lane>/wt && \
+     echo "The sweep at <run dir> (pid <pid>) has exited. Audit its output
+   against the spec's acceptance criteria, finish the report you
+   pre-structured in phase A, and end at STATUS: COMPLETE." \
+     | claude -p --continue --model <builder-model> \
+       --permission-mode acceptEdits \
+       --allowedTools 'Read,Edit,Write,Grep,Glob,Bash,WebSearch,WebFetch' \
+       --disallowedTools 'Bash(git commit:*),Bash(git push:*),Bash(git reset:*),Bash(git merge:*),Bash(git rebase:*),Bash(git checkout:*),Bash(git branch:*)' \
+       --output-format stream-json --verbose \
+       > build/<id>-<lane>/run-b.jsonl 2>&1 )
+   ```
+   Phase B runs the post-run audits the spec asked for, then finishes the
+   report at `STATUS: COMPLETE` (or `COMPLETE_WITH_CONCERNS`/`BLOCKED`, per the
+   template) exactly as any other lane would.
+
+**Invariant:** phase A never ends mid-poll or at a pending status of its own
+invention — it ends at `SWEEP_RUNNING` with the pid and run dir recorded, or
+it's indistinguishable from a lane that gave up. Spec authors: an in-lane
+"poll until it finishes" / "never end the session while it runs" instruction
+loses to the template's no-busy-wait clause below every time a builder holds
+both — write this two-phase shape into the lane spec instead of a poll
+instruction.
+
 ## Operating guidance
 
 - Background each lane as its own harness task and let the **per-lane
@@ -400,7 +460,11 @@ backgrounded work is SIGTERMed and its output lost while the run still exits
 potentially long command an explicit timeout; if a
 runtime will not start unattended (interactive prompt, server with no timeout),
 record the exact failure in your report and route around it — never busy-wait
-or retry in a loop. When done, write your report to the scratch file given to
+or retry in a loop. The one sanctioned exception is a deliberate wait on a
+detached process this lane itself launched: end that phase at
+`STATUS: SWEEP_RUNNING` (pid + run dir) per `### Long-running sweep` in
+dispatch.md, instead of polling for it to finish — this clause still forbids
+retry loops and sitting on an unattended runtime with no timeout. When done, write your report to the scratch file given to
 you, build/<id>-<lane>/report.md (an absolute path outside your worktree),
 with RAW results only — tables, numbers, command output — no interpretation, no
 "promising". Every status claim must be backed by a command result from this

@@ -536,11 +536,14 @@ blocks and overrides anything.
 Passing lanes integrate into one long-lived `project/<slug>` branch (slug from
 `space.title`) that accumulates **every** iteration; `main` is never touched
 per-iteration. A cross-repo project yields one `project/<slug>` branch per
-touched repo. Two first-class multi-lane patterns compose this: **parallel +
+touched repo. Three first-class multi-lane patterns compose this: **parallel +
 fast-follow** (disjoint lanes integrate first; a fast-follow lane off the merged
-tip carries the seam) and **serial deferred judgment** (iterations run to
+tip carries the seam), **serial deferred judgment** (iterations run to
 gates-green with the Verdict withheld; one later batch session judges each
-against its own frozen AC — every verdict still cold and fresh-session).
+against its own frozen AC — every verdict still cold and fresh-session), and
+**long-running sweep** (a lane launches its own long detached process, ends its
+session at a sanctioned pending status, and a later session in the same
+worktree audits it once it exits — see `dispatch.md`).
 
 ### Optional pre-spec research fan-out
 
