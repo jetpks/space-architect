@@ -298,12 +298,15 @@ contract, self-contained:
   overlap run as one. Each lane gets its own objective, output format, and
   boundaries. Most
   iterations are one lane — fan out only when the work is genuinely parallel (a
-  cross-repo project often is). Two first-class patterns — runnable recipes in `dispatch.md`: **parallel +
+  cross-repo project often is). Three first-class patterns — runnable recipes in `dispatch.md`: **parallel +
   fast-follow** (disjoint lanes integrate first; a fast-follow lane off
-  `project/<slug>` carries the seam — see `### Parallel + fast-follow`) and
+  `project/<slug>` carries the seam — see `### Parallel + fast-follow`),
   **serial deferred judgment** (iterations run to gates-green with `architect
   verdict` withheld; one later batch session judges each against its own frozen
-  AC — see `### Serial deferred judgment`).
+  AC — see `### Serial deferred judgment`), and **long-running sweep** (a lane
+  launches its own long detached process, ends its session at a sanctioned
+  pending status, and a later session in the same worktree audits it once it
+  exits — see `### Long-running sweep` in `dispatch.md`).
 - **Effort call** — thinking budget set per dispatch with `architect dispatch
   --effort <level>`, translated and clamped to the lane's harness (the
   escalation keywords `think hard` … `ultrathink` still work in-prompt);
