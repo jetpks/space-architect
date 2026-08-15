@@ -491,7 +491,10 @@ only the per-lane `lane/<iteration>-<lane>` branches and worktrees, never the
 project branch. Update the iteration index in `architecture/ARCHITECT.md`
 (recording the `project/<slug>` branch), remove the provisioned worktrees
 (`architect integrate … --teardown`, or `architect worktree remove <iteration>
-<lane>`), and commit the space.
+<lane>`), and commit the space. Both refuse per lane when its worktree still
+holds uncommitted work — untracked files included; `--force` overrides and
+discards it. The `--lanes` integration path itself is unaffected, since
+`integrate` commits each lane's work before teardown.
 
 **Run the frozen gates cold** — `architect gate <iteration>` runs the frozen
 gate commands against the integration tree and streams raw output (a runner, not

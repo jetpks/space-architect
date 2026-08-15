@@ -145,7 +145,12 @@ spec defect: kill the conflicting lane and re-spec; don't hand-resolve builder
 conflicts. It runs **no gates and makes no verdict** — `architect gate` streams
 the raw gate output for you to judge. `--teardown` deletes only the per-lane
 `lane/<iteration>-<lane>` branches and worktrees; it never deletes the
-`project/<slug>` branch.
+`project/<slug>` branch. Every destructive lane operation — `worktree remove`,
+`integrate --teardown`, and the re-point path of `provision --base` — refuses
+per lane when that lane's worktree still holds uncommitted work, untracked
+files included, because that's what a dispatched lane always holds; `--force`
+overrides and discards it. The `--lanes <passing-set>` integration path itself
+is unaffected — `integrate` commits each lane's work before tearing it down.
 
 Under the hood / manual fallback (one lane shown):
 
