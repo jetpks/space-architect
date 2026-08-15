@@ -181,7 +181,15 @@ module Space::Architect
                     h = l["harness"] || "claude-code"
                     m = l["model"]   || Harness.default_model_for(h)
                     eff = l["effort"] ? "·#{l['effort']}" : ""
-                    "#{l['name']}(#{l['repo']}·#{h}·#{m}#{eff})"
+                    # #89/AC8: the resolved tool grant, visible next to the other resolved
+                    # values — only when it diverges from the harness default, to keep the
+                    # common case (no lane touches it) uncluttered. Meaningless outside
+                    # claude-code (no equivalent grant mechanism), so shown only there.
+                    tools = if h == "claude-code"
+                      resolved = Harness::ClaudeCodeHarness.resolve_tools(replace: l["allowed_tools"], append: l["append_allowed_tools"])
+                      resolved == Harness::ClaudeCodeHarness::ALLOWED_TOOLS ? "" : "·tools:#{resolved}"
+                    end
+                    "#{l['name']}(#{l['repo']}·#{h}·#{m}#{eff}#{tools})"
                   end.join(", ")
                   lanes = lane_list.any? { |l| l["variant"] } ? "variant: #{lanes_str}" : lanes_str
                   lanes = "#{lanes} → winner: #{s['winner']}" if s["winner"]
@@ -432,6 +440,8 @@ module Space::Architect
         option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's stored model, else space.yaml project.model, else the per-harness sensible default). Any provider/tier; pin a full id, not a floating alias"
         option   :max_turns, default: "200",  desc: "Max turns for the builder"
         option   :harness,   default: nil,    desc: "Harness override (claude-code, opencode, pi)"
+        option   :allowed_tools,        default: nil, desc: "Comma-separated tool list — replaces the claude-code --allowedTools grant for this dispatch (default: Read,Edit,Write,Grep,Glob,Bash,WebSearch,WebFetch). The lane's frozen allowed_tools: does the same with no flag; this flag wins over that key. Meaningless for opencode/pi"
+        option   :append_allowed_tools, default: nil, desc: "Comma-separated tool list — appends to the claude-code --allowedTools grant for this dispatch (to the flag/lane replace value, or the default). The lane's frozen append_allowed_tools: does the same with no flag; this flag wins over that key. Meaningless for opencode/pi"
         option   :effort,    default: nil,    desc: "Thinking/reasoning effort level — alias for --thinking/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
         option   :thinking,  default: nil,    desc: "Thinking/reasoning effort level — alias for --effort/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
         option   :reasoning, default: nil,    desc: "Thinking/reasoning effort level — alias for --effort/--thinking (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
@@ -453,6 +463,7 @@ module Space::Architect
 
         def call(iteration:, lane:, space: nil, prompt: nil, model: nil,
                  max_turns: "200", harness: nil, effort: nil, thinking: nil, reasoning: nil,
+                 allowed_tools: nil, append_allowed_tools: nil,
                  force_effort: nil, force_thinking: nil, force_reasoning: nil, quiet: false, detach: false,
                  timeout: "14400", push_url: nil, push_token: nil, push_host: nil,
                  as_job: false, host: nil, token: nil, backend_url: nil, job_model: nil, api_key_ref: nil, **opts)
@@ -479,6 +490,8 @@ module Space::Architect
                 kwargs[:model]       = model           if model
                 kwargs[:harness]     = harness         if harness
                 kwargs[:effort]      = forced_level || level if forced_level || level
+                kwargs[:allowed_tools]        = allowed_tools        if allowed_tools
+                kwargs[:append_allowed_tools] = append_allowed_tools if append_allowed_tools
                 kwargs[:force]       = true            if forced_level
                 kwargs[:quiet]       = true             if quiet
                 kwargs[:job_model]   = job_model       if job_model
@@ -494,6 +507,8 @@ module Space::Architect
                 kwargs[:model]      = model           if model
                 kwargs[:harness]    = harness         if harness
                 kwargs[:effort]     = forced_level || level if forced_level || level
+                kwargs[:allowed_tools]        = allowed_tools        if allowed_tools
+                kwargs[:append_allowed_tools] = append_allowed_tools if append_allowed_tools
                 kwargs[:force]      = true            if forced_level
                 kwargs[:quiet]      = true             if quiet
                 kwargs[:timeout]    = timeout.to_i    unless detach

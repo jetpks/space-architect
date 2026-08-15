@@ -114,6 +114,111 @@ class HarnessTest < Space::ArchitectTest
     assert_instance_of Space::Architect::Harness::ClaudeCodeHarness, harness
   end
 
+  # ── #89: allowed-tools grant reaches the argv ────────────────────────────
+
+  # AC6: Harness.for with no allowed_tools: kwarg produces the byte-for-byte default argv.
+  def test_harness_for_omits_allowed_tools_kwarg_uses_default
+    harness = Space::Architect::Harness.for("claude-code",
+                                          model: "claude-sonnet-4-6", max_turns: 10, bin: "/fake")
+    assert_includes harness.builder_args, Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS
+  end
+
+  # AC1: Harness.for(allowed_tools:) replaces the default in the harness's own argv.
+  def test_harness_for_allowed_tools_kwarg_replaces_default_in_builder_args
+    harness = Space::Architect::Harness.for("claude-code",
+                                          model: "claude-sonnet-4-6", max_turns: 10, bin: "/fake",
+                                          allowed_tools: "Read,Edit")
+    assert_includes harness.builder_args, "Read,Edit"
+    refute_includes harness.builder_args, Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS
+  end
+
+  # ClaudeCodeHarness.resolve_tools composes replace + append as one rule, independent
+  # of which surface (flag or frozen lane yaml) supplied them.
+  def test_resolve_tools_default_when_neither_given
+    assert_equal Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS,
+      Space::Architect::Harness::ClaudeCodeHarness.resolve_tools
+  end
+
+  def test_resolve_tools_replace_only
+    assert_equal "Read,Edit", Space::Architect::Harness::ClaudeCodeHarness.resolve_tools(replace: "Read,Edit")
+  end
+
+  def test_resolve_tools_append_only_appends_to_default
+    assert_equal "#{Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS},mcp__foo",
+      Space::Architect::Harness::ClaudeCodeHarness.resolve_tools(append: "mcp__foo")
+  end
+
+  def test_resolve_tools_replace_and_append_appends_to_replace
+    assert_equal "Read,Edit,mcp__foo",
+      Space::Architect::Harness::ClaudeCodeHarness.resolve_tools(replace: "Read,Edit", append: "mcp__foo")
+  end
+
+  # AC1: --allowed-tools replaces the default grant reaching the builder's argv end to end.
+  def test_dispatch_allowed_tools_replaces_default_in_argv
+    root = Dir.mktmpdir("harness-test")
+    _space_dir, project, _fake_claude, _fake_oc, _build_dir = setup_space(root)
+
+    recorder = File.join(root, "recorder")
+    argv_file = File.join(root, "recorded_argv")
+    File.write(recorder, FAKE_ARGV_RECORDER)
+    File.chmod(0o755, recorder)
+
+    ENV["ARGV_RECORD_FILE"] = argv_file
+    project.dispatch("demo", "A", claude_bin: recorder, allowed_tools: "Read,Edit")
+    recorded = File.read(argv_file).split("\x00")
+
+    idx = recorded.index("--allowedTools")
+    refute_nil idx, "argv must carry --allowedTools: #{recorded.inspect}"
+    assert_equal "Read,Edit", recorded[idx + 1]
+  ensure
+    ENV.delete("ARGV_RECORD_FILE")
+    FileUtils.rm_rf(root)
+  end
+
+  # AC2: --append-allowed-tools appends to the default grant, default entries intact.
+  def test_dispatch_append_allowed_tools_appends_to_default_in_argv
+    root = Dir.mktmpdir("harness-test")
+    _space_dir, project, _fake_claude, _fake_oc, _build_dir = setup_space(root)
+
+    recorder = File.join(root, "recorder")
+    argv_file = File.join(root, "recorded_argv")
+    File.write(recorder, FAKE_ARGV_RECORDER)
+    File.chmod(0o755, recorder)
+
+    ENV["ARGV_RECORD_FILE"] = argv_file
+    project.dispatch("demo", "A", claude_bin: recorder, append_allowed_tools: "mcp__foo")
+    recorded = File.read(argv_file).split("\x00")
+
+    idx = recorded.index("--allowedTools")
+    refute_nil idx, "argv must carry --allowedTools: #{recorded.inspect}"
+    assert_equal "#{Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS},mcp__foo", recorded[idx + 1]
+  ensure
+    ENV.delete("ARGV_RECORD_FILE")
+    FileUtils.rm_rf(root)
+  end
+
+  # AC6: with neither flag given, the argv's tool list is byte-for-byte what it is today.
+  def test_dispatch_without_allowed_tools_flags_argv_unchanged
+    root = Dir.mktmpdir("harness-test")
+    _space_dir, project, _fake_claude, _fake_oc, _build_dir = setup_space(root)
+
+    recorder = File.join(root, "recorder")
+    argv_file = File.join(root, "recorded_argv")
+    File.write(recorder, FAKE_ARGV_RECORDER)
+    File.chmod(0o755, recorder)
+
+    ENV["ARGV_RECORD_FILE"] = argv_file
+    project.dispatch("demo", "A", claude_bin: recorder)
+    recorded = File.read(argv_file).split("\x00")
+
+    idx = recorded.index("--allowedTools")
+    refute_nil idx, "argv must carry --allowedTools: #{recorded.inspect}"
+    assert_equal Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS, recorded[idx + 1]
+  ensure
+    ENV.delete("ARGV_RECORD_FILE")
+    FileUtils.rm_rf(root)
+  end
+
   # ── AC1: per-harness sensible defaults ────────────────────────────────────
 
   def test_default_model_for_claude_code

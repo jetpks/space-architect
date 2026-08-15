@@ -241,6 +241,13 @@ module Space::Architect
           lanes = s["lanes"] || []
           declared.each do |d|
             fields = { "name" => d["name"], "repo" => d["repo"], "touch_set" => Array(d["touch"]) }
+            # #89/AC3-AC4: the frozen lane's own tool grant, reviewable like every other
+            # boundary. Declared-only, like touch_set — worktree_add never touches these
+            # keys, so a re-materialize preserves them without threading them through
+            # recorded_lane_fields (unlike harness/model, which worktree_add resolves and
+            # overwrites on every call).
+            fields["allowed_tools"]        = d["allowed_tools"]        if d["allowed_tools"]
+            fields["append_allowed_tools"] = d["append_allowed_tools"] if d["append_allowed_tools"]
             existing = lanes.find { |l| l["name"] == d["name"] }
             existing ? existing.merge!(fields) : lanes << fields
           end
@@ -932,7 +939,8 @@ module Space::Architect
     end
 
     def dispatch(iteration, lane, model: nil, max_turns: 200,
-                 claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil, force: false, quiet: false,
+                 claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil,
+                 allowed_tools: nil, append_allowed_tools: nil, force: false, quiet: false,
                  detach: false, push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
                  push_client: nil, timeout: nil, prompt: nil, now: Time.now)
       raise Space::Core::Error, "Specify --push-host or --push-url, not both" if push_host && push_url
@@ -949,6 +957,9 @@ module Space::Architect
 
       resolved_harness, resolved_model, resolved_effort =
         resolve_dispatch_harness(lane_entry, model: model, harness: harness, effort: effort, force: force, err: err)
+      resolved_allowed_tools, replace_tools, append_tools, tools_provenance =
+        resolve_allowed_tools(lane_entry, allowed_tools: allowed_tools, append_allowed_tools: append_allowed_tools)
+      err.puts(tools_provenance) if replace_tools || append_tools
 
       raise Space::Core::Error, "--push-host is only supported with the claude-code harness" \
         if push_host && resolved_harness != "claude-code"
@@ -968,22 +979,29 @@ module Space::Architect
 
       bin = resolved_harness == "claude-code" ? claude_bin : opencode_bin
       harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns, bin: bin,
-                                                  config_dir: build_dir, effort: resolved_effort, force: force, err: err)
+                                                  config_dir: build_dir, effort: resolved_effort,
+                                                  allowed_tools: resolved_allowed_tools, force: force, err: err)
 
-      # Stamp launch time and the resolved harness/model/effort onto the lane entry:
-      # after every preflight validation has passed (a dispatch that raises above
-      # records nothing) and before the blocking run or a detached dispatch returns.
-      # A re-dispatch overwrites the prior values, so `architect status` always reads
-      # what actually ran on the last dispatch.
+      # Stamp launch time and the resolved harness/model/effort/allowed_tools onto the
+      # lane entry: after every preflight validation has passed (a dispatch that raises
+      # above records nothing) and before the blocking run or a detached dispatch
+      # returns. A re-dispatch overwrites the prior values, so `architect status`
+      # always reads what actually ran on the last dispatch. #89/AC8: the resolved
+      # tool grant is recorded the same way, so a denial traces back to a grant a
+      # human can read — replace_tools/append_tools are the pre-composition components
+      # (not the harness's expanded ClaudeCodeHarness.resolve_tools result), so a later
+      # bare re-dispatch re-resolves from the same components instead of compounding.
       update_architect_block do |b|
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
           (s["lanes"] || []).each do |l|
             next unless l["name"] == lane
-            l["dispatched_at"] = now.iso8601
-            l["harness"]       = resolved_harness
-            l["model"]         = resolved_model
-            l["effort"]        = resolved_effort if resolved_effort
+            l["dispatched_at"]         = now.iso8601
+            l["harness"]               = resolved_harness
+            l["model"]                 = resolved_model
+            l["effort"]                = resolved_effort if resolved_effort
+            l["allowed_tools"]         = replace_tools    if replace_tools
+            l["append_allowed_tools"]  = append_tools     if append_tools
           end
         end
         b
@@ -1032,7 +1050,8 @@ module Space::Architect
     # transcript lives server-side. jobs_client: is the injectable seam (mirrors
     # dispatch's run_creator:).
     def dispatch_as_job(iteration, lane, host:, token:, backend_url:, model: nil, harness: nil,
-                        max_turns: 200, effort: nil, force: false, quiet: false,
+                        max_turns: 200, effort: nil, allowed_tools: nil, append_allowed_tools: nil,
+                        force: false, quiet: false,
                         job_model: nil, api_key_ref: nil, prompt: nil, jobs_client: nil, now: Time.now)
       err = quiet ? File.open(File::NULL, "w") : $stderr
 
@@ -1047,6 +1066,12 @@ module Space::Architect
         unless resolved_harness == "claude-code"
       raise Space::Core::Error, "--job-model is required with --as-job" unless job_model
 
+      # #89: same replace/append resolution as the local dispatch path — the sandboxed
+      # executor still runs `claude -p` with harness_args server-side.
+      resolved_allowed_tools, replace_tools, append_tools, tools_provenance =
+        resolve_allowed_tools(lane_entry, allowed_tools: allowed_tools, append_allowed_tools: append_allowed_tools)
+      err.puts(tools_provenance) if replace_tools || append_tools
+
       id = iteration_id(entry)
       wt_path = space.path.join(lane_entry["worktree"] || "build/#{id}-#{lane}/wt")
       raise Space::Core::Error, "Worktree directory does not exist: #{wt_path}" unless wt_path.exist?
@@ -1057,7 +1082,8 @@ module Space::Architect
 
       repo_path   = space.path.join("repos", lane_entry["repo"])
       harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
-                                                  effort: resolved_effort, force: force, err: err)
+                                                  effort: resolved_effort, allowed_tools: resolved_allowed_tools,
+                                                  force: force, err: err)
 
       spec = job_spec(iteration: iteration, lane: lane, wt_path: wt_path, build_dir: build_dir,
         repo_path: repo_path, prompt_content: prompt_path.read, backend_url: backend_url,
@@ -1641,6 +1667,35 @@ module Space::Architect
         end
 
       [resolved_harness, resolved_model, resolved_effort]
+    end
+
+    # #89/AC1-AC5: resolve the claude-code --allowedTools grant for a dispatch (local or
+    # --as-job), shared so both paths resolve precedence identically. The CLI flag beats
+    # the lane's recorded allowed_tools:/append_allowed_tools: (frozen-declaration or a
+    # prior dispatch's stamp) — resolved independently for replace vs. append, so a flag
+    # on one axis and a lane value on the other both apply (Objective A). Meaningless for
+    # opencode/pi (no equivalent grant mechanism) — still resolved/recorded for visibility,
+    # but Harness.for only wires it into the claude-code branch's argv.
+    def resolve_allowed_tools(lane_entry, allowed_tools:, append_allowed_tools:)
+      replace, replace_from =
+        if allowed_tools
+          [allowed_tools, "--allowed-tools flag"]
+        elsif lane_entry["allowed_tools"]
+          [lane_entry["allowed_tools"], "lane's allowed_tools:"]
+        else
+          [nil, "default"]
+        end
+
+      append, append_from =
+        if append_allowed_tools
+          [append_allowed_tools, "--append-allowed-tools flag"]
+        elsif lane_entry["append_allowed_tools"]
+          [lane_entry["append_allowed_tools"], "lane's append_allowed_tools:"]
+        end
+
+      final = Harness::ClaudeCodeHarness.resolve_tools(replace: replace, append: append)
+      provenance = "allowed-tools: #{replace_from}#{append_from ? " + #{append_from}" : ""} → #{final}"
+      [final, replace, append, provenance]
     end
 
     # Compose a dispatch --as-job spec per the space-server's job contract: prompt +
