@@ -277,7 +277,9 @@ contract, self-contained:
   its **target repo + file-touch set, checked for overlap**: name the repo
   (`repos/<repo>`) and every file each lane may touch. The machine-readable
   declaration lives in a fenced ` ```lanes ` block in the Specification — one
-  entry per lane (`name`, `repo`, `touch` globs) — the single frozen source of
+  entry per lane (`name`, `repo`, `touch` globs; optionally `allowed_tools`/
+  `append_allowed_tools` to replace/extend the lane's builder tool grant — see
+  `dispatch.md`) — the single frozen source of
   truth `architect freeze` records into `space.yaml` and `architect provision`
   materializes. The same boundary is stated twice more — the lane-prompt's
   may-touch list, and the scope gate that checks the lane's diff at judge
@@ -298,12 +300,15 @@ contract, self-contained:
   overlap run as one. Each lane gets its own objective, output format, and
   boundaries. Most
   iterations are one lane — fan out only when the work is genuinely parallel (a
-  cross-repo project often is). Two first-class patterns — runnable recipes in `dispatch.md`: **parallel +
+  cross-repo project often is). Three first-class patterns — runnable recipes in `dispatch.md`: **parallel +
   fast-follow** (disjoint lanes integrate first; a fast-follow lane off
-  `project/<slug>` carries the seam — see `### Parallel + fast-follow`) and
+  `project/<slug>` carries the seam — see `### Parallel + fast-follow`),
   **serial deferred judgment** (iterations run to gates-green with `architect
   verdict` withheld; one later batch session judges each against its own frozen
-  AC — see `### Serial deferred judgment`).
+  AC — see `### Serial deferred judgment`), and **long-running sweep** (a lane
+  launches its own long detached process, ends its session at a sanctioned
+  pending status, and a later session in the same worktree audits it once it
+  exits — see `### Long-running sweep` in `dispatch.md`).
 - **Effort call** — thinking budget set per dispatch with `architect dispatch
   --effort <level>`, translated and clamped to the lane's harness (the
   escalation keywords `think hard` … `ultrathink` still work in-prompt);
@@ -402,7 +407,8 @@ Per the mechanics in `dispatch.md`. The lane lifecycle is **declare → rehearse
 there is no dispatch-in-the-checkout path:
 
 - **Declare** — at spec time, each lane is one entry in the Specification's
-  fenced ` ```lanes ` block (§4): `name`, `repo`, `touch` globs.
+  fenced ` ```lanes ` block (§4): `name`, `repo`, `touch` globs, and optionally
+  `allowed_tools`/`append_allowed_tools`.
 - **Rehearse** — `architect rehearse <iteration>` dry-runs the drafted gates
   from the working tree (§4's pre-freeze check), resolving its run dir from the
   drafted ` ```lanes ` block, and stamps `space.yaml`; `freeze` refuses without
@@ -488,7 +494,10 @@ only the per-lane `lane/<iteration>-<lane>` branches and worktrees, never the
 project branch. Update the iteration index in `architecture/ARCHITECT.md`
 (recording the `project/<slug>` branch), remove the provisioned worktrees
 (`architect integrate … --teardown`, or `architect worktree remove <iteration>
-<lane>`), and commit the space.
+<lane>`), and commit the space. Both refuse per lane when its worktree still
+holds uncommitted work — untracked files included; `--force` overrides and
+discards it. The `--lanes` integration path itself is unaffected, since
+`integrate` commits each lane's work before teardown.
 
 **Run the frozen gates cold** — `architect gate <iteration>` runs the frozen
 gate commands against the integration tree and streams raw output (a runner, not

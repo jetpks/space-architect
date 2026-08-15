@@ -745,6 +745,252 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # ── #89: --allowed-tools / --append-allowed-tools ─────────────────────────
+
+  def dispatch_argv_recorder_setup(setup, env)
+    fake = File.join(setup[:root], "fake_claude_argv")
+    File.write(fake, "#!/usr/bin/env ruby\nFile.write(ENV['ARGV_RECORD_FILE'], ARGV.join(\"\\x00\"))\n$stdin.read\nexit 0\n")
+    File.chmod(0o755, fake)
+    argv_file = File.join(setup[:root], "recorded_argv")
+    [env.merge("ARCHITECT_CLAUDE_BIN" => fake, "ARGV_RECORD_FILE" => argv_file), argv_file]
+  end
+
+  def recorded_allowed_tools(argv_file)
+    recorded = File.read(argv_file).split("\x00")
+    idx = recorded.index("--allowedTools")
+    idx ? recorded[idx + 1] : nil
+  end
+
+  # ArchitectProject#dispatch's inform lines (thinking translation, allowed-tools
+  # provenance, liveness/push) go to the real $stderr, not the out/err StringIO
+  # `invoke` passes to Space::Architect::CLI.call — mirrors
+  # test_dispatch_cli_force_effort_bypasses_clamp_and_informs's own capture.
+  def capture_global_stderr
+    original = $stderr
+    captured = StringIO.new
+    $stderr = captured
+    yield
+    captured.string
+  ensure
+    $stderr = original
+  end
+
+  # AC1: --allowed-tools replaces the default grant reaching the builder's argv.
+  def test_dispatch_cli_allowed_tools_flag_replaces_default
+    setup = temp_env
+    env, argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out = nil
+        stderr_out = capture_global_stderr { out, = invoke("dispatch", "demo", "A", "--allowed-tools", "Read,Edit") }
+
+        assert_match(/Builder exited with status 0/, out)
+        assert_match(/allowed-tools: --allowed-tools flag → Read,Edit/, stderr_out)
+        assert_equal "Read,Edit", recorded_allowed_tools(argv_file)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC2: --append-allowed-tools appends to the default, default entries intact.
+  def test_dispatch_cli_append_allowed_tools_flag_appends_default
+    setup = temp_env
+    env, argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out = nil
+        stderr_out = capture_global_stderr { out, = invoke("dispatch", "demo", "A", "--append-allowed-tools", "mcp__foo") }
+
+        assert_match(/Builder exited with status 0/, out)
+        assert_match(/allowed-tools: default \+ --append-allowed-tools flag/, stderr_out)
+        assert_equal "#{Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS},mcp__foo",
+          recorded_allowed_tools(argv_file)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC6: with neither flag given, the argv's tool list is byte-for-byte unchanged
+  # and dispatch's stderr stays empty (no new noise for the common case).
+  def test_dispatch_cli_without_allowed_tools_flags_argv_and_stderr_unchanged
+    setup = temp_env
+    env, argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out = nil
+        stderr_out = capture_global_stderr { out, = invoke("dispatch", "demo", "A") }
+
+        assert_match(/Builder exited with status 0/, out)
+        refute_match(/allowed-tools:/, stderr_out)
+        assert_equal Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS, recorded_allowed_tools(argv_file)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC3/AC5: allowed_tools: in the frozen lane declaration replaces the default with
+  # no flag passed — and the --allowed-tools flag wins when both are given.
+  def test_dispatch_cli_lane_allowed_tools_key_and_flag_precedence
+    setup = temp_env
+    env, argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        iter_file = File.join(space_path, "architecture", "I01-demo.md")
+        text = File.read(iter_file)
+        text = text.sub(
+          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
+          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
+          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
+          "# - name: lane-a            # lane name (required)\n" \
+          "#   repo: my-repo           # target repo under repos/ (required)\n" \
+          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
+          "#     - lib/my_repo/foo.rb\n" \
+          "#     - lib/my_repo/bar.rb\n" \
+          "#     - test/my_repo_test.rb\n```",
+          "```lanes\n- name: A\n  repo: my-repo\n  touch:\n    - lib/**\n  allowed_tools: Read,Edit\n```"
+        )
+        File.write(iter_file, text)
+        freeze_for_test("demo")
+        invoke("provision", "demo")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        # No flag: the lane's yaml key wins.
+        invoke("dispatch", "demo", "A")
+        assert_equal "Read,Edit", recorded_allowed_tools(argv_file)
+
+        # Flag given: it wins over the lane's yaml key.
+        out = nil
+        stderr_out = capture_global_stderr { out, = invoke("dispatch", "demo", "A", "--allowed-tools", "Bash") }
+        assert_match(/Builder exited with status 0/, out)
+        assert_match(/allowed-tools: --allowed-tools flag → Bash/, stderr_out)
+        assert_equal "Bash", recorded_allowed_tools(argv_file)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC8: `architect status`'s lane line shows the resolved grant when it diverges
+  # from the harness default, next to the other resolved values.
+  def test_status_shows_resolved_allowed_tools_when_non_default
+    setup = temp_env
+    env, _argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        invoke("dispatch", "demo", "A", "--allowed-tools", "Bash")
+
+        out, err = invoke("status")
+        assert_empty err
+        assert_includes out, "·tools:Bash"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC6 control: status's lane line carries no tools: suffix for the default grant.
+  def test_status_hides_tools_suffix_for_default_grant
+    setup = temp_env
+    env, _argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        invoke("dispatch", "demo", "A")
+
+        out, err = invoke("status")
+        assert_empty err
+        refute_includes out, "·tools:"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_dispatch_help_lists_allowed_tools_flags
+    out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    assert_includes out, "--allowed-tools"
+    assert_includes out, "--append-allowed-tools"
+  end
+
   def test_dispatch_help_lists_pi_harness
     out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
                    err: [:child, :out]) { |f| f.read }
@@ -2442,6 +2688,122 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # #90/AC5, AC7: a cross-repo iteration whose gates each declare an explicit
+  # cwd rehearses in one pass at the CLI layer too — readable output naming
+  # each gate's own dir, no refusal on "more than one repo declared".
+  def test_rehearse_cross_repo_runs_in_one_pass
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "repo-a")
+      create_real_repo(space_path, "repo-b")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        text  = text.sub(
+          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
+          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
+          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
+          "# - name: lane-a            # lane name (required)\n" \
+          "#   repo: my-repo           # target repo under repos/ (required)\n" \
+          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
+          "#     - lib/my_repo/foo.rb\n" \
+          "#     - lib/my_repo/bar.rb\n" \
+          "#     - test/my_repo_test.rb\n```",
+          "```lanes\n- name: lane-a\n  repo: repo-a\n  touch:\n    - lib/**\n" \
+          "- name: lane-b\n  repo: repo-b\n  touch:\n    - lib/**\n```"
+        )
+        gate_yaml = <<~YAML
+          - id: g-a
+            ac: AC1
+            cwd: repos/repo-a
+            cmd: cat README.md
+            expect:
+              exit_code: 0
+          - id: g-b
+            ac: AC1
+            cwd: repos/repo-b
+            cmd: cat README.md
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+
+        out, err = invoke("rehearse", "demo")
+
+        assert_empty err
+        refute_match(/Cannot (resolve|default)/, out, "must not refuse for having two repos declared")
+        assert_match(%r{dir:.*repos/repo-a}, out)
+        assert_match(%r{dir:.*repos/repo-b}, out)
+        assert_equal 2, out.scan(/\[GREEN\]/).length
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # #90/AC6: at the CLI layer, the residual ambiguity (a gate with no cwd, more
+  # than one repo declared) refuses with a clean, non-zero-exit error naming the
+  # gate — not a stack trace, and not a blanket "multiple repos" refusal.
+  def test_rehearse_cli_refuses_naming_gate_missing_cwd
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "repo-a")
+      create_real_repo(space_path, "repo-b")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        text  = text.sub(
+          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
+          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
+          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
+          "# - name: lane-a            # lane name (required)\n" \
+          "#   repo: my-repo           # target repo under repos/ (required)\n" \
+          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
+          "#     - lib/my_repo/foo.rb\n" \
+          "#     - lib/my_repo/bar.rb\n" \
+          "#     - test/my_repo_test.rb\n```",
+          "```lanes\n- name: lane-a\n  repo: repo-a\n  touch:\n    - lib/**\n" \
+          "- name: lane-b\n  repo: repo-b\n  touch:\n    - lib/**\n```"
+        )
+        gate_yaml = <<~YAML
+          - id: no-cwd-gate
+            ac: AC1
+            cmd: echo ok
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+
+        _out, err = invoke("rehearse", "demo")
+
+        assert_match(/no-cwd-gate/, err)
+        assert_match(/cwd/, err)
+        refute_match(/trace/, err)
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   def test_rehearse_help_lists_record_flag
     out = IO.popen(["bundle", "exec", "architect", "rehearse", "--help"], err: [:child, :out], &:read)
     assert_includes out, "--record"
@@ -2624,6 +2986,225 @@ class ArchitectCLITest < Space::ArchitectTest
 
         out2, = invoke("provision", "slice-1")
         assert_match(/already present/, out2)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # #88/AC1, AC4: `worktree remove` names the surviving lane branch (not a
+  # reset), and a subsequent `provision --base <ref>` re-points that
+  # undispatched branch, reported as "(re-pointed)" — distinct from "(created)".
+  def test_worktree_remove_reports_branch_then_provision_base_repoints
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      repo_dir = create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "slice-1")
+        slice_file = File.join(space_path, "architecture", "I01-slice-1.md")
+        File.write(slice_file, <<~MD)
+          # I01: slice-1
+
+          ## Specification
+
+          ```lanes
+          - name: lane-a
+            repo: my-repo
+            touch:
+              - lib/**
+          ```
+
+          ## Acceptance Criteria
+
+          ## Builder Prompt
+        MD
+
+        freeze_for_test("slice-1")
+        invoke("provision", "slice-1")
+
+        out, err = invoke("worktree", "remove", "slice-1", "lane-a")
+        assert_empty err
+        assert_match(/Removed worktree/, out)
+        assert_match(/lane\/I01-slice-1-lane-a.*survives/, out)
+
+        system("git", "-C", repo_dir, "commit", "-q", "--allow-empty", "-m", "integrate")
+        new_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+        new_tip = new_tip.strip
+
+        out2, err2 = invoke("provision", "slice-1", "--base", new_tip)
+        assert_empty err2
+        assert_match(%r{lane-a:.*\(re-pointed\)}, out2)
+
+        head, = Open3.capture3("git", "-C", File.join(space_path, "build", "I01-slice-1-lane-a", "wt"), "rev-parse", "HEAD")
+        assert_equal new_tip, head.strip
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # ── I02: destructive guards ─────────────────────────────────────────────
+
+  # `worktree remove` (CLI) refuses a dirty worktree — non-zero
+  # exit, worktree untouched — and `--force` overrides, reporting what was
+  # discarded ALONGSIDE (not instead of) the surviving-branch line.
+  def test_worktree_remove_cli_refuses_uncommitted_work_then_force_removes
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        freeze_for_test("s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+
+        wt = File.join(space_path, "build", "I01-s1-lane-a", "wt")
+        File.write(File.join(wt, "work.txt"), "IRREPLACEABLE NEW FILE\n")
+
+        out, err = invoke("worktree", "remove", "s1", "lane-a")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/lane-a/, err)
+        assert_match(/--force/, err)
+        assert_empty out
+        assert_path_exists wt
+
+        out2, err2 = invoke("worktree", "remove", "s1", "lane-a", "--force")
+        assert_empty err2
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/Discarded 1 uncommitted change/, out2)
+        assert_match(/survives/, out2)
+        refute_path_exists wt
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # `worktree remove` accepts an optional trailing SPACE argument and
+  # acts on the named space, like provision/integrate/freeze/gate already do —
+  # invoked from OUTSIDE the target space, mirroring the frozen repro's
+  # scenario 5.
+  def test_worktree_remove_cli_accepts_space_argument
+    setup = temp_env
+    env = setup.fetch(:env)
+    space_path = nil
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        freeze_for_test("s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+      end
+
+      wt = File.join(space_path, "build", "I01-s1-lane-a", "wt")
+      assert_path_exists wt
+
+      out, err = invoke("worktree", "remove", "s1", "lane-a", space_path.to_s)
+      assert_empty err
+      assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+      assert_match(/Removed worktree/, out)
+      refute_path_exists wt, "must act on the named space, not the cwd"
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Audit: `worktree add` and `worktree list` had the same missing
+  # SPACE omission as `worktree remove` — fixed identically and additively.
+  def test_worktree_add_cli_accepts_space_argument
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+      end
+
+      out, err = invoke("worktree", "add", "my-repo", "s1", "lane-a", space_path.to_s)
+      assert_empty err
+      assert_match(/Worktree:/, out)
+      assert_path_exists File.join(space_path, "build", "I01-s1-lane-a", "wt")
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_worktree_list_cli_accepts_space_argument
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+      end
+
+      out, err = invoke("worktree", "list", space_path.to_s)
+      assert_empty err
+      assert_match(/I01-s1-lane-a/, out)
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # `integrate <it> --teardown` (CLI) refuses on a dirty lane — non-
+  # zero exit — and `--force` overrides.
+  def test_integrate_cli_teardown_refuses_uncommitted_lane_then_force
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        freeze_for_test("s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+
+        wt = File.join(space_path, "build", "I01-s1-lane-a", "wt")
+        File.write(File.join(wt, "work.txt"), "IRREPLACEABLE NEW FILE\n")
+
+        out, err = invoke("integrate", "s1", "--teardown")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/lane-a/, err)
+        assert_match(/--force/, err)
+        assert_empty out
+        assert_path_exists wt
+
+        out2, err2 = invoke("integrate", "s1", "--teardown", "--force")
+        assert_empty err2
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/Tore down lane-a.*discarded 1 uncommitted change/, out2)
+        refute_path_exists wt
       end
     end
   ensure

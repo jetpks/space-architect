@@ -1853,8 +1853,9 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # AC4: also ambiguous the other way — the drafted lanes block itself names
-  # more than one repo; rehearsal runs once, against one repo checkout.
+  # #90/AC6: also ambiguous the other way — the drafted lanes block itself names
+  # more than one repo, and the sole gate declares no `cwd` of its own to default
+  # around — the refusal names that gate specifically.
   def test_rehearse_raises_when_drafted_lanes_name_multiple_repos
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
@@ -1869,7 +1870,87 @@ class ArchitectProjectTest < Space::ArchitectTest
     write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
 
     err = assert_raises(Space::Core::Error) { project.rehearse("my-slice") }
-    assert_match(/Cannot resolve a single repo/, err.message)
+    assert_match(/Cannot default a repo/, err.message)
+    assert_match(/g1/, err.message)
+    assert_match(/cwd/, err.message)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #90/AC5: a cross-repo iteration whose gates each declare an explicit `cwd`
+  # rehearses in one pass — no refusal on "more than one repo declared", and
+  # each gate runs in its own declared directory.
+  def test_rehearse_cross_repo_runs_in_one_pass_when_every_gate_declares_cwd
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "repo-a")
+    create_real_repo(dir, "repo-b")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: repo-a\n  touch:\n    - lib/**\n- name: lane-b\n  repo: repo-b\n  touch:\n    - lib/**\n"
+    gates_yaml = <<~YAML
+      - id: g-a
+        ac: AC1
+        cwd: repos/repo-a
+        cmd: cat README.md
+        expect:
+          exit_code: 0
+      - id: g-b
+        ac: AC1
+        cwd: repos/repo-b
+        cmd: cat README.md
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+    assert_nil result[:repo], "no single repo to default — every gate declared its own cwd"
+    assert_equal 2, result[:gates].length
+    assert_equal [:pass, :pass], result[:gates].map { |g| g[:status] }
+    assert_equal File.join(dir, "repos", "repo-a"), result[:gates][0][:dir].to_s
+    assert_equal File.join(dir, "repos", "repo-b"), result[:gates][1][:dir].to_s
+
+    # AC5: sufficient for freeze without --skip-rehearse.
+    sha = project.freeze!("my-slice")
+    assert_match(/\A[0-9a-f]{40}\z/, sha)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #90/AC6: when a repo can't be defaulted, only the gate(s) actually lacking a
+  # `cwd` are named as ambiguous — a gate that already declares its own `cwd`
+  # is never refused just because other repos are in play.
+  def test_rehearse_names_only_the_gate_missing_cwd_when_repo_ambiguous
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "repo-a")
+    create_real_repo(dir, "repo-b")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: repo-a\n  touch:\n    - lib/**\n- name: lane-b\n  repo: repo-b\n  touch:\n    - lib/**\n"
+    gates_yaml = <<~YAML
+      - id: has-cwd
+        ac: AC1
+        cwd: repos/repo-a
+        cmd: echo ok
+        expect:
+          exit_code: 0
+      - id: no-cwd
+        ac: AC1
+        cmd: echo ok
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    err = assert_raises(Space::Core::Error) { project.rehearse("my-slice") }
+    assert_match(/no-cwd/, err.message)
+    refute_match(/has-cwd/, err.message)
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -3082,7 +3163,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.merge_lane!("my-slice", "lane-a")
 
     results = project.integrate!("my-slice", teardown: true)
-    assert_equal [{ lane: "lane-a", repo: "my-repo", lane_branch: "lane/I01-my-slice-lane-a" }], results
+    assert_equal [{ lane: "lane-a", repo: "my-repo", lane_branch: "lane/I01-my-slice-lane-a", discarded: nil }], results
 
     refute_path_exists wt, "expected lane worktree to be removed"
     branch_ref = File.join(dir, "repos", "my-repo", ".git", "refs", "heads", "lane", "I01-my-slice-lane-a")
@@ -3365,7 +3446,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     created = project.provision("my-slice")
     assert_equal ["lane-a"], created.map { |r| r[:lane] }
-    assert created[0][:created], "first provision creates the worktree"
+    assert_equal :created, created[0][:outcome], "first provision creates the worktree"
     assert_path_exists created[0][:worktree].to_s
     branch_ref = File.join(dir, "repos", "my-repo", ".git", "refs", "heads", "lane", "I01-my-slice-lane-a")
     assert_path_exists branch_ref
@@ -3375,7 +3456,384 @@ class ArchitectProjectTest < Space::ArchitectTest
     assert_match(/\A[0-9a-f]{40}\z/, lane["base_sha"])
 
     again = project.provision("my-slice")
-    refute again[0][:created], "second provision skips the already-materialized lane"
+    assert_equal :unchanged, again[0][:outcome], "second provision (bare re-run) is a no-op, not a re-point"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #88/AC1: a lane branch that survived a worktree removal, with no commits of
+  # its own beyond the base it was recorded from, is re-pointed at an explicit
+  # --base — the fast-follow case (a lane provisioned early, never dispatched,
+  # forking from an integrated tip after the fact).
+  def test_provision_base_fast_follow_repoints_undispatched_branch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    freeze_for_test!(project, dir, "my-slice")
+
+    project.provision("my-slice")
+    original_base = space.data.dig("project", "iterations", 0, "lanes", 0)["base_sha"]
+
+    # Simulate integration happening elsewhere: the repo's tip moves past the
+    # lane's original base while the (never-dispatched) lane branch does not.
+    File.write(File.join(repo_dir, "integrated.txt"), "integrated\n")
+    system("git", "-C", repo_dir, "add", "integrated.txt", out: File::NULL, err: File::NULL)
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "integrate")
+    new_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    new_tip = new_tip.strip
+    refute_equal original_base, new_tip
+
+    project.worktree_remove("my-slice", "lane-a")
+
+    results = project.provision("my-slice", base: new_tip)
+    assert_equal :repointed, results[0][:outcome]
+    assert_equal new_tip, results[0][:base_sha]
+
+    wt_head, = Open3.capture3("git", "-C", results[0][:worktree].to_s, "rev-parse", "HEAD")
+    assert_equal new_tip, wt_head.strip, "the re-pointed worktree's HEAD is the requested base's commit"
+
+    lane_after = space.data.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal new_tip, lane_after["base_sha"], "recorded base_sha matches the base the tree is actually on"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #88/AC2-AC3: an explicit --base that already matches where the (materialized)
+  # worktree sits is a true no-op — not a refusal, not a re-point, and no git
+  # mutation — even though the ask was explicit.
+  def test_provision_explicit_base_matching_current_tip_is_unchanged
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    freeze_for_test!(project, dir, "my-slice")
+
+    project.provision("my-slice")
+    base_sha = space.data.dig("project", "iterations", 0, "lanes", 0)["base_sha"]
+
+    result = project.provision("my-slice", base: base_sha)
+    assert_equal :unchanged, result[0][:outcome]
+    assert_equal base_sha, result[0][:base_sha]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #88/AC2-AC3: a lane branch carrying commits of its own refuses a disagreeing
+  # --base, naming the branch/tip/requested base and doing nothing — no worktree,
+  # no branch move, no space.yaml write. --force overrides and discards them.
+  def test_provision_base_refuses_dirty_branch_then_force_repoints
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    freeze_for_test!(project, dir, "my-slice")
+
+    project.provision("my-slice")
+    original_base = space.data.dig("project", "iterations", 0, "lanes", 0)["base_sha"]
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "work.txt"), "builder work\n")
+    system("git", "-C", wt, "add", "work.txt", out: File::NULL, err: File::NULL)
+    system("git", "-C", wt, "commit", "-q", "-m", "builder work")
+    branch_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "lane/I01-my-slice-lane-a")
+    branch_tip = branch_tip.strip
+    refute_equal original_base, branch_tip
+
+    project.worktree_remove("my-slice", "lane-a")
+
+    File.write(File.join(repo_dir, "integrated.txt"), "integrated\n")
+    system("git", "-C", repo_dir, "add", "integrated.txt", out: File::NULL, err: File::NULL)
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "integrate")
+    new_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    new_tip = new_tip.strip
+
+    err = assert_raises(Space::Core::Error) { project.provision("my-slice", base: new_tip) }
+    assert_match(/lane\/I01-my-slice-lane-a/, err.message, "names the branch")
+    assert_match(/#{branch_tip[0, 8]}/, err.message, "names the commit it sits at")
+    assert_match(/#{new_tip[0, 8]}/, err.message, "names the base that was asked for")
+    assert_match(/--force/, err.message, "says what to do about it")
+
+    refute_path_exists wt, "refusal creates no worktree"
+    unchanged_lane = space.data.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal original_base, unchanged_lane["base_sha"], "refusal writes no space.yaml base_sha change"
+    still_at_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "lane/I01-my-slice-lane-a")
+    assert_equal branch_tip, still_at_tip.strip, "refusal does not move the branch"
+
+    forced = project.provision("my-slice", base: new_tip, force: true)
+    assert_equal :repointed, forced[0][:outcome]
+    assert_equal new_tip, forced[0][:base_sha]
+    forced_head, = Open3.capture3("git", "-C", forced[0][:worktree].to_s, "rev-parse", "HEAD")
+    assert_equal new_tip, forced_head.strip, "--force discards the branch's own commits and re-points"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # #88/AC4: worktree_remove names the lane branch that survives it (and never
+  # deletes it) — remove-then-provision is not a reset.
+  def test_worktree_remove_reports_surviving_branch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    result = project.worktree_remove("my-slice", "lane-a")
+    assert_equal "lane/I01-my-slice-lane-a", result[:branch]
+    assert result[:branch_survives]
+
+    repo_path = File.join(dir, "repos", "my-repo")
+    assert project.send(:branch_exists?, Pathname.new(repo_path), "lane/I01-my-slice-lane-a"),
+      "worktree_remove must not delete the surviving branch"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── I02: destructive guards ────────────────────────────────────────────────
+
+  # worktree_remove refuses to discard a dirty lane worktree —
+  # untracked files included — naming the lane and the discard count, doing
+  # nothing (no worktree removed, no space.yaml write). --force overrides and
+  # reports the discard count.
+  def test_worktree_remove_refuses_uncommitted_work_then_force_removes
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "README.md"), "# my-repo\n\nEDITED\n")
+    File.write(File.join(wt, "work.txt"), "IRREPLACEABLE NEW FILE\n")
+
+    err = assert_raises(Space::Core::Error) { project.worktree_remove("my-slice", "lane-a") }
+    assert_match(/lane-a/, err.message, "names the lane")
+    assert_match(/\b2\b/, err.message, "names the dirty file count")
+    assert_match(/--force/, err.message, "says what to do about it")
+
+    assert_path_exists wt, "refusal must not remove the worktree"
+    assert_path_exists File.join(wt, "work.txt"), "refusal must not discard the untracked file"
+    lane_after = space.data.dig("project", "iterations", 0, "lanes", 0)
+    assert_equal "build/I01-my-slice-lane-a/wt", lane_after["worktree"], "refusal must not write space.yaml"
+
+    result = project.worktree_remove("my-slice", "lane-a", force: true)
+    assert_equal 2, result[:discarded]
+    refute_path_exists wt, "--force must remove the worktree"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # integrate!'s teardown-only path refuses on the same dirty-worktree
+  # condition, leaving BOTH the worktree and the lane branch intact — today's
+  # bug deletes the branch too, which removes the last recovery route.
+  # --force overrides.
+  def test_integrate_bang_teardown_refuses_uncommitted_lane_and_preserves_branch
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "work.txt"), "IRREPLACEABLE NEW FILE\n")
+
+    err = assert_raises(Space::Core::Error) { project.integrate!("my-slice", teardown: true) }
+    assert_match(/lane-a/, err.message)
+    assert_match(/--force/, err.message)
+
+    assert_path_exists wt, "refusal must not remove the worktree"
+    branch_ref = File.join(dir, "repos", "my-repo", ".git", "refs", "heads", "lane", "I01-my-slice-lane-a")
+    assert_path_exists branch_ref, "refusal must not delete the lane branch"
+
+    results = project.integrate!("my-slice", teardown: true, force: true)
+    assert_equal [{ lane: "lane-a", repo: "my-repo", lane_branch: "lane/I01-my-slice-lane-a", discarded: 1 }], results
+    refute_path_exists wt
+    refute_path_exists branch_ref
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # Teardown-only's refusal is decided before ANY lane is torn down —
+  # a dirty lane discovered anywhere in the recorded set blocks the whole
+  # call, including a lane that (on its own) would have torn down cleanly.
+  def test_integrate_bang_teardown_refusal_is_atomic_across_lanes
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    freeze_for_test!(project, dir, "my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+    project.worktree_add("my-repo", "my-slice", "lane-b")
+
+    wt_a = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    wt_b = File.join(dir, "build", "I01-my-slice-lane-b", "wt")
+    File.write(File.join(wt_b, "work.txt"), "IRREPLACEABLE NEW FILE\n")
+
+    err = assert_raises(Space::Core::Error) { project.integrate!("my-slice", teardown: true) }
+    assert_match(/lane-b/, err.message)
+
+    assert_path_exists wt_a, "the clean lane must not be torn down while another lane refuses"
+    assert_path_exists wt_b
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # The re-point path reached by `provision --base` refuses when the
+  # lane's worktree holds uncommitted work — not just commits of its own
+  # (already caught by #carries_own_commits?) — because hard rule 7 forbids
+  # builder commits, so an in-flight lane's entire output is uncommitted
+  # working-tree state. --force overrides and discards it.
+  def test_provision_base_refuses_uncommitted_worktree_then_force_repoints
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    freeze_for_test!(project, dir, "my-slice")
+
+    project.provision("my-slice")
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "work.txt"), "IRREPLACEABLE NEW FILE\n")
+
+    File.write(File.join(repo_dir, "integrated.txt"), "integrated\n")
+    system("git", "-C", repo_dir, "add", "integrated.txt", out: File::NULL, err: File::NULL)
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "integrate")
+    new_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    new_tip = new_tip.strip
+
+    err = assert_raises(Space::Core::Error) { project.provision("my-slice", base: new_tip) }
+    assert_match(/lane-a/, err.message, "names the lane")
+    assert_match(/--force/, err.message, "says what to do about it")
+    assert_path_exists File.join(wt, "work.txt"), "refusal must not discard the uncommitted file"
+    wt_head, = Open3.capture3("git", "-C", wt, "rev-parse", "HEAD")
+    refute_equal new_tip, wt_head.strip, "refusal must not reset the worktree"
+
+    forced = project.provision("my-slice", base: new_tip, force: true)
+    assert_equal :repointed, forced[0][:outcome]
+    assert_equal 1, forced[0][:discarded]
+    forced_head, = Open3.capture3("git", "-C", wt, "rev-parse", "HEAD")
+    assert_equal new_tip, forced_head.strip, "--force discards the uncommitted work and re-points"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # Provision's re-point refusal is decided before ANY lane's
+  # worktree is touched — a dirty lane late in the declared set must not
+  # leave an earlier, clean lane already re-pointed.
+  def test_provision_base_refusal_is_atomic_across_lanes
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+      - name: lane-b
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    freeze_for_test!(project, dir, "my-slice")
+
+    project.provision("my-slice")
+    wt_a = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    wt_b = File.join(dir, "build", "I01-my-slice-lane-b", "wt")
+    File.write(File.join(wt_b, "work.txt"), "IRREPLACEABLE NEW FILE\n")
+
+    File.write(File.join(repo_dir, "integrated.txt"), "integrated\n")
+    system("git", "-C", repo_dir, "add", "integrated.txt", out: File::NULL, err: File::NULL)
+    system("git", "-C", repo_dir, "commit", "-q", "-m", "integrate")
+    new_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    new_tip = new_tip.strip
+
+    err = assert_raises(Space::Core::Error) { project.provision("my-slice", base: new_tip) }
+    assert_match(/lane-b/, err.message)
+
+    a_head, = Open3.capture3("git", "-C", wt_a, "rev-parse", "HEAD")
+    refute_equal new_tip, a_head.strip, "the clean lane must not be re-pointed while another lane refuses"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # Control: `provision --force` with no explicit --base never reaches
+  # the re-point path at all (base_explicit: false short-circuits to "attach
+  # whatever's there") — a registered, dirty worktree is left alone, matching
+  # the repro harness's control scenario.
+  def test_provision_force_leaves_registered_dirty_worktree_alone
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    write_iteration_with_lanes(dir, "my-slice", <<~YAML)
+      - name: lane-a
+        repo: my-repo
+        touch:
+          - lib/**
+    YAML
+    freeze_for_test!(project, dir, "my-slice")
+
+    project.provision("my-slice")
+    wt = File.join(dir, "build", "I01-my-slice-lane-a", "wt")
+    File.write(File.join(wt, "work.txt"), "IRREPLACEABLE NEW FILE\n")
+
+    results = project.provision("my-slice", force: true)
+    assert_equal :unchanged, results[0][:outcome]
+    assert_path_exists File.join(wt, "work.txt")
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -3431,6 +3889,34 @@ class ArchitectProjectTest < Space::ArchitectTest
     File.write(bin, FAKE_CLAUDE_OK)
     File.chmod(0o755, bin)
     bin
+  end
+
+  # Fake binary that records argv to ARGV_RECORD_FILE (null-delimited) — mirrors
+  # HarnessTest's FAKE_ARGV_RECORDER, duplicated here since test/harness_test.rb
+  # is outside this lane's declared touch set for constants.
+  FAKE_ARGV_RECORDER = <<~RUBY
+    #!/usr/bin/env ruby
+    File.write(ENV.fetch("ARGV_RECORD_FILE"), ARGV.join("\x00"))
+    exit 0
+  RUBY
+
+  def write_argv_recorder(dir)
+    bin = File.join(dir, "argv_recorder")
+    File.write(bin, FAKE_ARGV_RECORDER)
+    File.chmod(0o755, bin)
+    bin
+  end
+
+  # Dispatch with claude_bin: the argv recorder and return the recorded --allowedTools
+  # value (or nil if absent).
+  def dispatched_allowed_tools(dir, project, lane, argv_file, **dispatch_kwargs)
+    ENV["ARGV_RECORD_FILE"] = argv_file
+    project.dispatch("demo", lane, claude_bin: write_argv_recorder(dir), **dispatch_kwargs)
+    recorded = File.read(argv_file).split("\x00")
+    idx = recorded.index("--allowedTools")
+    idx ? recorded[idx + 1] : nil
+  ensure
+    ENV.delete("ARGV_RECORD_FILE")
   end
 
   def lane_on_disk(dir, name)
@@ -3591,6 +4077,304 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # ── #89: the allowed-tools grant — settable and reviewable ───────────────
+
+  # AC3/AC4: freeze parses allowed_tools:/append_allowed_tools: from the ```lanes```
+  # block into the lane's recorded entry, same as it already does for touch_set.
+  def test_freeze_populates_allowed_tools_from_lanes_block
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: A
+        repo: my-repo
+        touch:
+          - lib/**
+        allowed_tools: Read,Edit
+        append_allowed_tools: mcp__foo
+    YAML
+    freeze_for_test!(project, dir, "demo")
+
+    lane = lane_on_disk(dir, "A")
+    assert_equal "Read,Edit", lane["allowed_tools"]
+    assert_equal "mcp__foo",  lane["append_allowed_tools"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: allowed_tools: in the frozen lane declaration replaces the default in the
+  # argv, with no flag passed.
+  def test_dispatch_lane_allowed_tools_replaces_default_in_argv
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: A
+        repo: my-repo
+        touch:
+          - lib/**
+        allowed_tools: Read,Edit
+    YAML
+    freeze_for_test!(project, dir, "demo")
+    project.provision("demo")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"))
+    assert_equal "Read,Edit", tools
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: append_allowed_tools: in the frozen lane declaration appends to the default,
+  # with no flag passed.
+  def test_dispatch_lane_append_allowed_tools_appends_default_in_argv
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: A
+        repo: my-repo
+        touch:
+          - lib/**
+        append_allowed_tools: mcp__foo
+    YAML
+    freeze_for_test!(project, dir, "demo")
+    project.provision("demo")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"))
+    assert_equal "#{Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS},mcp__foo", tools
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5: --allowed-tools flag wins over the lane's frozen allowed_tools: declaration.
+  def test_dispatch_flag_wins_over_lane_allowed_tools
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: A
+        repo: my-repo
+        touch:
+          - lib/**
+        allowed_tools: Read,Edit
+    YAML
+    freeze_for_test!(project, dir, "demo")
+    project.provision("demo")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"),
+                                     allowed_tools: "Bash")
+    assert_equal "Bash", tools, "the --allowed-tools flag must win over the lane's yaml key"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # Objective A: replace and append resolve independently of surface — a flag-supplied
+  # replace combines with a yaml-declared append.
+  def test_dispatch_flag_replace_combines_with_lane_append
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: A
+        repo: my-repo
+        touch:
+          - lib/**
+        append_allowed_tools: mcp__foo
+    YAML
+    freeze_for_test!(project, dir, "demo")
+    project.provision("demo")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"),
+                                     allowed_tools: "Bash")
+    assert_equal "Bash,mcp__foo", tools,
+      "a flag-supplied replace and a yaml-declared append must combine — append applies to whatever replace produced"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC7: a grant recorded on a lane (via the frozen allowed_tools: key) survives an
+  # actual re-materialization of the lane's worktree, not just inspection of the
+  # recorded fields.
+  def test_dispatch_allowed_tools_survives_rematerialize
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: A
+        repo: my-repo
+        touch:
+          - lib/**
+        allowed_tools: Read,Edit
+        append_allowed_tools: mcp__foo
+    YAML
+    freeze_for_test!(project, dir, "demo")
+    project.provision("demo")
+
+    project.worktree_remove("demo", "A")
+    refute Dir.exist?(File.join(dir, "build", "I01-demo-A", "wt")), "worktree must actually be gone"
+    project.send(:ensure_lane_materialized, "demo", "A")
+
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"))
+    assert_equal "Read,Edit,mcp__foo", tools,
+      "the frozen grant must survive worktree re-materialization"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC8: the resolved grant is recorded onto the lane the way harness/model/effort
+  # already are.
+  def test_dispatch_stamps_resolved_allowed_tools_onto_lane
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"),
+                             allowed_tools: "Bash", append_allowed_tools: "mcp__foo")
+
+    lane = lane_on_disk(dir, "A")
+    assert_equal "Bash",     lane["allowed_tools"]
+    assert_equal "mcp__foo", lane["append_allowed_tools"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC9 control: DISALLOWED_TOOLS is unaffected by an allowed-tools grant — the
+  # no-builder-commits guard still reaches the argv regardless.
+  def test_dispatch_allowed_tools_grant_does_not_disturb_disallowed_tools
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    ENV["ARGV_RECORD_FILE"] = File.join(dir, "recorded_argv")
+    project.dispatch("demo", "A", claude_bin: write_argv_recorder(dir), allowed_tools: "Bash")
+    recorded = File.read(File.join(dir, "recorded_argv")).split("\x00")
+
+    idx = recorded.index("--disallowedTools")
+    refute_nil idx, "argv must still carry --disallowedTools: #{recorded.inspect}"
+    assert_equal Space::Architect::Harness::ClaudeCodeHarness::DISALLOWED_TOOLS, recorded[idx + 1]
+  ensure
+    ENV.delete("ARGV_RECORD_FILE")
+    FileUtils.rm_rf(dir)
+  end
+
+  # dispatch_as_job composes the same resolved grant into the job spec's harness.args
+  # — the sandboxed executor still runs `claude -p` server-side.
+  class FakeJobsClientForToolsTest
+    attr_reader :spec
+
+    def create(spec)
+      @spec = spec
+      42
+    end
+  end
+
+  def test_dispatch_as_job_composes_resolved_allowed_tools_into_harness_args
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    fake = FakeJobsClientForToolsTest.new
+    project.dispatch_as_job("demo", "A", host: "http://example.com", token: "tok",
+      backend_url: "https://backend.example.com", job_model: "some/sandbox-model",
+      allowed_tools: "Bash", jobs_client: fake)
+
+    args = fake.spec.dig("harness", "args")
+    idx = args.index("--allowedTools")
+    refute_nil idx, "job harness.args must carry --allowedTools: #{args.inspect}"
+    assert_equal "Bash", args[idx + 1]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5 (dispatch's report): dispatch prints which surface's grant won, to $stderr.
+  def test_dispatch_reports_allowed_tools_provenance
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    original_stderr = $stderr
+    captured = StringIO.new
+    $stderr = captured
+    begin
+      project.dispatch("demo", "A", claude_bin: write_fake_claude(dir), allowed_tools: "Bash")
+    ensure
+      $stderr = original_stderr
+    end
+
+    assert_match(/allowed-tools: --allowed-tools flag → Bash/, captured.string)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5/AC6 control: a bare dispatch (no flag, no lane grant) prints nothing about
+  # allowed-tools — the common case stays as quiet as it is today.
+  def test_dispatch_without_grant_prints_no_allowed_tools_line
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    original_stderr = $stderr
+    captured = StringIO.new
+    $stderr = captured
+    begin
+      project.dispatch("demo", "A", claude_bin: write_fake_claude(dir))
+    ensure
+      $stderr = original_stderr
+    end
+
+    refute_match(/allowed-tools:/, captured.string)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # AC5: re-materialize over a surviving lane branch checks it out (no -b), carrying
   # the branch's own tip rather than failing "branch already exists".
   def test_rematerialize_reattaches_surviving_branch_with_its_tip
@@ -3644,7 +4428,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.worktree_add("my-repo", "my-slice", "lane-a")
     results = project.provision("my-slice")
     assert_equal ["lane-a"], results.map { |r| r[:lane] }
-    refute results[0][:created], "provision reads the pre-existing worktree_add entry, already materialized"
+    assert_equal :unchanged, results[0][:outcome], "provision reads the pre-existing worktree_add entry, already materialized"
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -4351,7 +5135,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     results = project.provision("my-slice", force: true)
     assert_equal 1, results.length
-    assert results[0][:created], "force provision must create the worktree (created: true)"
+    assert_equal :created, results[0][:outcome], "force provision must create the worktree"
     assert_path_exists results[0][:worktree].to_s
   ensure
     FileUtils.rm_rf(dir)

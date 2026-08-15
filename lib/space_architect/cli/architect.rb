@@ -181,7 +181,15 @@ module Space::Architect
                     h = l["harness"] || "claude-code"
                     m = l["model"]   || Harness.default_model_for(h)
                     eff = l["effort"] ? "·#{l['effort']}" : ""
-                    "#{l['name']}(#{l['repo']}·#{h}·#{m}#{eff})"
+                    # #89/AC8: the resolved tool grant, visible next to the other resolved
+                    # values — only when it diverges from the harness default, to keep the
+                    # common case (no lane touches it) uncluttered. Meaningless outside
+                    # claude-code (no equivalent grant mechanism), so shown only there.
+                    tools = if h == "claude-code"
+                      resolved = Harness::ClaudeCodeHarness.resolve_tools(replace: l["allowed_tools"], append: l["append_allowed_tools"])
+                      resolved == Harness::ClaudeCodeHarness::ALLOWED_TOOLS ? "" : "·tools:#{resolved}"
+                    end
+                    "#{l['name']}(#{l['repo']}·#{h}·#{m}#{eff}#{tools})"
                   end.join(", ")
                   lanes = lane_list.any? { |l| l["variant"] } ? "variant: #{lanes_str}" : lanes_str
                   lanes = "#{lanes} → winner: #{s['winner']}" if s["winner"]
@@ -259,12 +267,23 @@ module Space::Architect
             reason = result[:placeholder] ? "the scaffold placeholder '#{ArchitectProject::AC1_PLACEHOLDER}' with no active gate" : "no gates drafted yet"
             terminal.say "EMPTY — #{reason}. Nothing to rehearse; the pre-freeze look is still stamped."
           else
-            terminal.say "Rehearsing #{result[:iteration]} against #{terminal.path(result[:base_dir])} (repo: #{result[:repo]})"
+            terminal.say rehearsal_header(result)
             result[:gates].each { |g| render_gate(g) }
             render_scope_asymmetry(result[:scope_asymmetry])
           end
           terminal.say ""
           terminal.say "Discrimination report only — this runs and reports; it never judges whether these gates are good, bad, or ready."
+        end
+
+        # #90/AC7: with a single defaultable repo, name it as before; a cross-repo
+        # run (or one where every gate declares its own `cwd`) has no one repo to
+        # name — each gate's own "dir:" line (below) already says where it ran.
+        def rehearsal_header(result)
+          if result[:repo]
+            "Rehearsing #{result[:iteration]} against #{terminal.path(result[:base_dir])} (repo: #{result[:repo]})"
+          else
+            "Rehearsing #{result[:iteration]} — #{result[:gates].size} gate(s), each in its own declared cwd"
+          end
         end
 
         def render_gate(g)
@@ -291,7 +310,7 @@ module Space::Architect
           terminal.say ""
           terminal.say "Scope-asymmetry check (grep-family gates only):"
           report[:findings].each do |f|
-            terminal.say "── #{f[:id]}: pattern #{f[:pattern].inspect} searched #{f[:paths].join(', ')}"
+            terminal.say "── #{f[:id]} (#{f[:repo]}): pattern #{f[:pattern].inspect} searched #{f[:paths].join(', ')}"
             if f[:outside_lanes].any?
               terminal.say "   OUTSIDE ANY LANE'S TOUCH SET — no lane may legally fix these:"
               f[:outside_lanes].each { |file| terminal.say "     #{file}" }
@@ -311,9 +330,10 @@ module Space::Architect
 
           by  = result[:gates].group_by { |g| g[:rehearsal] }
           ids = ->(sym) { (by[sym] || []).map { |g| g[:id] }.join(", ") }
+          ran_against = result[:repo] ? "against `#{result[:repo]}`" : "each in its own declared `cwd`"
           [
             "> **Dry-run at rehearsal time, recorded for transparency.** All #{result[:gates].size} gate command(s) " \
-              "were executed as written against `#{result[:repo]}` under `/bin/sh` — the shell `architect gate` uses.",
+              "were executed as written #{ran_against} under `/bin/sh` — the shell `architect gate` uses.",
             ">",
             "> - **RED (#{(by[:red] || []).size} — discriminate):** #{ids.call(:red).empty? ? "(none)" : ids.call(:red)}",
             "> - **GREEN (#{(by[:green] || []).size} — regression guard or non-discriminating):** #{ids.call(:green).empty? ? "(none)" : ids.call(:green)}",
@@ -420,6 +440,8 @@ module Space::Architect
         option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's stored model, else space.yaml project.model, else the per-harness sensible default). Any provider/tier; pin a full id, not a floating alias"
         option   :max_turns, default: "200",  desc: "Max turns for the builder"
         option   :harness,   default: nil,    desc: "Harness override (claude-code, opencode, pi)"
+        option   :allowed_tools,        default: nil, desc: "Comma-separated tool list — replaces the claude-code --allowedTools grant for this dispatch (default: Read,Edit,Write,Grep,Glob,Bash,WebSearch,WebFetch). The lane's frozen allowed_tools: does the same with no flag; this flag wins over that key. Meaningless for opencode/pi"
+        option   :append_allowed_tools, default: nil, desc: "Comma-separated tool list — appends to the claude-code --allowedTools grant for this dispatch (to the flag/lane replace value, or the default). The lane's frozen append_allowed_tools: does the same with no flag; this flag wins over that key. Meaningless for opencode/pi"
         option   :effort,    default: nil,    desc: "Thinking/reasoning effort level — alias for --thinking/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
         option   :thinking,  default: nil,    desc: "Thinking/reasoning effort level — alias for --effort/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
         option   :reasoning, default: nil,    desc: "Thinking/reasoning effort level — alias for --effort/--thinking (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
@@ -441,6 +463,7 @@ module Space::Architect
 
         def call(iteration:, lane:, space: nil, prompt: nil, model: nil,
                  max_turns: "200", harness: nil, effort: nil, thinking: nil, reasoning: nil,
+                 allowed_tools: nil, append_allowed_tools: nil,
                  force_effort: nil, force_thinking: nil, force_reasoning: nil, quiet: false, detach: false,
                  timeout: "14400", push_url: nil, push_token: nil, push_host: nil,
                  as_job: false, host: nil, token: nil, backend_url: nil, job_model: nil, api_key_ref: nil, **opts)
@@ -467,6 +490,8 @@ module Space::Architect
                 kwargs[:model]       = model           if model
                 kwargs[:harness]     = harness         if harness
                 kwargs[:effort]      = forced_level || level if forced_level || level
+                kwargs[:allowed_tools]        = allowed_tools        if allowed_tools
+                kwargs[:append_allowed_tools] = append_allowed_tools if append_allowed_tools
                 kwargs[:force]       = true            if forced_level
                 kwargs[:quiet]       = true             if quiet
                 kwargs[:job_model]   = job_model       if job_model
@@ -482,6 +507,8 @@ module Space::Architect
                 kwargs[:model]      = model           if model
                 kwargs[:harness]    = harness         if harness
                 kwargs[:effort]     = forced_level || level if forced_level || level
+                kwargs[:allowed_tools]        = allowed_tools        if allowed_tools
+                kwargs[:append_allowed_tools] = append_allowed_tools if append_allowed_tools
                 kwargs[:force]      = true            if forced_level
                 kwargs[:quiet]      = true             if quiet
                 kwargs[:timeout]    = timeout.to_i    unless detach
@@ -536,8 +563,14 @@ module Space::Architect
                 terminal.say "No declared lanes to provision for '#{iteration}'"
               else
                 results.each do |r|
-                  state = r[:created] ? "created" : "already present"
-                  terminal.say "#{r[:lane]}: #{terminal.path(r[:worktree])} (#{state})"
+                  state = case r[:outcome]
+                  when :created   then "created"
+                  when :repointed then "re-pointed"
+                  else                 "already present"
+                  end
+                  line = "#{r[:lane]}: #{terminal.path(r[:worktree])} (#{state})"
+                  line += " — discarded #{r[:discarded]} uncommitted change(s), --force was given" if r[:discarded]
+                  terminal.say line
                 end
               end
               CLI.record_outcome(Outcome.new(exit_code: 0))
@@ -668,9 +701,10 @@ module Space::Architect
         option   :commit_mode, default: nil,    desc: "Commit mode override (strict|conductor); overrides space.yaml commit_mode for this run"
         option   :into,        required: false, desc: "Merge into this branch instead of the slug-derived project/<slug> default"
         option   :accept_bounds, default: nil,  desc: "Escape valve: override the in-bounds check for these lanes when the frozen touch-set glob is itself the defect, recording REASON in space.yaml (never overrides the no-builder-commits check)"
+        option   :force, type: :boolean, default: false, desc: "Teardown-only: discard uncommitted work in a lane worktree instead of refusing (never overrides the mechanical merge checks)"
         commit_message_options
 
-        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, commit_mode: nil, into: nil, accept_bounds: nil, **opts)
+        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, commit_mode: nil, into: nil, accept_bounds: nil, force: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
@@ -681,13 +715,15 @@ module Space::Architect
               project = ArchitectProject.new(space: sp)
               results = project.integrate!(iteration, lanes: lane_names, teardown: teardown,
                 message: read_commit_message(message: message, message_from: message_from),
-                commit_mode: commit_mode, into: into, accept_bounds_reason: accept_bounds)
+                commit_mode: commit_mode, into: into, accept_bounds_reason: accept_bounds, force: force)
               if lane_names.empty?
                 if results.empty?
                   terminal.say "Nothing to tear down for #{iteration}"
                 else
                   results.each do |r|
-                    terminal.say "Tore down #{r[:lane]} (removed worktree, deleted #{r[:lane_branch]})"
+                    line = "Tore down #{r[:lane]} (removed worktree, deleted #{r[:lane_branch]})"
+                    line += " — discarded #{r[:discarded]} uncommitted change(s), --force was given" if r[:discarded]
+                    terminal.say line
                   end
                 end
               else
@@ -792,6 +828,7 @@ module Space::Architect
           argument :repo,      required: true, desc: "Repo name (under repos/)"
           argument :iteration, required: true, desc: "Iteration name"
           argument :lane,      required: true, desc: "Lane name"
+          argument :space,     required: false, desc: "Space identifier (default: $PWD)"
           option   :base,      default: nil,          desc: "Base ref (default: HEAD of repo)"
           option   :harness,   default: nil,          desc: "Harness (claude-code, opencode, pi; default: space.yaml project.harness, else claude-code)"
           option   :model,     default: nil,           desc: "Model; a trailing :<level> suffix (e.g. foo:high) is parsed into --effort (default: space.yaml project.model, else the per-harness sensible default)"
@@ -802,12 +839,12 @@ module Space::Architect
           option   :touch,     default: nil,           desc: "Comma-separated file globs the lane may touch (records its touch_set for in-bounds + merge checks)"
           option   :force,     type: :boolean, default: false, desc: "Clear and re-create a stale (unregistered) worktree directory"
 
-          def call(repo:, iteration:, lane:, base: nil, harness: nil, model: nil,
+          def call(repo:, iteration:, lane:, space: nil, base: nil, harness: nil, model: nil,
                    effort: nil, thinking: nil, reasoning: nil, quiet: false, touch: nil, force: false, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               level = resolve_thinking_alias(effort: effort, thinking: thinking, reasoning: reasoning)
-              render(store.find) do |sp|
+              render(store.find(space)) do |sp|
                 project = ArchitectProject.new(space: sp)
                 touch_set = touch ? touch.split(",").map(&:strip).reject(&:empty?) : nil
                 err = quiet ? File.open(File::NULL, "w") : $stderr
@@ -815,6 +852,7 @@ module Space::Architect
                                              effort: level, touch: touch_set, force: force, err: err)
                 terminal.say "Worktree: #{terminal.path(result[:worktree])}"
                 terminal.say "Base SHA: #{result[:base_sha]}"
+                terminal.say "Discarded #{result[:discarded]} uncommitted change(s), --force was given" if result[:discarded]
                 CLI.record_outcome(Outcome.new(exit_code: 0))
               end
             end
@@ -825,14 +863,23 @@ module Space::Architect
           desc "Remove a lane worktree"
           argument :iteration, required: true, desc: "Iteration name"
           argument :lane,      required: true, desc: "Lane name"
+          argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+          option   :force,     type: :boolean, default: false, desc: "Discard uncommitted work in the worktree (untracked files included) instead of refusing"
 
-          def call(iteration:, lane:, **opts)
+          def call(iteration:, lane:, space: nil, force: false, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
-              render(store.find) do |sp|
+              render(store.find(space)) do |sp|
                 project = ArchitectProject.new(space: sp)
-                project.worktree_remove(iteration, lane)
+                result = project.worktree_remove(iteration, lane, force: force)
                 terminal.say "Removed worktree for #{iteration}/#{lane}"
+                if result[:discarded]
+                  terminal.say "Discarded #{result[:discarded]} uncommitted change(s), --force was given"
+                end
+                if result[:branch_survives]
+                  terminal.say "Lane branch '#{result[:branch]}' survives — this is not a reset; " \
+                    "re-provisioning re-points or refuses it, it does not start it over."
+                end
                 CLI.record_outcome(Outcome.new(exit_code: 0))
               end
             end
@@ -841,11 +888,12 @@ module Space::Architect
 
         class List < BaseCommand
           desc "List active architect worktrees"
+          argument :space, required: false, desc: "Space identifier (default: $PWD)"
 
-          def call(**opts)
+          def call(space: nil, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
-              render(store.find) do |sp|
+              render(store.find(space)) do |sp|
                 project = ArchitectProject.new(space: sp)
                 worktrees = project.worktree_list
                 if worktrees.empty?

@@ -140,6 +140,8 @@ architect dispatch dry-cli-port lane-a --detach          # returns a PID; poll r
 | `--max-turns=VALUE` | `200` | Max conversation turns. |
 | `--harness=VALUE` | lane entry, else `claude-code` | Harness override (`claude-code`, `opencode`). |
 | `--effort=VALUE` | — | Reasoning effort (opencode only; sets `reasoningEffort` in the model config). |
+| `--allowed-tools=LIST` | lane entry's `allowed_tools:`, else the harness default | Comma-separated tool list that **replaces** the default grant. Wins over the lane's `allowed_tools:` key; a lane's `append_allowed_tools:` still applies on top. |
+| `--append-allowed-tools=LIST` | lane entry's `append_allowed_tools:`, else unset | Comma-separated tool list **appended** to the default/lane grant instead of replacing it. Wins over the lane's `append_allowed_tools:` key; a lane's `allowed_tools:` still supplies the base it appends to. |
 | `--detach` | `false` | Detach the builder process — returns immediately with a PID; poll `report.md` for completion. Cannot combine with `--push-url`/`--push-host`. |
 | `--timeout=SECONDS` | `14400` (4h) | Wall-clock timeout; the wedged builder's process group is killed. `0` disables. Foreground only. |
 | `--push-url=URL` | — | Stream the builder's stream-json to an already-created run's ingest URL (requires `--push-token`). |
@@ -159,9 +161,9 @@ architect worktree remove dry-cli-port lane-a
 
 | Command | Description |
 |---------|-------------|
-| `worktree add REPO ITERATION LANE` | Create a worktree at `build/<id>-<lane>/wt` and record the lane in `space.yaml`. Idempotent — re-adding a lane reuses the existing worktree/branch and merges the new options in place. |
-| `worktree list` | List active architect worktree directories. |
-| `worktree remove ITERATION LANE` | Remove the lane worktree. |
+| `worktree add REPO ITERATION LANE [SPACE]` | Create a worktree at `build/<id>-<lane>/wt` and record the lane in `space.yaml`. Idempotent — re-adding a lane reuses the existing worktree/branch and merges the new options in place. |
+| `worktree list [SPACE]` | List active architect worktree directories. |
+| `worktree remove ITERATION LANE [SPACE]` | Remove the lane worktree. Refuses if the lane worktree holds uncommitted work — untracked files included; `--force` overrides and discards it. |
 
 `worktree add` options:
 
@@ -240,7 +242,7 @@ The lane's working-tree commit takes the shared commit-message options (`-m`/`--
 
 ### `architect integrate ITERATION [SPACE]`
 
-Integrate the architect-supplied set of passing lanes in order, running `merge` for each and stopping on the first conflict. The target is the stable `project/<slug>` branch (slug derived from `space.title`) shared across all iterations — `main` is never touched per-iteration. Calling `integrate` again with a new `--lanes` set appends to the same `project/<slug>` branch (used by the parallel + fast-follow pattern to stack a fast-follow lane onto the integrated tip). Pass `--teardown` to remove lane worktrees and delete per-lane `lane/<id>-<lane>` branches after merging; it never deletes the `project/<slug>` branch.
+Integrate the architect-supplied set of passing lanes in order, running `merge` for each and stopping on the first conflict. The target is the stable `project/<slug>` branch (slug derived from `space.title`) shared across all iterations — `main` is never touched per-iteration. Calling `integrate` again with a new `--lanes` set appends to the same `project/<slug>` branch (used by the parallel + fast-follow pattern to stack a fast-follow lane onto the integrated tip). Pass `--teardown` to remove lane worktrees and delete per-lane `lane/<id>-<lane>` branches after merging; it never deletes the `project/<slug>` branch. Teardown refuses per lane whose worktree still holds uncommitted work — untracked files included; `--force` overrides and discards it. The merge path itself is unaffected, because `integrate` commits each lane's work before tearing it down.
 
 ```sh
 architect integrate my-feature --lanes lane-a,lane-b
@@ -250,7 +252,7 @@ architect integrate my-feature --lanes lane-a,lane-b --teardown
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--lanes=NAMES` | (required) | Comma-separated list of passing lane names (the architect decides the set). |
-| `--teardown` | `false` | Remove worktrees and delete per-lane branches after merge. |
+| `--teardown` | `false` | Remove worktrees and delete per-lane branches after merge. Refuses per lane holding uncommitted work; `--force` overrides. |
 
 Plus the shared commit-message options (`-m`/`--message`, `--message-from`), applied to each lane's working-tree commit.
 
