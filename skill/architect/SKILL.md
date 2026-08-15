@@ -407,7 +407,8 @@ Per the mechanics in `dispatch.md`. The lane lifecycle is **declare → rehearse
 there is no dispatch-in-the-checkout path:
 
 - **Declare** — at spec time, each lane is one entry in the Specification's
-  fenced ` ```lanes ` block (§4): `name`, `repo`, `touch` globs.
+  fenced ` ```lanes ` block (§4): `name`, `repo`, `touch` globs, and optionally
+  `allowed_tools`/`append_allowed_tools`.
 - **Rehearse** — `architect rehearse <iteration>` dry-runs the drafted gates
   from the working tree (§4's pre-freeze check), resolving its run dir from the
   drafted ` ```lanes ` block, and stamps `space.yaml`; `freeze` refuses without

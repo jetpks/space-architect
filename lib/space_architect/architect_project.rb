@@ -1162,7 +1162,7 @@ module Space::Architect
       end
     end
 
-    # #98/AC2, AC4: every lane a teardown-only call would touch is checked for
+    # Every lane a teardown-only call would touch is checked for
     # uncommitted work BEFORE any lane is removed — a dirty lane discovered late
     # in the recorded set can never leave an earlier lane already torn down.
     # Lanes reached via a merge-then-teardown call are always clean here
@@ -2138,7 +2138,7 @@ module Space::Architect
       st.success?
     end
 
-    # #98/AC1-AC3: uncommitted work in a lane worktree — untracked files
+    # Uncommitted work in a lane worktree — untracked files
     # included. Hard rule 7 forbids builder commits, so this is the only
     # signal an in-flight or completed-but-unintegrated lane's output ever
     # leaves behind; "no commits on the branch" is the EXPECTED state, not
@@ -2169,7 +2169,7 @@ module Space::Architect
       dirty_file_count(repo_path, wt_path)
     end
 
-    # #98/AC4: multi-lane atomicity for provision's re-point path — every
+    # Multi-lane atomicity for provision's re-point path — every
     # declared lane is checked for uncommitted work BEFORE any lane's
     # worktree_add runs, so a dirty lane discovered late in the set can never
     # leave an earlier lane already re-pointed.
@@ -2242,7 +2242,7 @@ module Space::Architect
         return [:created, base_sha, nil]
       end
 
-      # #98/AC3: hard rule 7 forbids builder commits, so an in-flight lane's
+      # Hard rule 7 forbids builder commits, so an in-flight lane's
       # entire output is uncommitted working-tree state — carries_own_commits?
       # below can't see it (no commits to count). Checked first: it's the more
       # common loss (partial — reset --hard spares untracked files) and the one

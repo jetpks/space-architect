@@ -3620,7 +3620,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
   # ── I02: destructive guards ────────────────────────────────────────────────
 
-  # #98/AC1: worktree_remove refuses to discard a dirty lane worktree —
+  # worktree_remove refuses to discard a dirty lane worktree —
   # untracked files included — naming the lane and the discard count, doing
   # nothing (no worktree removed, no space.yaml write). --force overrides and
   # reports the discard count.
@@ -3655,7 +3655,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # #98/AC2: integrate!'s teardown-only path refuses on the same dirty-worktree
+  # integrate!'s teardown-only path refuses on the same dirty-worktree
   # condition, leaving BOTH the worktree and the lane branch intact — today's
   # bug deletes the branch too, which removes the last recovery route.
   # --force overrides.
@@ -3689,7 +3689,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # #98/AC4: teardown-only's refusal is decided before ANY lane is torn down —
+  # Teardown-only's refusal is decided before ANY lane is torn down —
   # a dirty lane discovered anywhere in the recorded set blocks the whole
   # call, including a lane that (on its own) would have torn down cleanly.
   def test_integrate_bang_teardown_refusal_is_atomic_across_lanes
@@ -3717,7 +3717,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # #98/AC3: the re-point path reached by `provision --base` refuses when the
+  # The re-point path reached by `provision --base` refuses when the
   # lane's worktree holds uncommitted work — not just commits of its own
   # (already caught by #carries_own_commits?) — because hard rule 7 forbids
   # builder commits, so an in-flight lane's entire output is uncommitted
@@ -3764,7 +3764,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # #98/AC4: provision's re-point refusal is decided before ANY lane's
+  # Provision's re-point refusal is decided before ANY lane's
   # worktree is touched — a dirty lane late in the declared set must not
   # leave an earlier, clean lane already re-pointed.
   def test_provision_base_refusal_is_atomic_across_lanes
@@ -3807,7 +3807,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # #98/AC6 control: `provision --force` with no explicit --base never reaches
+  # Control: `provision --force` with no explicit --base never reaches
   # the re-point path at all (base_explicit: false short-circuits to "attach
   # whatever's there") — a registered, dirty worktree is left alone, matching
   # the repro harness's control scenario.

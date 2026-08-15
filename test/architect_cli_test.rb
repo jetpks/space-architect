@@ -3051,7 +3051,7 @@ class ArchitectCLITest < Space::ArchitectTest
 
   # ── I02: destructive guards ─────────────────────────────────────────────
 
-  # #98/AC1, AC5: `worktree remove` (CLI) refuses a dirty worktree — non-zero
+  # `worktree remove` (CLI) refuses a dirty worktree — non-zero
   # exit, worktree untouched — and `--force` overrides, reporting what was
   # discarded ALONGSIDE (not instead of) the surviving-branch line.
   def test_worktree_remove_cli_refuses_uncommitted_work_then_force_removes
@@ -3091,7 +3091,7 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  # #98/AC7: `worktree remove` accepts an optional trailing SPACE argument and
+  # `worktree remove` accepts an optional trailing SPACE argument and
   # acts on the named space, like provision/integrate/freeze/gate already do —
   # invoked from OUTSIDE the target space, mirroring the frozen repro's
   # scenario 5.
@@ -3125,7 +3125,7 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  # #98/AC7 audit: `worktree add` and `worktree list` had the same missing
+  # Audit: `worktree add` and `worktree list` had the same missing
   # SPACE omission as `worktree remove` — fixed identically and additively.
   def test_worktree_add_cli_accepts_space_argument
     setup = temp_env
@@ -3173,7 +3173,7 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  # #98/AC2: `integrate <it> --teardown` (CLI) refuses on a dirty lane — non-
+  # `integrate <it> --teardown` (CLI) refuses on a dirty lane — non-
   # zero exit — and `--force` overrides.
   def test_integrate_cli_teardown_refuses_uncommitted_lane_then_force
     setup = temp_env

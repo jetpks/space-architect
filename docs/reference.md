@@ -140,8 +140,8 @@ architect dispatch dry-cli-port lane-a --detach          # returns a PID; poll r
 | `--max-turns=VALUE` | `200` | Max conversation turns. |
 | `--harness=VALUE` | lane entry, else `claude-code` | Harness override (`claude-code`, `opencode`). |
 | `--effort=VALUE` | — | Reasoning effort (opencode only; sets `reasoningEffort` in the model config). |
-| `--allowed-tools=LIST` | lane entry's `allowed_tools:`, else the harness default | Comma-separated tool list that **replaces** the default grant. Wins over the lane's `allowed_tools:`/`append_allowed_tools:` key when both are given. |
-| `--append-allowed-tools=LIST` | lane entry's `append_allowed_tools:`, else unset | Comma-separated tool list **appended** to the default/lane grant instead of replacing it. Wins over the lane's `allowed_tools:`/`append_allowed_tools:` key when both are given. |
+| `--allowed-tools=LIST` | lane entry's `allowed_tools:`, else the harness default | Comma-separated tool list that **replaces** the default grant. Wins over the lane's `allowed_tools:` key; a lane's `append_allowed_tools:` still applies on top. |
+| `--append-allowed-tools=LIST` | lane entry's `append_allowed_tools:`, else unset | Comma-separated tool list **appended** to the default/lane grant instead of replacing it. Wins over the lane's `append_allowed_tools:` key; a lane's `allowed_tools:` still supplies the base it appends to. |
 | `--detach` | `false` | Detach the builder process — returns immediately with a PID; poll `report.md` for completion. Cannot combine with `--push-url`/`--push-host`. |
 | `--timeout=SECONDS` | `14400` (4h) | Wall-clock timeout; the wedged builder's process group is killed. `0` disables. Foreground only. |
 | `--push-url=URL` | — | Stream the builder's stream-json to an already-created run's ingest URL (requires `--push-token`). |
@@ -161,8 +161,8 @@ architect worktree remove dry-cli-port lane-a
 
 | Command | Description |
 |---------|-------------|
-| `worktree add REPO ITERATION LANE` | Create a worktree at `build/<id>-<lane>/wt` and record the lane in `space.yaml`. Idempotent — re-adding a lane reuses the existing worktree/branch and merges the new options in place. |
-| `worktree list` | List active architect worktree directories. |
+| `worktree add REPO ITERATION LANE [SPACE]` | Create a worktree at `build/<id>-<lane>/wt` and record the lane in `space.yaml`. Idempotent — re-adding a lane reuses the existing worktree/branch and merges the new options in place. |
+| `worktree list [SPACE]` | List active architect worktree directories. |
 | `worktree remove ITERATION LANE [SPACE]` | Remove the lane worktree. Refuses if the lane worktree holds uncommitted work — untracked files included; `--force` overrides and discards it. |
 
 `worktree add` options:
