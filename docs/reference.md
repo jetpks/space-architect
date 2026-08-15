@@ -140,6 +140,8 @@ architect dispatch dry-cli-port lane-a --detach          # returns a PID; poll r
 | `--max-turns=VALUE` | `200` | Max conversation turns. |
 | `--harness=VALUE` | lane entry, else `claude-code` | Harness override (`claude-code`, `opencode`). |
 | `--effort=VALUE` | — | Reasoning effort (opencode only; sets `reasoningEffort` in the model config). |
+| `--allowed-tools=LIST` | lane entry's `allowed_tools:`, else the harness default | Comma-separated tool list that **replaces** the default grant. Wins over the lane's `allowed_tools:`/`append_allowed_tools:` key when both are given. |
+| `--append-allowed-tools=LIST` | lane entry's `append_allowed_tools:`, else unset | Comma-separated tool list **appended** to the default/lane grant instead of replacing it. Wins over the lane's `allowed_tools:`/`append_allowed_tools:` key when both are given. |
 | `--detach` | `false` | Detach the builder process — returns immediately with a PID; poll `report.md` for completion. Cannot combine with `--push-url`/`--push-host`. |
 | `--timeout=SECONDS` | `14400` (4h) | Wall-clock timeout; the wedged builder's process group is killed. `0` disables. Foreground only. |
 | `--push-url=URL` | — | Stream the builder's stream-json to an already-created run's ingest URL (requires `--push-token`). |
