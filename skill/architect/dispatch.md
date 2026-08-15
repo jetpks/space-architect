@@ -347,6 +347,19 @@ instruction.
   `ultrathink`) and the `MAX_THINKING_TOKENS` env var still raise depth from
   inside the block. Default unattended builder work to a high budget; downgrade
   a routine, tightly-specified lane (record which and why in the spec).
+- **Tool grant.** The default `--allowedTools` list is overridable per dispatch:
+  `--allowed-tools <list>` replaces it, `--append-allowed-tools <list>` appends
+  to it. The same is settable in the frozen lane declaration's ` ```lanes ` block
+  — `allowed_tools:` (replaces) / `append_allowed_tools:` (appends) — so a lane
+  that needs an MCP or other non-default tool is granted it reviewably, judged
+  like every other lane boundary, rather than buried in a shell invocation. The
+  CLI flag wins over the lane's yaml key when both are given, and dispatch
+  reports which source resolved. This exists because `claude -p` **denies** a
+  tool not on the allow list rather than prompting for it — a lane missing a
+  needed grant doesn't error, it silently can't use the tool and files a
+  confident, dataless report instead. `--disallowedTools`/`DISALLOWED_TOOLS`
+  (the builder-never-commits deny rules above) has no override route, by design
+  — hard rule 7 depends on it staying fixed.
 - **Builders never commit, and the architect verifies it.** Claude Code has no
   sandbox to make `.git` read-only, so this is enforced by the deny rules at
   dispatch *and* checked after the run: before integrating a lane, confirm

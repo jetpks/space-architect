@@ -277,7 +277,9 @@ contract, self-contained:
   its **target repo + file-touch set, checked for overlap**: name the repo
   (`repos/<repo>`) and every file each lane may touch. The machine-readable
   declaration lives in a fenced ` ```lanes ` block in the Specification — one
-  entry per lane (`name`, `repo`, `touch` globs) — the single frozen source of
+  entry per lane (`name`, `repo`, `touch` globs; optionally `allowed_tools`/
+  `append_allowed_tools` to replace/extend the lane's builder tool grant — see
+  `dispatch.md`) — the single frozen source of
   truth `architect freeze` records into `space.yaml` and `architect provision`
   materializes. The same boundary is stated twice more — the lane-prompt's
   may-touch list, and the scope gate that checks the lane's diff at judge
