@@ -745,6 +745,252 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # ── #89: --allowed-tools / --append-allowed-tools ─────────────────────────
+
+  def dispatch_argv_recorder_setup(setup, env)
+    fake = File.join(setup[:root], "fake_claude_argv")
+    File.write(fake, "#!/usr/bin/env ruby\nFile.write(ENV['ARGV_RECORD_FILE'], ARGV.join(\"\\x00\"))\n$stdin.read\nexit 0\n")
+    File.chmod(0o755, fake)
+    argv_file = File.join(setup[:root], "recorded_argv")
+    [env.merge("ARCHITECT_CLAUDE_BIN" => fake, "ARGV_RECORD_FILE" => argv_file), argv_file]
+  end
+
+  def recorded_allowed_tools(argv_file)
+    recorded = File.read(argv_file).split("\x00")
+    idx = recorded.index("--allowedTools")
+    idx ? recorded[idx + 1] : nil
+  end
+
+  # ArchitectProject#dispatch's inform lines (thinking translation, allowed-tools
+  # provenance, liveness/push) go to the real $stderr, not the out/err StringIO
+  # `invoke` passes to Space::Architect::CLI.call — mirrors
+  # test_dispatch_cli_force_effort_bypasses_clamp_and_informs's own capture.
+  def capture_global_stderr
+    original = $stderr
+    captured = StringIO.new
+    $stderr = captured
+    yield
+    captured.string
+  ensure
+    $stderr = original
+  end
+
+  # AC1: --allowed-tools replaces the default grant reaching the builder's argv.
+  def test_dispatch_cli_allowed_tools_flag_replaces_default
+    setup = temp_env
+    env, argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out = nil
+        stderr_out = capture_global_stderr { out, = invoke("dispatch", "demo", "A", "--allowed-tools", "Read,Edit") }
+
+        assert_match(/Builder exited with status 0/, out)
+        assert_match(/allowed-tools: --allowed-tools flag → Read,Edit/, stderr_out)
+        assert_equal "Read,Edit", recorded_allowed_tools(argv_file)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC2: --append-allowed-tools appends to the default, default entries intact.
+  def test_dispatch_cli_append_allowed_tools_flag_appends_default
+    setup = temp_env
+    env, argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out = nil
+        stderr_out = capture_global_stderr { out, = invoke("dispatch", "demo", "A", "--append-allowed-tools", "mcp__foo") }
+
+        assert_match(/Builder exited with status 0/, out)
+        assert_match(/allowed-tools: default \+ --append-allowed-tools flag/, stderr_out)
+        assert_equal "#{Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS},mcp__foo",
+          recorded_allowed_tools(argv_file)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC6: with neither flag given, the argv's tool list is byte-for-byte unchanged
+  # and dispatch's stderr stays empty (no new noise for the common case).
+  def test_dispatch_cli_without_allowed_tools_flags_argv_and_stderr_unchanged
+    setup = temp_env
+    env, argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        out = nil
+        stderr_out = capture_global_stderr { out, = invoke("dispatch", "demo", "A") }
+
+        assert_match(/Builder exited with status 0/, out)
+        refute_match(/allowed-tools:/, stderr_out)
+        assert_equal Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS, recorded_allowed_tools(argv_file)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC3/AC5: allowed_tools: in the frozen lane declaration replaces the default with
+  # no flag passed — and the --allowed-tools flag wins when both are given.
+  def test_dispatch_cli_lane_allowed_tools_key_and_flag_precedence
+    setup = temp_env
+    env, argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        iter_file = File.join(space_path, "architecture", "I01-demo.md")
+        text = File.read(iter_file)
+        text = text.sub(
+          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
+          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
+          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
+          "# - name: lane-a            # lane name (required)\n" \
+          "#   repo: my-repo           # target repo under repos/ (required)\n" \
+          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
+          "#     - lib/my_repo/foo.rb\n" \
+          "#     - lib/my_repo/bar.rb\n" \
+          "#     - test/my_repo_test.rb\n```",
+          "```lanes\n- name: A\n  repo: my-repo\n  touch:\n    - lib/**\n  allowed_tools: Read,Edit\n```"
+        )
+        File.write(iter_file, text)
+        freeze_for_test("demo")
+        invoke("provision", "demo")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        # No flag: the lane's yaml key wins.
+        invoke("dispatch", "demo", "A")
+        assert_equal "Read,Edit", recorded_allowed_tools(argv_file)
+
+        # Flag given: it wins over the lane's yaml key.
+        out = nil
+        stderr_out = capture_global_stderr { out, = invoke("dispatch", "demo", "A", "--allowed-tools", "Bash") }
+        assert_match(/Builder exited with status 0/, out)
+        assert_match(/allowed-tools: --allowed-tools flag → Bash/, stderr_out)
+        assert_equal "Bash", recorded_allowed_tools(argv_file)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC8: `architect status`'s lane line shows the resolved grant when it diverges
+  # from the harness default, next to the other resolved values.
+  def test_status_shows_resolved_allowed_tools_when_non_default
+    setup = temp_env
+    env, _argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        invoke("dispatch", "demo", "A", "--allowed-tools", "Bash")
+
+        out, err = invoke("status")
+        assert_empty err
+        assert_includes out, "·tools:Bash"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC6 control: status's lane line carries no tools: suffix for the default grant.
+  def test_status_hides_tools_suffix_for_default_grant
+    setup = temp_env
+    env, _argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "A")
+
+        build_dir = File.join(space_path, "build", "I01-demo-A")
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
+
+        invoke("dispatch", "demo", "A")
+
+        out, err = invoke("status")
+        assert_empty err
+        refute_includes out, "·tools:"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_dispatch_help_lists_allowed_tools_flags
+    out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    assert_includes out, "--allowed-tools"
+    assert_includes out, "--append-allowed-tools"
+  end
+
   def test_dispatch_help_lists_pi_harness
     out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
                    err: [:child, :out]) { |f| f.read }

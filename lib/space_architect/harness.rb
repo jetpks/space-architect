@@ -62,13 +62,16 @@ module Space::Architect
     # (default $stderr; thread a null writer to suppress) when it clamps/strips.
     # With force: true, the literal `effort` value is passed through unmodified.
     # For opencode: config_dir is required (build/<id>-<lane> dir outside the worktree).
-    def self.for(name, model:, max_turns:, bin: nil, config_dir: nil, effort: nil, force: false, err: $stderr)
+    def self.for(name, model:, max_turns:, bin: nil, config_dir: nil, effort: nil, allowed_tools: nil,
+                 force: false, err: $stderr)
       translated, inform = translate_thinking(name, effort, force: force)
       err.puts(inform) if inform
 
       case name.to_s
       when "claude-code"
-        ClaudeCodeHarness.new(model: model, max_turns: max_turns, bin: bin, effort: translated)
+        kwargs = { model: model, max_turns: max_turns, bin: bin, effort: translated }
+        kwargs[:allowed_tools] = allowed_tools if allowed_tools
+        ClaudeCodeHarness.new(**kwargs)
       when "opencode"
         raise Space::Core::Error, "config_dir is required for opencode harness" unless config_dir
         OpenCodeHarness.new(model: model, max_turns: max_turns, bin: bin, config_dir: config_dir, effort: translated)
@@ -92,6 +95,15 @@ module Space::Architect
       # (stripped — omit --effort) and no minimal level (clamped to low).
       ACCEPTED_LEVELS = %w[low medium high xhigh max].freeze
       CLAMP_MAP = { "minimal" => "low" }.freeze
+
+      # #89: compose the --allowedTools value from an optional replace + append pair —
+      # resolved once here regardless of which surface (--allowed-tools/--append-allowed-tools
+      # flag, or the lane's frozen allowed_tools:/append_allowed_tools: declaration) supplied
+      # them, since replace/append combine identically either way.
+      def self.resolve_tools(replace: nil, append: nil)
+        base = replace || ALLOWED_TOOLS
+        append ? "#{base},#{append}" : base
+      end
 
       def self.translate_thinking(level, force: false)
         return [nil, nil] if level.nil?

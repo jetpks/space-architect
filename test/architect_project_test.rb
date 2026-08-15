@@ -3891,6 +3891,34 @@ class ArchitectProjectTest < Space::ArchitectTest
     bin
   end
 
+  # Fake binary that records argv to ARGV_RECORD_FILE (null-delimited) — mirrors
+  # HarnessTest's FAKE_ARGV_RECORDER, duplicated here since test/harness_test.rb
+  # is outside this lane's declared touch set for constants.
+  FAKE_ARGV_RECORDER = <<~RUBY
+    #!/usr/bin/env ruby
+    File.write(ENV.fetch("ARGV_RECORD_FILE"), ARGV.join("\x00"))
+    exit 0
+  RUBY
+
+  def write_argv_recorder(dir)
+    bin = File.join(dir, "argv_recorder")
+    File.write(bin, FAKE_ARGV_RECORDER)
+    File.chmod(0o755, bin)
+    bin
+  end
+
+  # Dispatch with claude_bin: the argv recorder and return the recorded --allowedTools
+  # value (or nil if absent).
+  def dispatched_allowed_tools(dir, project, lane, argv_file, **dispatch_kwargs)
+    ENV["ARGV_RECORD_FILE"] = argv_file
+    project.dispatch("demo", lane, claude_bin: write_argv_recorder(dir), **dispatch_kwargs)
+    recorded = File.read(argv_file).split("\x00")
+    idx = recorded.index("--allowedTools")
+    idx ? recorded[idx + 1] : nil
+  ensure
+    ENV.delete("ARGV_RECORD_FILE")
+  end
+
   def lane_on_disk(dir, name)
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     demo = yml.dig("project", "iterations").find { |i| i["name"] == "demo" }
@@ -4045,6 +4073,304 @@ class ArchitectProjectTest < Space::ArchitectTest
     assert_equal true,                        lane["variant"]
     assert_equal "high",                      lane["effort"]
     assert_equal ["lib/**"],                  lane["touch_set"], "touch_set stays preserved"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # ── #89: the allowed-tools grant — settable and reviewable ───────────────
+
+  # AC3/AC4: freeze parses allowed_tools:/append_allowed_tools: from the ```lanes```
+  # block into the lane's recorded entry, same as it already does for touch_set.
+  def test_freeze_populates_allowed_tools_from_lanes_block
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: A
+        repo: my-repo
+        touch:
+          - lib/**
+        allowed_tools: Read,Edit
+        append_allowed_tools: mcp__foo
+    YAML
+    freeze_for_test!(project, dir, "demo")
+
+    lane = lane_on_disk(dir, "A")
+    assert_equal "Read,Edit", lane["allowed_tools"]
+    assert_equal "mcp__foo",  lane["append_allowed_tools"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: allowed_tools: in the frozen lane declaration replaces the default in the
+  # argv, with no flag passed.
+  def test_dispatch_lane_allowed_tools_replaces_default_in_argv
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: A
+        repo: my-repo
+        touch:
+          - lib/**
+        allowed_tools: Read,Edit
+    YAML
+    freeze_for_test!(project, dir, "demo")
+    project.provision("demo")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"))
+    assert_equal "Read,Edit", tools
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: append_allowed_tools: in the frozen lane declaration appends to the default,
+  # with no flag passed.
+  def test_dispatch_lane_append_allowed_tools_appends_default_in_argv
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: A
+        repo: my-repo
+        touch:
+          - lib/**
+        append_allowed_tools: mcp__foo
+    YAML
+    freeze_for_test!(project, dir, "demo")
+    project.provision("demo")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"))
+    assert_equal "#{Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS},mcp__foo", tools
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5: --allowed-tools flag wins over the lane's frozen allowed_tools: declaration.
+  def test_dispatch_flag_wins_over_lane_allowed_tools
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: A
+        repo: my-repo
+        touch:
+          - lib/**
+        allowed_tools: Read,Edit
+    YAML
+    freeze_for_test!(project, dir, "demo")
+    project.provision("demo")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"),
+                                     allowed_tools: "Bash")
+    assert_equal "Bash", tools, "the --allowed-tools flag must win over the lane's yaml key"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # Objective A: replace and append resolve independently of surface — a flag-supplied
+  # replace combines with a yaml-declared append.
+  def test_dispatch_flag_replace_combines_with_lane_append
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: A
+        repo: my-repo
+        touch:
+          - lib/**
+        append_allowed_tools: mcp__foo
+    YAML
+    freeze_for_test!(project, dir, "demo")
+    project.provision("demo")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"),
+                                     allowed_tools: "Bash")
+    assert_equal "Bash,mcp__foo", tools,
+      "a flag-supplied replace and a yaml-declared append must combine — append applies to whatever replace produced"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC7: a grant recorded on a lane (via the frozen allowed_tools: key) survives an
+  # actual re-materialization of the lane's worktree, not just inspection of the
+  # recorded fields.
+  def test_dispatch_allowed_tools_survives_rematerialize
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    write_iteration_with_lanes(dir, "demo", <<~YAML)
+      - name: A
+        repo: my-repo
+        touch:
+          - lib/**
+        allowed_tools: Read,Edit
+        append_allowed_tools: mcp__foo
+    YAML
+    freeze_for_test!(project, dir, "demo")
+    project.provision("demo")
+
+    project.worktree_remove("demo", "A")
+    refute Dir.exist?(File.join(dir, "build", "I01-demo-A", "wt")), "worktree must actually be gone"
+    project.send(:ensure_lane_materialized, "demo", "A")
+
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"))
+    assert_equal "Read,Edit,mcp__foo", tools,
+      "the frozen grant must survive worktree re-materialization"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC8: the resolved grant is recorded onto the lane the way harness/model/effort
+  # already are.
+  def test_dispatch_stamps_resolved_allowed_tools_onto_lane
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"),
+                             allowed_tools: "Bash", append_allowed_tools: "mcp__foo")
+
+    lane = lane_on_disk(dir, "A")
+    assert_equal "Bash",     lane["allowed_tools"]
+    assert_equal "mcp__foo", lane["append_allowed_tools"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC9 control: DISALLOWED_TOOLS is unaffected by an allowed-tools grant — the
+  # no-builder-commits guard still reaches the argv regardless.
+  def test_dispatch_allowed_tools_grant_does_not_disturb_disallowed_tools
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    ENV["ARGV_RECORD_FILE"] = File.join(dir, "recorded_argv")
+    project.dispatch("demo", "A", claude_bin: write_argv_recorder(dir), allowed_tools: "Bash")
+    recorded = File.read(File.join(dir, "recorded_argv")).split("\x00")
+
+    idx = recorded.index("--disallowedTools")
+    refute_nil idx, "argv must still carry --disallowedTools: #{recorded.inspect}"
+    assert_equal Space::Architect::Harness::ClaudeCodeHarness::DISALLOWED_TOOLS, recorded[idx + 1]
+  ensure
+    ENV.delete("ARGV_RECORD_FILE")
+    FileUtils.rm_rf(dir)
+  end
+
+  # dispatch_as_job composes the same resolved grant into the job spec's harness.args
+  # — the sandboxed executor still runs `claude -p` server-side.
+  class FakeJobsClientForToolsTest
+    attr_reader :spec
+
+    def create(spec)
+      @spec = spec
+      42
+    end
+  end
+
+  def test_dispatch_as_job_composes_resolved_allowed_tools_into_harness_args
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    fake = FakeJobsClientForToolsTest.new
+    project.dispatch_as_job("demo", "A", host: "http://example.com", token: "tok",
+      backend_url: "https://backend.example.com", job_model: "some/sandbox-model",
+      allowed_tools: "Bash", jobs_client: fake)
+
+    args = fake.spec.dig("harness", "args")
+    idx = args.index("--allowedTools")
+    refute_nil idx, "job harness.args must carry --allowedTools: #{args.inspect}"
+    assert_equal "Bash", args[idx + 1]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5 (dispatch's report): dispatch prints which surface's grant won, to $stderr.
+  def test_dispatch_reports_allowed_tools_provenance
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    original_stderr = $stderr
+    captured = StringIO.new
+    $stderr = captured
+    begin
+      project.dispatch("demo", "A", claude_bin: write_fake_claude(dir), allowed_tools: "Bash")
+    ensure
+      $stderr = original_stderr
+    end
+
+    assert_match(/allowed-tools: --allowed-tools flag → Bash/, captured.string)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5/AC6 control: a bare dispatch (no flag, no lane grant) prints nothing about
+  # allowed-tools — the common case stays as quiet as it is today.
+  def test_dispatch_without_grant_prints_no_allowed_tools_line
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
+
+    original_stderr = $stderr
+    captured = StringIO.new
+    $stderr = captured
+    begin
+      project.dispatch("demo", "A", claude_bin: write_fake_claude(dir))
+    ensure
+      $stderr = original_stderr
+    end
+
+    refute_match(/allowed-tools:/, captured.string)
   ensure
     FileUtils.rm_rf(dir)
   end
