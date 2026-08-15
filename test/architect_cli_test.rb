@@ -2803,6 +2803,168 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # ── I02: destructive guards ─────────────────────────────────────────────
+
+  # #98/AC1, AC5: `worktree remove` (CLI) refuses a dirty worktree — non-zero
+  # exit, worktree untouched — and `--force` overrides, reporting what was
+  # discarded ALONGSIDE (not instead of) the surviving-branch line.
+  def test_worktree_remove_cli_refuses_uncommitted_work_then_force_removes
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        freeze_for_test("s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+
+        wt = File.join(space_path, "build", "I01-s1-lane-a", "wt")
+        File.write(File.join(wt, "work.txt"), "IRREPLACEABLE NEW FILE\n")
+
+        out, err = invoke("worktree", "remove", "s1", "lane-a")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/lane-a/, err)
+        assert_match(/--force/, err)
+        assert_empty out
+        assert_path_exists wt
+
+        out2, err2 = invoke("worktree", "remove", "s1", "lane-a", "--force")
+        assert_empty err2
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/Discarded 1 uncommitted change/, out2)
+        assert_match(/survives/, out2)
+        refute_path_exists wt
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # #98/AC7: `worktree remove` accepts an optional trailing SPACE argument and
+  # acts on the named space, like provision/integrate/freeze/gate already do —
+  # invoked from OUTSIDE the target space, mirroring the frozen repro's
+  # scenario 5.
+  def test_worktree_remove_cli_accepts_space_argument
+    setup = temp_env
+    env = setup.fetch(:env)
+    space_path = nil
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        freeze_for_test("s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+      end
+
+      wt = File.join(space_path, "build", "I01-s1-lane-a", "wt")
+      assert_path_exists wt
+
+      out, err = invoke("worktree", "remove", "s1", "lane-a", space_path.to_s)
+      assert_empty err
+      assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+      assert_match(/Removed worktree/, out)
+      refute_path_exists wt, "must act on the named space, not the cwd"
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # #98/AC7 audit: `worktree add` and `worktree list` had the same missing
+  # SPACE omission as `worktree remove` — fixed identically and additively.
+  def test_worktree_add_cli_accepts_space_argument
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+      end
+
+      out, err = invoke("worktree", "add", "my-repo", "s1", "lane-a", space_path.to_s)
+      assert_empty err
+      assert_match(/Worktree:/, out)
+      assert_path_exists File.join(space_path, "build", "I01-s1-lane-a", "wt")
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_worktree_list_cli_accepts_space_argument
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+      end
+
+      out, err = invoke("worktree", "list", space_path.to_s)
+      assert_empty err
+      assert_match(/I01-s1-lane-a/, out)
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # #98/AC2: `integrate <it> --teardown` (CLI) refuses on a dirty lane — non-
+  # zero exit — and `--force` overrides.
+  def test_integrate_cli_teardown_refuses_uncommitted_lane_then_force
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "s1")
+        freeze_for_test("s1")
+        invoke("worktree", "add", "my-repo", "s1", "lane-a")
+
+        wt = File.join(space_path, "build", "I01-s1-lane-a", "wt")
+        File.write(File.join(wt, "work.txt"), "IRREPLACEABLE NEW FILE\n")
+
+        out, err = invoke("integrate", "s1", "--teardown")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/lane-a/, err)
+        assert_match(/--force/, err)
+        assert_empty out
+        assert_path_exists wt
+
+        out2, err2 = invoke("integrate", "s1", "--teardown", "--force")
+        assert_empty err2
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/Tore down lane-a.*discarded 1 uncommitted change/, out2)
+        refute_path_exists wt
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   # I08: --from pointing at a nonexistent file must raise Space::Core::Error,
   # not Errno::ENOENT — so handle_errors surfaces a clean one-line message.
   def test_section_cli_from_missing_file_gives_clean_error
