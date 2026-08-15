@@ -510,9 +510,10 @@ module Space::Architect
     # here, by pathspec, so which lanes merged survives independently of whether a
     # Verdict follows (I13/A3). Always attempted, success or raise, so a conflict that
     # stops the loop midway doesn't lose the lanes already merged.
-    def integrate!(iteration, lanes: nil, teardown: false, message: nil, commit_mode: nil, into: nil, accept_bounds_reason: nil)
+    def integrate!(iteration, lanes: nil, teardown: false, message: nil, commit_mode: nil, into: nil,
+                   accept_bounds_reason: nil, force: false)
       lanes = Array(lanes)
-      return teardown_lanes!(iteration, slice_entry(iteration)["lanes"] || []) if lanes.empty? && teardown
+      return teardown_lanes!(iteration, slice_entry(iteration)["lanes"] || [], force: force) if lanes.empty? && teardown
       raise Space::Core::Error, "No lanes given to integrate" if lanes.empty?
 
       merged = []
@@ -524,7 +525,7 @@ module Space::Architect
         raise Space::Core::Error, "Integrated #{done.empty? ? "(none)" : done} then stopped at '#{lane}': #{e.message}"
       end
 
-      teardown_lanes!(iteration, merged) if teardown
+      teardown_lanes!(iteration, merged, force: force) if teardown
       merged
     ensure
       commit_metadata_mutation!(iteration, message: message)
@@ -732,7 +733,7 @@ module Space::Architect
         end
       end
 
-      outcome, base_sha = attach_lane_branch!(repo_path, wt_path, branch, base_ref, base_sha, recorded_base,
+      outcome, base_sha, discarded = attach_lane_branch!(repo_path, wt_path, branch, base_ref, base_sha, recorded_base,
                                               base_explicit: base_explicit, force: force)
 
       new_fields = {
@@ -763,7 +764,7 @@ module Space::Architect
         b
       end
 
-      { worktree: wt_path, base_sha: base_sha, outcome: outcome }
+      { worktree: wt_path, base_sha: base_sha, outcome: outcome, discarded: discarded }
     end
 
     # Declare a variant set for an iteration: one competing lane per (harness, model) pair,
@@ -848,7 +849,7 @@ module Space::Architect
     # reading `worktree remove`'s output isn't misled into thinking it is.
     # Never deletes the branch itself: that would discard lane work with no
     # confirmation.
-    def worktree_remove(iteration, lane)
+    def worktree_remove(iteration, lane, force: false)
       entry = slice_entry(iteration)
       lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
       raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
@@ -863,6 +864,14 @@ module Space::Architect
 
       branch = worktree_branch(repo_path, wt_path) || "lane/#{iteration_id(entry)}-#{lane}"
 
+      dirty = dirty_file_count(repo_path, wt_path)
+      if dirty && !force
+        raise Space::Core::Error,
+          "Refusing to remove lane '#{lane}' worktree — #{dirty} uncommitted change(s) (untracked files " \
+          "included) would be discarded. Integrate the lane first, or re-run with --force to discard them " \
+          "and remove it."
+      end
+
       git_run("-C", repo_path.to_s, "worktree", "remove", "--force", wt_path.to_s)
       git_run("-C", repo_path.to_s, "worktree", "prune")
 
@@ -874,7 +883,7 @@ module Space::Architect
         b
       end
 
-      { lane: lane, branch: branch, branch_survives: branch_exists?(repo_path, branch) }
+      { lane: lane, branch: branch, branch_survives: branch_exists?(repo_path, branch), discarded: dirty }
     end
 
     def worktree_list
@@ -903,11 +912,14 @@ module Space::Architect
       raise Space::Core::Error, "No lane '#{lane}' declared for iteration '#{iteration}'" if lane && lanes.empty?
 
       base_explicit = !base.nil?
+      refuse_repoint_if_dirty!(iteration, lanes, base, iteration_id(entry)) if base_explicit && !force
+
       lanes.map do |l|
         name = l["name"]
         result = worktree_add(l["repo"], iteration, name, base: resolve_lane_base(l["repo"], base),
                               base_explicit: base_explicit, force: force, **recorded_lane_fields(l))
-        { lane: name, worktree: result[:worktree], base_sha: result[:base_sha], outcome: result[:outcome] }
+        { lane: name, worktree: result[:worktree], base_sha: result[:base_sha], outcome: result[:outcome],
+          discarded: result[:discarded] }
       end
     end
 
@@ -1110,16 +1122,43 @@ module Space::Architect
     # Remove each lane's worktree and safe-delete (`-d`) its lane branch. Accepts
     # either merge_lane! results (symbol keys) or recorded lane entries (string
     # keys) — both carry a lane name and a repo.
-    def teardown_lanes!(iteration, lane_entries)
+    def teardown_lanes!(iteration, lane_entries, force: false)
       id = iteration_id(slice_entry(iteration))
+      refuse_teardown_if_dirty!(iteration, lane_entries, id) unless force
+
       lane_entries.map do |l|
         lane = l[:lane] || l["name"]
         repo = l[:repo] || l["repo"]
-        worktree_remove(iteration, lane)
+        removal = worktree_remove(iteration, lane, force: true)
         lane_branch = "lane/#{id}-#{lane}"
         git_capture("-C", space.path.join("repos", repo).to_s, "branch", "-d", lane_branch)
-        { lane: lane, repo: repo, lane_branch: lane_branch }
+        { lane: lane, repo: repo, lane_branch: lane_branch, discarded: removal[:discarded] }
       end
+    end
+
+    # #98/AC2, AC4: every lane a teardown-only call would touch is checked for
+    # uncommitted work BEFORE any lane is removed — a dirty lane discovered late
+    # in the recorded set can never leave an earlier lane already torn down.
+    # Lanes reached via a merge-then-teardown call are always clean here
+    # (merge_lane! commits the worktree first), so this never fires on the
+    # normal integrate-then-teardown rhythm.
+    def refuse_teardown_if_dirty!(iteration, lane_entries, id)
+      entry = slice_entry(iteration)
+      dirty = lane_entries.filter_map do |l|
+        lane = l[:lane] || l["name"]
+        repo = l[:repo] || l["repo"]
+        recorded = (entry["lanes"] || []).find { |le| le["name"] == lane }
+        wt_path = space.path.join(recorded&.dig("worktree") || "build/#{id}-#{lane}/wt")
+        count = dirty_file_count(space.path.join("repos", repo), wt_path)
+        count ? [lane, count] : nil
+      end
+      return if dirty.empty?
+
+      names = dirty.map { |n, c| "#{n} (#{c})" }.join(", ")
+      raise Space::Core::Error,
+        "Refusing to tear down '#{iteration}' — lane(s) #{names} hold uncommitted work (untracked files " \
+        "included) that would be discarded (worktree removed, branch deleted). Integrate them first, or " \
+        "re-run with --force to discard it."
     end
 
     # Resolve the in-flight iteration file for ground output.
@@ -2044,6 +2083,60 @@ module Space::Architect
       st.success?
     end
 
+    # #98/AC1-AC3: uncommitted work in a lane worktree — untracked files
+    # included. Hard rule 7 forbids builder commits, so this is the only
+    # signal an in-flight or completed-but-unintegrated lane's output ever
+    # leaves behind; "no commits on the branch" is the EXPECTED state, not
+    # evidence the worktree is empty. nil when the worktree doesn't exist,
+    # isn't a registered git worktree, or is clean; otherwise the number of
+    # changed/untracked entries `git status --porcelain` reports (a count is
+    # enough — callers never dump the whole status).
+    def dirty_file_count(repo_path, wt_path)
+      return nil unless wt_path.exist? && worktree_registered?(repo_path, wt_path)
+      out, _, st = git_capture("-C", wt_path.to_s, "status", "--porcelain")
+      return nil unless st.success?
+      count = out.each_line.count { |l| !l.strip.empty? }
+      count.zero? ? nil : count
+    end
+
+    # Would re-pointing `branch`'s worktree to base_sha actually run `git
+    # reset --hard` over uncommitted work? nil when there's nothing to lose
+    # (branch absent, worktree unregistered, already at base_sha, or clean);
+    # otherwise the #dirty_file_count that would be discarded. Read-only —
+    # used by provision's multi-lane preflight (#refuse_repoint_if_dirty!),
+    # never by the mutating path itself (attach_lane_branch! already has
+    # tip_sha in scope and calls #dirty_file_count directly).
+    def repoint_dirty_count(repo_path, wt_path, branch, base_sha)
+      return nil unless branch_exists?(repo_path, branch) && worktree_registered?(repo_path, wt_path)
+      tip_out, _, tip_st = git_capture("-C", repo_path.to_s, "rev-parse", branch)
+      tip_sha = tip_st.success? ? tip_out.strip : nil
+      return nil if tip_sha == base_sha
+      dirty_file_count(repo_path, wt_path)
+    end
+
+    # #98/AC4: multi-lane atomicity for provision's re-point path — every
+    # declared lane is checked for uncommitted work BEFORE any lane's
+    # worktree_add runs, so a dirty lane discovered late in the set can never
+    # leave an earlier lane already re-pointed.
+    def refuse_repoint_if_dirty!(iteration, lanes, base, id)
+      dirty = lanes.filter_map do |l|
+        repo_path = space.path.join("repos", l["repo"])
+        wt_path = space.path.join(l["worktree"] || "build/#{id}-#{l["name"]}/wt")
+        branch = "lane/#{id}-#{l["name"]}"
+        resolved, _, st = git_capture("-C", repo_path.to_s, "rev-parse", resolve_lane_base(l["repo"], base))
+        next nil unless st.success?
+        count = repoint_dirty_count(repo_path, wt_path, branch, resolved.strip)
+        count ? [l["name"], count] : nil
+      end
+      return if dirty.empty?
+
+      names = dirty.map { |n, c| "#{n} (#{c})" }.join(", ")
+      raise Space::Core::Error,
+        "Refusing to provision '#{iteration}' — re-pointing to the requested base would discard uncommitted " \
+        "work (untracked files included) in: #{names}. Dispatch or integrate the lane(s) first, or re-run " \
+        "with --force to discard it and re-point."
+    end
+
     def worktree_registered?(repo_path, wt_path)
       out, _, _ = git_capture("-C", repo_path.to_s, "worktree", "list", "--porcelain")
       real = File.exist?(wt_path.to_s) ? File.realpath(wt_path.to_s) : wt_path.to_s
@@ -2075,7 +2168,7 @@ module Space::Architect
     def attach_lane_branch!(repo_path, wt_path, branch, base_ref, base_sha, recorded_base, base_explicit:, force:)
       unless branch_exists?(repo_path, branch)
         git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, "-b", branch, base_sha)
-        return [:created, base_sha]
+        return [:created, base_sha, nil]
       end
 
       registered = worktree_registered?(repo_path, wt_path)
@@ -2083,15 +2176,28 @@ module Space::Architect
       tip_sha = tip_st.success? ? tip_out.strip : nil
 
       unless base_explicit
-        return [:unchanged, recorded_base || base_sha] if registered
+        return [:unchanged, recorded_base || base_sha, nil] if registered
         git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, branch)
-        return [:created, recorded_base || tip_sha]
+        return [:created, recorded_base || tip_sha, nil]
       end
 
       if tip_sha == base_sha
-        return [:unchanged, base_sha] if registered
+        return [:unchanged, base_sha, nil] if registered
         git_run("-C", repo_path.to_s, "worktree", "add", wt_path.to_s, branch)
-        return [:created, base_sha]
+        return [:created, base_sha, nil]
+      end
+
+      # #98/AC3: hard rule 7 forbids builder commits, so an in-flight lane's
+      # entire output is uncommitted working-tree state — carries_own_commits?
+      # below can't see it (no commits to count). Checked first: it's the more
+      # common loss (partial — reset --hard spares untracked files) and the one
+      # this iteration exists to close.
+      dirty = dirty_file_count(repo_path, wt_path)
+      if dirty && !force
+        raise Space::Core::Error,
+          "Lane branch '#{branch}' worktree has #{dirty} uncommitted change(s) (untracked files included) — " \
+          "re-pointing to '#{base_ref}' (#{base_sha[0, 8]}) would run `git reset --hard` and discard them. " \
+          "Dispatch or integrate it first, or re-run with --force to discard them and re-point."
       end
 
       if !force && carries_own_commits?(repo_path, recorded_base, tip_sha)
@@ -2106,7 +2212,7 @@ module Space::Architect
       else
         git_run("-C", repo_path.to_s, "worktree", "add", "-B", branch, wt_path.to_s, base_sha)
       end
-      [:repointed, base_sha]
+      [:repointed, base_sha, dirty]
     end
 
     # #88/AC2-AC3: does the branch carry commits beyond the base it was recorded

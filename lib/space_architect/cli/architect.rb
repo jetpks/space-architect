@@ -553,7 +553,9 @@ module Space::Architect
                   when :repointed then "re-pointed"
                   else                 "already present"
                   end
-                  terminal.say "#{r[:lane]}: #{terminal.path(r[:worktree])} (#{state})"
+                  line = "#{r[:lane]}: #{terminal.path(r[:worktree])} (#{state})"
+                  line += " — discarded #{r[:discarded]} uncommitted change(s), --force was given" if r[:discarded]
+                  terminal.say line
                 end
               end
               CLI.record_outcome(Outcome.new(exit_code: 0))
@@ -684,9 +686,10 @@ module Space::Architect
         option   :commit_mode, default: nil,    desc: "Commit mode override (strict|conductor); overrides space.yaml commit_mode for this run"
         option   :into,        required: false, desc: "Merge into this branch instead of the slug-derived project/<slug> default"
         option   :accept_bounds, default: nil,  desc: "Escape valve: override the in-bounds check for these lanes when the frozen touch-set glob is itself the defect, recording REASON in space.yaml (never overrides the no-builder-commits check)"
+        option   :force, type: :boolean, default: false, desc: "Teardown-only: discard uncommitted work in a lane worktree instead of refusing (never overrides the mechanical merge checks)"
         commit_message_options
 
-        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, commit_mode: nil, into: nil, accept_bounds: nil, **opts)
+        def call(iteration:, space: nil, lanes: nil, teardown: false, message: nil, message_from: nil, commit_mode: nil, into: nil, accept_bounds: nil, force: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             lane_names = lanes.to_s.split(",").map(&:strip).reject(&:empty?)
@@ -697,13 +700,15 @@ module Space::Architect
               project = ArchitectProject.new(space: sp)
               results = project.integrate!(iteration, lanes: lane_names, teardown: teardown,
                 message: read_commit_message(message: message, message_from: message_from),
-                commit_mode: commit_mode, into: into, accept_bounds_reason: accept_bounds)
+                commit_mode: commit_mode, into: into, accept_bounds_reason: accept_bounds, force: force)
               if lane_names.empty?
                 if results.empty?
                   terminal.say "Nothing to tear down for #{iteration}"
                 else
                   results.each do |r|
-                    terminal.say "Tore down #{r[:lane]} (removed worktree, deleted #{r[:lane_branch]})"
+                    line = "Tore down #{r[:lane]} (removed worktree, deleted #{r[:lane_branch]})"
+                    line += " — discarded #{r[:discarded]} uncommitted change(s), --force was given" if r[:discarded]
+                    terminal.say line
                   end
                 end
               else
@@ -808,6 +813,7 @@ module Space::Architect
           argument :repo,      required: true, desc: "Repo name (under repos/)"
           argument :iteration, required: true, desc: "Iteration name"
           argument :lane,      required: true, desc: "Lane name"
+          argument :space,     required: false, desc: "Space identifier (default: $PWD)"
           option   :base,      default: nil,          desc: "Base ref (default: HEAD of repo)"
           option   :harness,   default: nil,          desc: "Harness (claude-code, opencode, pi; default: space.yaml project.harness, else claude-code)"
           option   :model,     default: nil,           desc: "Model; a trailing :<level> suffix (e.g. foo:high) is parsed into --effort (default: space.yaml project.model, else the per-harness sensible default)"
@@ -818,12 +824,12 @@ module Space::Architect
           option   :touch,     default: nil,           desc: "Comma-separated file globs the lane may touch (records its touch_set for in-bounds + merge checks)"
           option   :force,     type: :boolean, default: false, desc: "Clear and re-create a stale (unregistered) worktree directory"
 
-          def call(repo:, iteration:, lane:, base: nil, harness: nil, model: nil,
+          def call(repo:, iteration:, lane:, space: nil, base: nil, harness: nil, model: nil,
                    effort: nil, thinking: nil, reasoning: nil, quiet: false, touch: nil, force: false, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
               level = resolve_thinking_alias(effort: effort, thinking: thinking, reasoning: reasoning)
-              render(store.find) do |sp|
+              render(store.find(space)) do |sp|
                 project = ArchitectProject.new(space: sp)
                 touch_set = touch ? touch.split(",").map(&:strip).reject(&:empty?) : nil
                 err = quiet ? File.open(File::NULL, "w") : $stderr
@@ -831,6 +837,7 @@ module Space::Architect
                                              effort: level, touch: touch_set, force: force, err: err)
                 terminal.say "Worktree: #{terminal.path(result[:worktree])}"
                 terminal.say "Base SHA: #{result[:base_sha]}"
+                terminal.say "Discarded #{result[:discarded]} uncommitted change(s), --force was given" if result[:discarded]
                 CLI.record_outcome(Outcome.new(exit_code: 0))
               end
             end
@@ -841,14 +848,19 @@ module Space::Architect
           desc "Remove a lane worktree"
           argument :iteration, required: true, desc: "Iteration name"
           argument :lane,      required: true, desc: "Lane name"
+          argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+          option   :force,     type: :boolean, default: false, desc: "Discard uncommitted work in the worktree (untracked files included) instead of refusing"
 
-          def call(iteration:, lane:, **opts)
+          def call(iteration:, lane:, space: nil, force: false, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
-              render(store.find) do |sp|
+              render(store.find(space)) do |sp|
                 project = ArchitectProject.new(space: sp)
-                result = project.worktree_remove(iteration, lane)
+                result = project.worktree_remove(iteration, lane, force: force)
                 terminal.say "Removed worktree for #{iteration}/#{lane}"
+                if result[:discarded]
+                  terminal.say "Discarded #{result[:discarded]} uncommitted change(s), --force was given"
+                end
                 if result[:branch_survives]
                   terminal.say "Lane branch '#{result[:branch]}' survives — this is not a reset; " \
                     "re-provisioning re-points or refuses it, it does not start it over."
@@ -861,11 +873,12 @@ module Space::Architect
 
         class List < BaseCommand
           desc "List active architect worktrees"
+          argument :space, required: false, desc: "Space identifier (default: $PWD)"
 
-          def call(**opts)
+          def call(space: nil, **opts)
             setup_terminal(**opts.slice(:color, :colors))
             handle_errors do
-              render(store.find) do |sp|
+              render(store.find(space)) do |sp|
                 project = ArchitectProject.new(space: sp)
                 worktrees = project.worktree_list
                 if worktrees.empty?
