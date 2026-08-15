@@ -161,7 +161,7 @@ architect worktree remove dry-cli-port lane-a
 |---------|-------------|
 | `worktree add REPO ITERATION LANE` | Create a worktree at `build/<id>-<lane>/wt` and record the lane in `space.yaml`. Idempotent — re-adding a lane reuses the existing worktree/branch and merges the new options in place. |
 | `worktree list` | List active architect worktree directories. |
-| `worktree remove ITERATION LANE` | Remove the lane worktree. |
+| `worktree remove ITERATION LANE [SPACE]` | Remove the lane worktree. Refuses if the lane worktree holds uncommitted work — untracked files included; `--force` overrides and discards it. |
 
 `worktree add` options:
 
@@ -240,7 +240,7 @@ The lane's working-tree commit takes the shared commit-message options (`-m`/`--
 
 ### `architect integrate ITERATION [SPACE]`
 
-Integrate the architect-supplied set of passing lanes in order, running `merge` for each and stopping on the first conflict. The target is the stable `project/<slug>` branch (slug derived from `space.title`) shared across all iterations — `main` is never touched per-iteration. Calling `integrate` again with a new `--lanes` set appends to the same `project/<slug>` branch (used by the parallel + fast-follow pattern to stack a fast-follow lane onto the integrated tip). Pass `--teardown` to remove lane worktrees and delete per-lane `lane/<id>-<lane>` branches after merging; it never deletes the `project/<slug>` branch.
+Integrate the architect-supplied set of passing lanes in order, running `merge` for each and stopping on the first conflict. The target is the stable `project/<slug>` branch (slug derived from `space.title`) shared across all iterations — `main` is never touched per-iteration. Calling `integrate` again with a new `--lanes` set appends to the same `project/<slug>` branch (used by the parallel + fast-follow pattern to stack a fast-follow lane onto the integrated tip). Pass `--teardown` to remove lane worktrees and delete per-lane `lane/<id>-<lane>` branches after merging; it never deletes the `project/<slug>` branch. Teardown refuses per lane whose worktree still holds uncommitted work — untracked files included; `--force` overrides and discards it. The merge path itself is unaffected, because `integrate` commits each lane's work before tearing it down.
 
 ```sh
 architect integrate my-feature --lanes lane-a,lane-b
@@ -250,7 +250,7 @@ architect integrate my-feature --lanes lane-a,lane-b --teardown
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--lanes=NAMES` | (required) | Comma-separated list of passing lane names (the architect decides the set). |
-| `--teardown` | `false` | Remove worktrees and delete per-lane branches after merge. |
+| `--teardown` | `false` | Remove worktrees and delete per-lane branches after merge. Refuses per lane holding uncommitted work; `--force` overrides. |
 
 Plus the shared commit-message options (`-m`/`--message`, `--message-from`), applied to each lane's working-tree commit.
 
