@@ -5,6 +5,89 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.0] - 2026-08-14
+
+Three iterations of the Architect Loop run against this repo's own tooling, each
+frozen before dispatch and judged by a separate session against criteria written
+before results existed. Major because three destructive verbs gain a refusal they
+did not have, and `provision`'s per-lane return changes shape — see the
+**BREAKING** items under Changed.
+
+Every defect closed here is the same animal: a **confident, wrong artifact**. An
+operation that destroys a completed builder run and exits 0 reporting success. A
+value the tool resolves correctly and then declines to use. A lane denied the tool
+it needed, which does not crash and instead files a well-formatted, dataless
+report. The through-line is that none of them announced itself — which is why the
+fixes are as much about making the resolved value *visible* as about resolving it.
+Suite: 1297 → 1344 runs, 5148 → 5373 assertions, green throughout.
+
+### Added
+
+- **`--allowed-tools` / `--append-allowed-tools` on `architect dispatch`, and
+  `allowed_tools:` / `append_allowed_tools:` on the frozen lane declaration
+  (#89).** `ClaudeCodeHarness::ALLOWED_TOOLS` was a defaulted keyword that
+  `Harness.for` never accepted and no caller could pass, so no dispatched lane
+  could be granted an MCP tool. Because `claude -p` **denies** an unlisted tool
+  rather than prompting, the lane did not fail — it reasoned its way to "I was
+  unable to query the datasource" and wrote a plausible empty report. Replace and
+  append compose as one rule regardless of which surface supplied them
+  (`ClaudeCodeHarness.resolve_tools`); the CLI flag wins over the lane key **on
+  the same axis**, so a lane's `allowed_tools:` still supplies the base a
+  `--append-allowed-tools` flag appends to. The yaml half lives in the frozen lane
+  declaration so a grant is reviewable and judged like every other lane boundary
+  rather than buried in a shell invocation, and it survives worktree
+  re-materialization by the same mechanism `touch_set` already uses.
+- **The resolved grant is recorded and surfaced.** Stamped onto the lane beside
+  `harness`/`model`/`effort`, printed at dispatch with its provenance (which
+  surface won), and shown in `architect status`'s lane line when it diverges from
+  the default. A denial now traces back to a grant a human can read. An MCP
+  *reachability* probe is deliberately not in this release: there is no MCP
+  modelling anywhere in the codebase, and a prober is a subsystem, not a rider on
+  a plumbing fix.
+
+### Changed
+
+- **BREAKING — `architect worktree remove`, `architect integrate --teardown`, and
+  `architect provision --base` refuse to discard a lane worktree's uncommitted
+  work.** The existing safety checks asked whether work had been *committed*, in a
+  system whose hard rule 7 guarantees lane work is **never** committed — so all
+  three destroyed completed builder runs and exited 0 reporting success. One
+  predicate (`dirty_file_count`, untracked files included) now guards all three
+  sites. `--force` overrides and discards, restoring the old behavior exactly. A
+  script that tore down dirty lanes will now exit non-zero.
+- **BREAKING — the multi-lane verbs decide their refusal before mutating
+  anything.** `integrate --teardown` and `provision --base` pre-flight the whole
+  declared lane set (`refuse_teardown_if_dirty!`, `refuse_repoint_if_dirty!`), so a
+  dirty lane discovered late no longer leaves earlier lanes already destroyed. The
+  refusal names every offending lane at once instead of failing on the first.
+- **BREAKING — `provision`'s per-lane return is now `outcome:`**
+  (`:created` / `:unchanged` / `:repointed`) plus `discarded:`, replacing the
+  boolean `created:`. The boolean could not express the re-point path that #88's
+  fix introduces.
+- **`worktree add`, `worktree list`, and `worktree remove` accept an optional
+  trailing `SPACE` argument**, like every other space-scoped verb. `worktree
+  remove` previously had no way to name its space and resolved from `$PWD` — a
+  destructive verb that could fire against the wrong space entirely.
+- **Long-running lane guidance in `skill/architect/dispatch.md` (#85).** The lane
+  template's no-busy-wait clause beat every attempt to hold a 30–70 minute detached
+  process open, killing exactly the lanes it was least safe to kill.
+
+### Fixed
+
+- **`architect provision --base` was resolved and then discarded on the re-attach
+  path (#88).** `worktree_add` computed `base_sha` from `--base`, ignored it when
+  the lane branch already existed, and recorded it anyway — so `space.yaml` claimed
+  a base the worktree was never pointed at. An operator-supplied `--base` is now
+  enforced (re-point, or refuse when that would discard work); an internal
+  re-materialization still reattaches at whatever is there, never refusing and never
+  moving a branch nobody asked to move.
+- **`architect rehearse` refused every cross-repo iteration (#90).** It resolved one
+  repo for the whole iteration and raised when the drafted lanes named more than
+  one, even though `execute_gates` could already resolve a run dir per gate. Gates
+  carrying their own `cwd` now rehearse in their own declared directory regardless
+  of how many repos the iteration spans; the refusal survives only for gates that
+  genuinely need a default, and it names them.
+
 ## [6.0.0] - 2026-08-03
 
 Twelve iterations of the Architect Loop run against this repo's own tooling, each
