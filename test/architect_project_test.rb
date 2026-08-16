@@ -2161,6 +2161,211 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # ── I01: rehearsal transcript + execution dedup ─────────────────────────────
+
+  # AC1(behavior 1): every non-EMPTY rehearsal writes a full transcript under
+  # build/rehearse/, and the result names it — complete stdout, the RED
+  # marker, and the failing gate's reason all present, not truncated.
+  def test_rehearse_writes_a_complete_transcript
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = <<~YAML
+      - id: noisy-gate
+        ac: AC1
+        cmd: "seq 1 50"
+        expect:
+          exit_code: 0
+      - id: red-gate
+        ac: AC2
+        cmd: sh -c 'exit 1'
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+
+    assert result[:transcript], "rehearse must return the transcript path"
+    assert_match %r{build/rehearse/}, result[:transcript].to_s
+    assert_path_exists result[:transcript].to_s
+
+    transcript = File.read(result[:transcript])
+    assert_match(/\bRED\b/, transcript)
+    (1..50).each { |n| assert_match(/^#{n}$/, transcript) }
+    red_gate = result[:gates].find { |g| g[:id] == "red-gate" }
+    assert_match(Regexp.new(Regexp.escape(red_gate[:reason])), transcript)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC1: an EMPTY rehearsal (no gates drafted) writes no transcript file.
+  def test_rehearse_writes_no_transcript_when_empty
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    result = project.rehearse("my-slice")
+
+    assert result[:empty]
+    assert_nil result[:transcript]
+    refute_path_exists File.join(dir, "build", "rehearse")
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: gates sharing an identical (cmd, resolved dir) pair execute once —
+  # proven behaviorally via a side-effecting command (append to a counter
+  # file) rather than by asserting on an internal call count.
+  def test_rehearse_dedups_identical_cmd_and_dir
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    counter = File.join(dir, "tmp", "dedup-counter")
+    gates_yaml = <<~YAML
+      - id: a
+        ac: AC1
+        cmd: echo x >> #{counter}
+        expect:
+          exit_code: 0
+      - id: b
+        ac: AC1
+        cmd: echo x >> #{counter}
+        timeout: 5
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+
+    assert_equal 1, File.read(counter).lines.size, "identical (cmd, dir) gates must execute once"
+    assert_equal %i[green green], result[:gates].map { |g| g[:rehearsal] }
+    assert_equal ["b"], result[:gates].find { |g| g[:id] == "a" }[:shared_with]
+    assert_equal ["a"], result[:gates].find { |g| g[:id] == "b" }[:shared_with]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: each duplicate is still classified against its own `expect` — a
+  # shared execution does not force a shared verdict.
+  def test_rehearse_dedup_classifies_each_duplicate_against_its_own_expect
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = <<~YAML
+      - id: expects-hi
+        ac: AC1
+        cmd: echo hi
+        expect:
+          stdout_match: "hi"
+      - id: expects-bye
+        ac: AC1
+        cmd: echo hi
+        expect:
+          stdout_match: "bye"
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+    by_id = result[:gates].to_h { |g| [g[:id], g[:rehearsal]] }
+    assert_equal :green, by_id["expects-hi"]
+    assert_equal :red, by_id["expects-bye"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: when duplicates declare different timeouts, the shared execution uses
+  # the largest — a short-timeout duplicate must not truncate a sibling's
+  # longer budget.
+  def test_rehearse_dedup_shared_execution_uses_largest_timeout
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = <<~YAML
+      - id: short-timeout
+        ac: AC1
+        cmd: sleep 2
+        timeout: 1
+        expect:
+          exit_code: 0
+      - id: long-timeout
+        ac: AC1
+        cmd: sleep 2
+        timeout: 10
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice")
+
+    assert_equal %i[green green], result[:gates].map { |g| g[:rehearsal] },
+      "the shared execution must run under the larger of the two declared timeouts, not the shorter one"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC4: dedup is #execute_gates itself, not something bolted onto #rehearse —
+  # so #run_gates (judge time) gets it too.
+  def test_run_gates_dedups_identical_cmd_and_dir
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    counter = File.join(dir, "tmp", "judge-dedup-counter")
+    gates_yaml = <<~YAML
+      - id: a
+        ac: AC1
+        cmd: echo x >> #{counter}
+        expect:
+          exit_code: 0
+      - id: b
+        ac: AC1
+        cmd: echo x >> #{counter}
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+    freeze_for_test!(project, dir, "my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    results = project.run_gates("my-slice", lane: "lane-a")
+
+    assert_equal 1, File.read(counter).lines.size, "identical (cmd, dir) gates must execute once at judge time too"
+    assert_equal [["b"], ["a"]], results.map { |r| r[:shared_with] }
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # ── I09: freeze's rehearsal-stamp precondition (AC7) ───────────────────────
 
   def test_freeze_refuses_without_a_rehearsal_stamp
