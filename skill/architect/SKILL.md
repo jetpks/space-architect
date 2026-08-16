@@ -381,9 +381,13 @@ architect-read.
   that measures nothing; **BROKEN**, a 127 / syntax error / timeout —
   advisory, because a correct RED can look broken (`grep -q x` on a file the
   lane will write exits 2): the tool names the suspicion, you confirm;
-  **EMPTY**, no gates or an untouched placeholder. `--record` emits a
-  paste-able provenance block for the AC preamble. It reports; which GREENs
-  are guards and which are defects stays your call.
+  **EMPTY**, no gates or an untouched placeholder. Every non-EMPTY run writes
+  a full transcript (every gate's command, dir, exit code, verdict, reason,
+  complete stdout+stderr) under `build/rehearse/`, prints its path, and ends
+  with a bounded summary — one line per gate plus a tally — so a rerun is
+  never needed just to re-see output the terminal already trimmed. `--record`
+  emits a paste-able provenance block for the AC preamble. It reports; which
+  GREENs are guards and which are defects stays your call.
 
 Then run `architect freeze <name>`. Freeze requires a fresh rehearsal stamp —
 `rehearse` records one in `space.yaml`, keyed to the gates block's content, so

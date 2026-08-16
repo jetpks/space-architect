@@ -262,17 +262,29 @@ module Space::Architect
 
         private
 
+        # I01: inline output is bounded — one identity line per gate, ≤ 20
+        # lines of tail output — because the full report always lands in the
+        # transcript #render_gate points at. The summary block is emitted last
+        # (after the disclaimer) so a `tail` of stdout captures it whole.
         def render_rehearsal(result)
           if result[:empty]
             reason = result[:placeholder] ? "the scaffold placeholder '#{ArchitectProject::AC1_PLACEHOLDER}' with no active gate" : "no gates drafted yet"
             terminal.say "EMPTY — #{reason}. Nothing to rehearse; the pre-freeze look is still stamped."
-          else
-            terminal.say rehearsal_header(result)
-            result[:gates].each { |g| render_gate(g) }
-            render_scope_asymmetry(result[:scope_asymmetry])
+            terminal.say ""
+            terminal.say discrimination_note
+            return
           end
+
+          terminal.say rehearsal_header(result)
+          result[:gates].each { |g| render_gate(g, result[:transcript]) }
+          render_scope_asymmetry(result[:scope_asymmetry])
           terminal.say ""
-          terminal.say "Discrimination report only — this runs and reports; it never judges whether these gates are good, bad, or ready."
+          terminal.say discrimination_note
+          render_summary(result)
+        end
+
+        def discrimination_note
+          "Discrimination report only — this runs and reports; it never judges whether these gates are good, bad, or ready."
         end
 
         # #90/AC7: with a single defaultable repo, name it as before; a cross-repo
@@ -286,17 +298,45 @@ module Space::Architect
           end
         end
 
-        def render_gate(g)
+        # I01/AC "bounded terminal report": identity (AC label, gate id, verdict,
+        # exit code) always lands on one stdout line, however many lines `cmd`
+        # spans — the command itself is shown as at most its first line,
+        # truncated; the full command lives in the transcript.
+        CMD_LINE_MAX    = 100
+        OUTPUT_LINE_CAP = 20
+
+        def render_gate(g, transcript_path)
           terminal.say ""
-          terminal.say "── #{g[:ac].empty? ? "(gate)" : g[:ac]}: #{g[:cmd]}  (exit #{g[:exit_code].inspect})  [#{g[:rehearsal].to_s.upcase}]"
+          terminal.say "── #{g[:ac].empty? ? "(gate)" : g[:ac]} #{g[:id]}: #{truncated_cmd(g[:cmd])}  (exit #{g[:exit_code].inspect})  [#{g[:rehearsal].to_s.upcase}]"
           terminal.say "   dir: #{terminal.path(g[:dir])}"
           terminal.say "   reason: #{g[:reason]}" unless g[:reason].to_s.empty?
+          if g[:shared_with]&.any?
+            terminal.say "   shared execution with: #{g[:shared_with].join(', ')} (identical cmd+dir, captured once)"
+          end
           if g[:rehearsal] == :broken
             terminal.say "   BROKEN is advisory, not certain — a correct RED can look broken (e.g. a file the lane " \
               "hasn't written yet). Confirm before treating it as a defect."
           end
-          terminal.say g[:stdout].rstrip unless g[:stdout].strip.empty?
-          terminal.say g[:stderr].rstrip unless g[:stderr].strip.empty?
+          render_gate_output(g, transcript_path)
+        end
+
+        def truncated_cmd(cmd)
+          first, *rest = cmd.to_s.each_line.map(&:chomp)
+          clipped = first.length > CMD_LINE_MAX ? "#{first[0, CMD_LINE_MAX]}…" : first
+          rest.any? || clipped != first ? "#{clipped} …" : clipped
+        end
+
+        def render_gate_output(g, transcript_path)
+          combined = [g[:stdout], g[:stderr]].map { |s| s.to_s.rstrip }.reject(&:empty?).join("\n")
+          return if combined.empty?
+
+          lines = combined.lines(chomp: true)
+          if lines.size > OUTPUT_LINE_CAP
+            terminal.say lines.last(OUTPUT_LINE_CAP).join("\n")
+            terminal.say "   … #{lines.size - OUTPUT_LINE_CAP} more line(s) elided — full output in #{terminal.path(transcript_path)}"
+          else
+            terminal.say lines.join("\n")
+          end
         end
 
         # I12/AC3-AC4: reports scope asymmetry only — never affects RED/GREEN/
@@ -323,6 +363,22 @@ module Space::Architect
           terminal.say ""
           terminal.say "Not analyzed (#{report[:not_analyzable].size} grep invocation(s)) — counted, not silently skipped:"
           report[:not_analyzable].each { |na| terminal.say "   #{na[:id]}: #{na[:reason]}" }
+        end
+
+        # I01: always-on, positioned last so a `tail` of stdout captures it
+        # whole — one line per gate (AC label, gate id, verdict; reason
+        # appended for RED/BROKEN), a tally by verdict, and the transcript path.
+        def render_summary(result)
+          terminal.say ""
+          terminal.say "Summary:"
+          result[:gates].each do |g|
+            line = "  #{g[:ac].empty? ? "(gate)" : g[:ac]} #{g[:id]} [#{g[:rehearsal].to_s.upcase}]"
+            line += " — #{g[:reason]}" if %i[red broken].include?(g[:rehearsal]) && !g[:reason].to_s.empty?
+            terminal.say line
+          end
+          tally = result[:gates].group_by { |g| g[:rehearsal] }.transform_values(&:size)
+          terminal.say "  #{%i[green red broken].filter_map { |v| "#{v.to_s.upcase}: #{tally[v]}" if tally[v] }.join(', ')}"
+          terminal.say "  transcript: #{terminal.path(result[:transcript])}"
         end
 
         def render_record(result)

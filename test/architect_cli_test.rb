@@ -2622,6 +2622,149 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # I01: a multi-line command collapses to one identity line (AC label + gate
+  # id + verdict), and noisy inline output is capped with an elision marker
+  # naming the transcript — which holds the full command and full output.
+  def test_rehearse_bounds_multiline_command_and_noisy_output
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        text  = text.sub(
+          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
+          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
+          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
+          "# - name: lane-a            # lane name (required)\n" \
+          "#   repo: my-repo           # target repo under repos/ (required)\n" \
+          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
+          "#     - lib/my_repo/foo.rb\n" \
+          "#     - lib/my_repo/bar.rb\n" \
+          "#     - test/my_repo_test.rb\n```",
+          "```lanes\n- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n```"
+        )
+        gate_yaml = <<~YAML
+          - id: multiline-gate
+            ac: AC1
+            cmd: |-
+              echo line1
+              echo line2
+              echo line3
+            expect:
+              exit_code: 0
+          - id: noisy-gate
+            ac: AC2
+            cmd: printf 'L%02d\\n' $(seq 1 30)
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+
+        out, err = invoke("rehearse", "demo")
+
+        assert_empty err
+
+        identity_line = out.lines.find { |l| l.start_with?("── ") && l.include?("multiline-gate") }
+        assert identity_line, "expected one identity line naming the multi-line-command gate"
+        assert_match(/AC1 multiline-gate:.*echo line1/, identity_line)
+        assert_match(/\[GREEN\]/, identity_line)
+        refute_includes out, "echo line2", "the inline command must be at most its first line"
+        refute_includes out, "echo line3"
+
+        refute_match(/^L05$/, out, "capped inline output must elide the head, keeping only the tail")
+        assert_match(/^L30$/, out)
+        assert_match(/more line\(s\) elided/, out)
+        assert_match(%r{build/rehearse/}, out)
+
+        transcripts = Dir.glob(File.join(space_path, "build", "rehearse", "*.md"))
+        assert_equal 1, transcripts.size
+        transcript = File.read(transcripts.first)
+        assert_match(/echo line1\necho line2\necho line3/, transcript, "the full multi-line command, tail included, lives in the transcript")
+        (1..30).each { |n| assert_match(/^L#{format('%02d', n)}$/, transcript) }
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # I01: the always-on summary — one line per gate (AC label, gate id,
+  # verdict; reason for RED), a tally, and the transcript path — is the last
+  # thing printed, so a `tail` of stdout captures the whole run's outcome.
+  def test_rehearse_summary_lists_every_gate_and_is_positioned_last
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      invoke("space", "init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        text  = text.sub(
+          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
+          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
+          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
+          "# - name: lane-a            # lane name (required)\n" \
+          "#   repo: my-repo           # target repo under repos/ (required)\n" \
+          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
+          "#     - lib/my_repo/foo.rb\n" \
+          "#     - lib/my_repo/bar.rb\n" \
+          "#     - test/my_repo_test.rb\n```",
+          "```lanes\n- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n```"
+        )
+        gate_yaml = <<~YAML
+          - id: green-gate
+            ac: AC1
+            cmd: echo ok
+            expect:
+              exit_code: 0
+          - id: red-gate
+            ac: AC2
+            cmd: sh -c 'exit 1'
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+
+        out, err = invoke("rehearse", "demo")
+
+        assert_empty err
+        summary_index = out.index("Summary:")
+        assert summary_index, "expected an always-on Summary block"
+        summary = out[summary_index..]
+
+        assert_match(/AC1 green-gate \[GREEN\]/, summary)
+        assert_match(/AC2 red-gate \[RED\] — /, summary, "the RED gate's reason is appended in the summary")
+        assert_match(/GREEN: 1/, summary)
+        assert_match(/RED: 1/, summary)
+        assert_match(%r{transcript: .*build/rehearse/}, summary)
+
+        tail_lines = out.lines.last(25).join
+        assert_match(/green-gate/, tail_lines)
+        assert_match(/red-gate/, tail_lines)
+        assert_match(%r{build/rehearse/}, tail_lines)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   def test_rehearse_reports_empty_on_untouched_scaffold
     setup = temp_env
     env   = setup.fetch(:env)
@@ -2743,7 +2886,7 @@ class ArchitectCLITest < Space::ArchitectTest
         refute_match(/Cannot (resolve|default)/, out, "must not refuse for having two repos declared")
         assert_match(%r{dir:.*repos/repo-a}, out)
         assert_match(%r{dir:.*repos/repo-b}, out)
-        assert_equal 2, out.scan(/\[GREEN\]/).length
+        assert_equal 2, out.scan(/^── .*\[GREEN\]/).length
       end
     end
   ensure
