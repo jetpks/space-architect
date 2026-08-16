@@ -22,7 +22,7 @@ gem "hanami-controller", "2.3.2"
 gem "hanami-router", "2.3.1"
 
 # Async server
-gem "falcon", "0.55.5"
+gem "falcon", "0.57.0"
 
 # Async job queue (web side enqueues, worker process dequeues)
 gem "async-job", "0.11.1"
