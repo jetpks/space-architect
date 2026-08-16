@@ -19,7 +19,7 @@ gem "omniauth-github"
 gem "hanami", "2.3.2"
 gem "hanami-db", "2.3.0"
 gem "hanami-controller", "2.3.2"
-gem "hanami-router", "2.3.1"
+gem "hanami-router", "3.0.0"
 
 # Async server
 gem "falcon", "0.55.5"
