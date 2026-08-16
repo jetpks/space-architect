@@ -263,7 +263,23 @@ REASON` as the recorded escape valve. The stamp records that the architect
 looked, never that gates passed: an all-RED and an all-GREEN run stamp
 identically, which is what keeps the CLI out of the judging seat. Rehearsal
 moves the authoring-time check earlier; it licenses no change after the freeze
-(R2). A companion authoring rule, from the same verdict lineage: a
+(R2).
+
+Rehearsal earned a second fix once it was in daily use: the report went to
+stdout only, unbounded, so every re-view of a run — a tail window, a grep
+filter, a verdict count — re-executed the whole gate suite. Every non-EMPTY
+rehearsal now writes its complete report (each gate's command, dir, exit
+code, verdict, reason, full stdout+stderr, scope-asymmetry findings) to a
+file under `build/rehearse/` and prints that path; the terminal report itself
+is bounded — one line per gate identity regardless of how many lines the
+command spans, inline output capped to a tail — and always ends with a
+summary positioned last, so a `tail` of stdout captures the whole outcome
+without a rerun. `execute_gates`, the single instrument both `rehearse` and
+judge-time `gate` call, also dedups gates that share an identical (cmd,
+resolved dir): the shell runs once, each gate still classifies against its
+own `expect`, and the report names the sharing so byte-identical output
+doesn't read as a copy-paste bug. A companion authoring rule, from the same
+verdict lineage: a
 presence-grep gate on prose is a tripwire, never the proof — write its
 criterion to say which.
 

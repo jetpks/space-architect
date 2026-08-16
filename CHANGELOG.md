@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`architect rehearse` writes a durable transcript and prints a bounded
+  summary.** Previously the CLI wrote an unbounded report to stdout only, so
+  every re-view of a run — a tail window, a grep filter, a verdict count —
+  re-ran the whole gate suite. Every non-EMPTY rehearsal now writes its full
+  report (each gate's command, dir, exit code, verdict, reason, complete
+  stdout+stderr, and scope-asymmetry findings) to a uniquely named file under
+  `build/rehearse/` and prints that path; the terminal report itself is now
+  bounded — one line per gate carrying its AC label, gate id, verdict, and
+  exit code regardless of how many lines the command spans, inline output
+  capped to the last 20 lines with an elision marker naming the transcript —
+  and always ends with a summary block (one line per gate, a tally by
+  verdict, and the transcript path) positioned last, so a `tail` of stdout
+  captures the whole outcome.
+- **`execute_gates` dedups identical executions.** Gates that share an
+  identical `(cmd, resolved dir)` pair now execute once; each is still
+  evaluated against its own `expect` and classified independently, the
+  group's effective timeout is the largest any member declares, and the
+  report/transcript name the shared execution so byte-identical output
+  doesn't read as a copy-paste bug. `run_gates` (judge time) shares this for
+  free — dedup lives in `execute_gates`, the one instrument both call.
+
 ## [7.0.0] - 2026-08-14
 
 Three iterations of the Architect Loop run against this repo's own tooling, each

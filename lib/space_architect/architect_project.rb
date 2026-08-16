@@ -595,16 +595,17 @@ module Space::Architect
       text = path.read
 
       gates = parse_gates(text)
-      repo, base_dir, gate_results, scope_report =
+      repo, base_dir, gate_results, scope_report, transcript =
         if gates.empty?
-          [nil, nil, [], nil]
+          [nil, nil, [], nil, nil]
         else
           r   = resolve_rehearsal_repo(iteration, text, gates)
           dir = r ? space.path.join("repos", r) : nil
           raise Space::Core::Error, "directory does not exist: #{dir}" if dir && !dir.exist?
           results = execute_gates(gates, base_dir: dir, lane: nil, repo_root: nil)
                     .map { |g| g.merge(rehearsal: classify_rehearsal(g)) }
-          [r, dir, results, scope_asymmetry_report(results, text)]
+          scope = scope_asymmetry_report(results, text)
+          [r, dir, results, scope, write_rehearsal_transcript(entry, r, dir, results, scope, now)]
         end
 
       digest = gates_digest(text)
@@ -617,7 +618,8 @@ module Space::Architect
       end
 
       { iteration: iteration, repo: repo, base_dir: base_dir, gates: gate_results,
-        empty: gates.empty?, placeholder: untouched_ac_placeholder?(text), scope_asymmetry: scope_report }
+        empty: gates.empty?, placeholder: untouched_ac_placeholder?(text), scope_asymmetry: scope_report,
+        transcript: transcript }
     end
 
     # Emit grounding reads for the architect's SessionStart hook.
@@ -1252,28 +1254,35 @@ module Space::Architect
     # same shell (capture_with_timeout's Process.spawn), same GateEvaluator,
     # same timeout handling (I09/AC3). repo_root/lane are nil outside a lane
     # context (rehearsal never has one — it always runs in the repo checkout).
+    #
+    # I01: gates sharing an identical (resolved cmd, resolved dir) pair execute
+    # once; the shared capture is fanned back out to every member, each still
+    # evaluated against its own `expect` and classified independently. A
+    # group's effective timeout is the largest any member declares, so no
+    # duplicate is cut short by another's shorter budget.
     def execute_gates(gates, base_dir:, lane:, repo_root:)
-      gates.map do |gate|
+      resolved = gates.map do |gate|
         g   = gate.transform_keys(&:to_s)
-        dir =
-          if (cwd = g["cwd"])
-            gate_cwd = space.path.join(cwd)
-            if lane && repo_root && (gate_cwd == repo_root || gate_cwd.to_s.start_with?("#{repo_root}/"))
-              base_dir.join(gate_cwd.relative_path_from(repo_root)).cleanpath
-            else
-              gate_cwd
-            end
-          else
-            base_dir
-          end
+        dir = resolve_gate_dir(g, base_dir: base_dir, lane: lane, repo_root: repo_root)
         raise Space::Core::Error, "directory does not exist: #{dir}" unless dir.exist?
+        [g, dir]
+      end
 
-        effective = g["timeout"] || DEFAULT_GATE_TIMEOUT
-        captured = capture_with_timeout(g["cmd"], dir: dir, timeout: effective)
+      groups = resolved.group_by { |g, dir| [g["cmd"], dir.to_s] }
+      captures = groups.transform_values do |members|
+        timeout       = members.map { |g, _| g["timeout"] || DEFAULT_GATE_TIMEOUT }.max
+        sample_g, dir = members.first
+        capture_with_timeout(sample_g["cmd"], dir: dir, timeout: timeout).merge(timeout: timeout)
+      end
+
+      resolved.map do |g, dir|
+        key      = [g["cmd"], dir.to_s]
+        captured = captures[key]
+        siblings = groups[key].map { |gg, _| gg["id"] } - [g["id"]]
 
         if captured[:timed_out]
           status = :fail
-          reason = "timed out after #{effective}s"
+          reason = "timed out after #{captured[:timeout]}s"
         else
           ev     = GateEvaluator.call(stdout: captured[:stdout], exit_code: captured[:exit_code], expect: g["expect"] || {})
           status = ev.pass? ? :pass : :fail
@@ -1282,8 +1291,67 @@ module Space::Architect
 
         { id: g["id"], ac: g["ac"].to_s, cmd: g["cmd"], expect: g["expect"],
           stdout: captured[:stdout], stderr: captured[:stderr], exit_code: captured[:exit_code],
-          dir: dir, status: status, reason: reason, timed_out: captured[:timed_out] }
+          dir: dir, status: status, reason: reason, timed_out: captured[:timed_out],
+          shared_with: siblings }
       end
+    end
+
+    # The directory a single gate executes in: its own `cwd` (remapped into the
+    # lane worktree when it falls under repo_root) or the run's base_dir.
+    def resolve_gate_dir(g, base_dir:, lane:, repo_root:)
+      return base_dir unless (cwd = g["cwd"])
+
+      gate_cwd = space.path.join(cwd)
+      if lane && repo_root && (gate_cwd == repo_root || gate_cwd.to_s.start_with?("#{repo_root}/"))
+        base_dir.join(gate_cwd.relative_path_from(repo_root)).cleanpath
+      else
+        gate_cwd
+      end
+    end
+
+    # I01: the durable, unbounded counterpart to the CLI's bounded terminal
+    # report — one file per non-EMPTY rehearsal under build/rehearse/, holding
+    # every gate's full command, dir, exit code, verdict, reason, and complete
+    # stdout+stderr, plus the scope-asymmetry findings. The CLI prints this
+    # path so a rerun is never needed just to see output the terminal trimmed.
+    def write_rehearsal_transcript(entry, repo, base_dir, gate_results, scope_report, now)
+      dir  = space.path.join("build", "rehearse")
+      FileUtils.mkdir_p(dir)
+      path = dir.join("#{iteration_id(entry)}-#{now.strftime('%Y%m%dT%H%M%S.%6N')}.md")
+
+      lines = ["# Rehearsal transcript — #{entry['name']} — #{now.iso8601}"]
+      lines << (repo ? "Repo: #{repo} (#{base_dir})" : "Each gate ran in its own declared cwd")
+
+      gate_results.each do |g|
+        lines << ""
+        lines << "## #{g[:ac].empty? ? "(gate)" : g[:ac]} #{g[:id]} — #{g[:rehearsal].to_s.upcase} (exit #{g[:exit_code].inspect})"
+        lines << "cmd: #{g[:cmd]}"
+        lines << "dir: #{g[:dir]}"
+        lines << "reason: #{g[:reason]}" unless g[:reason].to_s.empty?
+        lines << "shared execution with: #{g[:shared_with].join(', ')} (identical cmd+dir, captured once)" if g[:shared_with]&.any?
+        lines << "--- stdout ---"
+        lines << g[:stdout].to_s
+        lines << "--- stderr ---"
+        lines << g[:stderr].to_s
+      end
+
+      if scope_report && (scope_report[:findings].any? || scope_report[:not_analyzable].any?)
+        lines << ""
+        lines << "## Scope-asymmetry check (grep-family gates only)"
+        scope_report[:findings].each do |f|
+          lines << "── #{f[:id]} (#{f[:repo]}): pattern #{f[:pattern].inspect} searched #{f[:paths].join(', ')}"
+          if f[:outside_lanes].any?
+            lines << "OUTSIDE ANY LANE'S TOUCH SET — no lane may legally fix these:"
+            f[:outside_lanes].each { |file| lines << "  #{file}" }
+          end
+          lines << "also matches (within a declared lane's touch set): #{f[:within_lanes].join(', ')}" if f[:within_lanes].any?
+          lines << "0 files elsewhere match" if f[:outside_lanes].empty? && f[:within_lanes].empty?
+        end
+        scope_report[:not_analyzable].each { |na| lines << "not analyzed — #{na[:id]}: #{na[:reason]}" }
+      end
+
+      path.write("#{lines.join("\n")}\n")
+      path
     end
 
     # I09/AC4, #90/AC5-AC6: resolve the repo to default for gates that declare no
