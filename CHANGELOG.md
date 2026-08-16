@@ -5,7 +5,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [7.1.0] - 2026-08-16
+
+One iteration of the Architect Loop (I01, space
+20260816-architect-rehearse-friction) closing the rehearse rerun tax: a heavy
+rehearsal now yields its verdict vector, per-gate reasons, and full raw output
+from one execution plus file reads.
 
 ### Added
 
@@ -29,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report/transcript name the shared execution so byte-identical output
   doesn't read as a copy-paste bug. `run_gates` (judge time) shares this for
   free — dedup lives in `execute_gates`, the one instrument both call.
+- **docs/RELEASING.md.** The release process, retraced from the v7.0.0
+  landing: preconditions, the release-prep commit, the human-run PR/merge and
+  signed-tag steps, what the tag-push automation covers, and local-install
+  verification (including the stale-binstub PATH hazard).
 
 ## [7.0.0] - 2026-08-14
 
