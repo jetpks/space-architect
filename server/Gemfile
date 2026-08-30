@@ -27,7 +27,7 @@ gem "falcon", "0.55.5"
 # Async job queue (web side enqueues, worker process dequeues)
 gem "async-job", "0.11.1"
 gem "async-job-processor-redis", "0.3.1"
-gem "async-redis", "0.13.1"
+gem "async-redis", "0.14.0"
 
 # File attachments
 gem "shrine", "3.8.0"
