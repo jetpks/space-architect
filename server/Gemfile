@@ -41,7 +41,7 @@ gem "pg", "1.6.3"
 # dry-rb suite
 gem "dry-types", "1.9.1"
 gem "dry-validation", "1.11.1"
-gem "dry-monads", "1.10.0"
+gem "dry-monads", "1.11.0"
 gem "dry-operation", ">= 1.0.1"
 
 # CLI + build
