@@ -24,7 +24,7 @@ Gem::Specification.new do |spec|
   spec.executables = ["architect"]
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "space-cadet", "~> 9.0"
+  spec.add_dependency "space-cadet", "~> 9.1"
   spec.add_dependency "async-http", "~> 0.95"
   spec.add_dependency "async-process", "~> 1.4"
   spec.add_dependency "protocol-http", "~> 0.62"
