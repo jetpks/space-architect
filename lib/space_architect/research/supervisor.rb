@@ -1,13 +1,18 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "pathname"
 require "time"
 
 module Space::Architect
   module Research
     class Supervisor
-      DEFAULT_MODEL     = Harness::CLAUDE_DEFAULT_MODEL
+      DEFAULT_MODEL     = Harness::DEFAULT_MODEL
       DEFAULT_MAX_TURNS = 40
+
+      # The vendored builder-guard extension ships in the gem next to this file's
+      # sibling pi/ dir — copied per-run and injected with the harness.
+      VENDORED_GUARD = Pathname.new(__dir__).join("../pi/builder-guard.ts")
 
       def initialize(space:, bin: nil)
         @space    = space
@@ -15,8 +20,8 @@ module Space::Architect
         @registry = Registry.new(space.path.join("build", "research", "registry.yaml"))
       end
 
-      # Dispatch each prompt file as a detached read-only claude -p child.
-      # Returns array of Run objects (non-blocking).
+      # Dispatch each prompt file as a detached pi child. Returns array of Run
+      # objects (non-blocking).
       def dispatch(prompts, model: DEFAULT_MODEL, max_turns: DEFAULT_MAX_TURNS)
         prompts.map { |path| dispatch_one(Pathname.new(path), model: model, max_turns: max_turns) }
       end
@@ -54,12 +59,19 @@ module Space::Architect
 
         FileUtils.cp(path.to_s, prompt_path.to_s)
 
-        harness = Harness::ClaudeCodeHarness.new(
-          model:            model,
-          max_turns:        max_turns,
-          bin:              @bin,
-          allowed_tools:    READONLY_TOOLS,
-          disallowed_tools: ""
+        # Vendor the guard into the run dir (idempotent overwrite) and inject it via
+        # the harness — research runs get the same deny-only builder guard.
+        guard_path = dir.join("builder-guard.ts")
+        FileUtils.cp(VENDORED_GUARD, guard_path)
+
+        # config_dir: is pi's --session-dir — research sessions land under
+        # build/research/<id>/ instead of ~/.pi/agent/sessions/.
+        harness = Harness::PiHarness.new(
+          model:      model,
+          max_turns:  max_turns,
+          bin:        @bin,
+          config_dir: dir,
+          guard_path: guard_path
         )
 
         pid = harness.run_detached(
@@ -87,13 +99,21 @@ module Space::Architect
         File.basename(path.to_s).sub(/\.prompt\.md\z/, "").sub(/\.md\z/, "")
       end
 
+      # pi has no terminal "result" event: the run's outcome is the LAST assistant
+      # message's stopReason ("stop" finished normally; "error"/"aborted" failed —
+      # pi's StopReason vocabulary). Without one, a live pid is still running and a
+      # dead pid died without finishing.
       def classify(run)
         content = File.exist?(run.run_log_path.to_s) ? File.read(run.run_log_path.to_s) : ""
         events  = content.lines.filter_map { |l| JSON.parse(l.chomp) rescue nil }
-        terminal = events.find { |e| e["type"] == "result" }
+        stop_reason = events
+          .select { |e| e.is_a?(Hash) && e["type"] == "message_end" &&
+                         e["message"].is_a?(Hash) && e["message"]["role"] == "assistant" }
+          .last
+          &.dig("message", "stopReason")
 
-        return :complete if terminal && !terminal["is_error"]
-        return :failed   if terminal && terminal["is_error"]
+        return :complete if stop_reason == "stop"
+        return :failed   if %w[error aborted].include?(stop_reason)
 
         pid_alive = begin; Process.kill(0, run.pid); true; rescue Errno::ESRCH, Errno::EPERM; false; end
         pid_alive ? :running : :failed

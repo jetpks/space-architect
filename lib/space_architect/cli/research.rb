@@ -8,7 +8,7 @@ module Space::Architect
           desc "Dispatch detached read-only research lanes (one per prompt file)"
           argument :prompts, type: :array, required: true,
             desc: "Prompt file(s) to dispatch (space-separated paths)"
-          option :model,     default: nil, desc: "Researcher model override (default: the reference default claude-sonnet-4-6)"
+          option :model,     default: nil, desc: "Researcher model override (default: the pi default #{Space::Architect::Harness::DEFAULT_MODEL})"
           option :max_turns, default: "40", desc: "Max turns per researcher"
 
           def call(prompts:, model: nil, max_turns: "40", **opts)

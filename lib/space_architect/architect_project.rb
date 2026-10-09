@@ -241,13 +241,6 @@ module Space::Architect
           lanes = s["lanes"] || []
           declared.each do |d|
             fields = { "name" => d["name"], "repo" => d["repo"], "touch_set" => Array(d["touch"]) }
-            # #89/AC3-AC4: the frozen lane's own tool grant, reviewable like every other
-            # boundary. Declared-only, like touch_set — worktree_add never touches these
-            # keys, so a re-materialize preserves them without threading them through
-            # recorded_lane_fields (unlike harness/model, which worktree_add resolves and
-            # overwrites on every call).
-            fields["allowed_tools"]        = d["allowed_tools"]        if d["allowed_tools"]
-            fields["append_allowed_tools"] = d["append_allowed_tools"] if d["append_allowed_tools"]
             existing = lanes.find { |l| l["name"] == d["name"] }
             existing ? existing.merge!(fields) : lanes << fields
           end
@@ -841,7 +834,7 @@ module Space::Architect
         variants: variant_lanes.map do |l|
           {
             name:               l["name"],
-            harness:            l["harness"] || "claude-code",
+            harness:            l["harness"] || "pi",
             model:              l["model"],
             effort:             l["effort"],
             base_sha:           l["base_sha"],
@@ -940,9 +933,8 @@ module Space::Architect
       end
     end
 
-    def dispatch(iteration, lane, model: nil, max_turns: 200,
-                 claude_bin: nil, harness: nil, opencode_bin: nil, effort: nil,
-                 allowed_tools: nil, append_allowed_tools: nil, force: false, quiet: false,
+    def dispatch(iteration, lane, model: nil, max_turns: 200, bin: nil, harness: nil, effort: nil,
+                 force: false, quiet: false,
                  detach: false, push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
                  push_client: nil, timeout: nil, prompt: nil, now: Time.now)
       raise Space::Core::Error, "Specify --push-host or --push-url, not both" if push_host && push_url
@@ -959,12 +951,6 @@ module Space::Architect
 
       resolved_harness, resolved_model, resolved_effort =
         resolve_dispatch_harness(lane_entry, model: model, harness: harness, effort: effort, force: force, err: err)
-      resolved_allowed_tools, replace_tools, append_tools, tools_provenance =
-        resolve_allowed_tools(lane_entry, allowed_tools: allowed_tools, append_allowed_tools: append_allowed_tools)
-      err.puts(tools_provenance) if replace_tools || append_tools
-
-      raise Space::Core::Error, "--push-host is only supported with the claude-code harness" \
-        if push_host && resolved_harness != "claude-code"
 
       id = iteration_id(entry)
       wt_path = space.path.join(lane_entry["worktree"] || "build/#{id}-#{lane}/wt")
@@ -979,31 +965,31 @@ module Space::Architect
       # and the CLI owns the canonical copy — byte-for-byte, like variant_add.
       copy_and_validate_prompt!(prompt, prompt_path)
 
-      bin = resolved_harness == "claude-code" ? claude_bin : opencode_bin
+      # Vendor the builder guard into the lane's build dir (idempotent overwrite) and
+      # inject it via -e on every dispatch — blocking and detached alike. The guard
+      # denies git-write and bash-unparseable commands before evaluation; the builder
+      # itself never needs to remember to load it.
+      guard_path = build_dir.join("builder-guard.ts")
+      FileUtils.cp(vendored_guard_path, guard_path)
+
       harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns, bin: bin,
                                                   config_dir: build_dir, effort: resolved_effort,
-                                                  allowed_tools: resolved_allowed_tools, force: force, err: err)
+                                                  guard_path: guard_path, force: force, err: err)
 
-      # Stamp launch time and the resolved harness/model/effort/allowed_tools onto the
+      # Stamp launch time and the resolved harness/model/effort onto the
       # lane entry: after every preflight validation has passed (a dispatch that raises
       # above records nothing) and before the blocking run or a detached dispatch
       # returns. A re-dispatch overwrites the prior values, so `architect status`
-      # always reads what actually ran on the last dispatch. #89/AC8: the resolved
-      # tool grant is recorded the same way, so a denial traces back to a grant a
-      # human can read — replace_tools/append_tools are the pre-composition components
-      # (not the harness's expanded ClaudeCodeHarness.resolve_tools result), so a later
-      # bare re-dispatch re-resolves from the same components instead of compounding.
+      # always reads what actually ran on the last dispatch.
       update_architect_block do |b|
         (b["iterations"] || []).each do |s|
           next unless s["name"] == iteration
           (s["lanes"] || []).each do |l|
             next unless l["name"] == lane
-            l["dispatched_at"]         = now.iso8601
-            l["harness"]               = resolved_harness
-            l["model"]                 = resolved_model
-            l["effort"]                = resolved_effort if resolved_effort
-            l["allowed_tools"]         = replace_tools    if replace_tools
-            l["append_allowed_tools"]  = append_tools     if append_tools
+            l["dispatched_at"] = now.iso8601
+            l["harness"]       = resolved_harness
+            l["model"]         = resolved_model
+            l["effort"]        = resolved_effort if resolved_effort
           end
         end
         b
@@ -1028,95 +1014,29 @@ module Space::Architect
 
         run_kwargs = { prompt_path: prompt_path, run_log_path: run_log_path, chdir: wt_path }
         run_kwargs[:timeout] = timeout if timeout
-        if resolved_harness == "claude-code"
-          run_kwargs[:push_url]    = push_url    if push_url
-          run_kwargs[:push_token]  = push_token  if push_token
-          run_kwargs[:push_client] = push_client if push_client
-          run_kwargs[:err]         = err         if quiet
-        end
+        run_kwargs[:push_url]    = push_url    if push_url
+        run_kwargs[:push_token]  = push_token  if push_token
+        run_kwargs[:push_client] = push_client if push_client
+        run_kwargs[:err]         = err         if quiet
         exit_code = harness_obj.run(**run_kwargs)
 
         result = { exit_code: exit_code, run_log: run_log_path, report: report_path, worktree: wt_path }
         result[:prompt_copied]  = prompt_path    if prompt
-        result[:timed_out]      = true           if exit_code == Harness::ClaudeCodeHarness::TIMEOUT_EXIT_CODE
+        result[:timed_out]      = true           if exit_code == Harness::PiHarness::TIMEOUT_EXIT_CODE
         result[:created_run_id] = created_run_id if created_run_id
         result[:push_url]       = push_url       if push_url
         result
       end
     end
 
-    # Submit the lane's builder run as a job to the space-server's queue instead of
-    # running it locally: the sandboxed executor mounts the lane worktree + the repo
-    # checkout at their identical host absolute paths (so the worktree's gitdir
-    # pointer resolves) and runs the harness itself — no local run.jsonl, the
-    # transcript lives server-side. jobs_client: is the injectable seam (mirrors
-    # dispatch's run_creator:).
-    def dispatch_as_job(iteration, lane, host:, token:, backend_url:, model: nil, harness: nil,
-                        max_turns: 200, effort: nil, allowed_tools: nil, append_allowed_tools: nil,
-                        force: false, quiet: false,
-                        job_model: nil, api_key_ref: nil, prompt: nil, jobs_client: nil, now: Time.now)
-      err = quiet ? File.open(File::NULL, "w") : $stderr
-
-      entry = slice_entry(iteration)
-      lane_entry = (entry["lanes"] || []).find { |l| l["name"] == lane }
-      raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless lane_entry
-      lane_entry = ensure_lane_materialized(iteration, lane)
-
-      resolved_harness, resolved_model, resolved_effort =
-        resolve_dispatch_harness(lane_entry, model: model, harness: harness, effort: effort, force: force, err: err)
-      raise Space::Core::Error, "--as-job only supports the claude-code harness (lane '#{lane}' resolves to '#{resolved_harness}')" \
-        unless resolved_harness == "claude-code"
-      raise Space::Core::Error, "--job-model is required with --as-job" unless job_model
-
-      # #89: same replace/append resolution as the local dispatch path — the sandboxed
-      # executor still runs `claude -p` with harness_args server-side.
-      resolved_allowed_tools, replace_tools, append_tools, tools_provenance =
-        resolve_allowed_tools(lane_entry, allowed_tools: allowed_tools, append_allowed_tools: append_allowed_tools)
-      err.puts(tools_provenance) if replace_tools || append_tools
-
-      id = iteration_id(entry)
-      wt_path = space.path.join(lane_entry["worktree"] || "build/#{id}-#{lane}/wt")
-      raise Space::Core::Error, "Worktree directory does not exist: #{wt_path}" unless wt_path.exist?
-
-      build_dir   = space.path.join("build", "#{id}-#{lane}")
-      prompt_path = build_dir.join("prompt.md")
-      copy_and_validate_prompt!(prompt, prompt_path)
-
-      repo_path   = space.path.join("repos", lane_entry["repo"])
-      harness_obj = Harness.for(resolved_harness, model: resolved_model, max_turns: max_turns,
-                                                  effort: resolved_effort, allowed_tools: resolved_allowed_tools,
-                                                  force: force, err: err)
-
-      spec = job_spec(iteration: iteration, lane: lane, wt_path: wt_path, build_dir: build_dir,
-        repo_path: repo_path, prompt_content: prompt_path.read, backend_url: backend_url,
-        job_model: job_model, api_key_ref: api_key_ref, harness_args: harness_obj.builder_args)
-
-      client = jobs_client || JobsClient.new(host, token)
-      job_id = client.create(spec)
-
-      # Dispatch bookkeeping, mirroring the local path's dispatched_at stamp: a
-      # re-dispatch overwrites the prior job_id, so `architect status` always
-      # reflects the last dispatch regardless of mode.
-      update_architect_block do |b|
-        (b["iterations"] || []).each do |s|
-          next unless s["name"] == iteration
-          (s["lanes"] || []).each do |l|
-            next unless l["name"] == lane
-            l["dispatched_at"] = now.iso8601
-            l["job_id"]        = job_id
-          end
-        end
-        b
-      end
-
-      result = { job_id: job_id, spec: spec }
-      result[:prompt_copied] = prompt_path if prompt
-      result
-    end
-
     private
 
     attr_reader :space
+
+    # The vendored builder-guard extension shipped in the gem (lib/space_architect/pi/).
+    def vendored_guard_path
+      Pathname.new(__dir__).join("pi/builder-guard.ts")
+    end
 
     # Compose a commit message. Without a custom message, the canonical default
     # (unchanged). With one, a short canonical prefix keeps the loop's commit
@@ -1685,23 +1605,23 @@ module Space::Architect
     end
 
     # Resolve harness + model by precedence: explicit value > (dispatch only) the
-    # lane's stored value > space.yaml project.harness/project.model > the
-    # per-harness sensible default (model only, keyed on the resolved harness).
-    # Shared by worktree_add and dispatch so both read the same defaults. A stored
-    # model is only honored when its stored harness still matches the resolved
-    # harness — a dispatch-time harness override drops the old harness's stored
-    # model instead of leaking it into the new harness's run.
+    # lane's stored value > space.yaml project.harness/project.model > the pi
+    # default model. Shared by worktree_add and dispatch so both read the same
+    # defaults. A stored model is only honored when its stored harness still matches
+    # the resolved harness — a dispatch-time harness override drops the old harness's
+    # stored model instead of leaking it into the new harness's run. A stored
+    # legacy harness name survives resolution (so a stale space.yaml
+    # surfaces as Harness.for's actionable pi-only error, not a silent default).
     def resolve_harness_model(harness, model, stored_harness: nil, stored_model: nil)
       defaults = project_defaults
-      resolved_harness = (harness || stored_harness || defaults["harness"] || "claude-code").to_s
+      resolved_harness = (harness || stored_harness || defaults["harness"] || "pi").to_s
       stored_model = nil unless stored_harness.nil? || stored_harness.to_s == resolved_harness
-      resolved_model = model || stored_model || defaults["model"] || Harness.default_model_for(resolved_harness)
+      resolved_model = model || stored_model || defaults["model"] || Harness::DEFAULT_MODEL
       [resolved_harness, resolved_model]
     end
 
     # --prompt: the caller authors the lane prompt anywhere (a fresh scratch file) and
-    # the CLI owns the canonical copy — byte-for-byte, like variant_add. Shared by
-    # dispatch and dispatch_as_job so both refuse the same empty/stub prompt.
+    # the CLI owns the canonical copy — byte-for-byte, like variant_add.
     def copy_and_validate_prompt!(prompt, prompt_path)
       if prompt
         src = Pathname.new(prompt)
@@ -1716,8 +1636,8 @@ module Space::Architect
         if prompt_content.empty? || prompt_content == PROMPT_STUB.strip
     end
 
-    # Resolve harness/model/effort for a dispatch (local or --as-job), shared so the
-    # two dispatch paths can never drift on precedence or thinking-level translation.
+    # Resolve harness/model/effort for a dispatch, so every dispatch path reads
+    # precedence and thinking-level translation from one place.
     def resolve_dispatch_harness(lane_entry, model:, harness:, effort:, force:, err:)
       model, suffix_level = Harness.parse_model_suffix(model)
       resolved_harness, resolved_model = resolve_harness_model(harness, model,
@@ -1737,69 +1657,9 @@ module Space::Architect
       [resolved_harness, resolved_model, resolved_effort]
     end
 
-    # #89/AC1-AC5: resolve the claude-code --allowedTools grant for a dispatch (local or
-    # --as-job), shared so both paths resolve precedence identically. The CLI flag beats
-    # the lane's recorded allowed_tools:/append_allowed_tools: (frozen-declaration or a
-    # prior dispatch's stamp) — resolved independently for replace vs. append, so a flag
-    # on one axis and a lane value on the other both apply (Objective A). Meaningless for
-    # opencode/pi (no equivalent grant mechanism) — still resolved/recorded for visibility,
-    # but Harness.for only wires it into the claude-code branch's argv.
-    def resolve_allowed_tools(lane_entry, allowed_tools:, append_allowed_tools:)
-      replace, replace_from =
-        if allowed_tools
-          [allowed_tools, "--allowed-tools flag"]
-        elsif lane_entry["allowed_tools"]
-          [lane_entry["allowed_tools"], "lane's allowed_tools:"]
-        else
-          [nil, "default"]
-        end
-
-      append, append_from =
-        if append_allowed_tools
-          [append_allowed_tools, "--append-allowed-tools flag"]
-        elsif lane_entry["append_allowed_tools"]
-          [lane_entry["append_allowed_tools"], "lane's append_allowed_tools:"]
-        end
-
-      final = Harness::ClaudeCodeHarness.resolve_tools(replace: replace, append: append)
-      provenance = "allowed-tools: #{replace_from}#{append_from ? " + #{append_from}" : ""} → #{final}"
-      [final, replace, append, provenance]
-    end
-
-    # Compose a dispatch --as-job spec per the space-server's job contract: prompt +
-    # workspace.dir (the lane worktree) + environment (deps/network/mounts/env or
-    # secrets) + harness (claude/backend/args) + provenance. mounts are src:dst with
-    # src == dst — the sandboxed executor requires the lane worktree AND the repo
-    # checkout mounted at their identical host absolute paths for the worktree's
-    # gitdir pointer to resolve.
-    def job_spec(iteration:, lane:, wt_path:, build_dir:, repo_path:, prompt_content:, backend_url:,
-                job_model:, api_key_ref:, harness_args:)
-      harness = { "type" => "claude", "backend" => { "base_url" => backend_url }, "args" => harness_args }
-      harness["model"] = job_model if job_model
-      harness["backend"]["api_key_ref"] = api_key_ref if api_key_ref
-
-      environment = {
-        "env"  => api_key_ref ? {} : { "ANTHROPIC_API_KEY" => "unused-for-keyless-backends" },
-        "deps" => ["git"],
-        "permissions" => {
-          "network" => true,
-          "mounts"  => ["#{build_dir}:#{build_dir}", "#{repo_path}:#{repo_path}"]
-        }
-      }
-      environment["secrets"] = [{ "ref" => api_key_ref, "name" => "ANTHROPIC_API_KEY" }] if api_key_ref
-
-      {
-        "prompt"      => prompt_content,
-        "workspace"   => { "dir" => wt_path.to_s },
-        "environment" => environment,
-        "harness"     => harness,
-        "provenance"  => { "space" => Space::Core::Slugger.slug(space.title), "iteration" => iteration, "lane" => lane }
-      }
-    end
-
     def recorded_lane_fields(lane_entry)
       {
-        harness: lane_entry["harness"] || "claude-code",
+        harness: lane_entry["harness"] || "pi",
         model:   lane_entry["model"],
         variant: lane_entry["variant"] || false,
         effort:  lane_entry["effort"]
