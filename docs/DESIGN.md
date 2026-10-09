@@ -12,7 +12,7 @@ fill those roles. Concrete model/CLI pairings are an implementation choice that
 belongs in the README and in per-lane configuration (`architect dispatch
 --model …`, `architect variant add`), never baked into the methodology. Where a
 section below documents the concrete builder interface (§4) it names the
-_reference_ harness (headless `claude -p`) and treats the model id as a
+_reference_ harness (headless `pi -p --mode json`) and treats the model id as a
 configurable placeholder.
 
 Project memory lives in the space's `architecture/` directory (committed to the
@@ -126,7 +126,8 @@ original loop, and they buy more than a model bake-off: you get several
 catch each other's bugs — a defect one variant trips over, another often avoids —
 and give you multiple *perspectives* on a hard problem. On a genuinely tricky
 iteration it can be worth running variants for that alone; the redundancy is the
-point, not just picking a winner. The README documents the reference pairings.
+point, not just picking a winner. Concrete pairings live in per-lane
+configuration and `architect variant add --pairs`.
 
 ### The space as substrate
 
@@ -146,7 +147,8 @@ notes/  tmp/      # scratch + workspace-local temp
 
 Repos are provisioned by **copy-on-write** from an evergreen checkout under the
 configured `src_dir` when one exists (an APFS COW clone — instant), falling back
-to a network clone otherwise; the bundled `src` engine keeps those evergreen
+to a network clone otherwise; the evergreen engine (`repo-tender` since the
+9.0.0 split — the deprecated `src` shim included) keeps those evergreen
 checkouts tended. This is why fanning out a cross-repo project is cheap: each
 lane worktree is a COW slice off a local mirror, not a fresh network fetch.
 
@@ -410,97 +412,93 @@ failure mode (§6) or a current source is a candidate for pruning.**
 
 ---
 
-## 4. The builder interface (reference implementation: the `claude-code` harness)
+## 4. The builder interface (reference implementation: the `pi` harness)
 
 This section documents the **concrete** builder interface. The methodology above
-is model-agnostic; here the reference harness is headless `claude -p` and the
-builder model is a **configurable placeholder** (`<builder-model>`) — the
-`architect dispatch` CLI pins it from the lane entry or its reference default,
-and `--harness` selects an alternate CLI (e.g. `opencode`). Facts the skill
-encodes:
+is model-agnostic; since 8.0.0 the reference (and only) harness is headless
+`pi -p --mode json`, and the builder model is a **configurable placeholder**
+— `architect dispatch` pins it from the lane entry, else `space.yaml`
+`project.model`, else the reference default (`accounts/fireworks/models/glm-5p3-flash`).
+Facts the skill encodes:
 
 - **The model is pinned explicitly**: `--model <builder-model>`. Pin the full id,
   not a floating alias (a bare "latest"/tier tag drifts to whatever ships next);
   an automation must not let a model bump silently change the builder mid-project.
   `architect dispatch --model …` overrides per dispatch, and a lane records its
-  own model at `worktree add`.
-- **Filesystem isolation is layered, not automatic.** By default the reference
-  CLI has no OS sandbox (it's opt-in via settings, off by default), so the
-  first-line controls are the **tool allow/deny lists**
-  (`--allowedTools`/`--disallowedTools`) plus `--permission-mode` — `acceptEdits`
-  lets builders auto-approve writes without prompting, while researchers get a
-  read-only allow list and nothing else (a tool not on the list is denied, not
-  prompted, in `-p` mode). That is the soft default. For real hardware isolation,
-  the `space` toolkit can pack the space — builders and all — into an **OCI
-  container** (`space pack` → `space build` → `space run`, with auth injected at
-  runtime rather than baked into the image), so the whole run executes in a
-  sandbox it can't escape to the host filesystem or network. Use the tool
-  allow/deny lists for the common case; reach for the container when you want the
-  run genuinely fenced. (Neither makes `.git` read-only — "builders never commit"
-  stays enforced by the layers in the commit-guarantee note below and checked in
-  R8.)
-- **Thinking budget** is set per harness — there is no one mechanism, so
+  own model at `worktree add` (a trailing `:<level>` suffix on the lane model
+  doubles as the effort level).
+- **Filesystem isolation is layered, not automatic.** The first-line control is
+  the **vendored builder-guard extension** shipped with every dispatch
+  (`builder-guard.ts`, injected via `pi -e`): it denies git-write subcommands —
+  parsed per command segment (`git -C <path> commit` is caught, `git log
+  --grep=commit` passes) — and `bash -n`-unparseable commands before they run,
+  telling the builder what was denied and what to do instead. Read-only research
+  lanes are read-only by **prompt contract** (the same guard denies the git
+  writes). For real hardware isolation, the `space` toolkit can pack the space —
+  builders and all — into an **OCI container** (`space pack` → `space build` →
+  `space run`, with auth injected at runtime rather than baked into the image),
+  so the whole run executes in a sandbox it can't escape to the host filesystem
+  or network. Use the guard for the common case; reach for the container when
+  you want the run genuinely fenced. (Neither makes `.git` read-only — "builders
+  never commit" stays enforced by the layers in the commit-guarantee note below
+  and checked in R8.)
+- **Thinking budget** is one normalized vocabulary translated for the harness:
   `architect dispatch --effort` (aliases `--thinking`/`--reasoning`) takes one
-  level and translates it to each harness's own flag, clamping levels the
-  harness lacks. The reference `claude-code` harness takes a per-invocation
-  `--effort` flag accepting `low`/`medium`/`high`/`xhigh`/`max`, passed through
-  unclamped; in-prompt escalation keywords (`think` < `think hard` <
-  `think harder` < `ultrathink`) and the `MAX_THINKING_TOKENS` env var still
-  work. Builders default high; researchers stay modest.
+  level (`off` … `max`), validated by the CLI and passed through as pi's
+  `--thinking` — pi clamps further with its own per-model thinking-level map.
+  `--force-effort` skips the CLI's validation and forces the literal level (the
+  binary's rejection is final). In-prompt escalation keywords (`think` < `think
+  hard` < `think harder` < `ultrathink`) still work. Builders default high;
+  researchers stay modest.
 - **Prompt input is stdin** — the lane-prompt is written to
   `build/<id>-<lane>/prompt.md` and fed on stdin, sidestepping shells that mangle
-  quotes in big prompts. The reference CLI has no `@file` and no `-C`/working-dir
-  flag, so per-lane dispatch `cd`s into the worktree.
-- **Telemetry / output**: `--output-format stream-json --verbose` streams JSONL
-  events to a run-log (`build/<id>-<lane>/run.jsonl`) for liveness/stall checks;
-  the builder's deliverable is the raw report it writes to
-  `build/<id>-<lane>/report.md`, and the contract is the `STATUS:` line
+  quotes in big prompts. Per-lane dispatch runs inside the worktree directory.
+- **Telemetry / output**: pi's JSON event stream (`-p --mode json`) is teed to a
+  run-log (`build/<id>-<lane>/run.jsonl`) for liveness/stall checks — dispatch
+  emits one liveness line naming the streamed model once the log's first
+  assistant event lands; the builder's deliverable is the raw report it writes
+  to `build/<id>-<lane>/report.md`, and the contract is the `STATUS:` line
   convention, not a schema. `--max-turns N` caps the agent loop as a backstop.
 - **Session continuity**: dispatch in the lane's worktree and follow up with a
-  headless continue/resume — sessions are scoped per directory, so a bare
-  "continue" is deterministic even with parallel lanes. Same-iteration only.
-- **Web access** is the built-in `WebSearch`/`WebFetch` tools — no extension or
-  key. Builders get them for verify-against-reality API checks; researchers get
-  them as their only outward tools (domain-pinned allow rules in
-  injection-sensitive repos).
-- **`CLAUDE.md`** is the builder's standing context — loaded root-down
-  automatically. The loop's PHASE rules live in the lane-prompt so they version
-  with the skill; repo-specific build/test commands belong in `CLAUDE.md`.
+  headless continue/resume — sessions are scoped per directory (the run's
+  `--session-dir`), so a bare "continue" is deterministic even with parallel
+  lanes. Same-iteration only.
+- **Standing context** is whatever the repo carries root-down (AGENTS.md and
+  peers). The loop's PHASE rules live in the lane-prompt so they version with
+  the skill; repo-specific build/test commands belong in the repo's agent docs.
 - **No hard commit guarantee from the runtime.** With no sandbox to make `.git`
-  read-only, "builders never commit" is enforced in layers: a runtime first line
-  (`--disallowedTools 'Bash(git commit:*)' …`, which a builder can still shell
-  out around via `sh -c`), worktree isolation, and the **authoritative** architect
-  check after the run — `git -C <worktree> log <repo-base>..` must be empty and
-  `git status` must show only declared files. A commit = a tampered worktree →
-  reset and re-dispatch.
+  read-only, "builders never commit" is enforced in layers: the vendored
+  builder-guard (which a builder can still shell out around via indirection),
+  worktree isolation, and the **authoritative** architect check after the run —
+  `git -C <worktree> log <repo-base>..` must be empty and `git status` must show
+  only declared files. A commit = a tampered worktree → reset and re-dispatch.
 
 Canonical dispatch (what `architect dispatch <iteration> <lane>` runs under the
 hood; the CLI is the supported path, this is the manual fallback):
 
 ```bash
-claude -p --model <builder-model> \
-  --permission-mode acceptEdits \
-  --allowedTools 'Read,Edit,Write,Grep,Glob,Bash,WebSearch,WebFetch' \
-  --disallowedTools 'Bash(git commit:*),Bash(git push:*),Bash(git reset:*)' \
-  --output-format stream-json --verbose --max-turns 200 \
+pi -p --mode json --model <builder-model> \
+  --session-dir build/<id>-<lane> --no-approve \
+  -e lib/space_architect/pi/builder-guard.ts \
+  [--thinking <level>] \
   < build/<id>-<lane>/prompt.md \
   > build/<id>-<lane>/run.jsonl 2>&1
 ```
 
-**Billing note (reference implementation, dated).** With the reference
-`claude-code` harness, headless `claude -p` draws on the Agent SDK credit pool on
-your Claude plan — separate from interactive usage limits since June 15 2026 — so
-there are no per-window quotas that die mid-run; unattended overnight loops just
-spend that pool. The architect runs as your interactive session. Other harnesses
-have their own cost model (e.g. a Codex-CLI builder bills against a ChatGPT
-plan's quotas). Treat the specific dates/pools as dated facts (§8).
+**Billing note (reference implementation, dated).** The reference default model
+runs on a Fireworks-backed account pool (`accounts/fireworks/models/…` ids);
+unattended overnight loops spend that pool, not an interactive per-window
+quota that could die mid-run. The architect runs as your interactive session.
+A different provider id bills against that provider's own plan. Treat the
+specific pools as dated facts (§8).
 
 ### CLI principles
 
 - The loop is one binary (`architect`) over a clean library seam: the spaces
-  substrate is the space-cadet gem (`Space::Core`, the `space`/`src` binaries),
-  and the sessions launchd agent comes from the repo-tender gem (soft dep) —
-  the split keeps each surface's CLI in its own gem.
+  substrate is the space-cadet gem (`Space::Core`, the `space` binary), the
+  evergreen engine (`repo-tender` + the `src` shim) is its own gem, and the
+  sessions launchd agent comes from repo-tender too (soft dep) — the split
+  keeps each surface's CLI in its own gem.
 - Output is readable manually and useful in scripts; paths under `$HOME` render
   as `~/…` in human output; color auto-detects the TTY and honors
   `--color=auto|always|never`.
@@ -565,10 +563,11 @@ worktree audits it once it exits — see `dispatch.md`).
 ### Optional pre-spec research fan-out
 
 Between judging and speccing, the architect may run a research phase: 3–5
-parallel read-only researchers (built-in `WebSearch`/`WebFetch`), each answering
-one narrow non-overlapping question, with the architect adversarially verifying
-load-bearing claims and writing the iteration's **Grounds** section itself.
-Design decisions behind it:
+parallel read-only researchers — detached `pi -p --mode json` lanes, read-only
+by prompt contract with the supervisor-injected guard denying git writes — each
+answering one narrow non-overlapping question, with the architect adversarially
+verifying load-bearing claims and writing the iteration's **Grounds** section
+itself. Design decisions behind it:
 
 - **Trigger-gated, not always-on.** "Research if you think it helps" fires
   constantly or never; instead the skill names three concrete triggers
@@ -579,10 +578,11 @@ Design decisions behind it:
 - **Progressive disclosure.** The mechanics live in `research.md`, read only when
   a trigger fires — the default architect context never pays for them (R12).
 - **Cheap researchers, strong-model judgment.** Research is coverage work — it
-  runs at a modest budget, read-only by toolset, report captured as stdout.
-  Verification of load-bearing claims and Grounds authorship stay with the
-  architect — researchers are forbidden from making recommendations, the
-  research-side equivalent of "raw results only" (R3).
+  runs at a modest budget (`--max-turns 40` default), read-only by prompt
+  contract, report captured from the run. Verification of load-bearing claims
+  and Grounds authorship stay with the architect — researchers are forbidden
+  from making recommendations, the research-side equivalent of "raw results
+  only" (R3).
 - **Findings discipline** mirrors deep-research harnesses: every finding carries
   a URL, date, exact quote/figure, and confidence tag; disagreements between
   sources are reported, not resolved; "NOT FOUND" beats inference.
@@ -710,7 +710,7 @@ evidence moves.
 ---
 
 *This is the "why". The "how" lives in the skill files (`skill/architect/SKILL.md`,
-`dispatch.md`, `research.md`) and the command reference (`docs/reference.md`).
+`dispatch.md`, `research.md`) and the command reference (`docs/reference/`).
 The invariants (R1–R12) are stable; the concrete interface (§4) tracks the
 reference harness; everything else is prunable (R12) — prune against the rules
 and failure modes here, not from memory.*
