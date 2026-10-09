@@ -9,24 +9,12 @@ require "async/http/client"
 require "protocol/http/response"
 
 class HarnessTest < Space::ArchitectTest
-  FAKE_CLAUDE_SCRIPT = <<~RUBY
+  FAKE_PI_SCRIPT = <<~RUBY
     #!/usr/bin/env ruby
     a = ARGV; c = Dir.pwd; s = $stdin.gets
     $stdout.puts "argv=" + a.inspect
     $stdout.puts "cwd=" + c.inspect
     $stdout.puts "stdin=" + (s || "").chomp
-    $stdout.flush
-    exit((ENV["FAKE_EXIT"] || "0").to_i)
-  RUBY
-
-  FAKE_OPENCODE_SCRIPT = <<~RUBY
-    #!/usr/bin/env ruby
-    a = ARGV; c = Dir.pwd; s = $stdin.gets
-    $stdout.puts "argv=" + a.inspect
-    $stdout.puts "cwd=" + c.inspect
-    $stdout.puts "stdin=" + (s || "").chomp
-    $stdout.puts "OPENCODE_CONFIG=" + (ENV["OPENCODE_CONFIG"] || "").inspect
-    $stdout.puts "OPENCODE_DISABLE_PROJECT_CONFIG=" + (ENV["OPENCODE_DISABLE_PROJECT_CONFIG"] || "").inspect
     $stdout.flush
     exit((ENV["FAKE_EXIT"] || "0").to_i)
   RUBY
@@ -62,17 +50,14 @@ class HarnessTest < Space::ArchitectTest
     end
   end
 
-  # Shared setup: minimal space + worktree + prompt.md + both fake binaries
+  # Shared setup: minimal space + worktree + prompt.md + fake pi binary
   def setup_space(root)
     space_dir = File.join(root, "space")
     FileUtils.cp_r(self.class.template_space_dir, space_dir)
 
-    fake_claude   = File.join(root, "fake_claude")
-    fake_opencode = File.join(root, "fake_opencode")
-    File.write(fake_claude,   FAKE_CLAUDE_SCRIPT)
-    File.write(fake_opencode, FAKE_OPENCODE_SCRIPT)
-    File.chmod(0o755, fake_claude)
-    File.chmod(0o755, fake_opencode)
+    fake_pi = File.join(root, "fake_pi")
+    File.write(fake_pi, FAKE_PI_SCRIPT)
+    File.chmod(0o755, fake_pi)
 
     space   = Space::Core::Space.load(space_dir)
     project = Space::Architect::ArchitectProject.new(space: space)
@@ -84,79 +69,56 @@ class HarnessTest < Space::ArchitectTest
     FileUtils.mkdir_p(build_dir)
     File.write(File.join(build_dir, "prompt.md"), "PROMPT-MARKER-99\nrest\n")
 
-    [space_dir, project, fake_claude, fake_opencode, build_dir]
+    [space_dir, project, fake_pi, build_dir]
   end
 
-  # ── ClaudeCodeHarness unit tests ─────────────────────────────────────────
+  # ── PiHarness run through dispatch ───────────────────────────────────────
 
-  def test_claude_code_harness_run_writes_log_and_exits_zero
+  def test_pi_harness_run_writes_log_and_exits_zero
     root = Dir.mktmpdir("harness-test")
-    _space_dir, project, fake_claude, _fake_oc, build_dir = setup_space(root)
+    _space_dir, project, fake_pi, build_dir = setup_space(root)
 
-    res = project.dispatch("demo", "A", claude_bin: fake_claude)
+    res = project.dispatch("demo", "A", bin: fake_pi)
     log = File.read(File.join(build_dir, "run.jsonl"))
 
     assert_equal 0, res[:exit_code]
-    assert_includes log, "claude-sonnet-5"
-    assert_includes log, "stream-json"
-    assert_includes log, "acceptEdits"
-    assert_includes log, "Bash(git commit"
-    assert_includes log, "--max-turns"
-    assert_includes log, "I01-demo-A/wt"
+    assert_includes log, "--mode"
+    assert_includes log, "json"
     assert_includes log, "PROMPT-MARKER-99"
   ensure
     FileUtils.rm_rf(root)
   end
 
-  def test_harness_factory_default_is_claude_code
-    harness = Space::Architect::Harness.for("claude-code",
-                                          model: "claude-sonnet-4-6", max_turns: 10, bin: "/fake")
-    assert_instance_of Space::Architect::Harness::ClaudeCodeHarness, harness
+  # ── factory: pi is the only backend ──────────────────────────────────────
+
+  def test_harness_factory_returns_pi_harness
+    harness = Space::Architect::Harness.for("pi",
+                                            model: "m", max_turns: 10, bin: "/fake",
+                                            config_dir: Dir.mktmpdir)
+    assert_instance_of Space::Architect::Harness::PiHarness, harness
   end
 
-  # ── #89: allowed-tools grant reaches the argv ────────────────────────────
-
-  # AC6: Harness.for with no allowed_tools: kwarg produces the byte-for-byte default argv.
-  def test_harness_for_omits_allowed_tools_kwarg_uses_default
-    harness = Space::Architect::Harness.for("claude-code",
-                                          model: "claude-sonnet-4-6", max_turns: 10, bin: "/fake")
-    assert_includes harness.builder_args, Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS
+  # Any name other than "pi" — including a stored legacy name from an old
+  # space.yaml — raises an actionable error naming pi as the only valid harness.
+  def test_harness_factory_rejects_everything_but_pi
+    %w[legacy-a legacy-b bogus].each do |name|
+      err = assert_raises(Space::Core::Error) do
+        Space::Architect::Harness.for(name, model: "m", max_turns: 1, config_dir: Dir.mktmpdir)
+      end
+      assert_match(/'pi' is the only valid harness/, err.message)
+      assert_match(/#{name}/, err.message)
+    end
   end
 
-  # AC1: Harness.for(allowed_tools:) replaces the default in the harness's own argv.
-  def test_harness_for_allowed_tools_kwarg_replaces_default_in_builder_args
-    harness = Space::Architect::Harness.for("claude-code",
-                                          model: "claude-sonnet-4-6", max_turns: 10, bin: "/fake",
-                                          allowed_tools: "Read,Edit")
-    assert_includes harness.builder_args, "Read,Edit"
-    refute_includes harness.builder_args, Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS
+  # ── default model ────────────────────────────────────────────────────────
+
+  def test_default_model_constant_value
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", Space::Architect::Harness::DEFAULT_MODEL
   end
 
-  # ClaudeCodeHarness.resolve_tools composes replace + append as one rule, independent
-  # of which surface (flag or frozen lane yaml) supplied them.
-  def test_resolve_tools_default_when_neither_given
-    assert_equal Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS,
-      Space::Architect::Harness::ClaudeCodeHarness.resolve_tools
-  end
-
-  def test_resolve_tools_replace_only
-    assert_equal "Read,Edit", Space::Architect::Harness::ClaudeCodeHarness.resolve_tools(replace: "Read,Edit")
-  end
-
-  def test_resolve_tools_append_only_appends_to_default
-    assert_equal "#{Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS},mcp__foo",
-      Space::Architect::Harness::ClaudeCodeHarness.resolve_tools(append: "mcp__foo")
-  end
-
-  def test_resolve_tools_replace_and_append_appends_to_replace
-    assert_equal "Read,Edit,mcp__foo",
-      Space::Architect::Harness::ClaudeCodeHarness.resolve_tools(replace: "Read,Edit", append: "mcp__foo")
-  end
-
-  # AC1: --allowed-tools replaces the default grant reaching the builder's argv end to end.
-  def test_dispatch_allowed_tools_replaces_default_in_argv
+  def test_dispatch_without_model_resolves_to_pi_default
     root = Dir.mktmpdir("harness-test")
-    _space_dir, project, _fake_claude, _fake_oc, _build_dir = setup_space(root)
+    _space_dir, project, _fake_pi, _build_dir = setup_space(root)
 
     recorder = File.join(root, "recorder")
     argv_file = File.join(root, "recorded_argv")
@@ -164,21 +126,42 @@ class HarnessTest < Space::ArchitectTest
     File.chmod(0o755, recorder)
 
     ENV["ARGV_RECORD_FILE"] = argv_file
-    project.dispatch("demo", "A", claude_bin: recorder, allowed_tools: "Read,Edit")
+
+    project.dispatch("demo", "A", bin: recorder)
     recorded = File.read(argv_file).split("\x00")
 
-    idx = recorded.index("--allowedTools")
-    refute_nil idx, "argv must carry --allowedTools: #{recorded.inspect}"
-    assert_equal "Read,Edit", recorded[idx + 1]
-  ensure
-    ENV.delete("ARGV_RECORD_FILE")
-    FileUtils.rm_rf(root)
+    idx = recorded.index("--model")
+    refute_nil idx, "argv must carry --model: #{recorded.inspect}"
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", recorded[idx + 1]
   end
 
-  # AC2: --append-allowed-tools appends to the default grant, default entries intact.
-  def test_dispatch_append_allowed_tools_appends_to_default_in_argv
+  # ── translate_thinking: unchanged passthrough ────────────────────────────
+
+  def test_translate_thinking_passthrough
+    translated, inform = Space::Architect::Harness::PiHarness.translate_thinking("high")
+    assert_equal "high", translated
+    assert_nil inform
+  end
+
+  def test_translate_thinking_nil_level_is_noop
+    translated, inform = Space::Architect::Harness::PiHarness.translate_thinking(nil)
+    assert_nil translated
+    assert_nil inform
+  end
+
+  def test_translate_thinking_force_passes_level_with_inform
+    translated, inform = Space::Architect::Harness::PiHarness.translate_thinking("bogus", force: true)
+    assert_equal "bogus", translated
+    assert_match(/force/, inform)
+  end
+
+  # ── argv assembly ────────────────────────────────────────────────────────
+
+  # The full builder flag set: -p --mode json --model <m> --session-dir <d>
+  # --no-approve -e <guard>, and --thinking only when effort is set.
+  def test_dispatch_argv_carries_pi_builder_flag_set
     root = Dir.mktmpdir("harness-test")
-    _space_dir, project, _fake_claude, _fake_oc, _build_dir = setup_space(root)
+    space_dir, project, _fake_pi, build_dir = setup_space(root)
 
     recorder = File.join(root, "recorder")
     argv_file = File.join(root, "recorded_argv")
@@ -186,21 +169,28 @@ class HarnessTest < Space::ArchitectTest
     File.chmod(0o755, recorder)
 
     ENV["ARGV_RECORD_FILE"] = argv_file
-    project.dispatch("demo", "A", claude_bin: recorder, append_allowed_tools: "mcp__foo")
+
+    project.dispatch("demo", "A", bin: recorder, model: "test-model")
     recorded = File.read(argv_file).split("\x00")
 
-    idx = recorded.index("--allowedTools")
-    refute_nil idx, "argv must carry --allowedTools: #{recorded.inspect}"
-    assert_equal "#{Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS},mcp__foo", recorded[idx + 1]
+    assert_equal "-p", recorded[0]
+    assert_equal "--mode", recorded[1]
+    assert_equal "json", recorded[2]
+    assert_equal ["--model", "test-model"], recorded[3, 2]
+    assert_equal "--session-dir", recorded[5]
+    assert_equal build_dir, recorded[6]
+    assert_includes recorded, "--no-approve"
+    assert_includes recorded, "-e"
+    refute_includes recorded, "--thinking", "no --thinking without effort"
+    refute_includes recorded, "PROMPT-MARKER-99", "prompt arrives on stdin, not argv"
   ensure
-    ENV.delete("ARGV_RECORD_FILE")
     FileUtils.rm_rf(root)
   end
 
-  # AC6: with neither flag given, the argv's tool list is byte-for-byte what it is today.
-  def test_dispatch_without_allowed_tools_flags_argv_unchanged
+  # effort set → --thinking <level> in argv.
+  def test_dispatch_effort_becomes_thinking_flag
     root = Dir.mktmpdir("harness-test")
-    _space_dir, project, _fake_claude, _fake_oc, _build_dir = setup_space(root)
+    _space_dir, project, _fake_pi, _build_dir = setup_space(root)
 
     recorder = File.join(root, "recorder")
     argv_file = File.join(root, "recorded_argv")
@@ -208,86 +198,23 @@ class HarnessTest < Space::ArchitectTest
     File.chmod(0o755, recorder)
 
     ENV["ARGV_RECORD_FILE"] = argv_file
-    project.dispatch("demo", "A", claude_bin: recorder)
+
+    res = project.dispatch("demo", "A", bin: recorder, effort: "high")
     recorded = File.read(argv_file).split("\x00")
 
-    idx = recorded.index("--allowedTools")
-    refute_nil idx, "argv must carry --allowedTools: #{recorded.inspect}"
-    assert_equal Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS, recorded[idx + 1]
-  ensure
-    ENV.delete("ARGV_RECORD_FILE")
-    FileUtils.rm_rf(root)
+    idx = recorded.index("--thinking")
+    refute_nil idx, "argv must carry --thinking with effort set: #{recorded.inspect}"
+    assert_equal "high", recorded[idx + 1]
   end
 
-  # ── AC1: per-harness sensible defaults ────────────────────────────────────
-
-  def test_default_model_for_claude_code
-    assert_equal "claude-sonnet-5", Space::Architect::Harness.default_model_for("claude-code")
-  end
-
-  def test_default_model_for_pi
-    assert_equal "qwen3-27b-optiq", Space::Architect::Harness.default_model_for("pi")
-  end
-
-  def test_default_model_for_opencode
-    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2",
-      Space::Architect::Harness.default_model_for("opencode")
-  end
-
-  def test_default_model_for_unknown_harness_is_nil
-    assert_nil Space::Architect::Harness.default_model_for("bogus")
-  end
-
-  def test_claude_default_model_constant_value
-    assert_equal "claude-sonnet-5", Space::Architect::Harness::CLAUDE_DEFAULT_MODEL
-  end
-
-  # ── OpenCodeHarness unit tests ────────────────────────────────────────────
-
-  def test_builder_config_steps_equals_max_turns
-    harness = Space::Architect::Harness::OpenCodeHarness.new(
-      model: "fireworks-ai/test", max_turns: 42, bin: "opencode",
-      config_dir: Dir.mktmpdir
-    )
-    cfg = harness.builder_config
-    assert_equal 42, cfg.dig("agent", "builder", "steps")
-  end
-
-  def test_builder_config_denies_git_commit_and_push
-    harness = Space::Architect::Harness::OpenCodeHarness.new(
-      model: "fireworks-ai/test", max_turns: 10, bin: "opencode",
-      config_dir: Dir.mktmpdir
-    )
-    bash = harness.builder_config.dig("agent", "builder", "permission", "bash")
-    assert_equal "deny", bash["git commit *"]
-    assert_equal "deny", bash["git push *"]
-    assert_equal "allow", bash["*"]
-  end
-
-  def test_opencode_dispatch_argv_and_env
+  # The prompt arrives on stdin (never argv).
+  def test_dispatch_prompt_arrives_on_stdin
     root = Dir.mktmpdir("harness-test")
-    _space_dir, project, _fake_claude, fake_oc, build_dir = setup_space(root)
+    _space_dir, project, fake_pi, build_dir = setup_space(root)
 
-    res = project.dispatch("demo", "A",
-                           harness: "opencode",
-                           model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
-                           opencode_bin: fake_oc)
+    project.dispatch("demo", "A", bin: fake_pi)
     log = File.read(File.join(build_dir, "run.jsonl"))
 
-    assert_equal 0, res[:exit_code]
-    # AC3: required strings in captured log
-    assert_includes log, '"run"'
-    assert_includes log, '"--format"'
-    assert_includes log, '"json"'
-    assert_includes log, "fireworks-ai/accounts/fireworks/models/glm-5p2"
-    assert_includes log, '"--dangerously-skip-permissions"'
-    assert_includes log, '"--agent"'
-    assert_includes log, '"builder"'
-    assert_includes log, "I01-demo-A/wt"   # worktree dir via --dir
-    # AC4: OPENCODE_CONFIG is set
-    assert_includes log, "OPENCODE_CONFIG="
-    refute_includes log, 'OPENCODE_CONFIG=""'
-    # AC-fix-2: prompt arrives on stdin, not argv
     assert_includes log, "stdin=PROMPT-MARKER-99"
     argv_line = log.lines.find { |l| l.start_with?("argv=") }
     refute_includes argv_line, "PROMPT-MARKER-99"
@@ -295,337 +222,155 @@ class HarnessTest < Space::ArchitectTest
     FileUtils.rm_rf(root)
   end
 
-  def test_opencode_config_file_is_valid_json_with_correct_shape
+  # ── guard wiring at the dispatch level ───────────────────────────────────
+
+  # Dispatch vendors the builder guard into the lane's build dir (byte-for-byte
+  # with the shipped extension) and injects it via -e <absolute path>.
+  def test_dispatch_copies_guard_and_injects_via_e
     root = Dir.mktmpdir("harness-test")
-    _space_dir, project, _fake_claude, fake_oc, build_dir = setup_space(root)
+    space_dir, project, _fake_pi, build_dir = setup_space(root)
 
-    project.dispatch("demo", "A",
-                     harness: "opencode",
-                     model: "fireworks-ai/test-model",
-                     max_turns: 77,
-                     opencode_bin: fake_oc)
+    recorder = File.join(root, "recorder")
+    argv_file = File.join(root, "recorded_argv")
+    File.write(recorder, FAKE_ARGV_RECORDER)
+    File.chmod(0o755, recorder)
 
-    config_path = File.join(build_dir, "opencode.json")
-    assert File.exist?(config_path), "opencode.json must be written to build dir"
+    ENV["ARGV_RECORD_FILE"] = argv_file
 
-    cfg = JSON.parse(File.read(config_path))
-    assert_equal 77, cfg.dig("agent", "builder", "steps")
-    bash = cfg.dig("agent", "builder", "permission", "bash")
-    assert_equal "deny", bash["git commit *"]
-    assert_equal "deny", bash["git push *"]
-    assert_equal "allow", bash["*"]
+    project.dispatch("demo", "A", bin: recorder)
+    recorded = File.read(argv_file).split("\x00")
+
+    vendored = File.expand_path("../lib/space_architect/pi/builder-guard.ts", __dir__)
+    copied = File.join(build_dir, "builder-guard.ts")
+    assert File.exist?(copied), "guard must be copied to the build dir"
+    assert_equal File.binread(vendored), File.binread(copied), "copy must be byte-for-byte"
+
+    idx = recorded.index("-e")
+    refute_nil idx, "argv must carry -e: #{recorded.inspect}"
+    assert_equal copied, recorded[idx + 1]
+    assert_path_exists recorded[idx + 1]
   ensure
     FileUtils.rm_rf(root)
   end
 
-  def test_opencode_config_path_passed_via_env
+  # The guard copy is idempotent: a stale file in the build dir is overwritten.
+  def test_dispatch_guard_copy_overwrites_stale_file
     root = Dir.mktmpdir("harness-test")
-    _space_dir, project, _fake_claude, fake_oc, build_dir = setup_space(root)
+    _space_dir, project, _fake_pi, build_dir = setup_space(root)
 
-    project.dispatch("demo", "A",
-                     harness: "opencode",
-                     model: "fireworks-ai/test-model",
-                     opencode_bin: fake_oc)
+    guard_path = File.join(build_dir, "builder-guard.ts")
+    FileUtils.mkdir_p(build_dir)
+    File.write(guard_path, "stale junk")
 
-    log = File.read(File.join(build_dir, "run.jsonl"))
-    expected_config = File.join(build_dir, "opencode.json")
-    assert_includes log, expected_config
+    project.dispatch("demo", "A", bin: fake_pi_bin(root))
+
+    vendored = File.expand_path("../lib/space_architect/pi/builder-guard.ts", __dir__)
+    assert_equal File.binread(vendored), File.binread(guard_path)
   ensure
     FileUtils.rm_rf(root)
   end
 
-  # ── Dispatch resolution from lane entry (AC3 / AC4) ──────────────────────
+  # Detached dispatch injects the guard too.
+  def test_dispatch_detached_copies_guard
+    root = Dir.mktmpdir("harness-detach-guard")
+    _space_dir, project, _fake_pi, build_dir = setup_space(root)
 
-  # AC3: dispatch with no harness/model kwargs reads both from the persisted lane entry
+    project.dispatch("demo", "A", bin: fake_pi_bin(root), detach: true)
+
+    vendored = File.expand_path("../lib/space_architect/pi/builder-guard.ts", __dir__)
+    copied = File.join(build_dir, "builder-guard.ts")
+    assert File.exist?(copied), "detached dispatch must still vendor the guard"
+    assert_equal File.binread(vendored), File.binread(copied)
+  ensure
+    FileUtils.rm_rf(root)
+  end
+
+  # ── dispatch resolution from lane entry ──────────────────────────────────
+
+  # dispatch with no harness/model kwargs reads both from the persisted lane entry.
   def test_dispatch_reads_harness_and_model_from_lane
     root = Dir.mktmpdir("harness-test")
-    space_dir, project, _fake_claude, fake_oc, _build_dir = setup_space(root)
+    space_dir, project, _fake_pi, _build_dir = setup_space(root)
 
     project.worktree_add("my-repo", "demo", "B",
-                         harness: "opencode",
-                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2")
+                         harness: "pi",
+                         model: "lane-stored-model")
     b_build_dir = File.join(space_dir, "build", "I01-demo-B")
     FileUtils.mkdir_p(b_build_dir)
     File.write(File.join(b_build_dir, "prompt.md"), "PROMPT-B\n")
 
-    res = project.dispatch("demo", "B", opencode_bin: fake_oc)
-    log = File.read(File.join(b_build_dir, "run.jsonl"))
+    recorder = File.join(root, "recorder")
+    argv_file = File.join(root, "recorded_argv")
+    File.write(recorder, FAKE_ARGV_RECORDER)
+    File.chmod(0o755, recorder)
 
-    assert_equal 0, res[:exit_code]
-    # Opencode path taken — not claude path
-    assert_includes log, '"run"'
-    assert_includes log, '"--agent"'
-    assert_includes log, '"builder"'
-    # Correct model from lane
-    assert_includes log, "fireworks-ai/accounts/fireworks/models/glm-5p2"
-    # Claude path NOT taken
-    refute_includes log, "stream-json"
+    ENV["ARGV_RECORD_FILE"] = argv_file
+
+    project.dispatch("demo", "B", bin: recorder)
+    recorded = File.read(argv_file).split("\x00")
+
+    idx = recorded.index("--model")
+    assert_equal "lane-stored-model", recorded[idx + 1]
+
+    yml = YAML.safe_load(File.read(File.join(space_dir, "space.yaml")), aliases: false)
+    demo = yml.dig("project", "iterations").find { |i| i["name"] == "demo" }
+    lane_b = (demo["lanes"] || []).find { |l| l["name"] == "B" }
+    assert_equal "pi", lane_b["harness"]
   ensure
     FileUtils.rm_rf(root)
   end
 
-  # AC4: explicit dispatch-time model overrides are stamped onto the persisted lane
+  # Explicit dispatch-time model overrides are stamped onto the persisted lane
   # entry, so `architect status` reflects what actually ran on the last dispatch.
   def test_dispatch_override_stamps_lane_entry
     root = Dir.mktmpdir("harness-test")
-    space_dir, project, _fake_claude, fake_oc, _build_dir = setup_space(root)
+    space_dir, project, _fake_pi, _build_dir = setup_space(root)
 
     project.worktree_add("my-repo", "demo", "C",
-                         harness: "opencode",
+                         harness: "pi",
                          model: "original-model")
     c_build_dir = File.join(space_dir, "build", "I01-demo-C")
     FileUtils.mkdir_p(c_build_dir)
     File.write(File.join(c_build_dir, "prompt.md"), "PROMPT-C\n")
 
-    res = project.dispatch("demo", "C", model: "override-model", opencode_bin: fake_oc)
-    log = File.read(File.join(c_build_dir, "run.jsonl"))
+    project.dispatch("demo", "C", model: "override-model", bin: fake_pi_bin(root))
 
-    assert_equal 0, res[:exit_code]
-    # Captured argv carries the override model
-    assert_includes log, "override-model"
-    refute_includes log, "original-model"
-
-    # Lane entry on disk is stamped with the resolved (override) model
     yml = YAML.safe_load(File.read(File.join(space_dir, "space.yaml")), aliases: false)
     iterations = yml.dig("project", "iterations") || []
     demo = iterations.find { |i| i["name"] == "demo" }
     lane_c = (demo["lanes"] || []).find { |l| l["name"] == "C" }
     assert_equal "override-model", lane_c["model"]
+    assert_equal "pi", lane_c["harness"]
   ensure
     FileUtils.rm_rf(root)
   end
 
-  # ── Footgun guard ─────────────────────────────────────────────────────────
-
-  # AC6: opencode dispatch with no --model no longer raises — the lane's stored
-  # (claude-code) model is dropped on a harness override, and the per-harness
-  # default is used instead.
-  def test_opencode_dispatch_with_no_model_resolves_to_per_harness_default
+  # A stored legacy harness name from an old space.yaml raises an actionable
+  # error naming pi — it never silently dispatches or defaults.
+  def test_dispatch_with_stored_legacy_harness_raises_actionable_error
     root = Dir.mktmpdir("harness-test")
-    _space_dir, project, _fake_claude, fake_oc, build_dir = setup_space(root)
+    space_dir, project, _fake_pi, _build_dir = setup_space(root)
 
-    res = project.dispatch("demo", "A", harness: "opencode", opencode_bin: fake_oc)
-    log = File.read(File.join(build_dir, "run.jsonl"))
+    project.worktree_add("my-repo", "demo", "D")
+    d_build_dir = File.join(space_dir, "build", "I01-demo-D")
+    FileUtils.mkdir_p(d_build_dir)
+    File.write(File.join(d_build_dir, "prompt.md"), "PROMPT-D\n")
 
-    assert_equal 0, res[:exit_code]
-    assert_includes log, "fireworks-ai/accounts/fireworks/models/glm-5p2"
+    space = Space::Core::Space.load(space_dir)
+    space.data["project"]["iterations"].find { |i| i["name"] == "demo" }
+      .dig("lanes").find { |l| l["name"] == "D" }["harness"] = "legacy-stored"
+    space.save
+
+    # dispatch through a fresh load so the stored (mutated) entry is what resolves
+    reloaded = Space::Architect::ArchitectProject.new(space: Space::Core::Space.load(space_dir))
+    err = assert_raises(Space::Core::Error) { reloaded.dispatch("demo", "D") }
+    assert_match(/'pi' is the only valid harness/, err.message)
+    assert_match(/legacy-stored/, err.message)
   ensure
     FileUtils.rm_rf(root)
   end
 
-  def test_footgun_guard_allows_opencode_with_explicit_model
-    root = Dir.mktmpdir("harness-test")
-    _space_dir, project, _fake_claude, fake_oc, _build_dir = setup_space(root)
-
-    # Should not raise — explicit non-claude model
-    res = project.dispatch("demo", "A",
-                           harness: "opencode",
-                           model: "fireworks-ai/some-model",
-                           opencode_bin: fake_oc)
-    assert_kind_of Hash, res
-  ensure
-    FileUtils.rm_rf(root)
-  end
-
-  def test_harness_factory_raises_on_unknown_harness
-    assert_raises(Space::Core::Error) do
-      Space::Architect::Harness.for("unknown-harness",
-                                  model: "x", max_turns: 1, config_dir: Dir.mktmpdir)
-    end
-  end
-
-  # ── I07: effort → reasoningEffort config injection ───────────────────────
-
-  # Fake binary that records argv to ARGV_RECORD_FILE (null-delimited).
-  FAKE_ARGV_RECORDER = <<~RUBY
-    #!/usr/bin/env ruby
-    File.write(ENV.fetch("ARGV_RECORD_FILE"), ARGV.join("\x00"))
-    exit 0
-  RUBY
-
-  # AC1: effort "high" + GLM model → builder_config injects reasoningEffort at correct path;
-  #      agent.builder block (steps, bash permission deny map) is unchanged.
-  def test_builder_config_injects_reasoning_effort_for_glm
-    harness = Space::Architect::Harness::OpenCodeHarness.new(
-      model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
-      max_turns: 10, bin: "opencode", config_dir: Dir.mktmpdir,
-      effort: "high"
-    )
-    cfg = harness.builder_config
-
-    assert_equal "high",
-      cfg.dig("provider", "fireworks-ai", "models",
-              "accounts/fireworks/models/glm-5p2", "options", "reasoningEffort")
-    assert_equal 10,     cfg.dig("agent", "builder", "steps")
-    bash = cfg.dig("agent", "builder", "permission", "bash")
-    assert_equal "deny",  bash["git commit *"]
-    assert_equal "deny",  bash["git push *"]
-    assert_equal "allow", bash["*"]
-  end
-
-  # AC2: effort nil → builder_config returns exactly the pre-I07 hash (no "provider" key).
-  def test_builder_config_no_provider_key_when_effort_nil
-    harness = Space::Architect::Harness::OpenCodeHarness.new(
-      model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
-      max_turns: 10, bin: "opencode", config_dir: Dir.mktmpdir
-    )
-    cfg = harness.builder_config
-    refute cfg.key?("provider"), "builder_config must not have provider key when effort is nil: #{cfg.keys.inspect}"
-    assert cfg.key?("agent")
-  end
-
-  # AC3: argv has NO --variant token whether effort is set or nil.
-  def test_opencode_argv_excludes_variant_when_effort_set
-    root = Dir.mktmpdir("harness-test")
-    _space_dir, project, _fake_claude, _fake_oc, _build_dir = setup_space(root)
-
-    recorder = File.join(root, "recorder")
-    argv_file = File.join(root, "recorded_argv")
-    File.write(recorder, FAKE_ARGV_RECORDER)
-    File.chmod(0o755, recorder)
-
-    ENV["ARGV_RECORD_FILE"] = argv_file
-    project.dispatch("demo", "A",
-                     harness: "opencode",
-                     model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
-                     effort: "high",
-                     opencode_bin: recorder)
-    recorded = File.read(argv_file).split("\x00")
-
-    refute_includes recorded, "--variant", "no --variant token expected even with effort set: #{recorded.inspect}"
-  ensure
-    ENV.delete("ARGV_RECORD_FILE")
-    FileUtils.rm_rf(root)
-  end
-
-  def test_opencode_argv_excludes_variant_when_no_effort
-    root = Dir.mktmpdir("harness-test")
-    _space_dir, project, _fake_claude, _fake_oc, _build_dir = setup_space(root)
-
-    recorder = File.join(root, "recorder")
-    argv_file = File.join(root, "recorded_argv")
-    File.write(recorder, FAKE_ARGV_RECORDER)
-    File.chmod(0o755, recorder)
-
-    ENV["ARGV_RECORD_FILE"] = argv_file
-    project.dispatch("demo", "A",
-                     harness: "opencode",
-                     model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
-                     opencode_bin: recorder)
-    recorded = File.read(argv_file).split("\x00")
-
-    refute_includes recorded, "--variant", "no --variant token expected: #{recorded.inspect}"
-    assert_equal "run", recorded[0]
-    assert_includes recorded, "--format"
-    assert_includes recorded, "json"
-    assert_includes recorded, "--dangerously-skip-permissions"
-    assert_includes recorded, "--agent"
-    assert_includes recorded, "builder"
-    assert_includes recorded, "--dir"
-  ensure
-    ENV.delete("ARGV_RECORD_FILE")
-    FileUtils.rm_rf(root)
-  end
-
-  # AC4: effort "high" + Kimi model → reasoningEffort injected under Kimi's config path.
-  def test_builder_config_injects_reasoning_effort_for_kimi
-    harness = Space::Architect::Harness::OpenCodeHarness.new(
-      model: "fireworks-ai/accounts/fireworks/models/kimi-k2p7-code",
-      max_turns: 5, bin: "opencode", config_dir: Dir.mktmpdir,
-      effort: "high"
-    )
-    cfg = harness.builder_config
-
-    assert_equal "high",
-      cfg.dig("provider", "fireworks-ai", "models",
-              "accounts/fireworks/models/kimi-k2p7-code", "options", "reasoningEffort")
-  end
-
-  # Resolution: lane effort → injected into builder_config (no --variant in argv).
-  def test_dispatch_reads_effort_from_lane
-    root = Dir.mktmpdir("harness-test")
-    space_dir, project, _fake_claude, _fake_oc, _build_dir = setup_space(root)
-
-    recorder = File.join(root, "recorder")
-    argv_file = File.join(root, "recorded_argv")
-    File.write(recorder, FAKE_ARGV_RECORDER)
-    File.chmod(0o755, recorder)
-
-    project.worktree_add("my-repo", "demo", "E",
-                         harness: "opencode",
-                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
-                         effort: "high")
-    e_build_dir = File.join(space_dir, "build", "I01-demo-E")
-    FileUtils.mkdir_p(e_build_dir)
-    File.write(File.join(e_build_dir, "prompt.md"), "PROMPT-E\n")
-
-    ENV["ARGV_RECORD_FILE"] = argv_file
-    project.dispatch("demo", "E", opencode_bin: recorder)
-    recorded = File.read(argv_file).split("\x00")
-
-    refute_includes recorded, "--variant", "lane effort must not produce --variant: #{recorded.inspect}"
-    cfg = JSON.parse(File.read(File.join(e_build_dir, "opencode.json")))
-    assert_equal "high",
-      cfg.dig("provider", "fireworks-ai", "models",
-              "accounts/fireworks/models/glm-5p2", "options", "reasoningEffort")
-  ensure
-    ENV.delete("ARGV_RECORD_FILE")
-    FileUtils.rm_rf(root)
-  end
-
-  # Resolution: explicit effort "low" overrides lane effort "high" in generated config.
-  def test_dispatch_explicit_effort_overrides_lane_effort
-    root = Dir.mktmpdir("harness-test")
-    space_dir, project, _fake_claude, _fake_oc, _build_dir = setup_space(root)
-
-    recorder = File.join(root, "recorder")
-    argv_file = File.join(root, "recorded_argv")
-    File.write(recorder, FAKE_ARGV_RECORDER)
-    File.chmod(0o755, recorder)
-
-    project.worktree_add("my-repo", "demo", "F",
-                         harness: "opencode",
-                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
-                         effort: "high")
-    f_build_dir = File.join(space_dir, "build", "I01-demo-F")
-    FileUtils.mkdir_p(f_build_dir)
-    File.write(File.join(f_build_dir, "prompt.md"), "PROMPT-F\n")
-
-    ENV["ARGV_RECORD_FILE"] = argv_file
-    project.dispatch("demo", "F", effort: "low", opencode_bin: recorder)
-    recorded = File.read(argv_file).split("\x00")
-
-    refute_includes recorded, "--variant", "no --variant expected with effort override: #{recorded.inspect}"
-    cfg = JSON.parse(File.read(File.join(f_build_dir, "opencode.json")))
-    assert_equal "low",
-      cfg.dig("provider", "fireworks-ai", "models",
-              "accounts/fireworks/models/glm-5p2", "options", "reasoningEffort")
-
-    # AC4: lane entry on disk is stamped with the resolved (override) effort
-    yml = YAML.safe_load(File.read(File.join(space_dir, "space.yaml")), aliases: false)
-    demo = yml.dig("project", "iterations").find { |i| i["name"] == "demo" }
-    lane_f = (demo["lanes"] || []).find { |l| l["name"] == "F" }
-    assert_equal "low", lane_f["effort"]
-  ensure
-    ENV.delete("ARGV_RECORD_FILE")
-    FileUtils.rm_rf(root)
-  end
-
-  # I10: claude-code + effort no longer raises — it translates to --effort.
-  def test_harness_for_claude_code_with_effort_dispatches_with_effort_flag
-    root = Dir.mktmpdir("harness-test")
-    _space_dir, project, fake_claude, _fake_oc, build_dir = setup_space(root)
-
-    project.dispatch("demo", "A", claude_bin: fake_claude, effort: "high")
-    log = File.read(File.join(build_dir, "run.jsonl"))
-
-    assert_includes log, "--effort"
-    assert_includes log, "\"high\""
-  ensure
-    FileUtils.rm_rf(root)
-  end
-
-  # ── run_detached: ClaudeCodeHarness ──────────────────────────────────────────
+  # ── run_detached ─────────────────────────────────────────────────────────
 
   FAKE_DETACH_SCRIPT = <<~RUBY
     #!/usr/bin/env ruby
@@ -637,34 +382,9 @@ class HarnessTest < Space::ArchitectTest
     exit 0
   RUBY
 
-  def test_claude_code_harness_run_detached_returns_integer_pid
+  def test_pi_harness_run_detached_returns_integer_pid
     root = Dir.mktmpdir("harness-detach-test")
     fake_bin = File.join(root, "fake_detach")
-    File.write(fake_bin, FAKE_DETACH_SCRIPT)
-    File.chmod(0o755, fake_bin)
-
-    wt_dir  = File.join(root, "wt")
-    FileUtils.mkdir_p(wt_dir)
-    prompt  = File.join(root, "prompt.md")
-    run_log = File.join(root, "run.jsonl")
-    File.write(prompt, "hello\n")
-
-    harness = Space::Architect::Harness::ClaudeCodeHarness.new(
-      model: "claude-sonnet-4-6", max_turns: 10, bin: fake_bin
-    )
-    pid = harness.run_detached(prompt_path: prompt, run_log_path: run_log, chdir: wt_dir)
-
-    assert_instance_of Integer, pid
-    assert pid > 0
-    assert_equal pid, Process.getpgid(pid), "child must be its own pgroup leader"
-  ensure
-    sleep 0.1
-    FileUtils.rm_rf(root)
-  end
-
-  def test_opencode_harness_run_detached_returns_integer_pid
-    root = Dir.mktmpdir("harness-detach-test")
-    fake_bin = File.join(root, "fake_oc_detach")
     File.write(fake_bin, FAKE_DETACH_SCRIPT)
     File.chmod(0o755, fake_bin)
 
@@ -676,9 +396,8 @@ class HarnessTest < Space::ArchitectTest
     run_log = File.join(root, "run.jsonl")
     File.write(prompt, "hello\n")
 
-    harness = Space::Architect::Harness::OpenCodeHarness.new(
-      model: "fireworks-ai/test-model", max_turns: 5, bin: fake_bin,
-      config_dir: config_dir
+    harness = Space::Architect::Harness::PiHarness.new(
+      model: "test-model", max_turns: 5, bin: fake_bin, config_dir: config_dir
     )
     pid = harness.run_detached(prompt_path: prompt, run_log_path: run_log, chdir: wt_dir)
 
@@ -690,45 +409,12 @@ class HarnessTest < Space::ArchitectTest
     FileUtils.rm_rf(root)
   end
 
-  # Claude-code dispatch: no --variant in argv (unchanged by effort feature).
-  def test_claude_code_dispatch_argv_unchanged_by_effort_feature
-    root = Dir.mktmpdir("harness-test")
-    _space_dir, project, _fake_claude, _fake_oc, _build_dir = setup_space(root)
-
-    recorder = File.join(root, "recorder")
-    argv_file = File.join(root, "recorded_argv")
-    File.write(recorder, FAKE_ARGV_RECORDER)
-    File.chmod(0o755, recorder)
-
-    ENV["ARGV_RECORD_FILE"] = argv_file
-    project.dispatch("demo", "A", claude_bin: recorder)
-    recorded = File.read(argv_file).split("\x00")
-
-    refute_includes recorded, "--variant", "claude-code argv must not contain --variant"
-  ensure
-    ENV.delete("ARGV_RECORD_FILE")
-    FileUtils.rm_rf(root)
-  end
-
-  # ── I06: --include-partial-messages and push tee ──────────────────────────
-
-  # AC10: --include-partial-messages appears in the spawned argv.
-  def test_claude_code_harness_includes_partial_messages_in_argv
-    root = Dir.mktmpdir("harness-partial")
-    _space_dir, project, fake_claude, _fake_oc, build_dir = setup_space(root)
-
-    project.dispatch("demo", "A", claude_bin: fake_claude)
-    log = File.read(File.join(build_dir, "run.jsonl"))
-
-    assert_includes log, "--include-partial-messages"
-  ensure
-    FileUtils.rm_rf(root)
-  end
+  # ── push tee ─────────────────────────────────────────────────────────────
 
   # Push tee: both the log file and the HTTP server receive the same lines.
-  def test_claude_code_harness_push_tee_sends_to_both_log_and_http
+  def test_pi_harness_push_tee_sends_to_both_log_and_http
     root = Dir.mktmpdir("harness-push")
-    space_dir, _mission, fake_claude, _fake_oc, build_dir = setup_space(root)
+    space_dir, project, fake_pi, build_dir = setup_space(root)
 
     wt_path      = File.join(space_dir, "build", "I01-demo-A", "wt")
     prompt_path  = File.join(build_dir, "prompt.md")
@@ -749,8 +435,9 @@ class HarnessTest < Space::ArchitectTest
 
       push_client = Async::HTTP::Client.new(mock_endpoint)
 
-      harness = Space::Architect::Harness::ClaudeCodeHarness.new(
-        model: Space::Architect::Harness::CLAUDE_DEFAULT_MODEL, max_turns: 10, bin: fake_claude
+      harness = Space::Architect::Harness::PiHarness.new(
+        model: Space::Architect::Harness::DEFAULT_MODEL, max_turns: 10, bin: fake_pi,
+        config_dir: build_dir
       )
       harness.run(
         prompt_path:  prompt_path,
@@ -767,7 +454,7 @@ class HarnessTest < Space::ArchitectTest
     log          = File.read(run_log_path)
     http_content = server_chunks.join
 
-    assert_includes log, "argv=",          "log file must contain fake-claude output"
+    assert_includes log, "argv=",          "log file must contain fake-pi output"
     assert_includes http_content, "argv=", "HTTP server must receive same content"
     assert_equal log, http_content,        "log and HTTP sink must receive identical bytes"
   ensure
@@ -790,11 +477,11 @@ class HarnessTest < Space::ArchitectTest
     assert_equal ["a", "b"], chunks
   end
 
-  # I07: tee_pipe continues writing to the log even when the push body is closed.
+  # tee_pipe continues writing to the log even when the push body is closed.
   # Simulates push-side close (e.g. connection drop) before tee_pipe has finished.
   def test_tee_pipe_continues_log_after_push_body_closes
-    harness = Space::Architect::Harness::ClaudeCodeHarness.new(
-      model: "x", max_turns: 1
+    harness = Space::Architect::Harness::PiHarness.new(
+      model: "x", max_turns: 1, config_dir: Dir.mktmpdir
     )
 
     root = Dir.mktmpdir("tee-pipe-fail")
@@ -820,14 +507,11 @@ class HarnessTest < Space::ArchitectTest
     FileUtils.rm_rf(root)
   end
 
-  # I13 R6 DECISIVE (AC-B3): after a mid-stream non-Closed push error, tee_pipe must
-  # stop writing to the body (write called exactly once) while the log gets ALL lines.
-  # On base, body.write is called for every chunk (inline rescue catches all StandardErrors
-  # but keeps retrying each chunk), so write_count > 1 → FAILS.
-  # With fix (pushing flag), body.write is called exactly once → PASSES.
+  # After a mid-stream non-Closed push error, tee_pipe must stop writing to the
+  # body (write called exactly once) while the log gets ALL lines.
   def test_tee_pipe_stops_writing_to_body_after_first_push_error
-    harness = Space::Architect::Harness::ClaudeCodeHarness.new(
-      model: "x", max_turns: 1
+    harness = Space::Architect::Harness::PiHarness.new(
+      model: "x", max_turns: 1, config_dir: Dir.mktmpdir
     )
 
     root = Dir.mktmpdir("tee-pipe-econnreset")
@@ -856,18 +540,17 @@ class HarnessTest < Space::ArchitectTest
     assert_equal "line1\nline2\nline3\n", File.read(log_path),
       "log must contain all lines even when push write raises Errno::ECONNRESET"
     assert_equal 1, write_count,
-      "body.write must be called exactly once — push disabled after first error (was called #{write_count} times on base)"
+      "body.write must be called exactly once — push disabled after first error"
     assert_includes err.string, "tee_pipe: push write failed"
     assert_includes err.string, "Errno::ECONNRESET"
   ensure
     FileUtils.rm_rf(root)
   end
 
-  # I13 R6 AC-B4: harness.run survives a push_client whose post raises.
-  # run must return the child exit status and the log must be intact.
+  # run survives a push_client whose post raises.
   def test_harness_run_survives_push_client_post_failure
     root = Dir.mktmpdir("harness-push-fail")
-    space_dir, _mission, fake_claude, _fake_oc, build_dir = setup_space(root)
+    space_dir, _project, fake_pi, build_dir = setup_space(root)
 
     wt_path      = File.join(space_dir, "build", "I01-demo-A", "wt")
     prompt_path  = File.join(build_dir, "prompt.md")
@@ -878,8 +561,9 @@ class HarnessTest < Space::ArchitectTest
       raise Errno::ECONNREFUSED, "Connection refused"
     end
 
-    harness = Space::Architect::Harness::ClaudeCodeHarness.new(
-      model: Space::Architect::Harness::CLAUDE_DEFAULT_MODEL, max_turns: 10, bin: fake_claude
+    harness = Space::Architect::Harness::PiHarness.new(
+      model: Space::Architect::Harness::DEFAULT_MODEL, max_turns: 10, bin: fake_pi,
+      config_dir: build_dir
     )
 
     err = StringIO.new
@@ -903,7 +587,7 @@ class HarnessTest < Space::ArchitectTest
     FileUtils.rm_rf(root)
   end
 
-  # ── I13: wall-clock timeout group-kill (AC2) ──────────────────────────────
+  # ── wall-clock timeout group-kill ────────────────────────────────────────
 
   FAKE_SLEEP_SCRIPT = <<~RUBY
     #!/usr/bin/env ruby
@@ -911,21 +595,23 @@ class HarnessTest < Space::ArchitectTest
     sleep 300
   RUBY
 
-  # AC2: timeout fires fast (1s), kills the process GROUP, returns 124, leaves no orphan.
-  def test_claude_code_harness_run_timeout_kills_process_group
+  # Timeout fires fast (1s), kills the process GROUP, returns 124, leaves no orphan.
+  def test_pi_harness_run_timeout_kills_process_group
     root = Dir.mktmpdir("harness-timeout-test")
     fake_bin = File.join(root, "fake_sleep_builder")
     File.write(fake_bin, FAKE_SLEEP_SCRIPT)
     File.chmod(0o755, fake_bin)
 
+    config_dir   = File.join(root, "config")
     wt_dir       = File.join(root, "wt")
     prompt_path  = File.join(root, "prompt.md")
     run_log_path = File.join(root, "run.jsonl")
+    FileUtils.mkdir_p(config_dir)
     FileUtils.mkdir_p(wt_dir)
     File.write(prompt_path, "go\n")
 
-    harness = Space::Architect::Harness::ClaudeCodeHarness.new(
-      model: "claude-sonnet-4-6", max_turns: 10, bin: fake_bin
+    harness = Space::Architect::Harness::PiHarness.new(
+      model: "test-model", max_turns: 10, bin: fake_bin, config_dir: config_dir
     )
 
     t0 = Time.now
@@ -939,8 +625,8 @@ class HarnessTest < Space::ArchitectTest
 
     elapsed = Time.now - t0
 
-    assert_equal Space::Architect::Harness::ClaudeCodeHarness::TIMEOUT_EXIT_CODE, exit_code,
-      "timeout must return #{Space::Architect::Harness::ClaudeCodeHarness::TIMEOUT_EXIT_CODE}, got #{exit_code}"
+    assert_equal Space::Architect::Harness::PiHarness::TIMEOUT_EXIT_CODE, exit_code,
+      "timeout must return #{Space::Architect::Harness::PiHarness::TIMEOUT_EXIT_CODE}, got #{exit_code}"
     assert elapsed < 5, "timeout-kill must fire fast (got #{elapsed.round(2)}s, expected < 5s)"
 
     # No orphaned builder process: pgrep for our fake binary returns nothing.
@@ -952,63 +638,49 @@ class HarnessTest < Space::ArchitectTest
     FileUtils.rm_rf(root)
   end
 
-  # nil timeout preserves today's behavior (no timeout, returns child exit status).
-  def test_claude_code_harness_run_nil_timeout_no_regression
+  # nil timeout preserves the no-timeout behavior (returns child exit status).
+  def test_pi_harness_run_nil_timeout_no_regression
     root = Dir.mktmpdir("harness-nil-timeout")
-    _space_dir, project, fake_claude, _fake_oc, _build_dir = setup_space(root)
+    _space_dir, project, fake_pi, _build_dir = setup_space(root)
 
-    res = project.dispatch("demo", "A", claude_bin: fake_claude, timeout: nil)
+    res = project.dispatch("demo", "A", bin: fake_pi, timeout: nil)
     assert_equal 0, res[:exit_code]
     refute res[:timed_out], "nil timeout must not set timed_out"
   ensure
     FileUtils.rm_rf(root)
   end
 
-  # zero timeout preserves today's behavior (disabled).
-  def test_claude_code_harness_run_zero_timeout_no_regression
+  # zero timeout preserves the disabled behavior.
+  def test_pi_harness_run_zero_timeout_no_regression
     root = Dir.mktmpdir("harness-zero-timeout")
-    _space_dir, project, fake_claude, _fake_oc, _build_dir = setup_space(root)
+    _space_dir, project, fake_pi, _build_dir = setup_space(root)
 
-    res = project.dispatch("demo", "A", claude_bin: fake_claude, timeout: 0)
+    res = project.dispatch("demo", "A", bin: fake_pi, timeout: 0)
     assert_equal 0, res[:exit_code]
     refute res[:timed_out], "zero timeout must not set timed_out"
   ensure
     FileUtils.rm_rf(root)
   end
 
-  # I13 R7 (AC-B5): real claude binary's --help must list --include-partial-messages.
-  def test_claude_binary_supports_include_partial_messages_flag
-    bin = ENV.fetch("ARCHITECT_CLAUDE_BIN", "claude")
-    unless File.exist?(bin) || system("which #{bin} > /dev/null 2>&1")
-      skip "claude binary not found at '#{bin}' — skipping real-flag check"
-    end
+  # ── helpers ──────────────────────────────────────────────────────────────
 
-    output = IO.popen([bin, "--help"], err: [:child, :out]) { |f| f.read }
-    assert_includes output, "--include-partial-messages",
-      "claude --help must list --include-partial-messages; got:\n#{output}"
-  end
+  # Fake binary that records argv to ARGV_RECORD_FILE (null-delimited).
+  FAKE_ARGV_RECORDER = <<~RUBY
+    #!/usr/bin/env ruby
+    File.write(ENV.fetch("ARGV_RECORD_FILE"), ARGV.join("\x00"))
+    exit 0
+  RUBY
 
-  # I12/AC7: emit_liveness now reuses init_event_ready?'s own incremental scan
-  # instead of re-parsing the whole log from the top — but a scan forward from
-  # the cached offset must never lose bytes appended between the poll loop's
-  # last check and this call. Reproduces exactly that tail: the predicate runs
-  # once against an empty log (memoizing offset 0, finding nothing), the init
-  # event lands afterward, and emit_liveness must still observe it.
-  def test_emit_liveness_observes_init_event_written_after_last_poll
-    root = Dir.mktmpdir("harness-liveness-tail-test")
-    log = Pathname.new(File.join(root, "run.jsonl"))
-    harness = Space::Architect::Harness::ClaudeCodeHarness.new(model: "claude-sonnet-4-6", max_turns: 5)
-
-    File.write(log, "")
-    refute harness.send(:init_event_ready?, log), "empty log must not report an init event yet"
-
-    log.open("a") { |f| f.write(JSON.generate("type" => "system", "subtype" => "init", "model" => "claude-sonnet-4-6") + "\n") }
-
-    err = StringIO.new
-    harness.send(:emit_liveness, log, 0.4, err)
-
-    assert_match(/\Aliveness: OK streaming model=claude-sonnet-4-6 /, err.string.lines.first)
-  ensure
-    FileUtils.rm_rf(root)
+  def fake_pi_bin(root)
+    bin = File.join(root, "fake_pi_dispatch")
+    File.write(bin, <<~RUBY)
+      #!/usr/bin/env ruby
+      $stdin.read
+      $stdout.puts "ok"
+      $stdout.flush
+      exit 0
+    RUBY
+    File.chmod(0o755, bin)
+    bin
   end
 end

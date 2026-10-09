@@ -5,7 +5,7 @@ description: >
   — judgment only: arbitration, judging raw evidence against frozen Acceptance
   Criteria, splitting iterations into disjoint lanes, kill/continue calls. The
   BUILDERS are 1-4 parallel cheaper agents run headless (reference harness:
-  `claude -p`), each in its own git worktree; the architect reviews, merges, and
+  `pi -p`), each in its own git worktree; the architect reviews, merges, and
   integrates their work.
   The space is the memory: one file per iteration at
   architecture/I<NN>-<name>.md (Grounds / Specification / Acceptance Criteria /
@@ -19,7 +19,7 @@ description: >
 
 You are the ARCHITECT — the judgment role: a strong reasoning model (or a human),
 run interactively. The BUILDER is a cheaper model run headless (reference
-harness: `claude -p`), one or more per iteration — the models filling both roles
+harness: `pi -p`), one or more per iteration — the models filling both roles
 are an operator choice (see `docs/DESIGN.md` §1–§2), not fixed. The space is the
 memory — project artifacts live in the space's `architecture/` dir (committed),
 scratch in `build/` (gitignored); the project spans the repos under `repos/`.
@@ -116,12 +116,13 @@ loop.
 6. **Audit every status claim** — yours and the builder's — against a tool
    result from the session before reporting it.
 7. **Fresh builder context per lane, worktree isolation between lanes.**
-   `claude -p --continue` (from the lane's worktree) only for follow-ups within
-   the current lane. Builders never commit — Claude Code has no sandbox to
-   enforce that, so verify it yourself post-flight (`git -C <worktree> log
-   <repo-base>..` must be empty). If a run leaves a worktree broken or
-   committed, discard that lane + re-dispatch over rescue prompting — lanes are
-   cheap by construction.
+   `pi -p --continue --session-dir <space>/build/<id>-<lane>` (from the lane's
+   worktree) only for follow-ups within
+   the current lane. Builders never commit — the injected builder guard denies
+   git writes at dispatch, so verify it yourself post-flight (`git -C
+   <worktree> log <repo-base>..` must be empty). If a run leaves a worktree
+   broken or committed, discard that lane + re-dispatch over rescue prompting —
+   lanes are cheap by construction.
 8. **Stop conditions:** failing verification you can't root-cause, instructions
    conflicting with project docs, irreversible/destructive calls, or scope
    growth beyond the iteration → checkpoint to the handoff and ask the human.
@@ -134,8 +135,8 @@ loop.
 - Read the project's operating docs in authority order: `CLAUDE.md` /
   `AGENTS.md` → `README.md` → architecture docs. Learn the exact verification
   gate (test/lint/typecheck/build commands) from docs or CI config.
-- Once per environment: `claude --version` and confirm the builder model
-  resolves (`echo ok | claude -p --model <builder-model> --max-turns 1`;
+- Once per environment: `pi --version` and confirm the builder model
+  resolves (`echo ok | pi -p --model <builder-model>`;
   details in `dispatch.md`). Past that one-time check, every foreground dispatch
   self-verifies — it prints a liveness line naming the streamed model and
   confirming the run log is growing (a WARN line instead if the streamed model
@@ -208,7 +209,7 @@ the builder's work — a capability-gap read whose independence depends on the
 pairing: a same-lab architect/builder shares the builder's blind spots (so the
 frozen gates stay the independent check), while a cross-vendor pairing is more
 independent (see `docs/DESIGN.md` §1/R3). For an extra adversarial pass, pipe the
-diff to a fresh read-only `claude -p` reviewer (command in `dispatch.md`) or a
+diff to a fresh read-only `pi -p` reviewer (command in `dispatch.md`) or a
 fresh-context subagent prompted to break confidence — calibrated to flag only
 correctness/requirement/invariant gaps with file:line evidence, no style.
 
@@ -243,8 +244,9 @@ Two scales, two routes:
   researching well-understood iterations is pure cost.
 
 When a trigger fires, read `research.md` next to this file and follow it:
-3–5 narrow non-overlapping questions → parallel read-only `claude -p`
-researchers (built-in `WebSearch`/`WebFetch`) in the background → you
+3–5 narrow non-overlapping questions → parallel detached `pi -p --mode json`
+researchers (read-only by prompt contract; web via pi's loaded web tools) in
+the background → you
 adversarially verify the load-bearing claims → you write the iteration's
 **Grounds** section with citations and commit it. Researchers gather; you judge
 and write Grounds. Findings without a source URL don't enter Grounds.
@@ -277,9 +279,7 @@ contract, self-contained:
   its **target repo + file-touch set, checked for overlap**: name the repo
   (`repos/<repo>`) and every file each lane may touch. The machine-readable
   declaration lives in a fenced ` ```lanes ` block in the Specification — one
-  entry per lane (`name`, `repo`, `touch` globs; optionally `allowed_tools`/
-  `append_allowed_tools` to replace/extend the lane's builder tool grant — see
-  `dispatch.md`) — the single frozen source of
+  entry per lane (`name`, `repo`, `touch` globs) — the single frozen source of
   truth `architect freeze` records into `space.yaml` and `architect provision`
   materializes. The same boundary is stated twice more — the lane-prompt's
   may-touch list, and the scope gate that checks the lane's diff at judge
@@ -310,8 +310,11 @@ contract, self-contained:
   pending status, and a later session in the same worktree audits it once it
   exits — see `### Long-running sweep` in `dispatch.md`).
 - **Effort call** — thinking budget set per dispatch with `architect dispatch
-  --effort <level>`, translated and clamped to the lane's harness (the
-  escalation keywords `think hard` … `ultrathink` still work in-prompt);
+  --effort <level>`, normalized to the canonical
+  `off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max` set and passed straight
+  through to pi's `--thinking` (each model's `thinkingLevelMap` in
+  `~/.pi/agent/models.json` clamps it further per model); the escalation
+  keywords `think hard` … `ultrathink` still work in-prompt;
   default unattended builder work high, downgrade a routine, tightly-specified
   lane (record which and why). Levels and mechanics: `dispatch.md`.
 
@@ -404,15 +407,14 @@ dispatch. You needn't sequence Grounds and Specification into separate commits
 first — the freeze snapshots the whole frozen region and refuses to re-freeze
 once a frozen section changed afterward.
 
-### 5. Dispatch (one fresh `claude -p` per lane, worktree-isolated)
+### 5. Dispatch (one fresh `pi -p` per lane, worktree-isolated)
 
 Per the mechanics in `dispatch.md`. The lane lifecycle is **declare → rehearse
 → freeze → provision → write prompts → dispatch** — every lane gets a worktree;
 there is no dispatch-in-the-checkout path:
 
 - **Declare** — at spec time, each lane is one entry in the Specification's
-  fenced ` ```lanes ` block (§4): `name`, `repo`, `touch` globs, and optionally
-  `allowed_tools`/`append_allowed_tools`.
+  fenced ` ```lanes ` block (§4): `name`, `repo`, `touch` globs.
 - **Rehearse** — `architect rehearse <iteration>` dry-runs the drafted gates
   from the working tree (§4's pre-freeze check), resolving its run dir from the
   drafted ` ```lanes ` block, and stamps `space.yaml`; `freeze` refuses without
@@ -440,7 +442,9 @@ with `architect section <iteration> prompt --append --lane <lane> --from
 <that scratch file>`. Then run `architect dispatch <iteration> <lane> --prompt
 <that scratch file>` — it copies the prompt to the canonical
 `build/<id>-<lane>/prompt.md` (fed to the builder on stdin), assembles the
-canonical `claude -p` argv, pins the model, and streams stream-json to
+canonical `pi -p --mode json` argv, pins the model, copies the vendored
+builder-guard into the lane's build dir and injects it with `-e`, and streams
+pi's JSONL event stream to
 `build/<id>-<lane>/run.jsonl`. Launch one dispatch per worktree — each as its
 **own background Bash tool call** (your harness's `run_in_background`), **not**
 shell `&`. The harness keeps each lane alive for its full run and notifies you
@@ -452,7 +456,7 @@ stay untouchable.
 
 Do not block — end the turn or do other judgment work; long runs (30–60 minutes) are
 normal. Print the lane-prompts too, so the human can run any lane in an
-interactive `claude` session instead. Whenever you return to a running lane,
+interactive `pi` session instead. Whenever you return to a running lane,
 check liveness: the lane's `run.jsonl` must still be growing. If it has been
 silent 15+ minutes on one in-flight command, follow "Stall detection and
 rescue" in `dispatch.md` — kill the stuck child process, not the run.

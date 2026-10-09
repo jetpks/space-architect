@@ -18,7 +18,7 @@ Gem::Specification.new do |spec|
   spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
 
   spec.files = Dir.chdir(__dir__) do
-    Dir["lib/**/*.rb", "lib/**/*.erb", "exe/*", "skill/**/*", "README.md", "CHANGELOG.md", "LICENSE.txt"]
+    Dir["lib/**/*.rb", "lib/**/*.ts", "lib/**/*.erb", "exe/*", "skill/**/*", "README.md", "CHANGELOG.md", "LICENSE.txt"]
   end
   spec.bindir = "exe"
   spec.executables = ["architect", "space", "src"]

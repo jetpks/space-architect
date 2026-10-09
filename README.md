@@ -343,7 +343,8 @@ architect integrate my-feature --lanes lane-a    # merge passing lanes → proje
 
 ### Streaming builder output 📡
 
-`architect dispatch` can push the builder's stream-json to an ingest server for
+`architect dispatch` can push the builder's pi JSONL event stream to an ingest
+server for
 live viewing:
 
 ```sh
@@ -367,8 +368,9 @@ can be combined with `--detach` (the push tees the live pipe in-process).
 ### Research lanes 🔭
 
 When an iteration needs facts the repo doesn't already have, fan out parallel
-**read-only** research lanes — detached `claude -p` researchers (no
-Edit/Write/Bash) that you supervise:
+**read-only** research lanes — detached `pi -p --mode json` researchers
+(read-only by prompt contract; the supervisor-injected guard denies git writes)
+that you supervise:
 
 ```sh
 architect research dispatch 01-official-api.prompt.md 02-changelog.prompt.md

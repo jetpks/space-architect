@@ -1,13 +1,15 @@
 # Research fan-out reference
 
 Read this only when a research trigger fires (see SKILL.md step 3). The fan-out
-uses `architect research dispatch` to launch parallel read-only `claude -p`
-researchers (a cheaper model, read-only — no Edit/Write/Bash) and `architect research wait` to
+uses `architect research dispatch` to launch parallel detached `pi -p --mode
+json` researchers (a cheaper model, read-only by prompt contract — the
+supervisor injects the builder guard, so git writes are denied) and
+`architect research wait` to
 collect their results. The architect keeps all judgment: it verifies
 load-bearing claims and writes the iteration's **Grounds** section itself.
 
-**Note:** the `~/.claude/skills/architect-research/` copy of this skill is
-synced separately and is NOT updated by this repo.
+**Note:** the installed copy of this skill (`architect install-skills`
+destination) is synced separately and is NOT updated by this repo.
 
 ## Fan out
 
@@ -48,10 +50,14 @@ Verbosity flags for `wait`:
 - `--thinking`: reveal assistant thinking blocks
 - `--jsonl`: emit raw lane-tagged JSONL instead of human text
 
-The researchers are READ-ONLY by toolset (`Read,Grep,Glob,WebSearch,WebFetch`
-with no Edit/Write/Bash) so they cannot touch the repo. Their final report
-is extracted from the terminal `result` event in the stream-json log and
-written to `build/research/<id>/report.md` automatically by `wait`.
+The researchers are READ-ONLY by prompt contract (pi has no tool allow-list in
+the loop's machinery — the lane prompt forbids writes, and the supervisor-injected
+builder guard still denies git-write commands), so they cannot touch the repo.
+Their final report
+is extracted from the run's JSONL event stream (the final assistant message)
+and written to `build/research/<id>/report.md` automatically by `wait`.
+Research sessions land under `build/research/<id>/` (`run.jsonl` + pi session
+files), like builder lanes' `build/<id>-<lane>/`.
 
 ## Research-prompt template
 

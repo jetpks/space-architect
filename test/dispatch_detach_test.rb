@@ -79,7 +79,7 @@ class DispatchDetachTest < Space::ArchitectTest
     setup_lane(space_dir, project, fake_bin, "A")
 
     t0 = Time.now
-    res = project.dispatch("demo", "A", claude_bin: fake_bin, detach: true)
+    res = project.dispatch("demo", "A", bin: fake_bin, detach: true)
     elapsed = Time.now - t0
     pid = res[:pid]
 
@@ -99,7 +99,7 @@ class DispatchDetachTest < Space::ArchitectTest
     space_dir, project, fake_bin = setup_detach_space(root)
     setup_lane(space_dir, project, fake_bin, "B")
 
-    res = project.dispatch("demo", "B", claude_bin: fake_bin, detach: true)
+    res = project.dispatch("demo", "B", bin: fake_bin, detach: true)
     pid = res[:pid]
 
     # Child is sleeping 0.15s — safe to check pgroup while it's alive
@@ -116,7 +116,7 @@ class DispatchDetachTest < Space::ArchitectTest
     space_dir, project, fake_bin = setup_detach_space(root)
     build_dir = setup_lane(space_dir, project, fake_bin, "C")
 
-    project.dispatch("demo", "C", claude_bin: fake_bin, detach: true)
+    project.dispatch("demo", "C", bin: fake_bin, detach: true)
     run_log = File.join(build_dir, "run.jsonl")
 
     # Give the child a moment to write its pid line, but NOT long enough for "done"
@@ -141,7 +141,7 @@ class DispatchDetachTest < Space::ArchitectTest
     space_dir, project, fake_bin = setup_detach_space(root)
     setup_lane(space_dir, project, fake_bin, "D")
 
-    res = project.dispatch("demo", "D", claude_bin: fake_bin, detach: true)
+    res = project.dispatch("demo", "D", bin: fake_bin, detach: true)
 
     assert res.key?(:pid),       "result must include :pid"
     assert res.key?(:run_log),   "result must include :run_log"
@@ -163,7 +163,7 @@ class DispatchDetachTest < Space::ArchitectTest
     File.chmod(0o755, fast_bin)
     setup_lane(space_dir, project, fast_bin, "E")
 
-    res = project.dispatch("demo", "E", claude_bin: fast_bin, detach: false)
+    res = project.dispatch("demo", "E", bin: fast_bin, detach: false)
 
     assert res.key?(:exit_code), "blocking result must include :exit_code"
     assert_equal 0, res[:exit_code]
