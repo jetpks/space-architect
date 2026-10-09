@@ -6,7 +6,7 @@ require "json"
 require "tmpdir"
 
 class SupervisorTest < Space::ArchitectTest
-  STUB_BIN = File.expand_path("../../test/research/stub_claude", __dir__)
+  STUB_BIN = File.expand_path("../../test/research/stub_pi", __dir__)
 
   def setup_space(root)
     space_dir = File.join(root, "space")
@@ -44,7 +44,8 @@ class SupervisorTest < Space::ArchitectTest
 
         content = File.read(r["run_log_path"])
         events  = content.lines.filter_map { |l| JSON.parse(l.chomp) rescue nil }
-        events.any? { |e| e["type"] == "result" }
+        events.any? { |e| e["type"] == "message_end" && e.dig("message", "role") == "assistant" &&
+                      e.dig("message", "stopReason") == "stop" }
       end
       break if all_done && !runs.empty?
     end
@@ -118,54 +119,22 @@ class SupervisorTest < Space::ArchitectTest
     FileUtils.rm_rf(root)
   end
 
-  # ── wait extracts report.md from result event ─────────────────────────────
+  # ── status classifies pi-shaped runs ──────────────────────────────────────
 
-  def test_wait_extracts_report_from_result_event
-    root = Dir.mktmpdir("sup-test")
-    space = setup_space(root)
-    p1 = write_prompt(space, "01-research")
-
-    supervisor = Space::Architect::Research::Supervisor.new(space: space, bin: STUB_BIN)
-    runs = supervisor.dispatch([p1.to_s])
-
-    out = StringIO.new
-    result = supervisor.wait(level: 1, out: out)
-
-    run = runs.first
-    assert File.exist?(run.report_path.to_s), "report.md must be written after wait"
-    assert_includes File.read(run.report_path.to_s), "Final research summary here."
-    assert_equal :ok, result
-  ensure
-    FileUtils.rm_rf(root)
-  end
-
-  # ── wait exits :ok when all succeed, :failed when any fail ───────────────
-
-  def test_wait_returns_ok_when_all_succeed
-    root = Dir.mktmpdir("sup-test")
-    space = setup_space(root)
-    p1 = write_prompt(space, "01-a")
-
-    supervisor = Space::Architect::Research::Supervisor.new(space: space, bin: STUB_BIN)
-    supervisor.dispatch([p1.to_s])
-
-    result = supervisor.wait(level: 0, out: StringIO.new)
-    assert_equal :ok, result
-  ensure
-    FileUtils.rm_rf(root)
-  end
-
-  def test_wait_returns_failed_when_lane_errors
+  def test_status_classifies_failed_run
     root = Dir.mktmpdir("sup-test")
     space = setup_space(root)
     p1 = write_prompt(space, "01-err")
 
-    with_env("STUB_CLAUDE_FIXTURE" => "error") do
+    with_env("STUB_PI_FIXTURE" => "error") do
       supervisor = Space::Architect::Research::Supervisor.new(space: space, bin: STUB_BIN)
       supervisor.dispatch([p1.to_s])
 
-      result = supervisor.wait(level: 0, out: StringIO.new)
-      assert_equal :failed, result
+      wait_for_completion(space)
+
+      entries = supervisor.status
+      run_entry = entries.find { |e| e[:run].id == "01-err" }
+      assert_equal :failed, run_entry[:state]
     end
   ensure
     FileUtils.rm_rf(root)
@@ -223,7 +192,9 @@ class SupervisorTest < Space::ArchitectTest
 
     assert File.exist?(run.run_log_path.to_s), "run.jsonl must exist after child completes"
     events = File.readlines(run.run_log_path.to_s).map { |l| JSON.parse(l.chomp) }
-    assert events.any? { |e| e["type"] == "result" }, "run.jsonl must contain result event"
+    assert events.any? { |e| e["type"] == "message_end" && e.dig("message", "role") == "assistant" &&
+                         e.dig("message", "stopReason") == "stop" },
+      "run.jsonl must contain the terminal assistant message_end event"
   ensure
     FileUtils.rm_rf(root)
   end

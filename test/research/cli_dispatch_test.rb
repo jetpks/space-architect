@@ -8,7 +8,7 @@ require "yaml"
 # Supervisor#dispatch already fans out an array correctly, so this must be
 # exercised at the CLI layer where the drop actually happens.
 class CLIDispatchTest < Space::ArchitectTest
-  STUB_BIN = File.expand_path("stub_claude", __dir__)
+  STUB_BIN = File.expand_path("stub_pi", __dir__)
 
   def setup_space(root)
     space_dir = File.join(root, "space")
@@ -40,7 +40,7 @@ class CLIDispatchTest < Space::ArchitectTest
     p3 = write_prompt(space_dir, "03-c")
 
     Dir.chdir(space_dir) do
-      with_env("ARCHITECT_CLAUDE_BIN" => STUB_BIN) do
+      with_env("ARCHITECT_PI_BIN" => STUB_BIN) do
         out, err = invoke("research", "dispatch", p1, p2, p3)
 
         assert_empty err
@@ -69,7 +69,7 @@ class CLIDispatchTest < Space::ArchitectTest
     p2 = write_prompt(space_dir, "02-b")
 
     Dir.chdir(space_dir) do
-      with_env("ARCHITECT_CLAUDE_BIN" => STUB_BIN) do
+      with_env("ARCHITECT_PI_BIN" => STUB_BIN) do
         invoke("research", "dispatch", p1, p2)
         out, err = invoke("research", "status")
 
@@ -89,7 +89,7 @@ class CLIDispatchTest < Space::ArchitectTest
     p1 = write_prompt(space_dir, "01-solo")
 
     Dir.chdir(space_dir) do
-      with_env("ARCHITECT_CLAUDE_BIN" => STUB_BIN) do
+      with_env("ARCHITECT_PI_BIN" => STUB_BIN) do
         out, err = invoke("research", "dispatch", p1)
 
         assert_empty err

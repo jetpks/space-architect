@@ -1,0 +1,56 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+require "json"
+# Stub pi bin for research supervisor tests.
+# Reads the prompt from stdin (ignored), asserts the pi argv shape dispatch
+# must produce (-p --mode json --session-dir <dir> --no-approve -e <guard>),
+# writes the pi-shaped fixture to stdout (which run_detached redirects to
+# run.jsonl), then exits 0.
+#
+# Set STUB_PI_FIXTURE to "error" to emit the error fixture instead of "success".
+argv = ARGV
+def flag_value(argv, flag)
+  i = argv.index(flag)
+  i ? argv[i + 1] : nil
+end
+
+problems = []
+problems << "missing -p" unless argv.include?("-p")
+problems << "missing --mode json" unless flag_value(argv, "--mode") == "json"
+problems << "missing --session-dir" unless flag_value(argv, "--session-dir")
+problems << "missing --no-approve" unless argv.include?("--no-approve")
+guard = flag_value(argv, "-e")
+problems << "missing -e <guard>" unless guard
+problems << "guard does not exist: #{guard}" if guard && !File.exist?(guard)
+if problems.any?
+  warn "stub_pi argv-shape assertion failed: #{problems.join(', ')} (argv: #{argv.inspect})"
+  exit 1
+end
+
+$stdin.read # consume stdin (the prompt)
+
+fixture_name = ENV.fetch("STUB_PI_FIXTURE", "success")
+if fixture_name == "error"
+  puts JSON.generate("type" => "session", "version" => 3, "id" => "stub-session", "cwd" => Dir.pwd)
+  puts JSON.generate("type" => "message_start",
+                     "message" => {"role" => "assistant", "content" => [], "provider" => "fireworks",
+                                   "model" => "accounts/fireworks/models/glm-5p3-flash", "stopReason" => "pending"})
+  puts JSON.generate("type" => "message_end",
+                     "message" => {"role" => "assistant", "content" => [], "provider" => "fireworks",
+                                   "model" => "accounts/fireworks/models/glm-5p3-flash",
+                                   "stopReason" => "error", "errorMessage" => "STUB_ERROR"})
+  puts JSON.generate("type" => "agent_end")
+else
+  puts JSON.generate("type" => "session", "version" => 3, "id" => "stub-session", "cwd" => Dir.pwd)
+  puts JSON.generate("type" => "message_start",
+                     "message" => {"role" => "assistant", "content" => [], "provider" => "fireworks",
+                                   "model" => "accounts/fireworks/models/glm-5p3-flash", "stopReason" => "pending"})
+  puts JSON.generate("type" => "message_end",
+                     "message" => {"role" => "assistant",
+                                   "content" => [{"type" => "text", "text" => "Final research summary here."}],
+                                   "provider" => "fireworks",
+                                   "model" => "accounts/fireworks/models/glm-5p3-flash", "stopReason" => "stop"})
+  puts JSON.generate("type" => "agent_end")
+end
+exit 0

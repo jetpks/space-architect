@@ -5,6 +5,44 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **pi is the only dispatch harness.** The `claude-code` and `opencode`
+  backends are deleted, along with everything that only served them: the
+  per-harness `DEFAULT_MODELS` map (one `Harness::DEFAULT_MODEL`:
+  `accounts/fireworks/models/glm-5p3-flash`), the three-way thinking-level
+  dispatch, the `--allowed-tools`/`--append-allowed-tools` flags and their
+  #89 resolution machinery (the frozen lanes block records `name`/`repo`/
+  `touch` only), `dispatch --as-job` with its `--host`/`--token`/
+  `--backend-url`/`--job-model`/`--api-key-ref` flags, and the backward-
+  compat `Dispatcher` wrapper. The `Harness.for` seam stays: any name but
+  `pi` — including a stored legacy harness in an old space.yaml — raises an
+  actionable error naming `pi` as the only valid harness. The push kwargs
+  (`--push-url`/`--push-token`/`--push-host`) and `--quiet` now apply to pi
+  dispatches, with liveness lines parsed from pi's own JSONL stream.
+- **`PiHarness` reaches parity with the old default backend:** a liveness
+  line per run (first assistant-role JSONL event carrying `model`; OK when
+  it matches the pin, WARN on no growth / no assistant model within the
+  budget / pinned-vs-streamed mismatch; incremental scan, `--quiet`
+  suppressible), stdout tee through a pipe to the run log and — when push
+  is wired — streamed to the ingest endpoint, and TERM→grace→KILL timeout
+  escalation unchanged.
+- **A vendored builder-guard extension ships with every dispatch.**
+  `lib/space_architect/pi/builder-guard.ts` is copied byte-for-byte into the
+  run's build dir and injected via `pi -e`, denying git-write subcommands
+  (parsed per command segment — `git -C <path> commit` is caught, `git log
+  --grep=commit` passes) and `bash -n`-unparseable commands before they run.
+  The deny reason tells the builder what was denied and what to do instead;
+  the architect CLI owns all commits.
+- **Research runs run on pi too.** The research supervisor constructs a
+  `PiHarness` per run (sessions under `build/research/<id>/`), passes the
+  same vendored guard, and defaults to the pi default model; read-only
+  remains prompt-enforced. `run.detached` research classification keys off
+  pi's terminal assistant `stopReason` instead of a stream-json `result`
+  event.
+
 ## [7.1.0] - 2026-08-16
 
 One iteration of the Architect Loop (I01, space

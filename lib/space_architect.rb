@@ -5,7 +5,6 @@ require "space_src"
 
 require_relative "space_architect/harness"
 require_relative "space_architect/run_creator"
-require_relative "space_architect/dispatcher"
 require_relative "space_architect/gate_lint"
 require_relative "space_architect/gate_evaluator"
 require_relative "space_architect/architect_project"

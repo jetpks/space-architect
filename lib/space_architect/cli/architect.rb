@@ -178,18 +178,10 @@ module Space::Architect
                   nn = s["ordinal"] ? format("%02d", s["ordinal"]) : "-"
                   lane_list = s["lanes"] || []
                   lanes_str = lane_list.map do |l|
-                    h = l["harness"] || "claude-code"
-                    m = l["model"]   || Harness.default_model_for(h)
+                    h = l["harness"] || "pi"
+                    m = l["model"]   || Harness::DEFAULT_MODEL
                     eff = l["effort"] ? "·#{l['effort']}" : ""
-                    # #89/AC8: the resolved tool grant, visible next to the other resolved
-                    # values — only when it diverges from the harness default, to keep the
-                    # common case (no lane touches it) uncluttered. Meaningless outside
-                    # claude-code (no equivalent grant mechanism), so shown only there.
-                    tools = if h == "claude-code"
-                      resolved = Harness::ClaudeCodeHarness.resolve_tools(replace: l["allowed_tools"], append: l["append_allowed_tools"])
-                      resolved == Harness::ClaudeCodeHarness::ALLOWED_TOOLS ? "" : "·tools:#{resolved}"
-                    end
-                    "#{l['name']}(#{l['repo']}·#{h}·#{m}#{eff}#{tools})"
+                    "#{l['name']}(#{l['repo']}·#{h}·#{m}#{eff})"
                   end.join(", ")
                   lanes = lane_list.any? { |l| l["variant"] } ? "variant: #{lanes_str}" : lanes_str
                   lanes = "#{lanes} → winner: #{s['winner']}" if s["winner"]
@@ -493,107 +485,68 @@ module Space::Architect
         argument :lane,      required: true,  desc: "Lane name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :prompt,    default: nil,    desc: "Read the lane prompt from this file (copied byte-for-byte to build/<id>-<lane>/prompt.md)"
-        option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's stored model, else space.yaml project.model, else the per-harness sensible default). Any provider/tier; pin a full id, not a floating alias"
+        option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's stored model, else space.yaml project.model, else the pi default #{Harness::DEFAULT_MODEL}). Any provider/tier; pin a full id, not a floating alias"
         option   :max_turns, default: "200",  desc: "Max turns for the builder"
-        option   :harness,   default: nil,    desc: "Harness override (claude-code, opencode, pi)"
-        option   :allowed_tools,        default: nil, desc: "Comma-separated tool list — replaces the claude-code --allowedTools grant for this dispatch (default: Read,Edit,Write,Grep,Glob,Bash,WebSearch,WebFetch). The lane's frozen allowed_tools: does the same with no flag; this flag wins over that key. Meaningless for opencode/pi"
-        option   :append_allowed_tools, default: nil, desc: "Comma-separated tool list — appends to the claude-code --allowedTools grant for this dispatch (to the flag/lane replace value, or the default). The lane's frozen append_allowed_tools: does the same with no flag; this flag wins over that key. Meaningless for opencode/pi"
-        option   :effort,    default: nil,    desc: "Thinking/reasoning effort level — alias for --thinking/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
-        option   :thinking,  default: nil,    desc: "Thinking/reasoning effort level — alias for --effort/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
-        option   :reasoning, default: nil,    desc: "Thinking/reasoning effort level — alias for --effort/--thinking (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness"
-        option   :force_effort,    default: nil, desc: "Force the literal level onto the harness flag, skipping architect's clamp — alias for --force-thinking/--force-reasoning (dispatch only; the binary's rejection is final)"
-        option   :force_thinking,  default: nil, desc: "Force the literal level onto the harness flag, skipping architect's clamp — alias for --force-effort/--force-reasoning (dispatch only; the binary's rejection is final)"
-        option   :force_reasoning, default: nil, desc: "Force the literal level onto the harness flag, skipping architect's clamp — alias for --force-effort/--force-thinking (dispatch only; the binary's rejection is final)"
+        option   :harness,   default: nil,    desc: "Harness (pi)"
+        option   :effort,    default: nil,    desc: "Thinking/reasoning effort level — alias for --thinking/--reasoning (off, minimal, low, medium, high, xhigh, max)"
+        option   :thinking,  default: nil,    desc: "Thinking/reasoning effort level — alias for --effort/--reasoning (off, minimal, low, medium, high, xhigh, max)"
+        option   :reasoning, default: nil,    desc: "Thinking/reasoning effort level — alias for --effort/--thinking (off, minimal, low, medium, high, xhigh, max)"
+        option   :force_effort,    default: nil, desc: "Force the literal level onto the --thinking flag, skipping architect's validation — alias for --force-thinking/--force-reasoning (dispatch only; the binary's rejection is final)"
+        option   :force_thinking,  default: nil, desc: "Force the literal level onto the --thinking flag, skipping architect's validation — alias for --force-effort/--force-reasoning (dispatch only; the binary's rejection is final)"
+        option   :force_reasoning, default: nil, desc: "Force the literal level onto the --thinking flag, skipping architect's validation — alias for --force-effort/--force-thinking (dispatch only; the binary's rejection is final)"
         option   :quiet,    type: :boolean, default: false, desc: "Suppress thinking-translation and harness run-time warn lines (liveness/push) on $stderr for this dispatch"
         option   :detach,    type: :boolean, default: false, desc: "Detach the builder process (returns immediately with PID; poll report for completion)"
         option   :timeout,   default: "14400", desc: "Wall-clock timeout in seconds (0 disables; default 4h); foreground only"
         option   :push_url,   default: nil,   desc: "HTTP endpoint for streaming push (POST body to this URL)"
         option   :push_token, default: nil,   desc: "Bearer token for push endpoint authorization"
         option   :push_host,  default: nil,   desc: "Base URL of the ingest server; the CLI creates a run via POST <host>/runs and streams to /runs/<id>/ingest (requires --push-token)"
-        option   :as_job,     type: :boolean, default: false, desc: "Submit the run as a job to the space-server's queue instead of running locally (sandboxed executor; requires --host/--token/--backend-url)"
-        option   :host,        default: nil, desc: "Base URL of the space-server (required with --as-job)"
-        option   :token,       default: nil, desc: "Bearer token for authorization (required with --as-job)"
-        option   :backend_url, default: nil, desc: "Base URL of the harness backend the sandboxed job talks to (required with --as-job)"
-        option   :job_model,   default: nil, desc: "Model pinned for the sandboxed job's harness — distinct from --model, which is meaningless against a non-Anthropic backend"
-        option   :api_key_ref, default: nil, desc: "op:// reference resolved into ANTHROPIC_API_KEY server-side (--as-job only; omit for keyless backends)"
 
         def call(iteration:, lane:, space: nil, prompt: nil, model: nil,
                  max_turns: "200", harness: nil, effort: nil, thinking: nil, reasoning: nil,
-                 allowed_tools: nil, append_allowed_tools: nil,
                  force_effort: nil, force_thinking: nil, force_reasoning: nil, quiet: false, detach: false,
-                 timeout: "14400", push_url: nil, push_token: nil, push_host: nil,
-                 as_job: false, host: nil, token: nil, backend_url: nil, job_model: nil, api_key_ref: nil, **opts)
+                 timeout: "14400", push_url: nil, push_token: nil, push_host: nil, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             level = resolve_thinking_alias(effort: effort, thinking: thinking, reasoning: reasoning)
             forced_level = resolve_force_thinking_alias(force_effort: force_effort,
               force_thinking: force_thinking, force_reasoning: force_reasoning)
 
-            if as_job
-              Jobs.require_credentials!(host, token)
-              raise Space::Core::Error, "--backend-url is required with --as-job" unless backend_url
-              raise Space::Core::Error, "--job-model is required with --as-job" unless job_model
-              raise Space::Core::Error, "--as-job cannot be combined with --push-url/--push-token/--push-host/--detach" \
-                if push_url || push_token || push_host || detach
-            end
-
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
 
-              if as_job
-                kwargs = { host: host, token: token, backend_url: backend_url, max_turns: max_turns.to_i }
-                kwargs[:prompt]      = prompt          if prompt
-                kwargs[:model]       = model           if model
-                kwargs[:harness]     = harness         if harness
-                kwargs[:effort]      = forced_level || level if forced_level || level
-                kwargs[:allowed_tools]        = allowed_tools        if allowed_tools
-                kwargs[:append_allowed_tools] = append_allowed_tools if append_allowed_tools
-                kwargs[:force]       = true            if forced_level
-                kwargs[:quiet]       = true             if quiet
-                kwargs[:job_model]   = job_model       if job_model
-                kwargs[:api_key_ref] = api_key_ref     if api_key_ref
-                res = project.dispatch_as_job(iteration, lane, **kwargs)
-                terminal.say "Prompt:  #{prompt} → #{terminal.path(res[:prompt_copied])}" if res[:prompt_copied]
-                terminal.say "Job:     #{res[:job_id]}"
-                terminal.say "Watch:   architect jobs watch #{res[:job_id]} --host #{host} --token #{token}"
+              kwargs = { max_turns: max_turns.to_i, detach: detach }
+              kwargs[:prompt]     = prompt          if prompt
+              kwargs[:model]      = model           if model
+              kwargs[:harness]    = harness         if harness
+              kwargs[:effort]     = forced_level || level if forced_level || level
+              kwargs[:force]      = true            if forced_level
+              kwargs[:quiet]      = true             if quiet
+              kwargs[:timeout]    = timeout.to_i    unless detach
+              kwargs[:push_url]   = push_url        if push_url
+              kwargs[:push_token] = push_token      if push_token
+              kwargs[:push_host]  = push_host       if push_host
+              res = project.dispatch(iteration, lane, **kwargs)
+              terminal.say "Prompt:  #{prompt} → #{terminal.path(res[:prompt_copied])}" if res[:prompt_copied]
+              if detach
+                terminal.say "PID:     #{res[:pid]}"
+                terminal.say "Run log: #{terminal.path(res[:run_log])}"
+                terminal.say "Report:  #{terminal.path(res[:report])}"
+                terminal.say "Dispatched detached — poll #{terminal.path(res[:report])} for completion"
                 CLI.record_outcome(Outcome.new(exit_code: 0))
+              elsif res[:timed_out]
+                terminal.say "Run log: #{terminal.path(res[:run_log])}"
+                terminal.say "Report:  #{terminal.path(res[:report])}"
+                terminal.say "Builder TIMED OUT after #{timeout}s — process group killed. Re-dispatch (lanes are cheap)."
+                CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
               else
-                kwargs = { max_turns: max_turns.to_i, detach: detach }
-                kwargs[:prompt]     = prompt          if prompt
-                kwargs[:model]      = model           if model
-                kwargs[:harness]    = harness         if harness
-                kwargs[:effort]     = forced_level || level if forced_level || level
-                kwargs[:allowed_tools]        = allowed_tools        if allowed_tools
-                kwargs[:append_allowed_tools] = append_allowed_tools if append_allowed_tools
-                kwargs[:force]      = true            if forced_level
-                kwargs[:quiet]      = true             if quiet
-                kwargs[:timeout]    = timeout.to_i    unless detach
-                kwargs[:push_url]   = push_url        if push_url
-                kwargs[:push_token] = push_token      if push_token
-                kwargs[:push_host]  = push_host       if push_host
-                res = project.dispatch(iteration, lane, **kwargs)
-                terminal.say "Prompt:  #{prompt} → #{terminal.path(res[:prompt_copied])}" if res[:prompt_copied]
-                if detach
-                  terminal.say "PID:     #{res[:pid]}"
-                  terminal.say "Run log: #{terminal.path(res[:run_log])}"
-                  terminal.say "Report:  #{terminal.path(res[:report])}"
-                  terminal.say "Dispatched detached — poll #{terminal.path(res[:report])} for completion"
-                  CLI.record_outcome(Outcome.new(exit_code: 0))
-                elsif res[:timed_out]
-                  terminal.say "Run log: #{terminal.path(res[:run_log])}"
-                  terminal.say "Report:  #{terminal.path(res[:report])}"
-                  terminal.say "Builder TIMED OUT after #{timeout}s — process group killed. Re-dispatch (lanes are cheap)."
-                  CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
-                else
-                  terminal.say "Run log: #{terminal.path(res[:run_log])}"
-                  terminal.say "Report:  #{terminal.path(res[:report])}"
-                  terminal.say "Ingest URL:  #{res[:push_url]}" if res[:push_url]
-                  terminal.say "Builder exited with status #{res[:exit_code]}"
-                  unless res[:report].exist? && !res[:report].read.strip.empty?
-                    terminal.say "WARNING: no report at #{terminal.path(res[:report])} — the lane produced no deliverable."
-                  end
-                  CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
+                terminal.say "Run log: #{terminal.path(res[:run_log])}"
+                terminal.say "Report:  #{terminal.path(res[:report])}"
+                terminal.say "Ingest URL:  #{res[:push_url]}" if res[:push_url]
+                terminal.say "Builder exited with status #{res[:exit_code]}"
+                unless res[:report].exist? && !res[:report].read.strip.empty?
+                  terminal.say "WARNING: no report at #{terminal.path(res[:report])} — the lane produced no deliverable."
                 end
+                CLI.record_outcome(Outcome.new(exit_code: res[:exit_code]))
               end
             end
           end
@@ -858,7 +811,7 @@ module Space::Architect
       class InstallSkills < BaseCommand
         desc "Install bundled skills (architect, architect-research, architect-vocabulary) for a harness"
         phase 53, "Project"
-        option :provider, default: "claude", desc: "Harness: claude, codex, opencode, pi"
+        option :provider, default: "claude", desc: "Skill install target (default: claude; validated by the installer)"
         option :project, type: :boolean, default: false, desc: "Install to CWD instead of global"
         option :force,   type: :boolean, default: false, desc: "Overwrite existing skills that differ"
         option :dry_run, type: :boolean, default: false, desc: "Print what would happen without writing files"
@@ -886,11 +839,11 @@ module Space::Architect
           argument :lane,      required: true, desc: "Lane name"
           argument :space,     required: false, desc: "Space identifier (default: $PWD)"
           option   :base,      default: nil,          desc: "Base ref (default: HEAD of repo)"
-          option   :harness,   default: nil,          desc: "Harness (claude-code, opencode, pi; default: space.yaml project.harness, else claude-code)"
-          option   :model,     default: nil,           desc: "Model; a trailing :<level> suffix (e.g. foo:high) is parsed into --effort (default: space.yaml project.model, else the per-harness sensible default)"
-          option   :effort,    default: nil,           desc: "Thinking/reasoning effort level — alias for --thinking/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness at dispatch time"
-          option   :thinking,  default: nil,           desc: "Thinking/reasoning effort level — alias for --effort/--reasoning (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness at dispatch time"
-          option   :reasoning, default: nil,           desc: "Thinking/reasoning effort level — alias for --effort/--thinking (off, minimal, low, medium, high, xhigh, max); translated + clamped to the lane's harness at dispatch time"
+          option   :harness,   default: nil,          desc: "Harness (pi; default: space.yaml project.harness, else pi)"
+          option   :model,     default: nil,           desc: "Model; a trailing :<level> suffix (e.g. foo:high) is parsed into --effort (default: space.yaml project.model, else the pi default #{Harness::DEFAULT_MODEL})"
+          option   :effort,    default: nil,           desc: "Thinking/reasoning effort level — alias for --thinking/--reasoning (off, minimal, low, medium, high, xhigh, max)"
+          option   :thinking,  default: nil,           desc: "Thinking/reasoning effort level — alias for --effort/--reasoning (off, minimal, low, medium, high, xhigh, max)"
+          option   :reasoning, default: nil,           desc: "Thinking/reasoning effort level — alias for --effort/--thinking (off, minimal, low, medium, high, xhigh, max)"
           option   :quiet,     type: :boolean, default: false, desc: "Suppress the thinking-translation inform line on $stderr"
           option   :touch,     default: nil,           desc: "Comma-separated file globs the lane may touch (records its touch_set for in-bounds + merge checks)"
           option   :force,     type: :boolean, default: false, desc: "Clear and re-create a stale (unregistered) worktree directory"
@@ -970,7 +923,7 @@ module Space::Architect
           argument :repo,      required: true,  desc: "Repo name (under repos/)"
           argument :iteration, required: true,  desc: "Iteration name"
           argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-          option   :pairs,     required: true,  desc: "Comma-separated harness[:model] pairs (e.g. claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2)"
+          option   :pairs,     required: true,  desc: "Comma-separated harness[:model] pairs (e.g. pi,pi:#{Harness::DEFAULT_MODEL})"
           option   :base,      default: nil,    desc: "Base ref (default: HEAD of repo)"
           option   :prompt,    default: nil,    desc: "Prompt file to fan-out byte-identical to each variant"
 

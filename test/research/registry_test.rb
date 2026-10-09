@@ -14,7 +14,7 @@ class RegistryTest < Space::ArchitectTest
       prompt_path:   Pathname.new(dir).join("prompt.md"),
       run_log_path:  Pathname.new(dir).join("run.jsonl"),
       report_path:   Pathname.new(dir).join("report.md"),
-      model:         "claude-sonnet-4-6",
+      model:         "accounts/fireworks/models/glm-5p3-flash",
       dispatched_at: Time.new(2026, 6, 27, 0, 0, 0, "+00:00")
     )
   end

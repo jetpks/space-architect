@@ -131,14 +131,14 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a",
-                         harness: "opencode",
-                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2")
+                         harness: "pi",
+                         model: "accounts/fireworks/models/glm-5p3-flash")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     lane = yml.dig("project", "iterations", 0, "lanes", 0)
 
-    assert_equal "opencode", lane["harness"]
-    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", lane["model"]
+    assert_equal "pi", lane["harness"]
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", lane["model"]
     # Pre-existing keys must still be present
     assert_equal "lane-a",   lane["name"]
     assert_equal "my-repo",  lane["repo"]
@@ -149,8 +149,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # AC6: worktree_add no longer raises for opencode/pi without a model — nil model
-  # resolves to the per-harness sensible default instead.
+  # pi without a model resolves to the pi default model instead.
   def test_worktree_add_nil_model_resolves_to_per_harness_default
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
@@ -160,7 +159,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
 
-    project.worktree_add("my-repo", "my-slice", "lane-oc", harness: "opencode")
+    project.worktree_add("my-repo", "my-slice", "lane-oc", harness: "pi")
     project.worktree_add("my-repo", "my-slice", "lane-pi", harness: "pi")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
@@ -168,15 +167,15 @@ class ArchitectProjectTest < Space::ArchitectTest
     lane_oc = lanes.find { |l| l["name"] == "lane-oc" }
     lane_pi = lanes.find { |l| l["name"] == "lane-pi" }
 
-    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", lane_oc["model"]
-    assert_equal "qwen3-27b-optiq", lane_pi["model"]
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", lane_oc["model"]
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", lane_pi["model"]
   ensure
     FileUtils.rm_rf(dir)
   end
 
   # I12 AC2: worktree_add with no flags and no space.yaml project defaults resolves
-  # to claude-code/claude-sonnet-5
-  def test_worktree_add_no_flags_resolves_to_claude_code_default
+  # to pi/accounts/fireworks/models/glm-5p3-flash
+  def test_worktree_add_no_flags_resolves_to_pi_default
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
@@ -189,8 +188,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     lane = yml.dig("project", "iterations", 0, "lanes", 0)
 
-    assert_equal "claude-code", lane["harness"]
-    assert_equal "claude-sonnet-5", lane["model"]
+    assert_equal "pi", lane["harness"]
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", lane["model"]
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -204,7 +203,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     space.data["project"] ||= {}
     space.data["project"]["harness"] = "pi"
-    space.data["project"]["model"]   = "qwen3-27b-optiq"
+    space.data["project"]["model"]   = "accounts/fireworks/models/glm-5p3-flash"
     space.save
 
     project = Space::Architect::ArchitectProject.new(space: space)
@@ -216,7 +215,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     lane = yml.dig("project", "iterations", 0, "lanes", 0)
 
     assert_equal "pi", lane["harness"]
-    assert_equal "qwen3-27b-optiq", lane["model"]
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", lane["model"]
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -229,21 +228,21 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     space.data["project"] ||= {}
     space.data["project"]["harness"] = "pi"
-    space.data["project"]["model"]   = "qwen3-27b-optiq"
+    space.data["project"]["model"]   = "accounts/fireworks/models/glm-5p3-flash"
     space.save
 
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-a",
-                         harness: "opencode",
-                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2")
+                         harness: "pi",
+                         model: "accounts/fireworks/models/glm-5p3-flash")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     lane = yml.dig("project", "iterations", 0, "lanes", 0)
 
-    assert_equal "opencode", lane["harness"]
-    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", lane["model"]
+    assert_equal "pi", lane["harness"]
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", lane["model"]
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -281,7 +280,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.variant_add("my-repo", "my-slice",
-                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+                        [["pi", nil], ["pi", "accounts/fireworks/models/glm-5p3-flash"]])
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     lanes = yml.dig("project", "iterations", 0, "lanes")
@@ -295,16 +294,16 @@ class ArchitectProjectTest < Space::ArchitectTest
     refute_nil v02, "expected v02 lane"
 
     assert_equal true, v01["variant"]
-    assert_equal "claude-code", v01["harness"]
-    assert_equal "claude-sonnet-5", v01["model"]
+    assert_equal "pi", v01["harness"]
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", v01["model"]
     assert_equal "my-repo", v01["repo"]
     assert v01["base_sha"]
     assert v01["worktree"]
     assert_nil v01["integration_branch"]
 
     assert_equal true, v02["variant"]
-    assert_equal "opencode", v02["harness"]
-    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", v02["model"]
+    assert_equal "pi", v02["harness"]
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", v02["model"]
     assert_equal "my-repo", v02["repo"]
     assert v02["base_sha"]
     assert v02["worktree"]
@@ -330,7 +329,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.variant_add("my-repo", "my-slice",
-                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]],
+                        [["pi", nil], ["pi", "accounts/fireworks/models/glm-5p3-flash"]],
                         prompt: prompt_src)
 
     src_bytes = File.binread(prompt_src)
@@ -353,8 +352,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.variant_add("my-repo", "my-slice",
-                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
-    project.variant_add("my-repo", "my-slice", [["claude-code", nil]])
+                        [["pi", nil], ["pi", "accounts/fireworks/models/glm-5p3-flash"]])
+    project.variant_add("my-repo", "my-slice", [["pi", nil]])
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     lanes = yml.dig("project", "iterations", 0, "lanes")
@@ -369,8 +368,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # AC6: variant_add with opencode+nil model no longer raises — the per-harness
-  # sensible default flows through worktree_add
+  # variant_add with pi+nil model resolves the pi default model through worktree_add
   def test_variant_add_resolves_nil_model_to_per_harness_default
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
@@ -380,13 +378,13 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
 
-    project.variant_add("my-repo", "my-slice", [["opencode", nil]])
+    project.variant_add("my-repo", "my-slice", [["pi", nil]])
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     lanes = yml.dig("project", "iterations", 0, "lanes") || []
     v01 = lanes.find { |l| l["name"] == "v01" }
     refute_nil v01, "expected v01 lane to be persisted"
-    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", v01["model"]
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", v01["model"]
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -422,7 +420,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.variant_add("my-repo", "my-slice",
-                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+                        [["pi", nil], ["pi", "accounts/fireworks/models/glm-5p3-flash"]])
 
     result = project.variant_promote("my-slice", "v02")
 
@@ -471,7 +469,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.variant_add("my-repo", "my-slice",
-                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+                        [["pi", nil], ["pi", "accounts/fireworks/models/glm-5p3-flash"]])
     # also add a non-variant lane to test (b)
     project.worktree_add("my-repo", "my-slice", "lane-a")
 
@@ -511,7 +509,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.variant_add("my-repo", "my-slice",
-                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+                        [["pi", nil], ["pi", "accounts/fireworks/models/glm-5p3-flash"]])
 
     project.variant_promote("my-slice", "v02")
     project.variant_promote("my-slice", "v01")
@@ -545,8 +543,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-e",
-                         harness: "opencode",
-                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2",
+                         harness: "pi",
+                         model: "accounts/fireworks/models/glm-5p3-flash",
                          effort: "high")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
@@ -559,8 +557,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     assert        lane["base_sha"]
     assert_match %r{build/I01-my-slice-lane-e/wt}, lane["worktree"]
     assert_nil    lane["integration_branch"]
-    assert_equal "opencode", lane["harness"]
-    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", lane["model"]
+    assert_equal "pi", lane["harness"]
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", lane["model"]
     assert_equal false, lane["variant"]
   ensure
     FileUtils.rm_rf(dir)
@@ -576,8 +574,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.worktree_add("my-repo", "my-slice", "lane-f",
-                         harness: "opencode",
-                         model: "fireworks-ai/accounts/fireworks/models/glm-5p2")
+                         harness: "pi",
+                         model: "accounts/fireworks/models/glm-5p3-flash")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     lane = yml.dig("project", "iterations", 0, "lanes", 0)
@@ -587,8 +585,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # I10: effort on a claude-code lane no longer raises — it stores the normalized level.
-  def test_worktree_add_allows_effort_on_claude_code
+  # I10: effort on a pi lane stores the normalized level.
+  def test_worktree_add_allows_effort_on_pi
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
@@ -596,7 +594,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.worktree_add("my-repo", "my-slice", "lane-ok", harness: "claude-code", effort: "high")
+    project.worktree_add("my-repo", "my-slice", "lane-ok", harness: "pi", effort: "high")
 
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
     lane = yml.dig("project", "iterations", 0, "lanes", 0)
@@ -645,7 +643,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.new_iteration!("my-slice")
     freeze_for_test!(project, dir, "my-slice")
     project.variant_add("my-repo", "my-slice",
-                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+                        [["pi", nil], ["pi", "accounts/fireworks/models/glm-5p3-flash"]])
     # non-variant lane must be EXCLUDED from the compare result
     project.worktree_add("my-repo", "my-slice", "lane-a")
     project.variant_promote("my-slice", "v02")
@@ -660,16 +658,16 @@ class ArchitectProjectTest < Space::ArchitectTest
     v02 = result[:variants].find { |v| v[:name] == "v02" }
 
     assert_equal "v01",               v01[:name]
-    assert_equal "claude-code",       v01[:harness]
-    assert_equal "claude-sonnet-5",   v01[:model]
+    assert_equal "pi",       v01[:harness]
+    assert_equal "accounts/fireworks/models/glm-5p3-flash",   v01[:model]
     assert_nil                       v01[:effort]
     assert v01[:base_sha]
     assert_nil                       v01[:integration_branch]
     assert_equal "discarded",         v01[:status]
 
     assert_equal "v02",               v02[:name]
-    assert_equal "opencode",          v02[:harness]
-    assert_equal "fireworks-ai/accounts/fireworks/models/glm-5p2", v02[:model]
+    assert_equal "pi",          v02[:harness]
+    assert_equal "accounts/fireworks/models/glm-5p3-flash", v02[:model]
     assert_nil                       v02[:effort]
     assert v02[:base_sha]
     assert_nil                       v02[:integration_branch]
@@ -688,7 +686,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.variant_add("my-repo", "my-slice",
-                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+                        [["pi", nil], ["pi", "accounts/fireworks/models/glm-5p3-flash"]])
 
     result = project.variant_compare("my-slice")
 
@@ -699,8 +697,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # AC1: harness defaults to "claude-code" when the record's value is nil
-  def test_variant_compare_defaults_nil_harness_to_claude_code
+  # AC1: harness defaults to "pi" when the record's value is nil
+  def test_variant_compare_defaults_nil_harness_to_pi
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
@@ -708,13 +706,13 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.variant_add("my-repo", "my-slice", [["claude-code", nil]])
+    project.variant_add("my-repo", "my-slice", [["pi", nil]])
 
     # Simulate a record with nil harness (e.g. from older code)
     space.data.dig("project", "iterations").find { |s| s["name"] == "my-slice" }["lanes"][0]["harness"] = nil
 
     result = project.variant_compare("my-slice")
-    assert_equal "claude-code", result[:variants].first[:harness]
+    assert_equal "pi", result[:variants].first[:harness]
   ensure
     FileUtils.rm_rf(dir)
   end
@@ -749,7 +747,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("my-slice")
     project.variant_add("my-repo", "my-slice",
-                        [["claude-code", nil], ["opencode", "fireworks-ai/accounts/fireworks/models/glm-5p2"]])
+                        [["pi", nil], ["pi", "accounts/fireworks/models/glm-5p3-flash"]])
     project.variant_promote("my-slice", "v02")
 
     # Snapshot the lane record before removal
@@ -2636,8 +2634,8 @@ class ArchitectProjectTest < Space::ArchitectTest
     [space, project, build_dir]
   end
 
-  def fake_claude_bin(dir)
-    bin = File.join(dir, "fake_claude_dispatch")
+  def fake_pi_bin(dir)
+    bin = File.join(dir, "fake_pi_dispatch")
     File.write(bin, <<~RUBY)
       #!/usr/bin/env ruby
       $stdout.puts "ok"
@@ -2653,7 +2651,7 @@ class ArchitectProjectTest < Space::ArchitectTest
   def test_dispatch_push_host_derives_push_url_from_created_run_id
     dir = Dir.mktmpdir("architect-project-dispatch")
     _space, project, _build = setup_dispatch_space(dir)
-    bin = fake_claude_bin(dir)
+    bin = fake_pi_bin(dir)
 
     fake_creator = Object.new
     def fake_creator.create = 99
@@ -2675,7 +2673,7 @@ class ArchitectProjectTest < Space::ArchitectTest
                                 push_token:   "my-ingest-token",
                                 run_creator:  fake_creator,
                                 push_client:  push_client,
-                                claude_bin:   bin)
+                                bin:   bin)
 
       assert_equal 99, result[:created_run_id]
       assert_equal "https://architect.example.com/runs/99/ingest", result[:push_url]
@@ -2744,12 +2742,12 @@ class ArchitectProjectTest < Space::ArchitectTest
   def test_dispatch_without_push_options_does_not_invoke_creator
     dir = Dir.mktmpdir("architect-project-dispatch")
     _space, project, _build = setup_dispatch_space(dir)
-    bin = fake_claude_bin(dir)
+    bin = fake_pi_bin(dir)
 
     sentinel = Object.new
     def sentinel.create = raise("run_creator must not be called when no push_host is set")
 
-    result = project.dispatch("demo", "A", run_creator: sentinel, claude_bin: bin)
+    result = project.dispatch("demo", "A", run_creator: sentinel, bin: bin)
 
     refute result[:created_run_id], "no run should be created without push_host"
     refute result[:push_url],       "no push_url should be set without push options"
@@ -3549,7 +3547,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project = Space::Architect::ArchitectProject.new(space: space)
     project.init!
     project.new_iteration!("my-slice")
-    project.worktree_add("my-repo", "my-slice", "lane-a", harness: "opencode", model: "some/model")
+    project.worktree_add("my-repo", "my-slice", "lane-a", harness: "pi", model: "some/model")
     write_iteration_with_lanes(dir, "my-slice", <<~YAML)
       - name: lane-a
         repo: my-repo
@@ -3562,7 +3560,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     lanes = space.data.dig("project", "iterations", 0, "lanes")
     assert_equal 1, lanes.length, "declared lane must merge into the recorded entry, not duplicate"
     assert_equal ["lib/**"], lanes[0]["touch_set"]
-    assert_equal "opencode", lanes[0]["harness"], "worktree_add fields survive freeze-populate"
+    assert_equal "pi", lanes[0]["harness"], "worktree_add fields survive freeze-populate"
 
     assert_equal sha, freeze_for_test!(project, dir, "my-slice"), "re-freeze returns the same sha"
     assert_equal 1, space.data.dig("project", "iterations", 0, "lanes").length
@@ -4081,17 +4079,17 @@ class ArchitectProjectTest < Space::ArchitectTest
 
   ISO8601_RE = /\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:\d{2})\z/
 
-  # A fake claude bin that consumes stdin and exits 0 quickly (so the default liveness
+  # A fake pi bin that consumes stdin and exits 0 quickly (so the default liveness
   # fiber is stopped on child exit — no test slowdown).
-  FAKE_CLAUDE_OK = <<~RUBY
+  FAKE_PI_OK = <<~RUBY
     #!/usr/bin/env ruby
     $stdin.read
     exit 0
   RUBY
 
-  def write_fake_claude(dir)
-    bin = File.join(dir, "fake_claude")
-    File.write(bin, FAKE_CLAUDE_OK)
+  def write_fake_pi(dir)
+    bin = File.join(dir, "fake_pi")
+    File.write(bin, FAKE_PI_OK)
     File.chmod(0o755, bin)
     bin
   end
@@ -4112,17 +4110,6 @@ class ArchitectProjectTest < Space::ArchitectTest
     bin
   end
 
-  # Dispatch with claude_bin: the argv recorder and return the recorded --allowedTools
-  # value (or nil if absent).
-  def dispatched_allowed_tools(dir, project, lane, argv_file, **dispatch_kwargs)
-    ENV["ARGV_RECORD_FILE"] = argv_file
-    project.dispatch("demo", lane, claude_bin: write_argv_recorder(dir), **dispatch_kwargs)
-    recorded = File.read(argv_file).split("\x00")
-    idx = recorded.index("--allowedTools")
-    idx ? recorded[idx + 1] : nil
-  ensure
-    ENV.delete("ARGV_RECORD_FILE")
-  end
 
   def lane_on_disk(dir, name)
     yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
@@ -4141,7 +4128,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.worktree_add("my-repo", "demo", "A")
     File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
 
-    project.dispatch("demo", "A", claude_bin: write_fake_claude(dir))
+    project.dispatch("demo", "A", bin: write_fake_pi(dir))
 
     stamp = lane_on_disk(dir, "A")["dispatched_at"]
     assert_match ISO8601_RE, stamp, "dispatched_at must be ISO 8601, got #{stamp.inspect}"
@@ -4160,7 +4147,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.worktree_add("my-repo", "demo", "A")
     File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
 
-    res = project.dispatch("demo", "A", claude_bin: write_fake_claude(dir), detach: true)
+    res = project.dispatch("demo", "A", bin: write_fake_pi(dir), detach: true)
     assert res[:pid], "detached dispatch returns a pid"
 
     stamp = lane_on_disk(dir, "A")["dispatched_at"]
@@ -4185,7 +4172,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     space.data.dig("project", "iterations", 0, "lanes", 0)["dispatched_at"] = "SENTINEL"
     space.save
 
-    project.dispatch("demo", "A", claude_bin: write_fake_claude(dir))
+    project.dispatch("demo", "A", bin: write_fake_pi(dir))
 
     stamp = lane_on_disk(dir, "A")["dispatched_at"]
     refute_equal "SENTINEL", stamp, "re-dispatch must overwrite the prior value"
@@ -4206,7 +4193,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     # prompt.md left as the seeded stub → dispatch raises before launch.
 
     assert_raises(Space::Core::Error) do
-      project.dispatch("demo", "A", claude_bin: write_fake_claude(dir))
+      project.dispatch("demo", "A", bin: write_fake_pi(dir))
     end
 
     refute lane_on_disk(dir, "A").key?("dispatched_at"),
@@ -4225,7 +4212,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.init!
     project.new_iteration!("demo")
     project.worktree_add("my-repo", "demo", "V",
-                         harness: "opencode",
+                         harness: "pi",
                          model: "fireworks-ai/custom-model",
                          variant: true,
                          effort: "high",
@@ -4237,7 +4224,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.send(:ensure_lane_materialized, "demo", "V")
 
     lane = lane_on_disk(dir, "V")
-    assert_equal "opencode",                 lane["harness"]
+    assert_equal "pi",                 lane["harness"]
     assert_equal "fireworks-ai/custom-model", lane["model"]
     assert_equal true,                       lane["variant"]
     assert_equal "high",                     lane["effort"]
@@ -4264,7 +4251,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     freeze_for_test!(project, dir, "demo")
     # Record harness/model/variant/effort onto the frozen lane via worktree_add.
     project.worktree_add("my-repo", "demo", "V",
-                         harness: "opencode",
+                         harness: "pi",
                          model: "fireworks-ai/custom-model",
                          variant: true,
                          effort: "high")
@@ -4273,7 +4260,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     project.provision("demo")
 
     lane = lane_on_disk(dir, "V")
-    assert_equal "opencode",                  lane["harness"]
+    assert_equal "pi",                  lane["harness"]
     assert_equal "fireworks-ai/custom-model", lane["model"]
     assert_equal true,                        lane["variant"]
     assert_equal "high",                      lane["effort"]
@@ -4282,221 +4269,6 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
-  # ── #89: the allowed-tools grant — settable and reviewable ───────────────
-
-  # AC3/AC4: freeze parses allowed_tools:/append_allowed_tools: from the ```lanes```
-  # block into the lane's recorded entry, same as it already does for touch_set.
-  def test_freeze_populates_allowed_tools_from_lanes_block
-    dir = Dir.mktmpdir("architect-project-test")
-    space = create_real_space(dir)
-    create_real_repo(dir, "my-repo")
-    project = Space::Architect::ArchitectProject.new(space: space)
-    project.init!
-    project.new_iteration!("demo")
-    write_iteration_with_lanes(dir, "demo", <<~YAML)
-      - name: A
-        repo: my-repo
-        touch:
-          - lib/**
-        allowed_tools: Read,Edit
-        append_allowed_tools: mcp__foo
-    YAML
-    freeze_for_test!(project, dir, "demo")
-
-    lane = lane_on_disk(dir, "A")
-    assert_equal "Read,Edit", lane["allowed_tools"]
-    assert_equal "mcp__foo",  lane["append_allowed_tools"]
-  ensure
-    FileUtils.rm_rf(dir)
-  end
-
-  # AC3: allowed_tools: in the frozen lane declaration replaces the default in the
-  # argv, with no flag passed.
-  def test_dispatch_lane_allowed_tools_replaces_default_in_argv
-    dir = Dir.mktmpdir("architect-project-test")
-    space = create_real_space(dir)
-    create_real_repo(dir, "my-repo")
-    project = Space::Architect::ArchitectProject.new(space: space)
-    project.init!
-    project.new_iteration!("demo")
-    write_iteration_with_lanes(dir, "demo", <<~YAML)
-      - name: A
-        repo: my-repo
-        touch:
-          - lib/**
-        allowed_tools: Read,Edit
-    YAML
-    freeze_for_test!(project, dir, "demo")
-    project.provision("demo")
-    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
-
-    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"))
-    assert_equal "Read,Edit", tools
-  ensure
-    FileUtils.rm_rf(dir)
-  end
-
-  # AC4: append_allowed_tools: in the frozen lane declaration appends to the default,
-  # with no flag passed.
-  def test_dispatch_lane_append_allowed_tools_appends_default_in_argv
-    dir = Dir.mktmpdir("architect-project-test")
-    space = create_real_space(dir)
-    create_real_repo(dir, "my-repo")
-    project = Space::Architect::ArchitectProject.new(space: space)
-    project.init!
-    project.new_iteration!("demo")
-    write_iteration_with_lanes(dir, "demo", <<~YAML)
-      - name: A
-        repo: my-repo
-        touch:
-          - lib/**
-        append_allowed_tools: mcp__foo
-    YAML
-    freeze_for_test!(project, dir, "demo")
-    project.provision("demo")
-    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
-
-    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"))
-    assert_equal "#{Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS},mcp__foo", tools
-  ensure
-    FileUtils.rm_rf(dir)
-  end
-
-  # AC5: --allowed-tools flag wins over the lane's frozen allowed_tools: declaration.
-  def test_dispatch_flag_wins_over_lane_allowed_tools
-    dir = Dir.mktmpdir("architect-project-test")
-    space = create_real_space(dir)
-    create_real_repo(dir, "my-repo")
-    project = Space::Architect::ArchitectProject.new(space: space)
-    project.init!
-    project.new_iteration!("demo")
-    write_iteration_with_lanes(dir, "demo", <<~YAML)
-      - name: A
-        repo: my-repo
-        touch:
-          - lib/**
-        allowed_tools: Read,Edit
-    YAML
-    freeze_for_test!(project, dir, "demo")
-    project.provision("demo")
-    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
-
-    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"),
-                                     allowed_tools: "Bash")
-    assert_equal "Bash", tools, "the --allowed-tools flag must win over the lane's yaml key"
-  ensure
-    FileUtils.rm_rf(dir)
-  end
-
-  # Objective A: replace and append resolve independently of surface — a flag-supplied
-  # replace combines with a yaml-declared append.
-  def test_dispatch_flag_replace_combines_with_lane_append
-    dir = Dir.mktmpdir("architect-project-test")
-    space = create_real_space(dir)
-    create_real_repo(dir, "my-repo")
-    project = Space::Architect::ArchitectProject.new(space: space)
-    project.init!
-    project.new_iteration!("demo")
-    write_iteration_with_lanes(dir, "demo", <<~YAML)
-      - name: A
-        repo: my-repo
-        touch:
-          - lib/**
-        append_allowed_tools: mcp__foo
-    YAML
-    freeze_for_test!(project, dir, "demo")
-    project.provision("demo")
-    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
-
-    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"),
-                                     allowed_tools: "Bash")
-    assert_equal "Bash,mcp__foo", tools,
-      "a flag-supplied replace and a yaml-declared append must combine — append applies to whatever replace produced"
-  ensure
-    FileUtils.rm_rf(dir)
-  end
-
-  # AC7: a grant recorded on a lane (via the frozen allowed_tools: key) survives an
-  # actual re-materialization of the lane's worktree, not just inspection of the
-  # recorded fields.
-  def test_dispatch_allowed_tools_survives_rematerialize
-    dir = Dir.mktmpdir("architect-project-test")
-    space = create_real_space(dir)
-    create_real_repo(dir, "my-repo")
-    project = Space::Architect::ArchitectProject.new(space: space)
-    project.init!
-    project.new_iteration!("demo")
-    write_iteration_with_lanes(dir, "demo", <<~YAML)
-      - name: A
-        repo: my-repo
-        touch:
-          - lib/**
-        allowed_tools: Read,Edit
-        append_allowed_tools: mcp__foo
-    YAML
-    freeze_for_test!(project, dir, "demo")
-    project.provision("demo")
-
-    project.worktree_remove("demo", "A")
-    refute Dir.exist?(File.join(dir, "build", "I01-demo-A", "wt")), "worktree must actually be gone"
-    project.send(:ensure_lane_materialized, "demo", "A")
-
-    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
-    tools = dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"))
-    assert_equal "Read,Edit,mcp__foo", tools,
-      "the frozen grant must survive worktree re-materialization"
-  ensure
-    FileUtils.rm_rf(dir)
-  end
-
-  # AC8: the resolved grant is recorded onto the lane the way harness/model/effort
-  # already are.
-  def test_dispatch_stamps_resolved_allowed_tools_onto_lane
-    dir = Dir.mktmpdir("architect-project-test")
-    space = create_real_space(dir)
-    create_real_repo(dir, "my-repo")
-    project = Space::Architect::ArchitectProject.new(space: space)
-    project.init!
-    project.new_iteration!("demo")
-    project.worktree_add("my-repo", "demo", "A")
-    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
-
-    dispatched_allowed_tools(dir, project, "A", File.join(dir, "recorded_argv"),
-                             allowed_tools: "Bash", append_allowed_tools: "mcp__foo")
-
-    lane = lane_on_disk(dir, "A")
-    assert_equal "Bash",     lane["allowed_tools"]
-    assert_equal "mcp__foo", lane["append_allowed_tools"]
-  ensure
-    FileUtils.rm_rf(dir)
-  end
-
-  # AC9 control: DISALLOWED_TOOLS is unaffected by an allowed-tools grant — the
-  # no-builder-commits guard still reaches the argv regardless.
-  def test_dispatch_allowed_tools_grant_does_not_disturb_disallowed_tools
-    dir = Dir.mktmpdir("architect-project-test")
-    space = create_real_space(dir)
-    create_real_repo(dir, "my-repo")
-    project = Space::Architect::ArchitectProject.new(space: space)
-    project.init!
-    project.new_iteration!("demo")
-    project.worktree_add("my-repo", "demo", "A")
-    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
-
-    ENV["ARGV_RECORD_FILE"] = File.join(dir, "recorded_argv")
-    project.dispatch("demo", "A", claude_bin: write_argv_recorder(dir), allowed_tools: "Bash")
-    recorded = File.read(File.join(dir, "recorded_argv")).split("\x00")
-
-    idx = recorded.index("--disallowedTools")
-    refute_nil idx, "argv must still carry --disallowedTools: #{recorded.inspect}"
-    assert_equal Space::Architect::Harness::ClaudeCodeHarness::DISALLOWED_TOOLS, recorded[idx + 1]
-  ensure
-    ENV.delete("ARGV_RECORD_FILE")
-    FileUtils.rm_rf(dir)
-  end
-
-  # dispatch_as_job composes the same resolved grant into the job spec's harness.args
-  # — the sandboxed executor still runs `claude -p` server-side.
   class FakeJobsClientForToolsTest
     attr_reader :spec
 
@@ -4506,82 +4278,6 @@ class ArchitectProjectTest < Space::ArchitectTest
     end
   end
 
-  def test_dispatch_as_job_composes_resolved_allowed_tools_into_harness_args
-    dir = Dir.mktmpdir("architect-project-test")
-    space = create_real_space(dir)
-    create_real_repo(dir, "my-repo")
-    project = Space::Architect::ArchitectProject.new(space: space)
-    project.init!
-    project.new_iteration!("demo")
-    project.worktree_add("my-repo", "demo", "A")
-    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
-
-    fake = FakeJobsClientForToolsTest.new
-    project.dispatch_as_job("demo", "A", host: "http://example.com", token: "tok",
-      backend_url: "https://backend.example.com", job_model: "some/sandbox-model",
-      allowed_tools: "Bash", jobs_client: fake)
-
-    args = fake.spec.dig("harness", "args")
-    idx = args.index("--allowedTools")
-    refute_nil idx, "job harness.args must carry --allowedTools: #{args.inspect}"
-    assert_equal "Bash", args[idx + 1]
-  ensure
-    FileUtils.rm_rf(dir)
-  end
-
-  # AC5 (dispatch's report): dispatch prints which surface's grant won, to $stderr.
-  def test_dispatch_reports_allowed_tools_provenance
-    dir = Dir.mktmpdir("architect-project-test")
-    space = create_real_space(dir)
-    create_real_repo(dir, "my-repo")
-    project = Space::Architect::ArchitectProject.new(space: space)
-    project.init!
-    project.new_iteration!("demo")
-    project.worktree_add("my-repo", "demo", "A")
-    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
-
-    original_stderr = $stderr
-    captured = StringIO.new
-    $stderr = captured
-    begin
-      project.dispatch("demo", "A", claude_bin: write_fake_claude(dir), allowed_tools: "Bash")
-    ensure
-      $stderr = original_stderr
-    end
-
-    assert_match(/allowed-tools: --allowed-tools flag → Bash/, captured.string)
-  ensure
-    FileUtils.rm_rf(dir)
-  end
-
-  # AC5/AC6 control: a bare dispatch (no flag, no lane grant) prints nothing about
-  # allowed-tools — the common case stays as quiet as it is today.
-  def test_dispatch_without_grant_prints_no_allowed_tools_line
-    dir = Dir.mktmpdir("architect-project-test")
-    space = create_real_space(dir)
-    create_real_repo(dir, "my-repo")
-    project = Space::Architect::ArchitectProject.new(space: space)
-    project.init!
-    project.new_iteration!("demo")
-    project.worktree_add("my-repo", "demo", "A")
-    File.write(File.join(dir, "build", "I01-demo-A", "prompt.md"), "real prompt here\n")
-
-    original_stderr = $stderr
-    captured = StringIO.new
-    $stderr = captured
-    begin
-      project.dispatch("demo", "A", claude_bin: write_fake_claude(dir))
-    ensure
-      $stderr = original_stderr
-    end
-
-    refute_match(/allowed-tools:/, captured.string)
-  ensure
-    FileUtils.rm_rf(dir)
-  end
-
-  # AC5: re-materialize over a surviving lane branch checks it out (no -b), carrying
-  # the branch's own tip rather than failing "branch already exists".
   def test_rematerialize_reattaches_surviving_branch_with_its_tip
     dir = Dir.mktmpdir("architect-project-test")
     space = create_real_space(dir)
@@ -4652,7 +4348,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     scratch = File.join(dir, "tmp-lane-prompt.md")
     File.write(scratch, "## Lane prompt\n\nBuild the thing. — bytes: é✓\n")
 
-    res = project.dispatch("demo", "A", claude_bin: write_fake_claude(dir), prompt: scratch)
+    res = project.dispatch("demo", "A", bin: write_fake_pi(dir), prompt: scratch)
 
     copied = File.join(dir, "build", "I01-demo-A", "prompt.md")
     assert_equal File.binread(scratch), File.binread(copied), "prompt.md must be a byte-for-byte copy"

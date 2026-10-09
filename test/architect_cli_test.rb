@@ -524,11 +524,11 @@ class ArchitectCLITest < Space::ArchitectTest
         invoke("init")
         invoke("new", "demo")
         invoke("worktree", "add", "my-repo", "demo", "lane-a",
-               "--harness", "opencode", "--model", "fireworks-ai/test-model")
+               "--harness", "pi", "--model", "fireworks-ai/test-model")
 
         out, err = invoke("status")
         assert_empty err
-        assert_includes out, "opencode"
+        assert_includes out, "pi"
         assert_includes out, "fireworks-ai/test-model"
       end
     end
@@ -553,12 +553,12 @@ class ArchitectCLITest < Space::ArchitectTest
         # Iteration with a variant set
         invoke("new", "variant-iter")
         invoke("variant", "add", "my-repo", "variant-iter",
-               "--pairs", "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2")
+               "--pairs", "pi,pi:accounts/fireworks/models/glm-5p3-flash")
 
         # Iteration with a plain non-variant lane (control)
         invoke("new", "plain-iter")
         invoke("worktree", "add", "my-repo", "plain-iter", "lane-a",
-               "--harness", "claude-code")
+               "--harness", "pi")
 
         out, err = invoke("status")
         assert_empty err
@@ -566,8 +566,8 @@ class ArchitectCLITest < Space::ArchitectTest
         variant_row = out.lines.find { |l| l.include?("variant-iter") }
         refute_nil variant_row, "expected a row for variant-iter"
         assert_includes variant_row, "variant:", "variant-iter row must include 'variant:' prefix"
-        assert_includes variant_row, "claude-code"
-        assert_includes variant_row, "glm-5p2"
+        assert_includes variant_row, "pi"
+        assert_includes variant_row, "accounts/fireworks/models/glm-5p3-flash"
 
         plain_row = out.lines.find { |l| l.include?("plain-iter") }
         refute_nil plain_row, "expected a row for plain-iter"
@@ -578,48 +578,6 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  def test_dispatch_cli_runs_fake_claude_and_writes_run_jsonl
-    setup = temp_env
-    env = setup.fetch(:env)
-
-    fake = File.join(setup[:root], "fake_claude")
-    File.write(fake, <<~RUBY)
-      #!/usr/bin/env ruby
-      a = ARGV; c = Dir.pwd; s = $stdin.gets
-      $stdout.puts "argv=" + a.inspect
-      $stdout.puts "cwd=" + c.inspect
-      $stdout.puts "stdin=" + (s || "").chomp
-      $stdout.flush
-      exit 0
-    RUBY
-    File.chmod(0o755, fake)
-
-    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
-      invoke("space", "init")
-      space_path = create_real_space(File.join(env["HOME"]))
-      create_real_repo(space_path, "my-repo")
-
-      Dir.chdir(space_path) do
-        invoke("init")
-        invoke("new", "demo")
-        invoke("worktree", "add", "my-repo", "demo", "A")
-
-        build_dir = File.join(space_path, "build", "I01-demo-A")
-        FileUtils.mkdir_p(build_dir)
-        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
-
-        out, err = invoke("dispatch", "demo", "A")
-
-        assert_empty err
-        assert_match(/Builder exited with status 0/, out)
-        assert File.exist?(File.join(build_dir, "run.jsonl")), "run.jsonl must be created"
-      end
-    end
-  ensure
-    FileUtils.rm_rf(setup[:root]) if setup
-  end
-
-  # ── I09: pi harness ───────────────────────────────────────────────────────
 
   def test_dispatch_cli_runs_fake_pi_and_writes_session_dir_to_run_jsonl
     setup = temp_env
@@ -701,7 +659,7 @@ class ArchitectCLITest < Space::ArchitectTest
         assert_empty err
         assert_match(/Builder exited with status 0/, out)
         log = File.read(File.join(build_dir, "run.jsonl"))
-        assert_includes log, "qwen3-27b-optiq"
+        assert_includes log, "accounts/fireworks/models/glm-5p3-flash"
       end
     end
   ensure
@@ -747,24 +705,7 @@ class ArchitectCLITest < Space::ArchitectTest
 
   # ── #89: --allowed-tools / --append-allowed-tools ─────────────────────────
 
-  def dispatch_argv_recorder_setup(setup, env)
-    fake = File.join(setup[:root], "fake_claude_argv")
-    File.write(fake, "#!/usr/bin/env ruby\nFile.write(ENV['ARGV_RECORD_FILE'], ARGV.join(\"\\x00\"))\n$stdin.read\nexit 0\n")
-    File.chmod(0o755, fake)
-    argv_file = File.join(setup[:root], "recorded_argv")
-    [env.merge("ARCHITECT_CLAUDE_BIN" => fake, "ARGV_RECORD_FILE" => argv_file), argv_file]
-  end
 
-  def recorded_allowed_tools(argv_file)
-    recorded = File.read(argv_file).split("\x00")
-    idx = recorded.index("--allowedTools")
-    idx ? recorded[idx + 1] : nil
-  end
-
-  # ArchitectProject#dispatch's inform lines (thinking translation, allowed-tools
-  # provenance, liveness/push) go to the real $stderr, not the out/err StringIO
-  # `invoke` passes to Space::Architect::CLI.call — mirrors
-  # test_dispatch_cli_force_effort_bypasses_clamp_and_informs's own capture.
   def capture_global_stderr
     original = $stderr
     captured = StringIO.new
@@ -775,232 +716,18 @@ class ArchitectCLITest < Space::ArchitectTest
     $stderr = original
   end
 
-  # AC1: --allowed-tools replaces the default grant reaching the builder's argv.
-  def test_dispatch_cli_allowed_tools_flag_replaces_default
-    setup = temp_env
-    env, argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
 
-    with_env(env) do
-      invoke("space", "init")
-      space_path = create_real_space(File.join(env["HOME"]))
-      create_real_repo(space_path, "my-repo")
-
-      Dir.chdir(space_path) do
-        invoke("init")
-        invoke("new", "demo")
-        invoke("worktree", "add", "my-repo", "demo", "A")
-
-        build_dir = File.join(space_path, "build", "I01-demo-A")
-        FileUtils.mkdir_p(build_dir)
-        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
-
-        out = nil
-        stderr_out = capture_global_stderr { out, = invoke("dispatch", "demo", "A", "--allowed-tools", "Read,Edit") }
-
-        assert_match(/Builder exited with status 0/, out)
-        assert_match(/allowed-tools: --allowed-tools flag → Read,Edit/, stderr_out)
-        assert_equal "Read,Edit", recorded_allowed_tools(argv_file)
-      end
-    end
-  ensure
-    FileUtils.rm_rf(setup[:root]) if setup
-  end
-
-  # AC2: --append-allowed-tools appends to the default, default entries intact.
-  def test_dispatch_cli_append_allowed_tools_flag_appends_default
-    setup = temp_env
-    env, argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
-
-    with_env(env) do
-      invoke("space", "init")
-      space_path = create_real_space(File.join(env["HOME"]))
-      create_real_repo(space_path, "my-repo")
-
-      Dir.chdir(space_path) do
-        invoke("init")
-        invoke("new", "demo")
-        invoke("worktree", "add", "my-repo", "demo", "A")
-
-        build_dir = File.join(space_path, "build", "I01-demo-A")
-        FileUtils.mkdir_p(build_dir)
-        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
-
-        out = nil
-        stderr_out = capture_global_stderr { out, = invoke("dispatch", "demo", "A", "--append-allowed-tools", "mcp__foo") }
-
-        assert_match(/Builder exited with status 0/, out)
-        assert_match(/allowed-tools: default \+ --append-allowed-tools flag/, stderr_out)
-        assert_equal "#{Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS},mcp__foo",
-          recorded_allowed_tools(argv_file)
-      end
-    end
-  ensure
-    FileUtils.rm_rf(setup[:root]) if setup
-  end
-
-  # AC6: with neither flag given, the argv's tool list is byte-for-byte unchanged
-  # and dispatch's stderr stays empty (no new noise for the common case).
-  def test_dispatch_cli_without_allowed_tools_flags_argv_and_stderr_unchanged
-    setup = temp_env
-    env, argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
-
-    with_env(env) do
-      invoke("space", "init")
-      space_path = create_real_space(File.join(env["HOME"]))
-      create_real_repo(space_path, "my-repo")
-
-      Dir.chdir(space_path) do
-        invoke("init")
-        invoke("new", "demo")
-        invoke("worktree", "add", "my-repo", "demo", "A")
-
-        build_dir = File.join(space_path, "build", "I01-demo-A")
-        FileUtils.mkdir_p(build_dir)
-        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
-
-        out = nil
-        stderr_out = capture_global_stderr { out, = invoke("dispatch", "demo", "A") }
-
-        assert_match(/Builder exited with status 0/, out)
-        refute_match(/allowed-tools:/, stderr_out)
-        assert_equal Space::Architect::Harness::ClaudeCodeHarness::ALLOWED_TOOLS, recorded_allowed_tools(argv_file)
-      end
-    end
-  ensure
-    FileUtils.rm_rf(setup[:root]) if setup
-  end
-
-  # AC3/AC5: allowed_tools: in the frozen lane declaration replaces the default with
-  # no flag passed — and the --allowed-tools flag wins when both are given.
-  def test_dispatch_cli_lane_allowed_tools_key_and_flag_precedence
-    setup = temp_env
-    env, argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
-
-    with_env(env) do
-      invoke("space", "init")
-      space_path = create_real_space(File.join(env["HOME"]))
-      create_real_repo(space_path, "my-repo")
-
-      Dir.chdir(space_path) do
-        invoke("init")
-        invoke("new", "demo")
-
-        iter_file = File.join(space_path, "architecture", "I01-demo.md")
-        text = File.read(iter_file)
-        text = text.sub(
-          "```lanes\n# One entry per lane (1–4). The frozen out-of-bounds contract: `architect freeze`\n" \
-          "# writes each into space.yaml (name, repo, touch_set); `architect provision demo`\n" \
-          "# materializes the worktrees + lane branches. Remove the comment markers to activate.\n" \
-          "# - name: lane-a            # lane name (required)\n" \
-          "#   repo: my-repo           # target repo under repos/ (required)\n" \
-          "#   touch:                  # every file this lane may write, enumerated — no globs (required, non-empty)\n" \
-          "#     - lib/my_repo/foo.rb\n" \
-          "#     - lib/my_repo/bar.rb\n" \
-          "#     - test/my_repo_test.rb\n```",
-          "```lanes\n- name: A\n  repo: my-repo\n  touch:\n    - lib/**\n  allowed_tools: Read,Edit\n```"
-        )
-        File.write(iter_file, text)
-        freeze_for_test("demo")
-        invoke("provision", "demo")
-
-        build_dir = File.join(space_path, "build", "I01-demo-A")
-        FileUtils.mkdir_p(build_dir)
-        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
-
-        # No flag: the lane's yaml key wins.
-        invoke("dispatch", "demo", "A")
-        assert_equal "Read,Edit", recorded_allowed_tools(argv_file)
-
-        # Flag given: it wins over the lane's yaml key.
-        out = nil
-        stderr_out = capture_global_stderr { out, = invoke("dispatch", "demo", "A", "--allowed-tools", "Bash") }
-        assert_match(/Builder exited with status 0/, out)
-        assert_match(/allowed-tools: --allowed-tools flag → Bash/, stderr_out)
-        assert_equal "Bash", recorded_allowed_tools(argv_file)
-      end
-    end
-  ensure
-    FileUtils.rm_rf(setup[:root]) if setup
-  end
-
-  # AC8: `architect status`'s lane line shows the resolved grant when it diverges
-  # from the harness default, next to the other resolved values.
-  def test_status_shows_resolved_allowed_tools_when_non_default
-    setup = temp_env
-    env, _argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
-
-    with_env(env) do
-      invoke("space", "init")
-      space_path = create_real_space(File.join(env["HOME"]))
-      create_real_repo(space_path, "my-repo")
-
-      Dir.chdir(space_path) do
-        invoke("init")
-        invoke("new", "demo")
-        invoke("worktree", "add", "my-repo", "demo", "A")
-
-        build_dir = File.join(space_path, "build", "I01-demo-A")
-        FileUtils.mkdir_p(build_dir)
-        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
-
-        invoke("dispatch", "demo", "A", "--allowed-tools", "Bash")
-
-        out, err = invoke("status")
-        assert_empty err
-        assert_includes out, "·tools:Bash"
-      end
-    end
-  ensure
-    FileUtils.rm_rf(setup[:root]) if setup
-  end
-
-  # AC6 control: status's lane line carries no tools: suffix for the default grant.
-  def test_status_hides_tools_suffix_for_default_grant
-    setup = temp_env
-    env, _argv_file = dispatch_argv_recorder_setup(setup, setup.fetch(:env))
-
-    with_env(env) do
-      invoke("space", "init")
-      space_path = create_real_space(File.join(env["HOME"]))
-      create_real_repo(space_path, "my-repo")
-
-      Dir.chdir(space_path) do
-        invoke("init")
-        invoke("new", "demo")
-        invoke("worktree", "add", "my-repo", "demo", "A")
-
-        build_dir = File.join(space_path, "build", "I01-demo-A")
-        FileUtils.mkdir_p(build_dir)
-        File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
-
-        invoke("dispatch", "demo", "A")
-
-        out, err = invoke("status")
-        assert_empty err
-        refute_includes out, "·tools:"
-      end
-    end
-  ensure
-    FileUtils.rm_rf(setup[:root]) if setup
-  end
-
-  def test_dispatch_help_lists_allowed_tools_flags
-    out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
-                   err: [:child, :out]) { |f| f.read }
-    assert_includes out, "--allowed-tools"
-    assert_includes out, "--append-allowed-tools"
-  end
 
   def test_dispatch_help_lists_pi_harness
     out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
                    err: [:child, :out]) { |f| f.read }
-    assert_includes out, "claude-code, opencode, pi"
+    assert_includes out, "Harness (pi)"
   end
 
   def test_worktree_add_help_lists_pi_harness
     out = IO.popen(["bundle", "exec", "architect", "worktree", "add", "--help"],
                    err: [:child, :out]) { |f| f.read }
-    assert_includes out, "claude-code, opencode, pi"
+    assert_match(/Harness \(pi/, out)
   end
 
   # ── I10: unified thinking knob — three aliases, force escape hatch, --quiet ──
@@ -1008,7 +735,6 @@ class ArchitectCLITest < Space::ArchitectTest
   def test_dispatch_help_lists_three_thinking_aliases_and_force_and_quiet
     out = IO.popen(["bundle", "exec", "architect", "dispatch", "--help"],
                    err: [:child, :out]) { |f| f.read }
-    refute_match(/opencode only/, out)
     assert_includes out, "--effort"
     assert_includes out, "--thinking"
     assert_includes out, "--reasoning"
@@ -1079,15 +805,16 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  def test_dispatch_cli_force_effort_bypasses_clamp_and_informs
+  def test_dispatch_cli_force_effort_bypasses_validation_and_informs
     setup = temp_env
     env = setup.fetch(:env)
 
-    fake = File.join(setup[:root], "fake_opencode")
-    File.write(fake, "#!/usr/bin/env ruby\n$stdin.read\nexit 0\n")
+    fake = File.join(setup[:root], "fake_pi")
+    File.write(fake, "#!/usr/bin/env ruby\nFile.write(ENV['ARGV_RECORD_FILE'], ARGV.join(\"\\x00\"))\n$stdin.read\nexit 0\n")
     File.chmod(0o755, fake)
+    argv_file = File.join(setup[:root], "recorded_argv")
 
-    with_env(env.merge("ARCHITECT_OPENCODE_BIN" => fake)) do
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake, "ARGV_RECORD_FILE" => argv_file)) do
       invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
@@ -1095,8 +822,7 @@ class ArchitectCLITest < Space::ArchitectTest
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "demo")
-        invoke("worktree", "add", "my-repo", "demo", "A",
-               "--harness", "opencode", "--model", "fireworks-ai/accounts/fireworks/models/glm-5p2")
+        invoke("worktree", "add", "my-repo", "demo", "A")
 
         build_dir = File.join(space_path, "build", "I01-demo-A")
         FileUtils.mkdir_p(build_dir)
@@ -1112,9 +838,10 @@ class ArchitectCLITest < Space::ArchitectTest
         end
 
         assert_match(/thinking: force --effort=xhigh \(unmodified, may be rejected\)/, captured.string)
-        cfg = JSON.parse(File.read(File.join(build_dir, "opencode.json")))
-        assert_equal "xhigh",
-          cfg.dig("provider", "fireworks-ai", "models", "accounts/fireworks/models/glm-5p2", "options", "reasoningEffort")
+        recorded = File.read(argv_file).split("\x00")
+        idx = recorded.index("--thinking")
+        refute_nil idx, "forced effort must reach the --thinking flag: #{recorded.inspect}"
+        assert_equal "xhigh", recorded[idx + 1]
       end
     end
   ensure
@@ -1135,11 +862,11 @@ class ArchitectCLITest < Space::ArchitectTest
     setup = temp_env
     env = setup.fetch(:env)
 
-    fake = File.join(setup[:root], "fake_claude")
+    fake = File.join(setup[:root], "fake_pi")
     File.write(fake, "#!/usr/bin/env ruby\n$stdin.read\nexit 0\n")
     File.chmod(0o755, fake)
 
-    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
       invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
@@ -1172,7 +899,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     # Fake builder that sleeps briefly — with --detach the CLI must return before it finishes
-    fake = File.join(setup[:root], "fake_detach_claude")
+    fake = File.join(setup[:root], "fake_detach_pi")
     File.write(fake, <<~RUBY)
       #!/usr/bin/env ruby
       $stdout.puts "child_pid=\#{Process.pid}"
@@ -1184,7 +911,7 @@ class ArchitectCLITest < Space::ArchitectTest
     RUBY
     File.chmod(0o755, fake)
 
-    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
       invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
@@ -1242,7 +969,7 @@ class ArchitectCLITest < Space::ArchitectTest
     RUBY
     File.chmod(0o755, fake)
 
-    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
       invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
@@ -1280,7 +1007,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.write(fake, "#!/usr/bin/env ruby\n$stdin.gets\nexit 0\n")
     File.chmod(0o755, fake)
 
-    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
       invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
@@ -1317,7 +1044,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.write(fake, "#!/usr/bin/env ruby\n$stdin.gets\nexit 0\n")
     File.chmod(0o755, fake)
 
-    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
       invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
@@ -1350,7 +1077,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.write(fake, "#!/usr/bin/env ruby\n$stdin.gets\nexit 0\n")
     File.chmod(0o755, fake)
 
-    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
       invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
@@ -1422,13 +1149,13 @@ class ArchitectCLITest < Space::ArchitectTest
         # Promoted variant iteration
         invoke("new", "winner-iter")
         invoke("variant", "add", "my-repo", "winner-iter",
-               "--pairs", "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2")
+               "--pairs", "pi,pi:accounts/fireworks/models/glm-5p3-flash")
         invoke("variant", "promote", "winner-iter", "v02")
 
         # Non-promoted variant iteration (control)
         invoke("new", "control-iter")
         invoke("variant", "add", "my-repo", "control-iter",
-               "--pairs", "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2")
+               "--pairs", "pi,pi:accounts/fireworks/models/glm-5p3-flash")
 
         out, err = invoke("status")
         assert_empty err
@@ -1437,8 +1164,8 @@ class ArchitectCLITest < Space::ArchitectTest
         refute_nil promoted_row, "expected a table row for winner-iter"
         assert_includes promoted_row, "variant:", "winner-iter row must include 'variant:' prefix"
         assert_includes promoted_row, " → winner: v02", "winner-iter row must include winner marker"
-        assert_includes promoted_row, "claude-code"
-        assert_includes promoted_row, "glm-5p2"
+        assert_includes promoted_row, "pi"
+        assert_includes promoted_row, "accounts/fireworks/models/glm-5p3-flash"
 
         unpromoted_row = out.lines.find { |l| l.include?("control-iter") && l.include?("my-repo") }
         refute_nil unpromoted_row, "expected a table row for control-iter"
@@ -1464,7 +1191,7 @@ class ArchitectCLITest < Space::ArchitectTest
         invoke("init")
         invoke("new", "demo")
         invoke("variant", "add", "my-repo", "demo",
-               "--pairs", "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2")
+               "--pairs", "pi,pi:accounts/fireworks/models/glm-5p3-flash")
 
         out, err = invoke("variant", "promote", "demo", "v02")
         assert_empty err
@@ -1492,23 +1219,23 @@ class ArchitectCLITest < Space::ArchitectTest
         invoke("init")
         invoke("new", "demo")
         invoke("worktree", "add", "my-repo", "demo", "lane-e",
-               "--harness", "opencode",
-               "--model", "fireworks-ai/accounts/fireworks/models/glm-5p2",
+               "--harness", "pi",
+               "--model", "accounts/fireworks/models/glm-5p3-flash",
                "--effort", "high")
         invoke("worktree", "add", "my-repo", "demo", "lane-f",
-               "--harness", "opencode",
-               "--model", "fireworks-ai/accounts/fireworks/models/glm-5p2")
+               "--harness", "pi",
+               "--model", "accounts/fireworks/models/glm-5p3-flash")
 
         out, err = invoke("status")
         assert_empty err
 
         # lane-e cell has ·high inside the per-lane paren, after the model
-        assert_includes out, "lane-e(my-repo·opencode·fireworks-ai/accounts/fireworks/models/glm-5p2·high)",
+        assert_includes out, "lane-e(my-repo·pi·accounts/fireworks/models/glm-5p3-flash·high)",
           "expected lane-e cell with ·high inside the paren"
         # lane-f cell does NOT carry effort (closes right after the model)
-        assert_includes out, "lane-f(my-repo·opencode·fireworks-ai/accounts/fireworks/models/glm-5p2)",
+        assert_includes out, "lane-f(my-repo·pi·accounts/fireworks/models/glm-5p3-flash)",
           "expected lane-f cell without effort"
-        refute_includes out, "lane-f(my-repo·opencode·fireworks-ai/accounts/fireworks/models/glm-5p2·high)",
+        refute_includes out, "lane-f(my-repo·pi·accounts/fireworks/models/glm-5p3-flash·high)",
           "lane-f cell must not carry ·high"
       end
     end
@@ -1547,12 +1274,12 @@ class ArchitectCLITest < Space::ArchitectTest
         FileUtils.mkdir_p(build_dir)
         File.write(File.join(build_dir, "prompt.md"), "test prompt\n")
 
-        invoke("dispatch", "demo", "A", "--harness", "pi", "--model", "qwen3-27b-optiq")
+        invoke("dispatch", "demo", "A", "--model", "override-model")
 
         out, err = invoke("status")
         assert_empty err
-        assert_includes out, "·pi·qwen3-27b-optiq"
-        refute_includes out, "·claude-code·claude-sonnet-5"
+        assert_includes out, "·pi·override-model"
+        refute_includes out, "·pi·#{Space::Architect::Harness::DEFAULT_MODEL}"
       end
     end
   ensure
@@ -1573,8 +1300,8 @@ class ArchitectCLITest < Space::ArchitectTest
         invoke("init")
         invoke("new", "demo")
         invoke("worktree", "add", "my-repo", "demo", "lane-a",
-               "--harness", "opencode",
-               "--model", "fireworks-ai/accounts/fireworks/models/glm-5p2")
+               "--harness", "pi",
+               "--model", "accounts/fireworks/models/glm-5p3-flash")
 
         yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
         lane = yml.dig("project", "iterations", 0, "lanes", 0)
@@ -1598,7 +1325,7 @@ class ArchitectCLITest < Space::ArchitectTest
         invoke("init")
         invoke("new", "demo")
         invoke("variant", "add", "my-repo", "demo",
-               "--pairs", "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2")
+               "--pairs", "pi,pi:accounts/fireworks/models/glm-5p3-flash")
 
         _out, err = invoke("variant", "promote", "demo", "v99")
         refute_empty err
@@ -1624,7 +1351,7 @@ class ArchitectCLITest < Space::ArchitectTest
         invoke("init")
         invoke("new", "demo")
         invoke("variant", "add", "my-repo", "demo",
-               "--pairs", "claude-code,opencode:fireworks-ai/accounts/fireworks/models/glm-5p2")
+               "--pairs", "pi,pi:accounts/fireworks/models/glm-5p3-flash")
         invoke("variant", "promote", "demo", "v02")
 
         out, err = invoke("variant", "compare", "demo")
@@ -1640,11 +1367,11 @@ class ArchitectCLITest < Space::ArchitectTest
         v01_line = out.lines.find { |l| l.include?("v01") && l.include?("discarded") }
         refute_nil v01_line, "expected a table row for v01 with discarded status"
 
-        # claude-code lane with no --model resolves to the per-harness sensible default
-        assert_includes v01_line, "claude-sonnet-5"
+        # a lane with no --model resolves to the pi default
+        assert_includes v01_line, "accounts/fireworks/models/glm-5p3-flash"
 
         # lane with no effort renders - in the Effort cell (between Model and Status)
-        assert_match(/claude-sonnet-5\s+-\s+discarded/, v01_line)
+        assert_match(%r{accounts/fireworks/models/glm-5p3-flash\s+-\s+discarded}, v01_line)
 
         # exit code 0
         assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
@@ -2074,7 +1801,7 @@ class ArchitectCLITest < Space::ArchitectTest
       tcp_server.close
     end
 
-    fake = File.join(setup[:root], "fake_claude_push")
+    fake = File.join(setup[:root], "fake_pi_push")
     File.write(fake, <<~RUBY)
       #!/usr/bin/env ruby
       a = ARGV; c = Dir.pwd; s = $stdin.gets
@@ -2086,7 +1813,7 @@ class ArchitectCLITest < Space::ArchitectTest
     RUBY
     File.chmod(0o755, fake)
 
-    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
+    with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
       invoke("space", "init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
@@ -2108,7 +1835,7 @@ class ArchitectCLITest < Space::ArchitectTest
         assert_match(/Builder exited with status 0/, out)
 
         log = File.read(File.join(build_dir, "run.jsonl"))
-        assert_includes log, "--include-partial-messages", "partial-messages flag must be in log"
+        assert_includes log, "-e", "guard flag must be in log"
       end
     end
 
@@ -2153,186 +1880,8 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  # ── dispatch --as-job: option handling + spec composition through the CLI ──
 
-  # --host/--token are required with --as-job, same posture as the `jobs` subcommands
-  # (dry-cli 1.4.1 doesn't enforce `required: true` on option — see Jobs.require_credentials!).
-  def test_dispatch_cli_as_job_requires_host_and_token
-    setup = temp_env
-    with_env(setup[:env]) do
-      _out, err = invoke("dispatch", "demo", "A", "--as-job", "--backend-url", "https://backend.example.com")
-      refute_equal 0, Space::Architect::CLI.last_outcome&.exit_code
-      assert_match(/host/i, err)
-    end
-  ensure
-    FileUtils.rm_rf(setup[:root]) if setup
-  end
 
-  def test_dispatch_cli_as_job_requires_backend_url
-    setup = temp_env
-    with_env(setup[:env]) do
-      _out, err = invoke("dispatch", "demo", "A", "--as-job", "--host", "http://example.com", "--token", "tok")
-      refute_equal 0, Space::Architect::CLI.last_outcome&.exit_code
-      assert_match(/backend-url/i, err)
-    end
-  ensure
-    FileUtils.rm_rf(setup[:root]) if setup
-  end
-
-  def test_dispatch_cli_as_job_rejects_combination_with_detach
-    setup = temp_env
-    with_env(setup[:env]) do
-      _out, err = invoke("dispatch", "demo", "A", "--as-job",
-                         "--host", "http://example.com", "--token", "tok",
-                         "--backend-url", "https://backend.example.com", "--detach")
-      refute_equal 0, Space::Architect::CLI.last_outcome&.exit_code
-      assert_match(/as-job/i, err)
-    end
-  ensure
-    FileUtils.rm_rf(setup[:root]) if setup
-  end
-
-  # Raw TCP stub mirroring architect_jobs_cli_test.rb's start_stub, extended to drain
-  # a Content-Length body so a real POST /jobs JSON body can be captured and asserted.
-  def start_json_post_stub(status:, body:)
-    tcp_server = TCPServer.new("127.0.0.1", 0)
-    port = tcp_server.addr[1]
-    captured = {}
-
-    server_thread = Thread.new do
-      client = tcp_server.accept
-      request_line = client.gets
-      method, path, = request_line.split(" ")
-      headers = {}
-      while (line = client.gets) && !line.chomp.empty?
-        key, value = line.chomp.split(": ", 2)
-        headers[key.downcase] = value
-      end
-      request_body = (len = headers["content-length"]&.to_i) && len > 0 ? client.read(len) : ""
-      captured.merge!(method: method, path: path, headers: headers, body: request_body)
-
-      payload = JSON.generate(body)
-      client.write("HTTP/1.1 #{status} X\r\ncontent-type: application/json\r\ncontent-length: #{payload.bytesize}\r\nconnection: close\r\n\r\n#{payload}")
-    rescue
-      # ignore connection errors
-    ensure
-      client&.close
-      tcp_server.close
-    end
-
-    [port, captured, server_thread]
-  end
-
-  # AC2: `--as-job` composes the full job spec (prompt/workspace/environment/harness/
-  # provenance) and POSTs it to /jobs with Bearer auth, printing the job id + watch hint.
-  def test_dispatch_cli_as_job_composes_and_posts_spec
-    setup = temp_env
-    env = setup.fetch(:env)
-
-    with_env(env) do
-      invoke("space", "init")
-      space_path = create_real_space(File.join(env["HOME"]))
-      create_real_repo(space_path, "my-repo")
-
-      Dir.chdir(space_path) do
-        invoke("init")
-        invoke("new", "demo")
-        invoke("worktree", "add", "my-repo", "demo", "A")
-
-        # realpath: macOS's /var → /private/var symlink means the ArchitectProject
-        # (Pathname built from the store's resolved cwd) reports /private/var paths
-        # even though space_path itself is the pre-resolved /var form.
-        real_space_path = File.realpath(space_path.to_s)
-        build_dir = File.join(real_space_path, "build", "I01-demo-A")
-        FileUtils.mkdir_p(build_dir)
-        File.write(File.join(build_dir, "prompt.md"), "as-job prompt\n")
-
-        port, captured, server_thread = start_json_post_stub(status: 201, body: { id: 55, status: "pending" })
-
-        out, err = invoke("dispatch", "demo", "A", "--as-job",
-                          "--host", "http://127.0.0.1:#{port}",
-                          "--token", "secret-token",
-                          "--backend-url", "https://backend.example.com",
-                          "--job-model", "some/sandbox-model")
-
-        server_thread.join(5)
-
-        assert_empty err
-        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
-        assert_match(/Job:\s+55/, out)
-        assert_match(%r{architect jobs watch 55 --host http://127\.0\.0\.1:#{port} --token secret-token}, out)
-
-        assert_equal "POST",  captured[:method]
-        assert_equal "/jobs", captured[:path]
-        assert_equal "Bearer secret-token", captured[:headers]["authorization"]
-
-        posted = JSON.parse(captured[:body])
-        assert_equal "as-job prompt\n", posted["prompt"]
-        assert_equal File.join(real_space_path, "build", "I01-demo-A", "wt"), posted["workspace"]["dir"]
-        assert_equal ["git"], posted["environment"]["deps"]
-        assert_equal true,    posted["environment"]["permissions"]["network"]
-        mounts = posted["environment"]["permissions"]["mounts"]
-        assert_includes mounts, "#{build_dir}:#{build_dir}"
-        repo_dir = File.join(real_space_path, "repos", "my-repo")
-        assert_includes mounts, "#{repo_dir}:#{repo_dir}"
-        assert_equal "unused-for-keyless-backends", posted["environment"]["env"]["ANTHROPIC_API_KEY"]
-        assert_equal "claude", posted["harness"]["type"]
-        assert_equal "https://backend.example.com", posted["harness"]["backend"]["base_url"]
-        assert_equal "some/sandbox-model", posted["harness"]["model"]
-        refute_includes posted["harness"]["args"], "-p"
-        refute_includes posted["harness"]["args"], "--model"
-        assert_equal({ "space" => "test-space", "iteration" => "demo", "lane" => "A" }, posted["provenance"])
-
-        yaml = YAML.load_file(File.join(space_path.to_s, "space.yaml"))
-        lane = yaml.dig("project", "iterations", 0, "lanes", 0)
-        assert_equal 55, lane["job_id"]
-      end
-    end
-  ensure
-    FileUtils.rm_rf(setup[:root]) if setup
-  end
-
-  # Without --as-job, dispatch's local streaming path is unaffected — the new options
-  # are simply absent from the call, exercising the existing byte-identical branch.
-  def test_dispatch_cli_without_as_job_flag_runs_local_path_unchanged
-    setup = temp_env
-    env = setup.fetch(:env)
-
-    fake = File.join(setup[:root], "fake_claude_no_job")
-    File.write(fake, <<~RUBY)
-      #!/usr/bin/env ruby
-      $stdout.puts "argv=" + ARGV.inspect
-      $stdout.flush
-      exit 0
-    RUBY
-    File.chmod(0o755, fake)
-
-    with_env(env.merge("ARCHITECT_CLAUDE_BIN" => fake)) do
-      invoke("space", "init")
-      space_path = create_real_space(File.join(env["HOME"]))
-      create_real_repo(space_path, "my-repo")
-
-      Dir.chdir(space_path) do
-        invoke("init")
-        invoke("new", "demo")
-        invoke("worktree", "add", "my-repo", "demo", "A")
-
-        build_dir = File.join(space_path, "build", "I01-demo-A")
-        FileUtils.mkdir_p(build_dir)
-        File.write(File.join(build_dir, "prompt.md"), "local prompt\n")
-
-        out, err = invoke("dispatch", "demo", "A")
-
-        assert_empty err
-        assert_match(/Builder exited with status 0/, out)
-        assert_path_exists File.join(build_dir, "run.jsonl")
-      end
-    end
-  ensure
-    FileUtils.rm_rf(setup[:root]) if setup
-  end
-
-  # ── gate: PASS/FAIL rendering and exit-code signalling ────────────────────
 
   def test_gate_command_reports_pass_and_exits_zero
     setup = temp_env
