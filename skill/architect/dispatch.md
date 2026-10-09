@@ -1,51 +1,58 @@
 # Builder dispatch reference
 
-Verified against the `claude` CLI (Claude Code) headless mode — the reference
-harness — June 2026. The builder is `claude -p` (`--print`, the non-interactive
-headless mode) pinned to the configured builder model (`<builder-model>`) — a
-cheaper model run headless via the same harness the architect uses. Key facts the
-skill encodes: lane-prompts go in on **stdin** (Claude Code has no `@file`, and a
-big quoted lane-prompt as a shell argument gets mangled); the model is pinned with
+Verified against `pi` 1.1.0 (badlogic/pi-mono) headless print mode — the reference
+harness. The builder is `pi -p` (`--print`, the non-interactive mode) pinned to
+the configured builder model (`<builder-model>`) — a cheaper model run headless
+via the same harness the architect uses. Key facts the skill encodes: lane-prompts
+go in on **stdin** (piped stdin is prepended to the message, and a big quoted
+lane-prompt as a shell argument gets mangled); the model is pinned with
 `--model <builder-model>` (a floating alias drifts to whatever ships next — pin
-the full id); there is **no `-C`/working-dir flag**, so
-per-lane dispatch `cd`s into the worktree; permissions are the **tool
-allow/deny lists** (`--allowedTools`/`--disallowedTools`) plus
-`--permission-mode`, not a sandbox; web access is the built-in
-`WebSearch`/`WebFetch` tools (no extension to install).
+the full id); there is **no working-dir flag**, so per-lane dispatch `cd`s into
+the worktree; there is **no tool allow/deny flag surface and no turn cap** — tool
+control is the injected **builder guard** extension (`-e`), hermeticity comes from
+`--no-approve` (project-trust pinned to untrusted: the lane's `.pi/` project
+resources never load; `AGENTS.md`/`CLAUDE.md` context files still load; explicit
+`-e` paths still load), and the run's bound is the dispatch wall-clock timeout
+(TERM → grace → KILL); web access comes from the web tools loaded by the pi
+extensions configured in `~/.pi/agent` (no per-dispatch setup).
 
 **The one load-bearing difference from the Codex design:** Codex's
-`--sandbox workspace-write` made `.git` physically read-only. Claude Code has
-**no automatic filesystem sandbox** in headless mode (the sandbox is opt-in via
-settings, off by default), so `.git` is not hardware-protected. "Builders never
-commit" (hard rule 7) is now enforced in three layers, weakest to strongest:
-(1) a runtime first line — deny the git-write tools with
-`--disallowedTools 'Bash(git commit:*)' …`; (2) worktree isolation between
+`--sandbox workspace-write` made `.git` physically read-only. pi has
+**no filesystem sandbox**, so `.git` is not hardware-protected. "Builders never
+commit" (hard rule 7) is enforced in three layers, weakest to strongest:
+(1) a runtime first line — the **builder guard** extension denies git-write
+commands (and `bash`-unparseable commands) before evaluation (see `### The
+builder guard` below); (2) worktree isolation between
 lanes; (3) the authoritative check — an architect post-flight
-`git -C <worktree> log <repo-base>..` that must be empty. The deny rules are
+`git -C <worktree> log <repo-base>..` that must be empty. The guard's deny is
 not airtight (a builder can shell out — `sh -c 'git commit …'` — past the
-pattern match), so the post-flight `git log` is what the loop actually trusts.
+parse), so the post-flight `git log` is what the loop actually trusts.
 If a lane committed, treat the worktree as tampered: reset and re-dispatch.
 
-**Preflight (once per environment):** run `claude --version`, and confirm the
-builder model resolves with a one-shot
-(`echo ok | claude -p --model <builder-model> --max-turns 1`). No API key —
-the builder runs on your Claude plan — but note headless `claude -p` draws on
-the Agent SDK credit pool (separate from interactive usage since June 15 2026;
-see `docs/DESIGN.md` §4). Past that one-time check, no dispatch needs a manual
+**Preflight (once per environment):** run `pi --version`, and confirm the
+builder model resolves with a one-message probe
+(`echo ok | pi -p --model <builder-model>`). No API-key/env ceremony — provider
+config (e.g. the Fireworks key) resolves from `~/.pi/agent`; pi needs no
+`ANTHROPIC_*` env. Past that one-time check, no dispatch needs a manual
 start-check: every foreground dispatch self-verifies. Shortly after launch it
 prints a liveness line to stderr naming the streamed model and confirming the
 run log is growing — or a WARN line instead when the streamed model disagrees
-with the pinned `<builder-model>` or the log isn't growing.
+with the pinned `<builder-model>` or the log isn't growing. (Liveness source:
+the run log is pi's JSONL event stream — ~20 event types, `session` →
+`agent_start`/`turn_start` → `message_*`/`tool_execution_*` →
+`turn_end`/`agent_end`/`agent_settled`; the line is parsed from the first
+assistant-role event carrying a `model` field.)
 
 ## Canonical dispatch — `architect dispatch <iteration> <lane>`
 
 The canonical path is `architect dispatch <iteration> <lane> --prompt <file>`.
 The tool copies your prompt file to `build/<id>-<lane>/prompt.md` (the CLI owns
-that canonical path — you never write it directly), assembles the canonical
-`claude -p` argv, pins the builder model (the lane's
+that canonical path — you never write it directly), copies the vendored
+builder-guard to `build/<id>-<lane>/builder-guard.ts`, assembles the canonical
+`pi -p` argv, pins the builder model (the lane's
 configured model or the CLI's reference default; see `docs/DESIGN.md` §4),
 feeds the copied lane prompt to the builder on stdin, and streams
-`--output-format stream-json --verbose` output to
+pi's `--mode json` event stream to
 `build/<id>-<lane>/run.jsonl`. Run each lane as its own **background Bash tool
 call** (`run_in_background`) so your turn doesn't block for the full run (30–60
 minutes is typical).
@@ -85,7 +92,7 @@ dead-end on a missing worktree.
 Issue each dispatch as its **own background Bash tool call** — one call per
 lane. Never use a shell `&` loop. A `for … & done` launcher is a *launcher*
 process: it returns the instant it has spawned the lane children, the harness
-reaps those now-orphaned `claude` processes, and every lane dies at once with no
+reaps those now-orphaned `pi` processes, and every lane dies at once with no
 `result` — partial diffs, no reports (this exact failure has happened: three
 lanes killed at the same second, zero output). One blocking dispatch per
 background Bash tool keeps each lane attached to a harness-tracked task that
@@ -97,26 +104,52 @@ survives the full run and reports completion per lane.
 and as the manual fallback:
 
 ```bash
-# dispatch --prompt copies the scratch prompt to build/<id>-<lane>/prompt.md; the
-# manual equivalent is that copy followed by:
+# dispatch --prompt copies the scratch prompt to build/<id>-<lane>/prompt.md and
+# the vendored guard to build/<id>-<lane>/builder-guard.ts; the manual equivalent
+# is those copies followed by:
 ( cd build/<id>-<lane>/wt && \
-  claude -p --model <builder-model> \
-    --permission-mode acceptEdits \
-    --allowedTools 'Read,Edit,Write,Grep,Glob,Bash,WebSearch,WebFetch' \
-    --disallowedTools 'Bash(git commit:*),Bash(git push:*),Bash(git reset:*),Bash(git merge:*),Bash(git rebase:*),Bash(git checkout:*),Bash(git branch:*)' \
-    --output-format stream-json --verbose \
-    --max-turns 200 \
+  pi -p --mode json \
+    --model <builder-model> \
+    --session-dir <space>/build/<id>-<lane> \
+    --no-approve \
+    -e <space>/build/<id>-<lane>/builder-guard.ts \
+    [--thinking <level>] \
     < <space>/build/<id>-<lane>/prompt.md \
     > <space>/build/<id>-<lane>/run.jsonl 2>&1 )
 ```
 
-`acceptEdits` auto-approves file writes; listing `Bash` in `--allowedTools`
-auto-approves shell commands so the run never blocks on a prompt; any tool *not*
-on the allow list is denied rather than prompted in `-p` mode (so the builder
-can't wander outside its toolset), and the `--disallowedTools` deny rules win
-over the allow list (deny always takes precedence) as the runtime first line
-against commits. Redirect stderr (`2>&1`) into the run-log so a dispatch error
-lands somewhere instead of vanishing.
+`--no-approve` pins project-trust to untrusted for the run — a **hermetic
+builder**: the lane's `.pi/` project resources (settings, extensions, skills,
+prompts, themes, SYSTEM.md) never load, while `AGENTS.md`/`CLAUDE.md` context
+files still load root-down and the explicit `-e` guard always loads — the guard
+cannot be shrunk by project-local config. `--session-dir` points pi's session
+storage and lookup at the lane's build dir, which is what makes `--continue`
+follow-ups (below) deterministic per lane. Redirect stderr (`2>&1`) into the
+run-log so a dispatch error lands somewhere instead of vanishing.
+
+### The builder guard — what a builder sees on a deny
+
+The guard is a pi extension (`lib/space_architect/pi/builder-guard.ts` in the
+space-architect repo, copied into the lane's build dir and injected via `-e`).
+Its `tool_call` handler intercepts every `bash` call **before evaluation** and
+blocks two classes, returning the deny reason as the bash tool result text —
+that reason is the builder's only feedback, so it says what to do instead:
+
+- **Git write operations** — `commit`, `push`, `pull`, `reset`, `merge`,
+  `rebase`, `checkout`, `switch`, `branch`, `tag`, and the rest of git's write
+  verbs — denied because the architect CLI owns all commits (hard rule 7). The
+  deny text surfaces as `architect builder guard: …` in the tool result. The
+  parse walks each command segment past git's flags (`git -C <path> commit` is
+  still a deny), and reads like `git log --grep=commit` pass — the guard
+  classifies the subcommand, it never substring-matches the raw command.
+- **`bash`-unparseable commands** — the guard runs `bash -n` and blocks on a
+  parse error (unterminated quote, missing `;` before `then`), with bash's
+  stderr in the reason. The parse-check is parse-level only: an unclosed `[`
+  (`[ -f /etc/hosts` with no `]`) is a *runtime* `test` failure, syntactically
+  valid — not the guard's domain.
+
+The guard is a first line, not a sandbox — the post-flight `git log` check
+(Operating guidance below) stays the authoritative no-commits proof.
 
 ### Integration (judging session — after per-lane post-flight passes)
 
@@ -307,13 +340,15 @@ after.
      echo "The sweep at <run dir> (pid <pid>) has exited. Audit its output
    against the spec's acceptance criteria, finish the report you
    pre-structured in phase A, and end at STATUS: COMPLETE." \
-     | claude -p --continue --model <builder-model> \
-       --permission-mode acceptEdits \
-       --allowedTools 'Read,Edit,Write,Grep,Glob,Bash,WebSearch,WebFetch' \
-       --disallowedTools 'Bash(git commit:*),Bash(git push:*),Bash(git reset:*),Bash(git merge:*),Bash(git rebase:*),Bash(git checkout:*),Bash(git branch:*)' \
-       --output-format stream-json --verbose \
+     | pi -p --continue --session-dir <space>/build/<id>-<lane> \
+       --mode json --model <builder-model> \
+       --no-approve \
+       -e <space>/build/<id>-<lane>/builder-guard.ts \
        > build/<id>-<lane>/run-b.jsonl 2>&1 )
    ```
+   (`--mode json` because the audit run gets its own run log — `run-b.jsonl`
+   stays a pi JSONL event stream like the first. Piped stdin is prepended to
+   the resumed message, same as a fresh dispatch.)
    Phase B runs the post-run audits the spec asked for, then finishes the
    report at `STATUS: COMPLETE` (or `COMPLETE_WITH_CONCERNS`/`BLOCKED`, per the
    template) exactly as any other lane would.
@@ -340,43 +375,33 @@ instruction.
   model bump can't silently change builder behavior mid-project.
 - Effort = thinking budget. Set it per dispatch: `architect dispatch --effort
   <level>` (aliases `--thinking`/`--reasoning`) accepts
-  `off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max` and translates it to the
-  lane's harness — `claude-code` passes `low`…`max` straight through to its own
-  `--effort` flag, unclamped (`minimal` clamps to `low`; `off` omits the flag).
-  The escalation keywords (`think` < `think hard` < `think harder` <
-  `ultrathink`) and the `MAX_THINKING_TOKENS` env var still raise depth from
-  inside the block. Default unattended builder work to a high budget; downgrade
+  `off`/`minimal`/`low`/`medium`/`high`/`xhigh`/`max`, normalizes to that
+  canonical set, and pi accepts the full set unchanged (`--thinking <level>`) —
+  no harness-side clamping; each model's `thinkingLevelMap` in
+  `~/.pi/agent/models.json` clamps further per model (e.g. a model whose map
+  sends `off`/`minimal` to a higher floor). The escalation keywords (`think` <
+  `think hard` < `think harder` < `ultrathink`) still raise depth from inside
+  the block. Default unattended builder work to a high budget; downgrade
   a routine, tightly-specified lane (record which and why in the spec).
-- **Tool grant.** The default `--allowedTools` list is overridable per dispatch:
-  `--allowed-tools <list>` replaces it, `--append-allowed-tools <list>` appends
-  to it. The same is settable in the frozen lane declaration's ` ```lanes ` block
-  — `allowed_tools:` (replaces) / `append_allowed_tools:` (appends) — so a lane
-  that needs an MCP or other non-default tool is granted it reviewably, judged
-  like every other lane boundary, rather than buried in a shell invocation. The
-  CLI flag wins over the lane's yaml key when both are given, and dispatch
-  reports which source resolved. This exists because `claude -p` **denies** a
-  tool not on the allow list rather than prompting for it — a lane missing a
-  needed grant doesn't error, it silently can't use the tool and files a
-  confident, dataless report instead. `--disallowedTools`/`DISALLOWED_TOOLS`
-  (the builder-never-commits deny rules above) has no override route, by design
-  — hard rule 7 depends on it staying fixed.
-- **Builders never commit, and the architect verifies it.** Claude Code has no
-  sandbox to make `.git` read-only, so this is enforced by the deny rules at
-  dispatch *and* checked after the run: before integrating a lane, confirm
+- **Builders never commit, and the architect verifies it.** pi has no sandbox
+  to make `.git` read-only, so the injected guard denies git-write commands at
+  dispatch (see `### The builder guard` above) *and* it is checked after the
+  run: before integrating a lane, confirm
   `git -C build/<id>-<lane>/wt log <repo-base>..` is empty and
   `git -C build/<id>-<lane>/wt status` shows only files inside the lane's
   declared set. A commit or an out-of-bounds write fails the lane — reset and
   re-dispatch (lanes are cheap, hard rule 7).
 - Same-iteration follow-up (e.g. answering PHASE 0 disagreements after the
-  human rules): from the lane's worktree, `claude -p --continue "<rulings +
-  proceed>"` resumes that worktree's most recent session with full context —
-  sessions are scoped per directory, so `--continue` (`-c`) is deterministic
-  even with parallel lanes. (Alternatively pin `--session-id <uuid>` at
-  dispatch and resume with `--resume <uuid>`.) Resume the **same way you
-  dispatch** — one background Bash tool call per lane, each a single blocking
-  `claude -p --continue …`, never a `&` loop (a `&` launcher orphans the
-  resumed lanes exactly as it does fresh ones). Never resume across iterations —
-  every iteration gets a fresh context.
+  human rules): from the lane's worktree, `pi -p --continue --session-dir
+  <space>/build/<id>-<lane> "<rulings + proceed>"` resumes the lane's most
+  recent session in that session dir with full context — `-c` continues that
+  most recent session, so follow-ups are deterministic even with parallel
+  lanes. Resume the **same way you dispatch** — one background Bash tool call
+  per lane, each a single blocking `pi -p --continue …`, never a `&` loop (a
+  `&` launcher orphans the resumed lanes exactly as it does fresh ones). Add
+  `--mode json` and redirect when you want the resumed run logged like a fresh
+  dispatch. Never resume across iterations — every iteration gets a fresh
+  context.
 - Capability-gap review gate (high-stakes iterations): the architect outranks the
   builder, so the architect reading the diff is already a stronger-model,
   fresh-context pass over it. How independent that read is depends on the pairing
@@ -387,7 +412,7 @@ instruction.
   ```bash
   { echo "Review this diff against the spec. Flag ONLY correctness/requirement/invariant gaps with file:line evidence. No style."; \
     git -C <repo-root> diff <base>...HEAD; } \
-  | claude -p --model <builder-model> --allowedTools 'Read,Grep,Glob'
+  | pi -p --model <builder-model> --tools read,grep,find,ls
   ```
 - `build/` is already gitignored by the space, so no extra `.gitignore` entry
   is needed. Scratch never reaches the space repo; only `architecture/` is
@@ -397,25 +422,26 @@ instruction.
 
 A dispatched run is STALLED when its `run.jsonl`
 (`build/<id>-<lane>/run.jsonl`) has not grown for 15+ minutes AND the last
-event is an in-flight `Bash` tool call (a `tool_use` for `Bash` with no
-matching `tool_result` yet). Silent gaps between events are normal model
-thinking; a shell command that should take seconds sitting in flight for 15+
-minutes is not.
+event is an in-flight `bash` tool call (a `tool_execution_start` for `bash`
+with no matching `tool_execution_end` yet). Silent gaps between events are
+normal model thinking; a shell command that should take seconds sitting in
+flight for 15+ minutes is not.
 
-Diagnose before killing: find the command's child under the `claude` PID
-(claude → shell → child). Hot-spinning (high CPU) or blocked (zero CPU and none
+Diagnose before killing: find the command's child under the `pi` PID
+(pi → shell → child). Hot-spinning (high CPU) or blocked (zero CPU and none
 of its expected side effects on disk) — hung either way.
 
-Kill the NARROWEST thing: the stuck child process, not the `claude` run. The
+Kill the NARROWEST thing: the stuck child process, not the `pi` run. The
 command returns a failure to the builder, which adapts with its full context
 intact. Kill the whole run only when the builder re-enters the same hang or the
 worktree is broken; then discard the lane and re-dispatch (hard rule 7).
 
-Claude Code runs the `Bash` tool directly with no sandbox, so the Codex-era
+pi runs the `bash` tool directly with no sandbox, so the Codex-era
 sandbox-specific hang sources don't apply — but long-running and interactive
-commands still hang an unattended run. Spec consequence: give every potentially
-long command an explicit timeout in the lane-prompt (the `Bash` tool also takes
-a per-call timeout), cap the run with `--max-turns` as a loop backstop, steer
+commands still hang an unattended run, and pi has no turn cap (there is no
+`--max-turns` flag), so the dispatch's wall-clock timeout (TERM → grace →
+KILL) is the run's bound, not a turn budget. Spec consequence: give every
+potentially long command an explicit timeout in the lane-prompt, steer
 builders toward the repo's existing test fixtures over hand-rolled long-running
 harnesses, and when a gate needs a runtime that can't run unattended
 (interactive prompts, servers without a timeout), have the builder record the
@@ -427,10 +453,9 @@ look broken).
 
 ## Manual alternative (human-driven)
 
-Paste the lane-prompt into an interactive `claude` session (no `-p`). Claude
-Code's agent loop runs plan→act→test against the block's stopping condition
-while you watch and steer — approve tools as they come, or set `/permissions`
-first. Use when the human wants to babysit a run.
+Paste the lane-prompt into an interactive `pi` session (no `-p`). pi's agent
+loop runs plan→act→test against the block's stopping condition while you watch
+and steer. Use when the human wants to babysit a run.
 
 ## Lane-prompt template
 
@@ -516,22 +541,19 @@ against them, do not edit or work around) ===
 
 ## Builder-side standing setup (one time per machine/repo)
 
-- The builder is the same `claude` binary as the architect (reference harness),
+- The builder is the same `pi` binary as the architect (reference harness),
   running a cheaper model — nothing extra to install. `architect dispatch` pins
-  the model per dispatch (`--model <builder-model>`); a `~/.claude/settings.json`
-  `"model"` default is fine interactively, but automations pin it explicitly so a
-  default can't silently swap the builder.
-- Repo `CLAUDE.md` is the builder's standing context — Claude Code loads it
-  root-down automatically. Put exact build/test commands and repo gotchas there;
-  the loop's PHASE rules stay in the dispatch block so they version with the
-  skill. (Claude Code does **not** auto-read `AGENTS.md`; if the repo keeps its
-  build/test docs there, add `@AGENTS.md` to `CLAUDE.md` to pull it in.)
-- The builder is a bare `claude -p` over the block — it is not invoking the
-  `/architect` skills, the block is its entire instruction set. (`--bare` would
-  give a leaner builder context but also drops `CLAUDE.md`/skills/hooks — keep
-  `CLAUDE.md`, so skip `--bare` unless the repo has no standing build/test doc.)
-- Billing: headless `claude -p` draws on the Agent SDK credit pool on your
-  Claude plan (separate from interactive usage limits since June 15 2026).
-  There's no per-window quota that dies mid-run the way a chat session can, but
-  a long parallel fan-out does spend that pool. The architect runs as your
-  interactive Claude Code session.
+  the model per dispatch (`--model <builder-model>`); a default model in
+  `~/.pi/agent` config is fine interactively, but automations pin it explicitly
+  so a default can't silently swap the builder.
+- Repo `AGENTS.md`/`CLAUDE.md` are the builder's standing context — pi loads
+  them root-down automatically (`--no-approve` does not gate them). Put exact
+  build/test commands and repo gotchas there; the loop's PHASE rules stay in
+  the dispatch block so they version with the skill.
+- The builder is a bare `pi -p` over the block — it is not invoking the
+  `/architect` skills, the block is its entire instruction set.
+- Billing: the builder draws on the provider account configured in
+  `~/.pi/agent` (per-token API usage — e.g. the Fireworks key). There's no
+  per-window quota that dies mid-run the way a chat session can, but a long
+  parallel fan-out does spend that account. The architect runs as your
+  interactive session.

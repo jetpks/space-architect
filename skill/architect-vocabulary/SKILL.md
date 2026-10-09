@@ -34,7 +34,7 @@ the loop.
   judgment mode): arbitrates disagreements, writes and freezes iteration files,
   calls kill/continue, merges builder output. Never writes implementation code.
 - **builder** — the implementation role: a cheaper model run headless via
-  `architect dispatch` (reference harness: `claude -p`), one per lane in its own
+  `architect dispatch` (reference harness: `pi -p`), one per lane in its own
   worktree. Reports
   raw evidence; never grades its own work; never edits `architecture/`.
 

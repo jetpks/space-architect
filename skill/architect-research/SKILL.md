@@ -44,7 +44,7 @@ use LLM-designed, topic-specific decomposition rather than a fixed lane
 taxonomy. Lanes are designed per topic, not taken from a template.
 
 **Scout (brainstorm scale only):** dispatch ONE cheap researcher (~10
-searches, same `claude -p` command as step 3) to map the terrain: canonical
+searches, same `pi -p` command as step 3) to map the terrain: canonical
 terminology, the 5–10 load-bearing systems/papers/repos, the named people,
 which source classes look rich vs empty, and the topic's natural fault lines.
 The scout returns a map, not findings — discovering the topic's actual
@@ -70,26 +70,33 @@ dispatch. State the plan in a few lines; proceed unless the user redirects.
 One fresh researcher per lane, each launched as its own **background Bash tool
 call** (`run_in_background`) — one call per lane, not a shell `&` loop (a `&`
 launcher orphans the lanes and the harness reaps them all at once). Read-only by
-toolset (`Read,Grep,Glob`) plus the web tools (`WebSearch,WebFetch`); the
-report is the redirected stdout:
+prompt contract (the injected builder guard still denies git writes); the
+report is the extracted final assistant message (see `research.md`):
 
 ```bash
-claude -p --model <researcher-model> \
-  --allowedTools 'Read,Grep,Glob,WebSearch,WebFetch' \
-  --max-turns 40 \
+pi -p --mode json --model <researcher-model> \
+  --session-dir <space>/build/research/<NN>-<lane> \
+  --no-approve -e <guard> \
   < build/research/<NN>-<lane>.prompt.md \
-  > build/research/<NN>-<lane>.md
+  > build/research/<NN>-<lane>/run.jsonl 2>&1
 ```
+
+(`architect research dispatch` runs this for you — it injects the supervisor-
+copied guard and records the run; the block above is the transparency
+equivalent. There is no `--max-turns`: scope the researcher with the prompt's
+search budget, not a turn cap.)
 
 Write each lane block to a `.prompt.md` file and feed it on stdin — never as a
 shell argument; a quote-mangling shell will corrupt a big block, the stdin
 redirect injects it verbatim.
 
-(Web comes from the built-in `WebSearch` and `WebFetch` tools — no extension or
-key. With only the read-only + web tools on the allow list, every write/bash
-call is denied, so the researcher can't touch the repo. Launch ONE canary lane
+(Web comes from pi's loaded web tools — `web_search`/`fetch_content` from the
+extensions configured in `~/.pi/agent`; no per-run setup. The read-only
+discipline is the prompt contract plus the guard — a researcher that tries to
+write or commit is denied, and a lane that misbehaves is killed and re-dispatched
+with a tighter prompt. Launch ONE canary lane
 and confirm it actually fetches live URLs before fanning out. These lane blocks
-also run verbatim as read-only Claude subagents with web search if you'd rather
+also run verbatim as read-only subagents with web search if you'd rather
 keep research inside the architect's own session.)
 
 Every lane block carries the full contract — objective, output format, source
