@@ -43,6 +43,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pi's terminal assistant `stopReason` instead of a stream-json `result`
   event.
 
+### Fixed
+
+- **`architect research wait` works on pi runs.** `Research::Mux` and
+  `Research::Renderer` now speak pi's JSONL event vocabulary natively (the
+  last claude-code stream-json dialect in the gem): the tail breaks on
+  `agent_settled`, `wait` classifies via the last assistant `stopReason` plus
+  `agent_settled.aborted` and the final assistant text (no final text →
+  `:failed` "no final assistant text"), and the report is the final assistant
+  message's joined text blocks. The shared pi-shape predicates live in one
+  new module, `Research::PiEvents` (last assistant message/stopReason, joined
+  text, run span from `session.timestamp` → last assistant `timestamp`,
+  `turn_end` count) — `Supervisor#classify` consumes it too. The renderer's
+  §5.3 verbosity ladder, `--thinking`, and `--jsonl` passthrough are
+  unchanged, fed by pi events (`message_end`, `tool_execution_start/end`)
+  with the terminal line built from native facts (no fabricated fields).
+
 ## [7.1.0] - 2026-08-16
 
 One iteration of the Architect Loop (I01, space

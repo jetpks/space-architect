@@ -39,10 +39,13 @@ if fixture_name == "error"
   puts JSON.generate("type" => "message_end",
                      "message" => {"role" => "assistant", "content" => [], "provider" => "fireworks",
                                    "model" => "accounts/fireworks/models/glm-5p3-flash",
-                                   "stopReason" => "error", "errorMessage" => "STUB_ERROR"})
+                                   "stopReason" => "error", "errorMessage" => "STUB_ERROR",
+                                   "timestamp" => 1_000_000_000_500, "durationMs" => 500})
   puts JSON.generate("type" => "agent_end")
+  puts JSON.generate("type" => "agent_settled", "aborted" => false)
 else
-  puts JSON.generate("type" => "session", "version" => 3, "id" => "stub-session", "cwd" => Dir.pwd)
+  puts JSON.generate("type" => "session", "version" => 3, "id" => "stub-session", "cwd" => Dir.pwd,
+                     "timestamp" => "2001-09-09T01:46:40.000Z")
   puts JSON.generate("type" => "message_start",
                      "message" => {"role" => "assistant", "content" => [], "provider" => "fireworks",
                                    "model" => "accounts/fireworks/models/glm-5p3-flash", "stopReason" => "pending"})
@@ -50,7 +53,9 @@ else
                      "message" => {"role" => "assistant",
                                    "content" => [{"type" => "text", "text" => "Final research summary here."}],
                                    "provider" => "fireworks",
-                                   "model" => "accounts/fireworks/models/glm-5p3-flash", "stopReason" => "stop"})
+                                   "model" => "accounts/fireworks/models/glm-5p3-flash", "stopReason" => "stop",
+                                   "timestamp" => 1_000_000_001_200, "durationMs" => 1_200})
   puts JSON.generate("type" => "agent_end")
+  puts JSON.generate("type" => "agent_settled", "aborted" => false)
 end
 exit 0

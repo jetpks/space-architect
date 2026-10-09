@@ -11,10 +11,12 @@ module Space::Architect
       HEARTBEAT_EVERY  = 30    # seconds of silence before heartbeat
       FILE_WAIT_LIMIT  = 10    # seconds to wait for run.jsonl to appear
 
-      def initialize(runs, renderer:, out: $stdout)
-        @runs     = runs
-        @renderer = renderer
-        @out      = out
+      # heartbeat_every: test seam — defaults to HEARTBEAT_EVERY.
+      def initialize(runs, renderer:, out: $stdout, heartbeat_every: HEARTBEAT_EVERY)
+        @runs            = runs
+        @renderer        = renderer
+        @out             = out
+        @heartbeat_every = heartbeat_every
       end
 
       # Returns :ok or :failed
@@ -35,7 +37,7 @@ module Space::Architect
         wait_for_file(run)
 
         unless File.exist?(run.run_log_path.to_s)
-          emit(@renderer.render(lane: run.id, events: [error_event("run.jsonl never appeared")], alive: false))
+          emit(@renderer.terminal(lane: run.id, ok: false, reason: "run.jsonl never appeared"))
           return :failed
         end
 
@@ -43,7 +45,7 @@ module Space::Architect
 
         events_all = []
         last_emit  = Time.now
-        terminal   = nil
+        settled    = nil
 
         File.open(run.run_log_path.to_s, "r") do |f|
           loop do
@@ -53,30 +55,29 @@ module Space::Architect
               next unless ev
 
               events_all << ev
-              terminal = ev if ev["type"] == "result"
+              settled = ev if ev["type"] == "agent_settled"
 
               new_events = [ev]
-              rendered = @renderer.render(lane: run.id, events: new_events, alive: terminal.nil?)
+              rendered = @renderer.render(lane: run.id, events: new_events, alive: settled.nil?)
               emit(rendered) unless rendered.empty?
               last_emit = Time.now
 
-              break if terminal
+              break if settled
             else
               # EOF — check liveness
               pid_alive = begin; Process.kill(0, run.pid); true; rescue Errno::ESRCH, Errno::EPERM; false; end
 
               unless pid_alive
                 # PID dead and no terminal event → treat as failure
-                unless terminal
-                  emit(@renderer.render(lane: run.id,
-                                        events: [error_event("process died without result event")],
-                                        alive: false))
+                unless settled
+                  emit(@renderer.terminal(lane: run.id, ok: false,
+                                          reason: "process died without a terminal event"))
                   return :failed
                 end
                 break
               end
 
-              if Time.now - last_emit > HEARTBEAT_EVERY
+              if Time.now - last_emit > @heartbeat_every
                 emit("[#{run.id}] ⏳ still running…\n") if @renderer.lifecycle?
                 last_emit = Time.now
               end
@@ -86,14 +87,36 @@ module Space::Architect
           end
         end
 
-        if terminal
-          extract_report(run, terminal)
-          rendered = @renderer.render(lane: run.id, events: [terminal], alive: false)
-          emit(rendered) unless rendered.empty?
-          terminal["is_error"] ? :failed : :ok
-        else
-          :failed
-        end
+        finish(run, events_all, settled)
+      end
+
+      # Classify the settled stream via PiEvents and render the terminal line.
+      def finish(run, events, settled)
+        text   = PiEvents.message_text(PiEvents.last_assistant_message(events))
+        outcome, reason = classify(events, settled, text)
+
+        extract_report(run, text) unless text.empty?
+
+        emit(@renderer.terminal(lane: run.id, ok: outcome == :ok,
+                                reason:  outcome == :ok ? nil : reason,
+                                snippet: outcome == :ok ? text : nil,
+                                duration: PiEvents.duration_seconds(events),
+                                turns:    PiEvents.turn_count(events)))
+        outcome
+      end
+
+      # :ok iff the stream settled un-aborted, the last assistant stopReason is
+      # "stop", and the final assistant text is non-empty; :failed with a named
+      # reason otherwise.
+      def classify(events, settled, text)
+        reason = PiEvents.stop_reason(events)
+
+        return [:failed, text.empty? ? "aborted" : text] if settled.is_a?(Hash) && settled["aborted"] == true
+        return [:ok, text] if reason == "stop" && !text.empty?
+        return [:failed, text.empty? ? reason : text] if PiEvents.failed_stop_reason?(reason)
+
+        # "stop" or no assistant message at all, but no final text.
+        [:failed, "no final assistant text"]
       end
 
       def wait_for_file(run)
@@ -105,16 +128,8 @@ module Space::Architect
         end
       end
 
-      def extract_report(run, terminal_ev)
-        result = terminal_ev["result"].to_s
-        return if result.empty?
-
-        Pathname.new(run.report_path).write(result)
-      end
-
-      def error_event(msg)
-        { "type" => "result", "subtype" => "error", "is_error" => true,
-          "duration_ms" => 0, "num_turns" => 0, "result" => msg }
+      def extract_report(run, text)
+        Pathname.new(run.report_path).write(text)
       end
 
       def emit(text)

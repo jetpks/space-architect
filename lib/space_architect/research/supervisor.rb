@@ -101,22 +101,23 @@ module Space::Architect
 
       # pi has no terminal "result" event: the run's outcome is the LAST assistant
       # message's stopReason ("stop" finished normally; "error"/"aborted" failed —
-      # pi's StopReason vocabulary). Without one, a live pid is still running and a
-      # dead pid died without finishing.
+      # pi's StopReason vocabulary; PiEvents is the one home for these
+      # predicates). Without one, a live pid is still running and a dead pid
+      # died without finishing.
       def classify(run)
-        content = File.exist?(run.run_log_path.to_s) ? File.read(run.run_log_path.to_s) : ""
-        events  = content.lines.filter_map { |l| JSON.parse(l.chomp) rescue nil }
-        stop_reason = events
-          .select { |e| e.is_a?(Hash) && e["type"] == "message_end" &&
-                         e["message"].is_a?(Hash) && e["message"]["role"] == "assistant" }
-          .last
-          &.dig("message", "stopReason")
+        events = read_events(run.run_log_path)
+        reason = PiEvents.stop_reason(events)
 
-        return :complete if stop_reason == "stop"
-        return :failed   if %w[error aborted].include?(stop_reason)
+        return :complete if reason == "stop"
+        return :failed   if PiEvents.failed_stop_reason?(reason)
 
         pid_alive = begin; Process.kill(0, run.pid); true; rescue Errno::ESRCH, Errno::EPERM; false; end
         pid_alive ? :running : :failed
+      end
+
+      def read_events(path)
+        return [] unless File.exist?(path.to_s)
+        File.readlines(path.to_s).filter_map { |l| JSON.parse(l.chomp) rescue nil }
       end
 
       def tail_lines(path, n)
