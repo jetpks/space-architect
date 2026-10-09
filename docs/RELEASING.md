@@ -11,7 +11,7 @@ Where things live:
 
 | Thing | Path |
 |---|---|
-| The one version constant | `lib/space_core/version.rb` (`Space::Core::VERSION`; `architect version` prints it) |
+| The one version constant | `lib/space_architect/version.rb` (`Space::Architect::VERSION`; `architect version` prints it) |
 | Changelog | `CHANGELOG.md` (Keep a Changelog; link refs at the bottom) |
 | Release automation | `.github/workflows/release.yml` (fires on `v*` tag push) |
 | Local install task | `Rakefile` → `rake install` (`gem install --user-install --no-document`) |
@@ -36,7 +36,7 @@ touch set.
    iteration verdicts and the integrated diff, citing the closed issues.
    Match the house style: read the previous version's section and the link
    refs at the bottom first.
-2. Bump `lib/space_core/version.rb`.
+2. Bump `lib/space_architect/version.rb`.
 3. `bundle install` — refreshes the `Gemfile.lock` version lines.
 4. `bundle exec rake test` — green.
 5. One commit, message from a file:
@@ -67,7 +67,7 @@ Human merges the PR on GitHub (merge commit). Then:
 
 ```sh
 git checkout main && git pull
-grep VERSION lib/space_core/version.rb   # the bump is on main
+grep VERSION lib/space_architect/version.rb   # the bump is on main
 ```
 
 ## 4. Tag — annotated, signed, on the merge commit

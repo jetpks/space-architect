@@ -5,6 +5,60 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.0.0] - 2026-10-09
+
+### Changed
+
+- **The split: space-architect is now the Architect Loop only.** The monolith
+  carved the space tool and the evergreen engine into their own gems —
+  **space-cadet** 9.0.0 (`Space::Core`, the `space` binary) and **repo-tender**
+  1.0.0 (`RepoTender`, the `repo-tender` binary with the deprecated `src`
+  shim) — and this gem consumes them as libraries instead of vendoring them.
+  Dropped: the vendored `lib/space_core` / `lib/space_src` subtrees, the
+  `exe/space` and `exe/src` binaries, and the `architect space …` / `architect
+  src …` forwarder intercepts. `architect space …` / `architect src …` are now
+  ordinary unknown commands (dry-cli usage + non-zero exit) — the `space`
+  binary comes from space-cadet and the `src` binary from repo-tender; re-point
+  8.x scripts and aliases accordingly.
+- **Upgrading from 8.x:** `gem uninstall space-architect` first — the 8.x gem's
+  `space` and `src` executables collide with the ones the new gems ship — then
+  `gem install space-architect` (pulls space-cadet) and, for the session-sync
+  rail, `gem install repo-tender`. Config/state: space-cadet ≥ 9.1 migrates the
+  substrate's `config.yml`/`state.yml` from the old
+  `~/.config|state/space-architect/` dirs automatically on first run of either
+  `space` or `architect` (on 9.0.0, move them across by hand); the loop's own
+  session-sync cursor stays where it is.
+- **Host-branded help header.** `architect --help`'s root header now brands
+  the loop (`architect 9.0.0 — …`) via space-cadet's product-name/version seam
+  instead of the substrate's identity — hence the `space-cadet ~> 9.1`
+  dependency floor.
+- **Own version line.** The loop's version is now
+  `Space::Architect::VERSION = "9.0.0"` (`lib/space_architect/version.rb`) —
+  its first, decoupled from `Space::Core::VERSION`. The gemspec version,
+  `architect --version`, the bug-report diagnostics, and the bug-report command
+  footer all derive from the loop's own constant; the bug report additionally
+  lists `space-cadet: <version>` as a dependency diagnostic.
+- **Dependency posture.** Hard dependency: `space-cadet ~> 9.0`. The declared
+  set shrank to what the loop itself requires (`async-http`, `async-process`,
+  `protocol-http`, `pastel`, `dry-cli`, `dry-monads`, `dry-validation` — `xdg`,
+  `tty-cursor`, `dry-struct`/`dry-types`, and bare `async` were the vendored
+  trees' deps, not the loop's). repo-tender is deliberately **not** a gemspec
+  runtime dependency: the `sessions agent` launchd seam requires it lazily and,
+  when the gem is absent, fails with a short actionable error naming the fix
+  (`gem install repo-tender`) instead of a LoadError backtrace. The dev
+  Gemfile includes repo-tender so the suite exercises the real integration.
+- **Tests and mutation subjects classified, not carried.** Tests whose subject
+  was the vendored tools' functionality (everything under `test/space_core/`
+  and `test/space_src/`, the forwarder tests, the space-tool surface,
+  shell-integration, slugger, repo-resolver, warnings) dropped with the code —
+  their coverage lives in the two gems. Loop tests keep running against the
+  gem-served `Space::Core`; fixture setup routes through the gem's own CLI.
+  The `:mutant` task now subjects `Space::Architect::GateEvaluator` and
+  `Space::Architect::GateLint` only.
+- **Docs and skills updated to the split reality** (README, command reference,
+  releasing guide, design doc, skills): one binary, two gem dependencies, no
+  forwarders or vendored subtrees.
+
 ## [8.0.0] - 2026-10-09
 
 ### Changed

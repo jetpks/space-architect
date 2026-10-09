@@ -76,6 +76,16 @@ class Space::ArchitectTest < Minitest::Test
     Space::Architect::CLI.call(argv.flatten, out, err)
     [out.string, err.string]
   end
+
+  # Drives the space-tool surface (the space-cadet gem's own CLI) for fixture
+  # setup — a space must exist before `architect init` etc. The gem's CLI is
+  # behaviorally what `architect space …` forwarded to; the forwarder is gone.
+  def space_invoke(*argv)
+    out = StringIO.new
+    err = StringIO.new
+    Space::Core::CLI.call(argv.flatten, out, err)
+    [out.string, err.string]
+  end
   def with_env(vars)
     original = vars.each_key.to_h { |key| [key, ENV[key]] }
     vars.each { |key, value| ENV[key] = value }

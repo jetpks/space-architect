@@ -5,7 +5,7 @@ require "open3"
 module Space::Architect
   module SessionSync
     # Resolves the absolute path to the `architect` executable the plist
-    # should invoke, imitating Space::Src::CLI::Daemon::Helpers::Resolve's
+    # should invoke, imitating RepoTender::CLI::Daemon::Helpers::Resolve's
     # detect_bin_path precedence: an env override (tests), the dev checkout's
     # exe/architect, `which architect`, then the installed gem's bin.
     module BinPath

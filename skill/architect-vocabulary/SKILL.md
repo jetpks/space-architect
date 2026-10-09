@@ -131,8 +131,8 @@ Safe **read-only** commands to orient yourself (these don't run the loop):
 
 ```sh
 architect status            # project state: iterations, freeze shas, lanes, verdicts
-architect space show        # the space you're standing in
-architect space list        # all your spaces
+space show                  # the space you're standing in (space-cadet binary)
+space list                  # all your spaces
 ```
 
 ## Maintenance

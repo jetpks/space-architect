@@ -7,9 +7,9 @@ class XDGConfigStateTest < Space::ArchitectTest
     setup = temp_env
     env = setup.fetch(:env)
 
-    assert_equal File.join(env["XDG_CONFIG_HOME"], "space-architect", "config.yml"),
+    assert_equal File.join(env["XDG_CONFIG_HOME"], "space-cadet", "config.yml"),
                  Space::Core::Config.default_path(env: env).to_s
-    assert_equal File.join(env["XDG_STATE_HOME"], "space-architect", "state.yml"),
+    assert_equal File.join(env["XDG_STATE_HOME"], "space-cadet", "state.yml"),
                  Space::Core::State.default_path(env: env).to_s
   ensure
     FileUtils.rm_rf(setup[:root]) if setup

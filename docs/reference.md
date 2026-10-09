@@ -1,6 +1,6 @@
 # Command Reference 📖
 
-Every Space Architect (`space-architect`) command, flag, and behavior. The gem installs three first-class binaries — `architect`, `space`, and `src` — over clean `Space::Architect` / `Space::Core` / `Space::Src` seams. `architect` also forwards `architect space …` and `architect src …` to the other two, so a project can drive everything from one command; this reference documents commands under those forwarded prefixes, but each works identically as a bare `space …` / `src …` invocation. 🚀
+Every Architect Loop (`space-architect`) command, flag, and behavior. The gem installs one binary — `architect` — running the Architect Loop inside space-cadet's task-scoped workspaces; the space/evergreen surfaces live in the space-cadet and repo-tender gems (see Related tools at the end). 🚀
 
 ## Global options 🎨
 
@@ -19,7 +19,7 @@ Commands that take an optional `[SPACE]` resolve it in this order:
 1. An explicit id or slug passed on the command line.
 2. Otherwise, the nearest parent directory of `$PWD` containing a `space.yaml`.
 
-Being *inside* a space is what makes it current — `architect space use` records recent state and prints a path, but it never overrides `$PWD`-based resolution.
+Being *inside* a space is what makes it current — `space use` (the space-cadet binary) records recent state and prints a path, but it never overrides `$PWD`-based resolution.
 
 ## Architect Loop commands 🔄
 
@@ -332,282 +332,25 @@ architect research status        # snapshot of dispatched runs
 | `--thinking` | `false` | Show assistant thinking blocks. |
 | `--jsonl` | `false` | Emit raw lane-tagged JSONL (mutually exclusive with `--level`/`--quiet`). |
 
-## Space management: `architect space …` 🗂️
-
-Manage project spaces. These commands are also accessible via the `space` shim (e.g., `space new "Title"` → `architect space new "Title"`).
-
-### `architect space init`
-
-Create the default XDG config and state files.
-
-```sh
-architect space init
-```
-
-### `architect space new TITLE [-r REPO]...`
-
-Create a new space. The id is date-prefixed and slugged from the title (`"Name of Space"` → `20260531-name-of-space`); duplicate names on the same day get a counter (`...-name-of-space-2`). Repos are passed with a repeatable `-r` flag (the comma form `-r a,b` works too) and are cloned into the new space immediately.
-
-```sh
-architect space new "Name of Space"
-architect space new "Name of Space" -r example-tools/alpha -r example-tools/beta
-architect space new "Name of Space" --no-git   # skip git init
-```
-
-| Option | Description |
-|--------|-------------|
-| `-r, --repo=REPO` | Repo ref to clone; repeat once per repo (comma form also accepted). |
-| `--[no-]git` | Initialize the space as a Git repository (default: `--git`). |
-
-### `architect space list` (alias `architect space ls`)
-
-List all spaces, compact and human-readable.
-
-```sh
-architect space list
-architect space ls --color=always
-```
-
-### `architect space show [IDENTIFIER]`
-
-Show metadata for a space, or the current space when no id is given.
-
-```sh
-architect space show
-architect space show 20260531-name-of-space
-```
-
-### `architect space path [IDENTIFIER]`
-
-Print *only* the path for a space (handy for scripting).
-
-```sh
-architect space path
-architect space path 20260531-name-of-space
-```
-
-### `architect space use IDENTIFIER`
-
-Record a space in recent state and print its path.
-
-```sh
-architect space use 20260531-name-of-space
-```
-
-### `architect space current`
-
-Show the current space, resolved from `$PWD`.
-
-```sh
-architect space current
-```
-
-### `architect space status [SPACE] [STATUS]`
-
-**Report or set.** With no status keyword — bare, or with just a space id — it *reports* the space: its metadata (ID, Title, Status, Path, Created, Updated) followed by a compact loop-status block (project status, current iteration, derived state) when the space runs an Architect project, quietly omitted for a non-architect space. Pass a status keyword to *set* it instead; supported statuses: `active`, `paused`, `done`, `archived`.
-
-```sh
-architect space status                                   # report the current space
-architect space status 20260531-name-of-space            # report another space
-architect space status done                              # set the current space's status
-architect space status 20260531-name-of-space archived   # set another space's status
-```
-
-### `architect space config [SUBCOMMAND]`
-
-Show or update configuration.
-
-```sh
-architect space config show
-architect space config path
-architect space config set default_provider github.com
-architect space config set default_organization example-org
-architect space config set git_clone_protocol https
-architect space config set src_dir ""                    # disable evergreen copy-on-write (always clone)
-```
-
-Config lives at `~/.config/space-architect/config.yml` (XDG-aware):
-
-```yaml
-version: 1
-base_dir: ~/architect            # spaces_dir + src_dir hang off this by default
-default_provider: github.com
-default_organization:
-git_clone_protocol: ssh          # ssh | https
-```
-
-`spaces_dir` defaults to `<base_dir>/spaces` and `src_dir` (the evergreen checkout root) to `<base_dir>/src`; set either explicitly to override. Editable keys: `base_dir`, `spaces_dir`, `src_dir`, `default_provider`, `default_organization`, `git_clone_protocol`.
-
-### `architect space repo [SUBCOMMAND]` (alias `architect space repos`)
-
-Manage repos in the current space.
-
-```sh
-architect space repo add example-app
-architect space repo add example-tools/alpha example-tools/beta
-architect space repo add gitlab.com/example-org/api
-architect space repo list            # alias: ls
-architect space repo resolve example-app example-tools/async
-```
-
-- **add** — add repos into `repos/` (copy-on-write from an evergreen checkout under `src_dir` when available, else clone), concurrently up to five at a time.
-- **list** / **ls** — list repos tracked in the current space.
-- **resolve** — print the resolved full name and clone URL without cloning.
-
-### `architect space shell [SUBCOMMAND]`
-
-Manage shell integration. Only `fish` is supported today.
-
-```sh
-architect space shell init fish              # print the fish function to stdout
-architect space shell fish install           # install function + completions
-architect space shell fish install --force   # overwrite existing files
-architect space shell fish uninstall
-architect space shell fish path              # print install paths
-architect space shell complete spaces        # print completion candidates
-```
-
-### `architect space pack`
-
-Render a portable OCI build context for the current space into `build/oci/` (override with `-o`): a `Dockerfile`, an executable `entrypoint.sh`, and a `Dockerfile.dockerignore`. The Dockerfile is rendered in cache-hygiene layer order: stable system layers first, then each `pack.provision` script copied and run individually, then the gem install, then the full space tree. This means a space-content edit after a cold build leaves the provision and gem-install layers cached — only `COPY . /space` and later re-run, so the rebuild completes in seconds. The gem is installed from the in-space `repos/space-architect` checkout when present (determined at render time), else from RubyGems; the generated ignore file keeps secrets and scratch (`.env`, `*.key`, `*.pem`, ssh keys, `build/`, `tmp/`) out of the layers. Reads and validates the `pack.provision` / `pack.persist` keys from `space.yaml` (see below). Writes the context only — no image is built.
-
-```sh
-architect space pack
-architect space pack -o /tmp/space-ctx
-```
-
-| Option | Description |
-|--------|-------------|
-| `-o, --output=DIR` | Output directory for the build context (default: `build/oci/` under the space root). |
-
-### `architect space build`
-
-Pack, then build **and tag** the image via the `container` CLI. Two tags are applied: `<space-id>:<sha>` — where `<sha>` is the space repo's 12-char `HEAD`, suffixed `-dirty` when the working tree has uncommitted changes — and a moving `<space-id>:latest`. Same commit ⇒ same tag ⇒ same image (reproducible by SHA). Requires the space to be a Git repository with at least one commit. The generated context is a standard OCI/Docker build context, so `docker build -f build/oci/Dockerfile .` from the space root builds the same image with any OCI builder.
-
-```sh
-architect space build
-```
-
-### `architect space run [COMMAND]`
-
-Run `<space-id>:latest` via `container run --rm`, injecting auth and mounting persisted state. With no `COMMAND` it starts a login shell; pass a command to run it once instead. Only the auth environment variables that are actually set are forwarded with bare `-e VAR` — `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL` — so credentials are never baked into the image. Each `pack.persist` path is bind-mounted from `<space>/.state<path>` on the host (created before the run) so container state survives across runs.
-
-Vars declared under `run.env:` in `space.yaml` and vars passed via `--env` are also forwarded as bare `-e VAR` passthrough — values never appear in argv, `ps`, or the image. Declared vars that overlap the always-on auth trio are deduplicated to a single `-e`. A requested-but-unset var emits a stderr warning and is omitted from argv (it does not fail the run).
-
-```sh
-architect space run                         # login shell
-architect space run architect status        # one-off command
-architect space run --tty                   # force an interactive TTY
-architect space run --env FIREWORKS_API_KEY -- hermes -z 'hello' # ad hoc env forward; -- keeps the payload's flags from the CLI parser
-```
-
-| Option | Description |
-|--------|-------------|
-| `--[no-]tty` | Force (or disable) an interactive TTY. Default: auto-detected from the output stream. |
-| `--env VAR` | Forward a host env var into the container as bare `-e VAR` (repeatable; adds to `run.env:`). |
-
-### Declaring provisioning, persistence & runtime env (`space.yaml`)
-
-The `pack`-family commands and `space run` read optional keys from `space.yaml`:
-
-```yaml
-pack:
-  provision:                 # build-time scripts, each COPY'd and RUN before the space tree lands
-    - scripts/setup-toolchain.sh
-  persist:                   # absolute guest paths, bind-mounted from <space>/.state<path> at run
-    - /root/.claude
-run:
-  env:                       # host var names forwarded as bare -e VAR at run time (values never baked)
-    - FIREWORKS_API_KEY
-```
-
-**`provision` contract.** Entries must be space-root-relative paths that exist under the space and must be executable (COPY preserves the bit from the build context). Each script is copied into the image individually — `COPY <script> /space/<script>` immediately followed by `RUN /space/<script>` — so its cache key is the script's own content: editing any other space file leaves its layer cached. Scripts run **before** the full space tree is copied and **before** the gem is installed, in declared order. A script therefore sees only the base system layers plus outputs of any earlier scripts; it must be self-contained (network + its own file only) and cannot read other space files or call `architect`/`space`. The payoff: after the first (cold) build, a space-content edit triggers only `COPY . /space` and later — provision and gem-install layers stay cached and the rebuild completes in seconds.
-
-`persist` entries must be absolute. Both `provision` and `persist` are validated at pack time — an absolute or missing provision path, a provision path that escapes the space root, or a relative persist path fails the command before anything is written.
-
-**`run.env` contract.** Entries are host env var **names only** — values are never written to `space.yaml` or baked into the image (R5). At `space run` time, each named var is read from the host and forwarded as bare `-e VAR` (no `=value` in argv). A var that is unset or empty on the host is omitted from argv and a stderr warning names it — the run continues so you can diagnose which credential is missing. Vars that overlap the always-on auth trio are deduplicated. Ad hoc additions use `space run --env VAR` (repeatable).
-
-## Evergreen engine: `architect src …` 🌲
-
-The evergreen engine (`space-src`, exposed as `src`) keeps canonical copies of tracked repos in sync so spaces can clone via fast APFS copy-on-write. Run `architect src --help` to list available subcommands.
-
-> **Note:** these commands appear under `architect src <verb>` but are not listed in root `architect --help`. Discover them via `architect src --help`.
-
-### `architect src clone NAMES`
-
-Clone evergreen repo(s) into a working directory via APFS COW copy.
-
-```sh
-architect src clone example-app
-architect src clone example-tools/alpha example-tools/beta
-architect src clone github.com/example-org/api --into ~/work
-```
-
-| Option | Description |
-|--------|-------------|
-| `--into=DIR` | Destination parent directory (default: `$PWD`). |
-| `--json` | JSON output (one object per event line). |
-| `--plain` | Plain text output, no color. |
-| `--quiet, -q` | Suppress non-essential output. |
-
-### `architect src sync`
-
-Run one sync pass — fetch + fast-forward all tracked repos.
-
-```sh
-architect src sync
-architect src sync --repo github.com/example-org/api   # scope to one repo
-```
-
-### `architect src status`
-
-Show the per-repo evergreen status table (source: `$XDG_STATE_HOME/space-src/state.yaml`).
-
-```sh
-architect src status
-```
-
-### `architect src repo [SUBCOMMAND]`
-
-Manage tracked repos in the evergreen store.
-
-```sh
-architect src repo add example-org/api
-architect src repo list
-architect src repo remove example-org/api
-```
-
-### `architect src org [SUBCOMMAND]`
-
-Manage tracked orgs (all repos under an org are synced automatically).
-
-```sh
-architect src org add github.com/example-org
-architect src org list
-architect src org remove github.com/example-org
-```
-
-### `architect src config [SUBCOMMAND]`
-
-Show or locate the evergreen engine config (separate from space config).
-
-```sh
-architect src config show
-architect src config path
-```
-
-### `architect src daemon [SUBCOMMAND]`
-
-Manage the per-user launchd sync agent (macOS).
-
-```sh
-architect src daemon install
-architect src daemon start
-architect src daemon stop
-architect src daemon restart
-architect src daemon status
-architect src daemon uninstall
-```
+## Related tools: spaces & evergreen checkouts 🪐🌲
+
+The Architect Loop runs *inside* spaces, but the space surface itself ships in a
+separate gem. Since 9.0.0, space-architect installs one binary — `architect` —
+and depends on two sibling gems:
+
+- **space-cadet** (hard dependency) — the spaces substrate: create, manage &
+  containerize task-scoped workspaces. Its `space` binary covers everything the
+  old `architect space …` forwarder did (`space new`, `space list`, `space
+  repo`, `space pack|build|run`, `space config`, …).
+- **repo-tender** (soft dependency) — keeps local git clones evergreen. Its
+  `repo-tender` binary (with the deprecated `src` shim) covers the evergreen
+  checkout engine (`src clone`, `src sync`, `src daemon`, …), and the
+  `architect sessions agent` commands use its launchd agent. Install it with
+  `gem install repo-tender` when you want the session-sync rail; without it,
+  everything else in `architect` works.
+
+See `space --help` and `src --help` (from the space-cadet and repo-tender gems)
+for those surfaces' own references.
 
 ## Exit codes 🚦
 

@@ -1,15 +1,15 @@
 # frozen_string_literal: true
 
-require_relative "lib/space_core/version"
+require_relative "lib/space_architect/version"
 
 Gem::Specification.new do |spec|
   spec.name = "space-architect"
-  spec.version = Space::Core::VERSION
+  spec.version = Space::Architect::VERSION
   spec.authors = ["Eric Jacobs"]
   spec.email = ["eric@ebj.dev"]
 
-  spec.summary = "Task-scoped project workspaces (repos · notes · artifacts under one self-describing root)"
-  spec.description = "A dry-cli CLI for spaces: date-prefixed directories with a YAML identity file, $PWD-based current-space resolution, and XDG config/state. Provisions repos at copy-on-write speed from evergreen checkouts, concurrently on fibers. Ships fish shell integration and completions."
+  spec.summary = "The Architect Loop — structured judgment-and-build cycles for humans and headless AI builders"
+  spec.description = "A dry-cli CLI for the Architect Loop: iterations, briefs, freezes, verdicts, lane worktrees, and headless pi dispatch — the judgment loop that runs inside space-cadet's task-scoped workspaces. Depends on the space-cadet gem for the spaces substrate (hard) and the repo-tender gem for the session-sync launchd agent (soft, install at will)."
   spec.homepage = "https://github.com/jetpks/space-architect"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 4.0.5"
@@ -21,22 +21,17 @@ Gem::Specification.new do |spec|
     Dir["lib/**/*.rb", "lib/**/*.ts", "lib/**/*.erb", "exe/*", "skill/**/*", "README.md", "CHANGELOG.md", "LICENSE.txt"]
   end
   spec.bindir = "exe"
-  spec.executables = ["architect", "space", "src"]
+  spec.executables = ["architect"]
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "async", "~> 2.39"
-  spec.add_dependency "async-process", "~> 1.4"
+  spec.add_dependency "space-cadet", "~> 9.1"
   spec.add_dependency "async-http", "~> 0.95"
+  spec.add_dependency "async-process", "~> 1.4"
   spec.add_dependency "protocol-http", "~> 0.62"
   spec.add_dependency "pastel", "~> 0.8"
   spec.add_dependency "dry-cli", "~> 1.4"
   spec.add_dependency "dry-monads", "~> 1.10"
-  spec.add_dependency "dry-schema", "~> 1.16"
-  spec.add_dependency "dry-struct", "~> 1.8"
-  spec.add_dependency "dry-types", "~> 1.9"
   spec.add_dependency "dry-validation", "~> 1.11"
-  spec.add_dependency "xdg", "~> 10.2"
-  spec.add_dependency "tty-cursor", "~> 0.7"
 
   spec.add_development_dependency "minitest", "~> 6.0"
   spec.add_development_dependency "mutant-minitest", "~> 0.16"

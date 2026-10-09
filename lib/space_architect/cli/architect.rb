@@ -2,7 +2,6 @@
 
 require "json"
 require "fileutils"
-require "space_src/launchd/agent"
 require_relative "../jobs_client"
 require_relative "../conversations_client"
 require_relative "../session_sync"
@@ -12,8 +11,8 @@ module Space::Architect
     # Optional loop-phase DSL on the shared command base, read by
     # Space::Core::CLI::Help to group the help listing. A command may declare
     # `phase <order>, "<Label>"`; groups, and members within a group, sort by
-    # <order>. Only architect commands declare one — space commands leave it nil
-    # and render as the single ungrouped default listing (unchanged).
+    # <order>. Only architect commands declare one — commands without a phase
+    # render as the single ungrouped default listing (unchanged).
     class BaseCommand
       def self.phase(order = nil, label = nil)
         return @phase if order.nil?
@@ -800,7 +799,8 @@ module Space::Architect
             terminal.say result[:command]
             terminal.say ""
             terminal.say "Diagnostics:"
-            terminal.say "  space-architect #{Space::Core::VERSION}"
+            terminal.say "  space-architect #{Space::Architect::VERSION}"
+            terminal.say "  space-cadet #{Space::Core::VERSION}"
             terminal.say "  ruby #{RUBY_VERSION} (#{RUBY_PLATFORM})"
             terminal.say "  space: #{space.id} — #{space.title}" if space
             CLI.record_outcome(Outcome.new(exit_code: 0))
@@ -1168,6 +1168,17 @@ module Space::Architect
             end
 
             def format_failure(f) = f.is_a?(Hash) ? f.inspect : f.to_s
+
+            # The launchd-agent seam is repo-tender's — a soft dependency, never a
+            # gemspec runtime dep. Required lazily so `sessions agent …` degrades
+            # with an actionable hint instead of failing at boot when the gem is
+            # absent; handle_errors turns the raise into a red message + exit 1.
+            def agent
+              require "repo_tender"
+              RepoTender::Launchd::Agent
+            rescue LoadError
+              raise Space::Core::Error, "sessions agent needs the repo-tender gem — install it with: gem install repo-tender"
+            end
           end
 
           class Install < BaseCommand
@@ -1196,7 +1207,7 @@ module Space::Architect
                 File.write(pp, xml)
                 File.chmod(0o600, pp)
 
-                result = Space::Src::Launchd::Agent.new(label: SessionSync::LABEL).install(pp)
+                result = agent.new(label: SessionSync::LABEL).install(pp)
                 raise Space::Core::Error, "bootstrap failed: #{format_failure(result.failure)}" if result.failure?
 
                 terminal.say "Installed: #{terminal.path(pp)}"
@@ -1213,7 +1224,7 @@ module Space::Architect
               setup_terminal(**opts.slice(:color, :colors))
               handle_errors do
                 pp = plist_path
-                result = Space::Src::Launchd::Agent.new(label: SessionSync::LABEL).uninstall
+                result = agent.new(label: SessionSync::LABEL).uninstall
                 terminal.say "bootout reported: #{format_failure(result.failure)}" if result.failure?
 
                 if File.exist?(pp)
@@ -1234,7 +1245,7 @@ module Space::Architect
             def call(**opts)
               setup_terminal(**opts.slice(:color, :colors))
               handle_errors do
-                result = Space::Src::Launchd::Agent.new(label: SessionSync::LABEL).status
+                result = agent.new(label: SessionSync::LABEL).status
                 raise Space::Core::Error, "status failed: #{format_failure(result.failure)}" if result.failure?
 
                 s = result.success
@@ -1256,6 +1267,8 @@ end
 # Loop-phase declarations above sort the architect help listing; its namespaces
 # (brief/worktree/variant/research) declare no phase and list under this header.
 Space::Core::CLI::Help.trailing_group_label = "Groups"
+Space::Core::CLI::Help.product_name = "architect"
+Space::Core::CLI::Help.product_version = Space::Architect::VERSION
 
 Space::Architect::CLI::Registry.register "init",   Space::Architect::CLI::Architect::Init
 Space::Architect::CLI::Registry.register "ground", Space::Architect::CLI::Architect::Ground

@@ -6,7 +6,7 @@ require "fileutils"
 module Space::Architect
   module SessionSync
     # Machine-managed cursor at $XDG_STATE_HOME/space-architect/session-sync.yaml
-    # (imitates Space::Src::State::Store's load/write/emit shape). Keyed by
+    # (imitates RepoTender::State::Store's load/write/emit shape). Keyed by
     # absolute source path; each entry records the size + mtime observed the
     # last time that file was uploaded.
     class Cursor

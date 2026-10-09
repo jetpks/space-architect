@@ -1,16 +1,18 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
+require "repo_tender"
 require "socket"
 require "json"
 require "fileutils"
 require "tmpdir"
 require "rbconfig"
+require "open3"
 
 # CLI-level tests for `architect sessions sync|agent install|agent uninstall|agent status`,
 # exercised end-to-end via invoke() — same TCP-stub pattern as architect_jobs_cli_test.rb
-# for `sync`, and the same Launchd::Agent.new-stubbing pattern as
-# test/space_src/cli/daemon_test.rb for `agent` (no live launchctl in tests, per AC5).
+# for `sync`, and the same Launchd::Agent.new-stubbing pattern for `agent`
+# (no live launchctl in tests, per AC5).
 class ArchitectSessionsCLITest < Space::ArchitectTest
   Net_HTTP_STATUS = {200 => "OK", 201 => "Created", 401 => "Unauthorized", 422 => "Unprocessable Entity"}.freeze
 
@@ -272,8 +274,7 @@ class ArchitectSessionsCLITest < Space::ArchitectTest
 
   # ---- `sessions agent install|uninstall|status` ----
 
-  # Stub Space::Src::Launchd::Agent so no live launchctl is ever invoked
-  # (mirrors test/space_src/cli/daemon_test.rb's stub_agent).
+  # Stub RepoTender::Launchd::Agent so no live launchctl is ever invoked.
   def stub_agent(install_result: nil, uninstall_result: nil, status_result: nil)
     fake_class = Class.new do
       attr_reader :calls, :install_result, :uninstall_result, :status_result
@@ -306,7 +307,7 @@ class ArchitectSessionsCLITest < Space::ArchitectTest
       uninstall_result: uninstall_result || Dry::Monads::Success(""),
       status_result: status_result || Dry::Monads::Success({loaded: false, running: false, pid: nil, last_exit: nil})
     )
-    agent_class = Space::Src::Launchd::Agent
+    agent_class = RepoTender::Launchd::Agent
     @agent_new_orig = agent_class.method(:new)
     agent_class.singleton_class.send(:remove_method, :new) if agent_class.singleton_class.method_defined?(:new, false)
     agent_class.define_singleton_method(:new) { |**_| fake }
@@ -326,7 +327,7 @@ class ArchitectSessionsCLITest < Space::ArchitectTest
 
   def teardown
     if @agent_new_orig
-      agent_class = Space::Src::Launchd::Agent
+      agent_class = RepoTender::Launchd::Agent
       agent_class.singleton_class.send(:remove_method, :new) if agent_class.singleton_class.method_defined?(:new, false)
       agent_class.define_singleton_method(:new, &@agent_new_orig)
     end
@@ -454,5 +455,36 @@ class ArchitectSessionsCLITest < Space::ArchitectTest
     end
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # (k) with repo-tender absent from the load path, `sessions agent …` degrades
+  # with an actionable error naming the fix — no raw LoadError backtrace. The
+  # subprocess hides the gem by overriding Kernel#require for "repo_tender".
+  def test_agent_without_repo_tender_names_the_fix
+    lib = File.expand_path("../lib", __dir__)
+    script = <<~RUBY
+      module Kernel
+        alias_method :original_require, :require
+        def require(name)
+          raise LoadError, "cannot load such file -- repo_tender" if name == "repo_tender"
+
+          original_require(name)
+        end
+      end
+      $LOAD_PATH.unshift(#{lib.inspect})
+      require "space_architect"
+      require "stringio"
+      out = StringIO.new
+      err = StringIO.new
+      code = Space::Architect::CLI.call(["sessions", "agent", "status"], out, err)
+      puts "CODE=\#{code}"
+      puts err.string
+    RUBY
+
+    output, _status = Open3.capture2e(RbConfig.ruby, "-e", script)
+
+    assert_includes output, "CODE=1", "absent repo-tender must exit 1, got: \#{output}"
+    assert_match(/gem install repo-tender/, output, "error must name the fix")
+    refute_match(/LoadError/, output, "no raw LoadError backtrace may escape")
   end
 end
