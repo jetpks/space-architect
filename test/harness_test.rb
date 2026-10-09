@@ -161,7 +161,7 @@ class HarnessTest < Space::ArchitectTest
   # --no-approve -e <guard>, and --thinking only when effort is set.
   def test_dispatch_argv_carries_pi_builder_flag_set
     root = Dir.mktmpdir("harness-test")
-    space_dir, project, _fake_pi, build_dir = setup_space(root)
+    _space_dir, project, _fake_pi, build_dir = setup_space(root)
 
     recorder = File.join(root, "recorder")
     argv_file = File.join(root, "recorded_argv")
@@ -199,7 +199,7 @@ class HarnessTest < Space::ArchitectTest
 
     ENV["ARGV_RECORD_FILE"] = argv_file
 
-    res = project.dispatch("demo", "A", bin: recorder, effort: "high")
+    project.dispatch("demo", "A", bin: recorder, effort: "high")
     recorded = File.read(argv_file).split("\x00")
 
     idx = recorded.index("--thinking")
@@ -228,7 +228,7 @@ class HarnessTest < Space::ArchitectTest
   # with the shipped extension) and injects it via -e <absolute path>.
   def test_dispatch_copies_guard_and_injects_via_e
     root = Dir.mktmpdir("harness-test")
-    space_dir, project, _fake_pi, build_dir = setup_space(root)
+    _space_dir, project, _fake_pi, build_dir = setup_space(root)
 
     recorder = File.join(root, "recorder")
     argv_file = File.join(root, "recorded_argv")
@@ -414,7 +414,7 @@ class HarnessTest < Space::ArchitectTest
   # Push tee: both the log file and the HTTP server receive the same lines.
   def test_pi_harness_push_tee_sends_to_both_log_and_http
     root = Dir.mktmpdir("harness-push")
-    space_dir, project, fake_pi, build_dir = setup_space(root)
+    space_dir, _project, fake_pi, build_dir = setup_space(root)
 
     wt_path      = File.join(space_dir, "build", "I01-demo-A", "wt")
     prompt_path  = File.join(build_dir, "prompt.md")

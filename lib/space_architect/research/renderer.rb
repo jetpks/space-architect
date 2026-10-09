@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require "json"
+
 module Space::Architect
   module Research
-    # Pure, testable verbosity-gated renderer for stream-json events.
+    # Pure, testable verbosity-gated renderer for pi JSONL events.
     #
     # Levels (§5.3 ladder):
     #   0 (quiet)  — nothing
@@ -22,8 +24,8 @@ module Space::Architect
 
       # Render a batch of events for a lane.
       # alive: true  → lane still in flight (lifecycle prefix)
-      # alive: false → lane finished (terminal line included)
-      # Returns a String (may be empty).
+      # alive: false → lane finished
+      # Returns a String (may be empty). Terminal lines come from #terminal.
       def render(lane:, events:, alive:)
         return "" if @level == 0 && !@jsonl
 
@@ -32,69 +34,67 @@ module Space::Architect
         end
 
         lines = []
-        terminal = nil
-
         events.each do |ev|
           case ev["type"]
-          when "assistant"
+          when "message_end"
+            next unless ev.dig("message", "role") == "assistant"
             Array(ev.dig("message", "content")).each do |block|
               case block["type"]
               when "thinking"
                 lines << "[#{lane}] #{block['thinking'].to_s.strip}" if @thinking && @level >= 1
               when "text"
                 lines << "[#{lane}] #{block['text'].to_s.strip}" if @level >= 2
-              when "tool_use"
+              when "toolCall"
                 if @level >= 3
                   name_line = "[#{lane}] tool: #{block['name']}"
                   if @level >= 4
-                    input = block["input"]
-                    name_line += " #{JSON.generate(input)}" if input && !input.empty?
+                    arguments = block["arguments"]
+                    name_line += " #{JSON.generate(arguments)}" if arguments && !arguments.empty?
                   end
                   lines << name_line
                 end
               end
             end
-          when "user"
-            Array(ev.dig("message", "content")).each do |block|
-              next unless block["type"] == "tool_result"
-              next unless @level >= 4
-
-              content = block["content"]
-              lines << "[#{lane}] tool_result: #{content.to_s.strip}"
+          when "tool_execution_start"
+            if @level >= 3
+              line = "[#{lane}] tool: #{ev['toolName']}"
+              if @level >= 4
+                args = ev["args"]
+                line += " #{JSON.generate(args)}" if args && !args.empty?
+              end
+              lines << line
             end
-          when "result"
-            terminal = ev
+          when "tool_execution_end"
+            if @level >= 4
+              text = Array(ev.dig("result", "content")).select { |c| c.is_a?(Hash) && c["type"] == "text" }
+                                                     .map { |c| c["text"].to_s }.join
+              lines << "[#{lane}] tool_result: #{text.strip}"
+            end
           end
         end
 
-        if terminal
-          lines << terminal_line(lane, terminal)
-        elsif alive && @level >= 1 && events.empty?
-          lines << "[#{lane}] running"
-        end
+        lines << "[#{lane}] running" if alive && @level >= 1 && events.empty?
 
         lines.reject(&:empty?).join("\n").then { |s| s.empty? ? s : "#{s}\n" }
       end
 
-      def lifecycle?
-        @level >= 1 && !@jsonl
+      # The terminal line, fed terminal FACTS by the mux (never a fabricated
+      # event): ok/failed, the failure reason or the final-text snippet, the
+      # run span, and the turn count.
+      def terminal(lane:, ok:, reason: nil, snippet: nil, duration: nil, turns: nil)
+        return "" if @level == 0 || @jsonl
+
+        line = if ok
+          span  = duration ? "#{duration}s" : "-"
+          "[#{lane}] ✓ complete · STATUS: #{snippet.to_s.strip.slice(0, 80)} · #{span} · #{turns || '-'} turns"
+        else
+          "[#{lane}] ✗ failed #{reason.to_s.strip}"
+        end
+        "#{line}\n"
       end
 
-      private
-
-      def terminal_line(lane, ev)
-        if ev["is_error"]
-          reason = ev["result"].to_s.strip
-          reason = ev["subtype"] if reason.empty?
-          "[#{lane}] ✗ failed #{reason}"
-        elsif ev["subtype"] == "success"
-          dur   = ev["duration_ms"] ? "#{(ev['duration_ms'] / 1000.0).round(1)}s" : "-"
-          turns = ev["num_turns"] || "-"
-          result_snip = ev["result"].to_s.strip.slice(0, 80)
-          "[#{lane}] ✓ complete · STATUS: #{result_snip} · #{dur} · #{turns} turns"
-        else
-          "[#{lane}] ⚠ nonzero exit"
-        end
+      def lifecycle?
+        @level >= 1 && !@jsonl
       end
     end
   end
