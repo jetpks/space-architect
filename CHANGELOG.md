@@ -23,11 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Upgrading from 8.x:** `gem uninstall space-architect` first — the 8.x gem's
   `space` and `src` executables collide with the ones the new gems ship — then
   `gem install space-architect` (pulls space-cadet) and, for the session-sync
-  rail, `gem install repo-tender`. Config/state: with space-cadet ≥ 9.1.0 the
-  substrate's `config.yml`/`state.yml` migrate from the old
-  `~/.config|state/space-architect/` dirs automatically on first run (on
-  9.0.0, move them across by hand); the loop's own session-sync cursor stays
-  where it is.
+  rail, `gem install repo-tender`. Config/state: space-cadet ≥ 9.1 migrates the
+  substrate's `config.yml`/`state.yml` from the old
+  `~/.config|state/space-architect/` dirs automatically on first run of either
+  `space` or `architect` (on 9.0.0, move them across by hand); the loop's own
+  session-sync cursor stays where it is.
+- **Host-branded help header.** `architect --help`'s root header now brands
+  the loop (`architect 9.0.0 — …`) via space-cadet's product-name/version seam
+  instead of the substrate's identity — hence the `space-cadet ~> 9.1`
+  dependency floor.
 - **Own version line.** The loop's version is now
   `Space::Architect::VERSION = "9.0.0"` (`lib/space_architect/version.rb`) —
   its first, decoupled from `Space::Core::VERSION`. The gemspec version,

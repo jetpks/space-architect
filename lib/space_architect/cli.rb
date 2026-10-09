@@ -78,6 +78,13 @@ module Space::Architect
     end
 
     def self.run(argv, out = $stdout, err = $stderr)
+      # One-shot 8.x app-dir migration (the substrate's config/state, owned by
+      # Space::Core::Migration in space-cadet) before dispatch — skipped for
+      # the pure help/version queries so they stay side-effect-free. Running it
+      # here too means `architect` picks up an 8.x user's config even if they
+      # never ran `space` first.
+      Space::Core::Migration.run(err: err) unless TOP_LEVEL_HELP.include?(argv) || VERSION_REQUEST.include?(argv)
+
       Kernel.exit(call(argv, out, err))
     rescue Interrupt
       err.puts "interrupted"

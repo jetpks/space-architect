@@ -1267,6 +1267,8 @@ end
 # Loop-phase declarations above sort the architect help listing; its namespaces
 # (brief/worktree/variant/research) declare no phase and list under this header.
 Space::Core::CLI::Help.trailing_group_label = "Groups"
+Space::Core::CLI::Help.product_name = "architect"
+Space::Core::CLI::Help.product_version = Space::Architect::VERSION
 
 Space::Architect::CLI::Registry.register "init",   Space::Architect::CLI::Architect::Init
 Space::Architect::CLI::Registry.register "ground", Space::Architect::CLI::Architect::Ground

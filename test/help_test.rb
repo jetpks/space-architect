@@ -57,10 +57,11 @@ class HelpTest < Space::ArchitectTest
   def test_root_listing_carries_a_header_and_footer
     plain = Space::Core::CLI::Help.call(architect_root, pastel: Pastel.new(enabled: false))
 
-    # The header is the space-cadet gem's substrate identity + version (the
-    # per-binary tagline keys off $PROGRAM_NAME, which the real `architect`
-    # binary supplies); the footer routes to per-command help.
-    assert_match(/\Aspace-cadet \d+\.\d+\.\d+ — /, plain)
+    # The header brands the host binary (product_name/version set at require
+    # time in cli/architect.rb — space-cadet >= 9.1's seam); the per-binary
+    # tagline keys off $PROGRAM_NAME, which the real `architect` binary
+    # supplies. The footer routes to per-command help.
+    assert_match(/\Aarchitect #{Space::Architect::VERSION} — /, plain)
     assert_match(/Run `.*--help`/, plain)
   end
 
