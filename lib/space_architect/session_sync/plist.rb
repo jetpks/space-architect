@@ -3,7 +3,7 @@
 module Space::Architect
   module SessionSync
     # Hand-rolled launchd plist emitter for the session-sync agent, imitating
-    # Space::Src::Launchd::Plist's shape. Under launchd's bare PATH, a bare
+    # RepoTender::Launchd::Plist's shape. Under launchd's bare PATH, a bare
     # env-relative ruby binstub shebang resolves to macOS system Ruby instead
     # of the caller's toolchain, so ProgramArguments names the interpreter
     # explicitly (ruby_bin) rather than relying on shebang resolution — no

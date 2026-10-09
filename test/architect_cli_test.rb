@@ -80,7 +80,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -110,7 +110,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -133,7 +133,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -159,7 +159,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -184,7 +184,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       Dir.mktmpdir do |dir|
         Dir.chdir(dir) do
           out = help_render("architect")
@@ -203,7 +203,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"])) # no `architect init` → no project block
 
       Dir.chdir(space_path) do
@@ -223,7 +223,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       File.write(File.join(space_path, "space.yaml"), "version: 2\nrepos: [broken\n")
 
@@ -244,14 +244,14 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
         invoke("init")
         invoke("new", "demo")
 
-        out, err = invoke("space", "status")
+        out, err = space_invoke("status")
 
         assert_empty err
         assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
@@ -272,7 +272,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -299,7 +299,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -324,7 +324,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -364,7 +364,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -408,7 +408,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -430,7 +430,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -440,7 +440,7 @@ class ArchitectCLITest < Space::ArchitectTest
         architect_before = yml_before["project"]
         refute_nil architect_before
 
-        invoke("space", "status", "done")
+        space_invoke("status", "done")
 
         yml_after = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
         assert_equal "done", yml_after["status"], "status should be updated"
@@ -458,7 +458,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -490,7 +490,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -516,7 +516,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -543,7 +543,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -596,7 +596,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.chmod(0o755, fake)
 
     with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -641,7 +641,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.chmod(0o755, fake_pi)
 
     with_env(env.merge("ARCHITECT_PI_BIN" => fake_pi)) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -677,7 +677,7 @@ class ArchitectCLITest < Space::ArchitectTest
     argv_file = File.join(setup[:root], "recorded_argv")
 
     with_env(env.merge("ARCHITECT_PI_BIN" => fake_pi, "ARGV_RECORD_FILE" => argv_file)) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -759,7 +759,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -787,7 +787,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -815,7 +815,7 @@ class ArchitectCLITest < Space::ArchitectTest
     argv_file = File.join(setup[:root], "recorded_argv")
 
     with_env(env.merge("ARCHITECT_PI_BIN" => fake, "ARGV_RECORD_FILE" => argv_file)) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -867,7 +867,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.chmod(0o755, fake)
 
     with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -912,7 +912,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.chmod(0o755, fake)
 
     with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -970,7 +970,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.chmod(0o755, fake)
 
     with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1008,7 +1008,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.chmod(0o755, fake)
 
     with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1045,7 +1045,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.chmod(0o755, fake)
 
     with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1078,7 +1078,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.chmod(0o755, fake)
 
     with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1108,7 +1108,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1139,7 +1139,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1183,7 +1183,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1211,7 +1211,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1261,7 +1261,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.chmod(0o755, fake_pi)
 
     with_env(env.merge("ARCHITECT_PI_BIN" => fake_pi)) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1292,7 +1292,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1317,7 +1317,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1343,7 +1343,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1388,7 +1388,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -1412,7 +1412,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -1437,7 +1437,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -1468,7 +1468,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -1495,7 +1495,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1528,7 +1528,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1562,7 +1562,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -1582,7 +1582,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1611,7 +1611,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1650,7 +1650,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1690,7 +1690,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1718,7 +1718,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1750,7 +1750,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -1814,7 +1814,7 @@ class ArchitectCLITest < Space::ArchitectTest
     File.chmod(0o755, fake)
 
     with_env(env.merge("ARCHITECT_PI_BIN" => fake)) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1854,7 +1854,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1888,7 +1888,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env   = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1928,7 +1928,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env   = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -1971,7 +1971,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env   = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2010,7 +2010,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env   = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2069,7 +2069,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env   = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       repo_dir = create_real_repo(space_path, "my-repo")
 
@@ -2128,7 +2128,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env   = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2179,7 +2179,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env   = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2254,7 +2254,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env   = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2319,7 +2319,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env   = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -2343,7 +2343,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env   = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2388,7 +2388,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env   = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "repo-a")
       create_real_repo(space_path, "repo-b")
@@ -2450,7 +2450,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env   = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "repo-a")
       create_real_repo(space_path, "repo-b")
@@ -2521,7 +2521,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2550,7 +2550,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2587,7 +2587,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2644,7 +2644,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2692,7 +2692,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       repo_dir = create_real_repo(space_path, "my-repo")
 
@@ -2751,7 +2751,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2793,7 +2793,7 @@ class ArchitectCLITest < Space::ArchitectTest
     space_path = nil
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2824,7 +2824,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2847,7 +2847,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2872,7 +2872,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
       create_real_repo(space_path, "my-repo")
 
@@ -2910,7 +2910,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do
@@ -2938,7 +2938,7 @@ class ArchitectCLITest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       space_path = create_real_space(File.join(env["HOME"]))
 
       Dir.chdir(space_path) do

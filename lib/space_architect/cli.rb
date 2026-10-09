@@ -33,21 +33,11 @@ module Space::Architect
       end
 
       if VERSION_REQUEST.include?(argv)
-        out.puts Space::Core::VERSION
+        out.puts Space::Architect::VERSION
         return 0
       end
 
-      if argv.first == "src"
-        return dispatch_src(argv[1..], out, err)
-      end
-
-      normalized = normalize_args(argv)
-
-      if normalized.first == "space"
-        return dispatch_space(normalized[1..], out, err)
-      end
-
-      Dry::CLI.new(Registry).call(arguments: normalized, out: out, err: err)
+      Dry::CLI.new(Registry).call(arguments: normalize_args(argv), out: out, err: err)
       last_outcome&.exit_code || 0
     end
 
@@ -97,6 +87,4 @@ module Space::Architect
 end
 
 require_relative "cli/architect"
-require_relative "cli/space"
-require_relative "cli/src"
 require_relative "cli/research"

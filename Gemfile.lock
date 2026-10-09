@@ -1,20 +1,15 @@
 PATH
   remote: .
   specs:
-    space-architect (8.0.0)
-      async (~> 2.39)
+    space-architect (9.0.0)
       async-http (~> 0.95)
       async-process (~> 1.4)
       dry-cli (~> 1.4)
       dry-monads (~> 1.10)
-      dry-schema (~> 1.16)
-      dry-struct (~> 1.8)
-      dry-types (~> 1.9)
       dry-validation (~> 1.11)
       pastel (~> 0.8)
       protocol-http (~> 0.62)
-      tty-cursor (~> 0.7)
-      xdg (~> 10.2)
+      space-cadet (~> 9.0)
 
 GEM
   remote: https://rubygems.org/
@@ -159,8 +154,24 @@ GEM
     regexp_parser (2.12.0)
     reline (0.6.3)
       io-console (~> 0.5)
+    repo-tender (1.0.0)
+      async (~> 2.39)
+      dry-cli (~> 1.4)
+      dry-monads (~> 1.10)
+      dry-struct (~> 1.8)
+      dry-types (~> 1.9)
+      dry-validation (~> 1.11)
+      pastel (~> 0.8)
+      tty-cursor (~> 0.7)
+      xdg (~> 10.2)
     securerandom (0.4.1)
     sorbet-runtime (0.6.13323)
+    space-cadet (9.0.0)
+      async (~> 2.39)
+      async-process (~> 1.4)
+      dry-cli (~> 1.4)
+      dry-monads (~> 1.10)
+      pastel (~> 0.8)
     traces (0.18.2)
     tsort (0.2.0)
     tty-color (0.6.0)
@@ -180,6 +191,7 @@ DEPENDENCIES
   minitest (~> 6.0)
   mutant-minitest (~> 0.16)
   rake (~> 13.0)
+  repo-tender (~> 1.0)
   space-architect!
 
 CHECKSUMS
@@ -237,9 +249,11 @@ CHECKSUMS
   rdoc (8.0.0) sha256=03bf8c08a9639658855a0cfd77c0abca8325c227693f7f33f82957811348c469
   regexp_parser (2.12.0) sha256=35a916a1d63190ab5c9009457136ae5f3c0c7512d60291d0d1378ba18ce08ebb
   reline (0.6.3) sha256=1198b04973565b36ec0f11542ab3f5cfeeec34823f4e54cebde90968092b1835
+  repo-tender (1.0.0) sha256=a13a27d9415bedebf4fcd92e4f4354d9e34ec39f7ebf5bb9563d321ce6f69a25
   securerandom (0.4.1) sha256=cc5193d414a4341b6e225f0cb4446aceca8e50d5e1888743fac16987638ea0b1
   sorbet-runtime (0.6.13323) sha256=cf9c4e6793e1a9ef69bd96e3a006e0fd1fead429f4e4370163460bf569a23518
-  space-architect (8.0.0)
+  space-architect (9.0.0)
+  space-cadet (9.0.0) sha256=2b910d8c779346207f30234f5e6766ec397e7db3443977069a256ac650384ff7
   traces (0.18.2) sha256=80f1649cb4daace1d7174b81f3b3b7427af0b93047759ba349960cb8f315e214
   tsort (0.2.0) sha256=9650a793f6859a43b6641671278f79cfead60ac714148aabe4e3f0060480089f
   tty-color (0.6.0) sha256=6f9c37ca3a4e2367fb2e6d09722762647d6f455c111f05b59f35730eeb24332a
