@@ -341,9 +341,10 @@ and depends on two sibling gems:
 - **space-cadet** (hard dependency) — the spaces substrate: create, manage &
   containerize task-scoped workspaces. Its `space` binary covers everything the
   old `architect space …` forwarder did (`space new`, `space list`, `space
-  repo`, `space pack|build|run`, `space config`, …) and its `src` binary covers
-  the evergreen checkout engine (`src clone`, `src sync`, `src daemon`, …).
-- **repo-tender** (soft dependency) — keeps local git clones evergreen; the
+  repo`, `space pack|build|run`, `space config`, …).
+- **repo-tender** (soft dependency) — keeps local git clones evergreen. Its
+  `repo-tender` binary (with the deprecated `src` shim) covers the evergreen
+  checkout engine (`src clone`, `src sync`, `src daemon`, …), and the
   `architect sessions agent` commands use its launchd agent. Install it with
   `gem install repo-tender` when you want the session-sync rail; without it,
   everything else in `architect` works.

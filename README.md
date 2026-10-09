@@ -14,14 +14,16 @@ evergreen-checkout engine live in two sibling gems:
 
 | Gem | Dependency | What it provides |
 |-----|------------|------------------|
-| **space-cadet** | hard | The spaces substrate (`Space::Core`): create, manage & containerize task-scoped workspaces — the `space` binary — plus the evergreen checkouts (`src` binary) repos provision from at copy-on-write speed |
-| **repo-tender** | soft | Evergreen clone tending; the `architect sessions agent` commands drive its launchd agent. Install with `gem install repo-tender` when you want the session-sync rail — everything else works without it |
+| **space-cadet** | hard | The spaces substrate (`Space::Core`): create, manage & containerize task-scoped workspaces — the `space` binary — plus the copy-on-write evergreen-checkout substrate (`Cloner`, `SCM`) repos provision from |
+| **repo-tender** | soft | Evergreen clone tending — the `repo-tender` binary (with the deprecated `src` shim) — and the launchd agent the `architect sessions agent` commands drive. Install with `gem install repo-tender` when you want the session-sync rail — everything else works without it |
 
 Until 8.x this gem was the monolith: it shipped `space`, `architect`, and `src`
 binaries (and `architect space …` / `architect src …` forwarders) plus the
 vendored `Space::Core` / `Space::Src` subtrees. The 9.0.0 split carved the
 tools into their own gems; this gem is the loop only. If you're on 8.x, get
-`space` and `src` from the **space-cadet** and **repo-tender** gems now.
+`space` from the **space-cadet** gem and `src` from **repo-tender** now — and
+`gem uninstall space-architect` first: the 8.x gem's `space`/`src` executables
+collide with the ones the new gems ship.
 
 ## What's a space? 🪐
 
