@@ -1,4 +1,7 @@
-# Releasing
+# Release a new version 👑
+
+> **Maintainer-facing.** This is the gem maintainer's release procedure, not a
+> task for users of the tool — everything else in how-to/ is.
 
 Retraced from the v7.0.0 release (2026-08-14, PR #92, space
 `20260813-architect-bug-smash-3-tokyo-drift`). Releases happen at project
