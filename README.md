@@ -2,24 +2,26 @@
 
 [![Gem Version](https://badge.fury.io/rb/space-architect.svg)](https://badge.fury.io/rb/space-architect)
 
-> **Task-scoped workspaces that double as Architect Loop projects — for humans and their agents!** ✨🛰️
+> **The Architect Loop — structured judgment-and-build cycles for humans and their agents!** ✨🛰️
 
-`space-architect` is a Ruby toolkit for **spaces** — task-scoped project
-workspaces that hold repos, notes, and artifacts under one obvious filesystem
-root — fused with the **Architect Loop**: a structured judgment-and-build cycle
-for you and a fleet of headless AI builders. 🌌
+`space-architect` is the gem behind the **Architect Loop**: a structured
+judgment-and-build cycle for you and a fleet of headless AI builders, run
+inside task-scoped **spaces** — directories that hold repos, notes, and
+artifacts under one obvious filesystem root. 🌌
 
-The gem ships **three composable binaries** over clean library seams:
+It installs **one executable**, `architect`. The spaces substrate and the
+evergreen-checkout engine live in two sibling gems:
 
-| Binary | What it does | Library |
-|--------|--------------|---------|
-| **`space`** 🪐 | Create, manage & containerize task-scoped workspaces | `Space::Core` |
-| **`architect`** 🏗️ | Run the Architect Loop — judgment + headless builders | `Space::Architect` |
-| **`src`** 🌲 | Tend evergreen repo checkouts for copy-on-write provisioning | `Space::Src` |
+| Gem | Dependency | What it provides |
+|-----|------------|------------------|
+| **space-cadet** | hard | The spaces substrate (`Space::Core`): create, manage & containerize task-scoped workspaces — the `space` binary — plus the evergreen checkouts (`src` binary) repos provision from at copy-on-write speed |
+| **repo-tender** | soft | Evergreen clone tending; the `architect sessions agent` commands drive its launchd agent. Install with `gem install repo-tender` when you want the session-sync rail — everything else works without it |
 
-Each is a first-class executable. `architect` also forwards `architect space …`
-and `architect src …` to the other two, so a project can drive everything from
-one command when that's handier. 🎀
+Until 8.x this gem was the monolith: it shipped `space`, `architect`, and `src`
+binaries (and `architect space …` / `architect src …` forwarders) plus the
+vendored `Space::Core` / `Space::Src` subtrees. The 9.0.0 split carved the
+tools into their own gems; this gem is the loop only. If you're on 8.x, get
+`space` and `src` from the **space-cadet** and **repo-tender** gems now.
 
 ## What's a space? 🪐
 
@@ -37,10 +39,17 @@ everything a task needs:
   tmp/              # workspace-local temp — use this instead of /tmp
 ```
 
-Run a command from anywhere inside a space and it just works — `space` and
-`architect` walk up from `$PWD` until they find the nearest `space.yaml`. No
-"current space" state to get out of sync; where you *are* is the space you
-mean. 🧭
+Run an `architect` command from inside a space and it just works — the loop
+walks up from `$PWD` until it finds the nearest `space.yaml`. No "current
+space" state to get out of sync; where you *are* is the space you mean. 🧭
+
+Create and manage spaces with the **space-cadet** gem:
+
+```sh
+space init                                        # create XDG config + state files
+space new "Name of Space" -r org/repo -r org/lib  # blast off a new space 🚀
+space list                                        # see all your spaces
+```
 
 ## Installation 📦
 
@@ -58,25 +67,18 @@ Or grab it yourself:
 
 ```bash
 gem install space-architect
+gem install repo-tender   # optional: enables the sessions launchd agent
 ```
 
-The gem is `space-architect`; it installs three executables — `space`,
-`architect`, and `src`. 🎀
+The gem installs one executable: `architect`. 🎀
 
 ## Quick start 🎀
 
 ```sh
-# Spaces
+# Spaces (space-cadet gem)
 space init                                        # create XDG config + state files
-space new "Name of Space"                         # blast off a new space 🚀
-space new "Name of Space" -r org/repo -r org/lib  # …with repos cloned in (repeat -r)
-space list                                        # see all your spaces
-space show                                        # show the space you're standing in
-
-# Evergreen checkouts (copy-on-write sources for fast provisioning)
-src repo add github.com/example-org/example-app     # tend it 🌲
-src sync                                            # one sync pass
-src status                                          # per-repo evergreen status
+space new "Name of Space" -r org/repo -r org/lib  # blast off a new space 🚀
+space use 20260531-name-of-space                  # cd into a space by id
 
 # Architect Loop (run from inside a space)
 architect install-skills                          # install agent skills (once per machine)
@@ -84,156 +86,7 @@ architect init                                    # scaffold ARCHITECT.md + arch
 architect new my-feature                          # scaffold the next iteration file
 architect freeze my-feature                       # lock the Acceptance Criteria ❄️
 architect dispatch my-feature lane-a              # send a headless builder to work
-
-# Containers (run from inside a space) — a portable, reproducible-by-SHA image of the space
-space pack                                         # render build/oci/ (Dockerfile + entrypoint)
-space build                                        # pack + build & tag <space-id>:<git-sha>
-space run                                          # run it — login shell, auth from your env
 ```
-
-## `space` — task-scoped workspaces 🌌
-
-```sh
-space init
-space new "Name of Space"
-space new "Name of Space" -r org/repo -r example-tools/alpha -r example-tools/beta
-space list                                   # alias: space ls
-space show 20260531-name-of-space
-space path 20260531-name-of-space
-space current                                # based on $PWD
-space show                                   # based on $PWD
-space status                                 # report: metadata + loop status (based on $PWD)
-space status 20260531-name-of-space          # report another space
-space status done                            # set: active | paused | done | archived
-space status 20260531-name-of-space done
-space config set default_provider github.com
-space config set default_organization example-org
-space repo add example-app                   # github.com/example-org/example-app
-space repo add example-tools/alpha example-tools/beta
-space repo add gitlab.com/example-org/api
-space repo resolve example-app example-tools/async
-space repo ls                                # alias: space repos ls
-space use 20260531-name-of-space             # records recent state, prints the path
-space ls --color=always                      # auto | always | never (--colors also accepted)
-```
-
-`space status` is **report-or-set**: with no status keyword (bare, or with just
-a space id) it *reports* the space — its metadata plus a compact loop-status
-block (project status, current iteration, derived state) when the space runs an
-Architect project, quietly omitted otherwise; pass a status keyword (`active`,
-`paused`, `done`, `archived`) to *set* it instead. 🔁
-
-Repos are passed with a repeatable `-r` flag (`-r org/repo -r org/lib`); the
-comma form (`-r a,b`) works too. Space ids are date-prefixed
-(`20260531-name-of-space`) so they sort naturally, and duplicate names on the
-same day get a counter (`…-name-of-space-2`). 📅
-
-Everything `space` does is also reachable as `architect space …` from within a
-project.
-
-## Containerize a space: `pack` · `build` · `run` 📦
-
-A space is self-describing enough to become a container. `space pack` renders a
-portable OCI build context from the space; `space build` packs and builds it into
-a **reproducible-by-SHA** image; `space run` runs that image with your auth
-injected at runtime and stateful paths bind-mounted back to the host. 🐳
-
-```sh
-space pack                    # render build/oci/ (Dockerfile + entrypoint + ignore file)
-space pack -o /tmp/ctx        # …to a different output directory
-space build                   # pack, then build & tag <space-id>:<git-sha> and :latest
-space run                     # run <space-id>:latest — login shell, auth from your env
-space run architect status    # …or run a one-off command instead of the login shell
-space run --tty               # force an interactive TTY (default: auto-detect)
-```
-
-**What lands in the image.** The context copies the whole space tree (filtered by
-a generated `Dockerfile.dockerignore`) onto a `ruby:4.0.5` base with `git`, the
-Claude Code CLI, and the `space-architect` gem — installed from the in-space
-`repos/space-architect` checkout when present (a pinned build), else from
-RubyGems. Secrets never enter the layers: `.env`, `*.key`, `*.pem`, ssh keys,
-`build/`, and `tmp/` are all excluded by the generated ignore file. 🔒
-
-**Reproducible by SHA.** `space build` tags the image `<space-id>:<sha>`, where
-`<sha>` is the space repo's 12-char `HEAD` (suffixed `-dirty` when the tree has
-uncommitted changes), plus a moving `:latest`. Same commit → same tag → same
-image. It drives the `container` CLI, but the output is an ordinary OCI/Docker
-build context, so `docker build -f build/oci/Dockerfile .` (from the space root)
-works just as well.
-
-**Auth stays out of the layers.** `space run` injects only the auth environment
-variables that are actually set — `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`,
-`ANTHROPIC_BASE_URL` — with `-e` at run time, so credentials live in your shell,
-never in the image. 🗝️
-
-**Forwarding payload credentials.** Beyond the always-on auth trio, a space can declare
-`run.env:` in `space.yaml` — a list of host env var names forwarded into the container at
-run time. You can also pass `space run --env VAR` (repeatable) for ad hoc additions. All
-forwarding is bare `-e VAR` passthrough: values never appear in argv, `ps`, or the image.
-A requested-but-unset var warns on stderr instead of silently failing inside the guest.
-
-```yaml
-run:
-  env:                         # run-time: host var names, forwarded as bare -e VAR
-    - FIREWORKS_API_KEY
-    - OPENAI_API_KEY
-```
-
-**Declaring provisioning & persistence** — two optional keys in `space.yaml`:
-
-```yaml
-pack:
-  provision:                 # build-time: relative scripts, baked in by `space build`
-    - scripts/setup-toolchain.sh
-  persist:                   # run-time: absolute guest paths, bind-mounted per run
-    - /root/.claude
-    - /root/.local/state
-```
-
-`provision` scripts must live under the space root and be executable. Each script is
-copied into the image individually (`COPY <script> /space/<script>`) and then invoked
-(`RUN /space/<script>`) **before** the full space tree lands and **before** the gem is
-installed. This ordering is the cache-hygiene guarantee: editing any other space file
-leaves the provision and gem-install layers cached, so a rebuild completes in seconds
-instead of minutes. Scripts must therefore be self-contained — they run with only the
-base system layers and any earlier provision scripts' outputs; they cannot read other
-space files or call `architect`/`space`. Scripts must have the executable bit set; COPY
-preserves the mode from the build context.
-
-`persist` paths must be absolute; `space run` bind-mounts each one from
-`<space>/.state<path>` on the host (created on first run) so a container's mutable state
-survives across runs. Both are validated at pack time.
-
-Like everything else, these are reachable as `architect space pack|build|run`
-from inside a project.
-
-## `src` — the evergreen engine 🌲
-
-`src` keeps local clones under `<src_dir>/<host>/<owner>/<repo>` (default
-`~/architect/src/…`) clean, on their default branch, and freshly fetched — so
-spaces can provision repos by **copy-on-write** instead of cloning over the
-network.
-
-```sh
-src repo add github.com/example-org/example-app     # track + tend a repo
-src org add github.com/example-org                  # track a whole org
-src sync                                            # run one sync pass (--repo to scope)
-src status                                          # per-repo evergreen status table
-src clone example-app                               # APFS copy-on-write into $PWD
-src daemon install                                  # per-user launchd agent for background sync
-```
-
-When `space repo add` finds a matching evergreen checkout, it copy-on-writes
-from it instead of hitting the network — instant provisioning. ⚡ The two
-surfaces share one layout by design, so they line up with zero configuration:
-
-```sh
-src repo add github.com/example-org/example-app   # tend it: keep it evergreen 🌲
-space repo add example-app                          # copies it instantly ⚡
-```
-
-`src` has its own `--plain` / `--json` output modes for scripting, and its own
-fish integration (`src shell fish install`).
 
 ## `architect` — the Architect Loop 🏗️
 
@@ -396,80 +249,35 @@ architect install-skills --dry-run               # show what would change
 `architect-vocabulary` loads the system's terms and a short orientation when
 you're in a space but don't want to run the loop.
 
-## Fish shell integration 🐟
+### Sessions: the launchd rail 🛰️ (requires repo-tender)
 
-Shells can't let a child process change *their* working directory, so `space`
-and `src` each ship a small fish wrapper function plus completions (commands,
-subcommands, spaces, statuses, config keys, repo refs). Install into fish's
-autoloaded directories:
-
-```fish
-space shell fish install
-src shell fish install
-exec fish
-```
-
-After restarting fish (or `exec fish`), `space new "…"` and
-`space use <id>` will `cd` into the selected space once the command succeeds;
-every other command keeps normal CLI behavior. 🚪 The functions and completions
-are written under `~/.config/fish/`, so there's no need to edit `config.fish`.
-For one-off testing without installing:
-
-```fish
-space shell init fish | source
-```
+`architect sessions sync` uploads new conversation transcripts (`~/.pi/agent/sessions`
+and `~/.claude/projects`) to a space-server; `architect sessions agent
+install|uninstall|status` manages the per-user launchd agent that runs the sync
+on an interval. These commands drive **repo-tender**'s launchd agent — a *soft*
+dependency, deliberately absent from the gemspec: without the gem, the sessions
+agent commands print a short error naming the fix (`gem install repo-tender`)
+and the rest of `architect` is unaffected.
 
 ## Configuration ⚙️
 
-Config lives at `~/.config/space-architect/config.yml` (XDG-aware) and defaults to:
-
-```yaml
-version: 1
-base_dir: ~/architect            # spaces_dir + src_dir hang off this by default
-default_provider: github.com
-default_organization:
-git_clone_protocol: ssh          # ssh | https
-```
-
-Derived defaults: `spaces_dir` → `<base_dir>/spaces`, `src_dir` (evergreen
-checkout root) → `<base_dir>/src`. Override either explicitly. View values with
-`space config show`; set one with `space config set KEY VALUE`. Editable keys:
-`base_dir`, `spaces_dir`, `src_dir`, `default_provider`, `default_organization`,
-`git_clone_protocol`.
-
-## Repos: evergreen, copy-on-write, concurrent ⚡
-
-Repos are added to the current space under `repos/` and tracked in `space.yaml`.
-When an up-to-date evergreen checkout exists at
-`<src_dir>/<host>/<owner>/<name>` (e.g.
-`~/architect/src/github.com/example-org/example-app`), `space` copies it into the
-space instead of cloning over the network — a copy-on-write clone on APFS. ⚡
-Set `src_dir` empty to always clone:
-
-```sh
-space config set src_dir ""
-```
-
-Clone URLs default to SSH (`git@github.com:example-org/example-app.git`); switch
-with `space config set git_clone_protocol https`. Multiple repos passed to
-`space repo add` are fetched **concurrently**, up to five at a time, on fibers —
-no threads, all cooperative. 🧵 After each repo lands, `space` runs `mise trust`
-in it. Each space also gets a workspace-local `tmp/` — use it instead of `/tmp`.
+The spaces config the loop reads lives at `~/.config/space-cadet/config.yml`
+(XDG-aware, owned by the space-cadet gem) — see `space config show`. The loop
+itself has no config of its own: a space's `space.yaml` `project:` block *is*
+the loop's state.
 
 ## Embedding 📚
 
-The library is split into three namespaces you can require independently:
+Two namespaces, published as two gems:
 
-- **`Space::Core`** — the foundation: config, state, XDG, terminal, git/mise
-  clients, the space store. The `space` CLI runs on this alone.
-- **`Space::Architect`** — project state, the builder harness, dispatch, and the
-  research supervisor.
-- **`Space::Src`** — the evergreen engine (tracking, sync, copy-on-write clone).
+- **`Space::Core`** (the space-cadet gem) — the substrate: config, state, XDG,
+  terminal, git/mise clients, the space store. The `space` CLI runs on this.
+- **`Space::Architect`** (this gem) — project state, the builder harness,
+  dispatch, and the research supervisor, over the `Space::Core` substrate.
 
 ```ruby
-require "space_core"       # just spaces
-require "space_architect"  # the full loop (pulls in core + src)
-require "space_src"        # just the evergreen engine
+require "space_core"       # just spaces (space-cadet gem)
+require "space_architect"  # the loop (pulls in the space-cadet gem)
 ```
 
 ## Documentation 📖

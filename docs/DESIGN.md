@@ -497,9 +497,10 @@ plan's quotas). Treat the specific dates/pools as dated facts (§8).
 
 ### CLI principles
 
-- The `architect`, `space`, and `src` binaries are first-class over clean library
-  seams; `architect` forwards `architect space …` / `architect src …` so one
-  command can drive everything.
+- The loop is one binary (`architect`) over a clean library seam: the spaces
+  substrate is the space-cadet gem (`Space::Core`, the `space`/`src` binaries),
+  and the sessions launchd agent comes from the repo-tender gem (soft dep) —
+  the split keeps each surface's CLI in its own gem.
 - Output is readable manually and useful in scripts; paths under `$HOME` render
   as `~/…` in human output; color auto-detects the TTY and honors
   `--color=auto|always|never`.

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require "space_core"
-require "space_src"
+require_relative "space_architect/version"
 
 require_relative "space_architect/harness"
 require_relative "space_architect/run_creator"

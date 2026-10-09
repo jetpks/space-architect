@@ -28,7 +28,8 @@ class BugReportTest < Space::ArchitectTest
     result = Space::Architect::BugReport.generate(space: nil, cwd: @tmp, now: Time.now)
 
     assert_match(/## Diagnostics/, result[:body])
-    assert_match(/space-architect: #{Space::Core::VERSION}/, result[:body])
+    assert_match(/space-architect: #{Space::Architect::VERSION}/, result[:body])
+    assert_match(/space-cadet: #{Space::Core::VERSION}/, result[:body])
     assert_match(/ruby: #{RUBY_VERSION}/, result[:body])
   end
 
@@ -90,7 +91,8 @@ class BugReportTest < Space::ArchitectTest
     result = Space::Architect::BugReport.generate(space: space, cwd: @tmp, now: Time.now)
 
     assert_match(/## Diagnostics/, result[:body])
-    assert_match(/space-architect: #{Space::Core::VERSION}/, result[:body])
+    assert_match(/space-architect: #{Space::Architect::VERSION}/, result[:body])
+    assert_match(/space-cadet: #{Space::Core::VERSION}/, result[:body])
     assert_match(/ruby: #{RUBY_VERSION}/, result[:body])
   end
 
@@ -206,7 +208,7 @@ class BugReportTest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       Dir.chdir(@tmp) do
         out, _err = invoke("bug-report")
 
@@ -228,7 +230,7 @@ class BugReportTest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       Dir.chdir(@tmp) do
         out, _err = invoke("bug-report")
 
@@ -244,7 +246,7 @@ class BugReportTest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       Dir.chdir(@tmp) do
         out, err = invoke("bug-report", "--title", "From the CLI")
 
@@ -263,7 +265,7 @@ class BugReportTest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       Dir.chdir(@tmp) do
         out, err = invoke("bug-report")
 
@@ -281,11 +283,11 @@ class BugReportTest < Space::ArchitectTest
     env = setup.fetch(:env)
 
     with_env(env) do
-      invoke("space", "init")
+      space_invoke("init")
       Dir.chdir(@tmp) do
         out, _err = invoke("bug-report")
 
-        assert_match(/space-architect #{Space::Core::VERSION}/, out)
+        assert_match(/space-architect #{Space::Architect::VERSION}/, out)
         assert_match(/ruby #{RUBY_VERSION}/, out)
       end
     end

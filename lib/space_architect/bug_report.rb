@@ -79,7 +79,8 @@ module Space
           <<~MD
             ## Diagnostics
 
-            - space-architect: #{Space::Core::VERSION}
+            - space-architect: #{Space::Architect::VERSION}
+            - space-cadet: #{Space::Core::VERSION}
             - ruby: #{RUBY_VERSION} (#{RUBY_PLATFORM})
           MD
         end
