@@ -536,6 +536,51 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # I02/AC4: status resolves the config layer for legacy lanes with no stored
+  # model, and marks the bare constant as the last resort it is.
+  def test_status_resolves_config_for_legacy_lane_and_marks_last_resort
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      space_invoke("init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+        invoke("worktree", "add", "my-repo", "demo", "lane-a")
+
+        # Make the lane legacy: no stored model (lanes always recorded one since
+        # model recording began).
+        yml = YAML.safe_load(File.read("space.yaml"), aliases: false)
+        yml.dig("project", "iterations", 0, "lanes", 0).delete("model")
+        File.write("space.yaml", YAML.dump(yml))
+
+        # No config anywhere: the display marks the default as the last resort.
+        out, err = invoke("status")
+        assert_empty err
+        assert_includes out, "#{Space::Architect::Harness::DEFAULT_MODEL} (last resort)"
+
+        # With an architect.yaml, the display shows the config builder model.
+        File.write("architect.yaml", <<~YAML)
+          version: 1
+          roles:
+            spec:        { model: "prov/spec" }
+            builder:     { model: "prov/config-status" }
+            judge:       { model: "prov/judge" }
+            coordinator: { model: "prov/coordinator" }
+        YAML
+        out, err = invoke("status")
+        assert_empty err
+        assert_includes out, "prov/config-status"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   # AC6: architect status marks variant set with "variant:" prefix;
   #      non-variant lane renders without prefix (control assertion)
   def test_status_marks_variant_set_and_leaves_non_variant_unchanged

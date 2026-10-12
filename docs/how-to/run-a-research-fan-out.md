@@ -29,8 +29,10 @@ architect research dispatch tmp/prompts/01-official-api.prompt.md tmp/prompts/02
 
 Each researcher runs detached (headless `pi`, read-only by prompt contract —
 the injected guard denies git writes), writing its JSONL event stream under
-`build/research/<id>/`. Options: `--model <id>` (default:
-`accounts/fireworks/models/glm-5p3-flash`) and `--max-turns <n>` (default 40).
+`build/research/<id>/`. Options: `--model <id>` (researchers are not
+`architect.yaml`-routed loop roles; without it the pi default
+`accounts/fireworks/models/glm-5p3-flash` is used — loudly informed) and
+`--max-turns <n>` (default 40).
 
 ## 3. Watch
 

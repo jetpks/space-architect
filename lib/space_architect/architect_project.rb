@@ -701,8 +701,12 @@ module Space::Architect
     def worktree_add(repo, iteration, lane, base: nil, base_explicit: !base.nil?, harness: nil, model: nil,
                      variant: false, effort: nil, touch: nil, force: false, err: $stderr)
       model, suffix_level = Harness.parse_model_suffix(model)
-      harness, model = resolve_harness_model(harness, model)
-      resolved_level = effort || suffix_level || project_defaults["effort"]
+      harness, model, inform = resolve_harness_model(harness, model)
+      err.puts inform if inform
+      # The config layer sits above project.effort — architect.yaml is the
+      # dedicated routing layer; unconfigured spaces fall through unchanged.
+      resolved_level = effort || suffix_level ||
+        Routing.for_space(space.path)&.dig("builder", "thinking") || project_defaults["effort"]
       Harness.validate_thinking_level!(resolved_level)
       if effort.nil? && suffix_level
         err.puts "thinking: model suffix ':#{suffix_level}' parsed from lane model → level=#{suffix_level} (model stripped)"
@@ -1605,19 +1609,35 @@ module Space::Architect
     end
 
     # Resolve harness + model by precedence: explicit value > (dispatch only) the
-    # lane's stored value > space.yaml project.harness/project.model > the pi
-    # default model. Shared by worktree_add and dispatch so both read the same
-    # defaults. A stored model is only honored when its stored harness still matches
-    # the resolved harness — a dispatch-time harness override drops the old harness's
-    # stored model instead of leaking it into the new harness's run. A stored
-    # legacy harness name survives resolution (so a stale space.yaml
-    # surfaces as Harness.for's actionable pi-only error, not a silent default).
+    # lane's stored value > architect.yaml builder-role model > space.yaml
+    # project.harness/project.model > the pi default model. Shared by worktree_add
+    # and dispatch so both read the same defaults. A stored model is only honored
+    # when its stored harness still matches the resolved harness — a dispatch-time
+    # harness override drops the old harness's stored model instead of leaking it
+    # into the new harness's run. A stored legacy harness name survives resolution
+    # (so a stale space.yaml surfaces as Harness.for's actionable pi-only error,
+    # not a silent default).
+    #
+    # Returns [harness, model, inform] — inform is the loud last-resort line (nil
+    # otherwise) for the caller to print once to its err stream when the model
+    # fell all the way through to Harness::DEFAULT_MODEL (no flag, no stored
+    # value, no architect.yaml builder role, no project.model).
     def resolve_harness_model(harness, model, stored_harness: nil, stored_model: nil)
       defaults = project_defaults
       resolved_harness = (harness || stored_harness || defaults["harness"] || "pi").to_s
       stored_model = nil unless stored_harness.nil? || stored_harness.to_s == resolved_harness
-      resolved_model = model || stored_model || defaults["model"] || Harness::DEFAULT_MODEL
-      [resolved_harness, resolved_model]
+      config_model = Routing.for_space(space.path)&.dig("builder", "model")
+      resolved_model = model || stored_model || config_model || defaults["model"] || Harness::DEFAULT_MODEL
+      inform = default_model_inform if model.nil? && stored_model.nil? && config_model.nil? && defaults["model"].nil?
+      [resolved_harness, resolved_model, inform]
+    end
+
+    # The loud last-resort inform — the bare DEFAULT_MODEL constant is a last
+    # resort, not a silent fallback: name that no architect.yaml was found, the
+    # two paths looked at, and the default in use.
+    def default_model_inform
+      "model: no architect.yaml found (looked at #{Routing.space_path(space.path)} + #{Routing.global_path}) — " \
+        "using default '#{Harness::DEFAULT_MODEL}'"
     end
 
     # --prompt: the caller authors the lane prompt anywhere (a fresh scratch file) and
@@ -1640,8 +1660,9 @@ module Space::Architect
     # precedence and thinking-level translation from one place.
     def resolve_dispatch_harness(lane_entry, model:, harness:, effort:, force:, err:)
       model, suffix_level = Harness.parse_model_suffix(model)
-      resolved_harness, resolved_model = resolve_harness_model(harness, model,
+      resolved_harness, resolved_model, inform = resolve_harness_model(harness, model,
         stored_harness: lane_entry["harness"], stored_model: lane_entry["model"])
+      err.puts inform if inform
 
       resolved_effort =
         if effort
@@ -1651,7 +1672,9 @@ module Space::Architect
           err.puts "thinking: model suffix ':#{suffix_level}' parsed from --model → level=#{suffix_level} (model stripped to '#{model}')"
           suffix_level
         else
-          lane_entry["effort"]
+          # Dispatch's tail is the lane's stored effort (project.effort was never
+          # in the dispatch chain); architect.yaml builder thinking slots in above it.
+          lane_entry["effort"] || Routing.for_space(space.path)&.dig("builder", "thinking")
         end
 
       [resolved_harness, resolved_model, resolved_effort]

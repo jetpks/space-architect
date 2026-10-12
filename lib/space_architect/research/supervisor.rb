@@ -21,8 +21,15 @@ module Space::Architect
       end
 
       # Dispatch each prompt file as a detached pi child. Returns array of Run
-      # objects (non-blocking).
-      def dispatch(prompts, model: DEFAULT_MODEL, max_turns: DEFAULT_MAX_TURNS)
+      # objects (non-blocking). Researchers are NOT loop roles — architect.yaml
+      # never routes them — so the pi default is the researcher last resort, made
+      # loud here (silent whenever an explicit --model supplies the model).
+      def dispatch(prompts, model: nil, max_turns: DEFAULT_MAX_TURNS, err: $stderr)
+        if model.nil?
+          err.puts "research: researchers are not architect.yaml-routed (loop roles only) — " \
+                   "no --model given, using default '#{DEFAULT_MODEL}'"
+          model = DEFAULT_MODEL
+        end
         prompts.map { |path| dispatch_one(Pathname.new(path), model: model, max_turns: max_turns) }
       end
 

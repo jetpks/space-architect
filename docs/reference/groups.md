@@ -54,7 +54,7 @@ fan-out](../how-to/run-a-research-fan-out.md).
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model=VALUE` | `accounts/fireworks/models/glm-5p3-flash` | Researcher model override (any provider/tier). |
+| `--model=VALUE` | the pi default `accounts/fireworks/models/glm-5p3-flash` (researchers are not `architect.yaml`-routed; loudly informed when the default is used) | Researcher model override (any provider/tier). |
 | `--max-turns=VALUE` | `40` | Max turns per researcher. |
 
 `research wait` options:

@@ -33,7 +33,7 @@ still-stubbed prompt. Under the hood it runs:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--prompt=FILE` | — | Lane prompt source — copied byte-for-byte to `build/<id>-<lane>/prompt.md`. Omit to reuse an existing canonical prompt. |
-| `--model=VALUE` | the lane's stored model, else `space.yaml` `project.model`, else `accounts/fireworks/models/glm-5p3-flash` | Builder model to pin — any provider/tier; pin a full id, not a floating alias. |
+| `--model=VALUE` | the lane's stored model, else `architect.yaml` builder role, else `space.yaml` `project.model`, else the pi default (last resort) | Builder model to pin — any provider/tier; pin a full id, not a floating alias. |
 | `--max-turns=VALUE` | `200` | Max turns for the builder. |
 | `--harness=VALUE` | lane entry, else `space.yaml` `project.harness`, else `pi` | Harness (`pi` is the only valid value; anything else is rejected with an actionable error). |
 | `--effort` / `--thinking` / `--reasoning=VALUE` | — | Thinking/reasoning effort level — aliases of one another (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). |
@@ -44,6 +44,14 @@ still-stubbed prompt. Under the hood it runs:
 | `--push-url=URL` | — | HTTP endpoint for streaming push (POST body to this URL). Requires `--push-token`. |
 | `--push-host=URL` | — | Base URL of the ingest server; the CLI creates a run via `POST <host>/runs` and streams to `/runs/<id>/ingest`. Requires `--push-token`; mutually exclusive with `--push-url`. |
 | `--push-token=TOKEN` | — | Bearer token for push endpoint authorization. |
+
+The model resolution chain: the `--model` flag > the lane's stored model > the
+`architect.yaml` builder role > `space.yaml` `project.model` > the pi default
+`accounts/fireworks/models/glm-5p3-flash` — a loudly-informed last resort on
+stderr. `architect.yaml` is loop-role routing config, resolved space-local
+(`architect.yaml` at the space root) over global
+(`$SPACE_ARCHITECT_GLOBAL_CONFIG`, else `~/.config/space-architect/architect.yaml`),
+merged per role.
 
 ```sh
 architect dispatch my-feature lane-a --prompt tmp/prompts/I01-lane-a.md
@@ -71,7 +79,7 @@ Manage per-lane git worktrees under `build/`.
 |--------|---------|-------------|
 | `--base=REF` | repo HEAD | Base ref for the worktree (any git ref, including `project/<slug>`). |
 | `--harness=VALUE` | `space.yaml` `project.harness`, else `pi` | Harness for the lane. |
-| `--model=VALUE` | `space.yaml` `project.model`, else `accounts/fireworks/models/glm-5p3-flash` | Model for the lane; a trailing `:<level>` suffix (e.g. `foo:high`) is parsed into `--effort`. |
+| `--model=VALUE` | `architect.yaml` builder role, else `space.yaml` `project.model`, else the pi default (last resort) | Model for the lane; a trailing `:<level>` suffix (e.g. `foo:high`) is parsed into `--effort`. |
 | `--effort` / `--thinking` / `--reasoning=VALUE` | — | Thinking/reasoning effort level (aliases). |
 | `--[no-]quiet` | `false` | Suppress the thinking-translation inform line on stderr. |
 | `--touch=GLOBS` | — | Comma-separated file globs the lane may touch. Recorded as the lane's `touch_set` and enforced by the in-bounds check (`architect verify`) and by `merge`. |

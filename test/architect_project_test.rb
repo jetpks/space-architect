@@ -247,6 +247,349 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # ── architect.yaml routing layer (I02) ──────────────────────────────────
+
+  # Full v1 routing fixture with the builder entry swapped in; every agent role
+  # routed, since for_space requires all four after merge.
+  def routing_yaml(builder_entry)
+    <<~YAML
+      version: 1
+      roles:
+        spec:        { model: "prov/spec" }
+        builder:     #{builder_entry}
+        judge:       { model: "prov/judge" }
+        coordinator: { model: "prov/coordinator" }
+    YAML
+  end
+
+  def write_space_config(dir, builder_entry)
+    path = File.join(dir, "architect.yaml")
+    File.write(path, routing_yaml(builder_entry))
+    path
+  end
+
+  def lane_entry(dir, iteration, lane)
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    yml.dig("project", "iterations").find { |s| s["name"] == iteration }["lanes"].find { |l| l["name"] == lane }
+  end
+
+  # I02/AC2: architect.yaml builder model sits between a stored/flag value and
+  # space.yaml project.model — config is the dedicated routing layer.
+  def test_worktree_add_config_model_beats_project_model
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    write_space_config(dir, "{ model: \"prov/config-builder\" }")
+
+    space.data["project"] ||= {}
+    space.data["project"]["model"] = "prov/project-model"
+    space.save
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(dir, "no-global.yaml")) do
+      project.worktree_add("my-repo", "my-slice", "lane-a")
+    end
+
+    assert_equal "prov/config-builder", lane_entry(dir, "my-slice", "lane-a")["model"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I02/AC2: space-local architect.yaml overrides the global file per role key
+  # through the real resolution path (SPACE_ARCHITECT_GLOBAL_CONFIG).
+  def test_worktree_add_space_config_overrides_global_config
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    write_space_config(dir, "{ model: \"prov/space-builder\" }")
+    global = File.join(dir, "global-architect.yaml")
+    File.write(global, routing_yaml("{ model: \"prov/global-builder\" }"))
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => global) do
+      project.worktree_add("my-repo", "my-slice", "lane-a")
+    end
+
+    assert_equal "prov/space-builder", lane_entry(dir, "my-slice", "lane-a")["model"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I02/AC2: a :level suffix in the config model threads into effort, beating
+  # both project.effort and the config thinking key (suffix wins in the entry).
+  def test_worktree_add_config_suffix_and_thinking_thread_into_effort
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    write_space_config(dir, "{ model: \"prov/config-builder:high\", thinking: low }")
+
+    space.data["project"] ||= {}
+    space.data["project"]["effort"] = "max"
+    space.save
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(dir, "no-global.yaml")) do
+      project.worktree_add("my-repo", "my-slice", "lane-a")
+    end
+
+    lane = lane_entry(dir, "my-slice", "lane-a")
+    assert_equal "prov/config-builder", lane["model"]
+    assert_equal "high", lane["effort"]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I02/AC2: effort chain — explicit flag > config thinking > project.effort.
+  def test_worktree_add_effort_flag_and_config_beat_project_effort
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    write_space_config(dir, "{ model: \"prov/config-builder\", thinking: low }")
+
+    space.data["project"] ||= {}
+    space.data["project"]["effort"] = "max"
+    space.save
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(dir, "no-global.yaml")) do
+      project.worktree_add("my-repo", "my-slice", "lane-a", effort: "high")
+      assert_equal "high", lane_entry(dir, "my-slice", "lane-a")["effort"]
+
+      project.worktree_add("my-repo", "my-slice", "lane-b")
+      assert_equal "low", lane_entry(dir, "my-slice", "lane-b")["effort"]
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I02/AC3: the inform fires exactly once when the model falls through every
+  # layer to the bare default — naming no-config, both paths, and the default.
+  def test_worktree_add_informs_when_last_resort_fires
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    err = StringIO.new
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(dir, "no-global.yaml")) do
+      project.worktree_add("my-repo", "my-slice", "lane-a", err: err)
+    end
+
+    lines = err.string.lines
+    assert_equal 1, lines.length
+    assert_match(
+      /model: no architect\.yaml found \(looked at #{Regexp.escape(dir)}\/architect\.yaml \+ .*no-global\.yaml\) — using default 'accounts\/fireworks\/models\/glm-5p3-flash'/,
+      lines.first)
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I02/AC3: silent whenever any layer above the default supplies the model —
+  # config, project.model, or an explicit flag each keep it quiet.
+  def test_worktree_add_silent_when_any_higher_layer_supplies_model
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    config_path = write_space_config(dir, "{ model: \"prov/config-builder\" }")
+
+    space.data["project"] ||= {}
+    space.data["project"]["model"] = "prov/project-model"
+    space.save
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    err = StringIO.new
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(dir, "no-global.yaml")) do
+      project.worktree_add("my-repo", "my-slice", "lane-config", err: err)
+      assert_empty err.string
+      assert_equal "prov/config-builder", lane_entry(dir, "my-slice", "lane-config")["model"]
+
+      # an explicit flag beats the config layer too — and stays silent
+      project.worktree_add("my-repo", "my-slice", "lane-flagged", model: "prov/flag-model", err: err)
+      assert_empty err.string
+      assert_equal "prov/flag-model", lane_entry(dir, "my-slice", "lane-flagged")["model"]
+
+      File.delete(config_path)
+      err = StringIO.new
+      project.worktree_add("my-repo", "my-slice", "lane-project", err: err)
+      assert_empty err.string
+
+      space.data["project"].delete("model")
+      space.save
+      err = StringIO.new
+      project.worktree_add("my-repo", "my-slice", "lane-flag", model: "prov/flag-model", err: err)
+      assert_empty err.string
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # Records the spawned pi argv so dispatch-level resolution is asserted through
+  # the real public path (resolve_dispatch_harness is private).
+  ARGV_RECORDER = <<~RUBY
+    #!/usr/bin/env ruby
+    File.write(ENV.fetch("ARGV_RECORD_FILE"), ARGV.join("\x00"))
+    exit 0
+  RUBY
+
+  def setup_dispatch_fixture(dir, config_entry: nil)
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    write_space_config(dir, config_entry) if config_entry
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+
+    recorder = File.join(dir, "argv-recorder")
+    File.write(recorder, ARGV_RECORDER)
+    File.chmod(0o755, recorder)
+    [space, project, recorder]
+  end
+
+  # Simulate a legacy lane: the worktree exists but the recorded entry carries
+  # no model/effort (lanes written before model recording existed).
+  def strip_lane_keys!(space, iteration, lane, keys)
+    entry = space.data.dig("project", "iterations").find { |s| s["name"] == iteration }
+    lane_entry = entry["lanes"].find { |l| l["name"] == lane }
+    keys.each { |k| lane_entry.delete(k) }
+    space.save
+  end
+
+  def capture_stderr
+    original = $stderr
+    $stderr = StringIO.new
+    yield
+    $stderr.string
+  ensure
+    $stderr = original
+  end
+
+  # I02/AC2: dispatch precedence — a stored (harness-matched) model beats the
+  # config layer, and the inform stays silent when the model never hits the
+  # last resort.
+  def test_dispatch_stored_model_beats_config_and_stays_silent
+    dir = Dir.mktmpdir("architect-project-test")
+    space, project, recorder = setup_dispatch_fixture(dir, config_entry: "{ model: \"prov/config-builder\" }")
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(dir, "no-global.yaml")) do
+      project.worktree_add("my-repo", "my-slice", "lane-a", model: "prov/stored-model")
+      prompt = File.join(dir, "build", "I01-my-slice-lane-a", "prompt.md")
+      File.write(prompt, "PROMPT\n")
+
+      stderr = capture_stderr do
+        with_env("ARGV_RECORD_FILE" => File.join(dir, "argv")) do
+          project.dispatch("my-slice", "lane-a", bin: recorder)
+        end
+      end
+      recorded = File.read(File.join(dir, "argv")).split("\x00")
+      assert_equal "prov/stored-model", recorded[recorded.index("--model") + 1]
+      refute_match(/model: no architect\.yaml found/, stderr)
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I02/AC2: a legacy lane with no stored model gets the architect.yaml builder
+  # model; the stored-harness-match rule still drops a stale harness's model.
+  def test_dispatch_config_fills_legacy_lane_and_stored_harness_match_rule_intact
+    dir = Dir.mktmpdir("architect-project-test")
+    space, project, recorder = setup_dispatch_fixture(dir, config_entry: "{ model: \"prov/config-builder\" }")
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(dir, "no-global.yaml")) do
+      project.worktree_add("my-repo", "my-slice", "lane-a")
+      strip_lane_keys!(space, "my-slice", "lane-a", ["model"])
+      File.write(File.join(dir, "build", "I01-my-slice-lane-a", "prompt.md"), "PROMPT\n")
+
+      with_env("ARGV_RECORD_FILE" => File.join(dir, "argv")) do
+        project.dispatch("my-slice", "lane-a", bin: recorder)
+      end
+      recorded = File.read(File.join(dir, "argv")).split("\x00")
+      assert_equal "prov/config-builder", recorded[recorded.index("--model") + 1]
+
+      # A dispatch-time --harness pi override drops a stale (mismatched)
+      # harness's stored model instead of leaking it into the new harness.
+      entry = space.data.dig("project", "iterations").find { |s| s["name"] == "my-slice" }
+      lane = entry["lanes"].find { |l| l["name"] == "lane-a" }
+      lane["harness"] = "claude"
+      lane["model"] = "prov/stale-model"
+      space.save
+      with_env("ARGV_RECORD_FILE" => File.join(dir, "argv")) do
+        project.dispatch("my-slice", "lane-a", bin: recorder, harness: "pi")
+      end
+      recorded = File.read(File.join(dir, "argv")).split("\x00")
+      assert_equal "prov/config-builder", recorded[recorded.index("--model") + 1]
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I02/AC2: dispatch effort chain — stored effort > config thinking, and an
+  # explicit :level suffix in --model beats the config thinking key.
+  def test_dispatch_effort_precedence_chain
+    dir = Dir.mktmpdir("architect-project-test")
+    space, project, recorder = setup_dispatch_fixture(dir, config_entry: "{ model: \"prov/config-builder\", thinking: low }")
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(dir, "no-global.yaml")) do
+      argv = lambda do |lane, **kwargs|
+        File.write(File.join(dir, "build", "I01-my-slice-#{lane}", "prompt.md"), "PROMPT\n")
+        with_env("ARGV_RECORD_FILE" => File.join(dir, "argv")) { project.dispatch("my-slice", lane, bin: recorder, **kwargs) }
+        File.read(File.join(dir, "argv")).split("\x00")
+      end
+
+      # config thinking fills a lane with no stored effort
+      project.worktree_add("my-repo", "my-slice", "lane-no-effort")
+      strip_lane_keys!(space, "my-slice", "lane-no-effort", ["model", "effort"])
+      recorded = argv.call("lane-no-effort")
+      assert_equal "low", recorded[recorded.index("--thinking") + 1]
+
+      # a stored effort beats the config thinking key
+      project.worktree_add("my-repo", "my-slice", "lane-stored", effort: "high")
+      recorded = argv.call("lane-stored")
+      assert_equal "high", recorded[recorded.index("--thinking") + 1]
+
+      # an explicit :medium suffix in --model beats the config thinking key
+      recorded = argv.call("lane-no-effort", model: "prov/x:medium")
+      assert_equal "prov/x", recorded[recorded.index("--model") + 1]
+      assert_equal "medium", recorded[recorded.index("--thinking") + 1]
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I02/AC3: no stored model, no config anywhere — dispatch informs exactly
+  # once (naming no config, both paths, and the default) and routes the default.
+  def test_dispatch_informs_when_last_resort_fires
+    dir = Dir.mktmpdir("architect-project-test")
+    space, project, recorder = setup_dispatch_fixture(dir)
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(dir, "no-global.yaml")) do
+      project.worktree_add("my-repo", "my-slice", "lane-a", err: StringIO.new)
+      strip_lane_keys!(space, "my-slice", "lane-a", ["model"])
+      File.write(File.join(dir, "build", "I01-my-slice-lane-a", "prompt.md"), "PROMPT\n")
+
+      stderr = capture_stderr do
+        with_env("ARGV_RECORD_FILE" => File.join(dir, "argv")) do
+          project.dispatch("my-slice", "lane-a", bin: recorder)
+        end
+      end
+      lines = stderr.lines.grep(/model: no architect\.yaml found/)
+      assert_equal 1, lines.length
+      assert_match(/— using default 'accounts\/fireworks\/models\/glm-5p3-flash'/, lines.first)
+
+      recorded = File.read(File.join(dir, "argv")).split("\x00")
+      assert_equal Space::Architect::Harness::DEFAULT_MODEL, recorded[recorded.index("--model") + 1]
+    end
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # AC7: plain worktree_add persists variant: false (backward-compat)
   def test_worktree_add_records_variant_false_by_default
     dir = Dir.mktmpdir("architect-project-test")
