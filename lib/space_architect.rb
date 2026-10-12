@@ -4,6 +4,7 @@ require "space_core"
 require_relative "space_architect/version"
 
 require_relative "space_architect/harness"
+require_relative "space_architect/routing"
 require_relative "space_architect/run_creator"
 require_relative "space_architect/gate_lint"
 require_relative "space_architect/gate_evaluator"

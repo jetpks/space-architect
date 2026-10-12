@@ -165,6 +165,10 @@ module Space::Architect
               project = ArchitectProject.new(space: sp)
               info = project.status
               block = info[:block]
+              # Legacy lanes store no model — resolve the config layer once so the
+              # display shows what they would actually route, and mark the bare
+              # constant as the last resort it is, not ordinary behavior.
+              config_model = Routing.for_space(sp.path)&.dig("builder", "model")
 
               terminal.say "Project status:     #{block['status'] || '(none)'}"
               terminal.say "Current iteration:  #{block['current_iteration'] || '(none)'}"
@@ -178,7 +182,7 @@ module Space::Architect
                   lane_list = s["lanes"] || []
                   lanes_str = lane_list.map do |l|
                     h = l["harness"] || "pi"
-                    m = l["model"]   || Harness::DEFAULT_MODEL
+                    m = l["model"] || config_model || "#{Harness::DEFAULT_MODEL} (last resort)"
                     eff = l["effort"] ? "·#{l['effort']}" : ""
                     "#{l['name']}(#{l['repo']}·#{h}·#{m}#{eff})"
                   end.join(", ")
@@ -484,7 +488,7 @@ module Space::Architect
         argument :lane,      required: true,  desc: "Lane name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
         option   :prompt,    default: nil,    desc: "Read the lane prompt from this file (copied byte-for-byte to build/<id>-<lane>/prompt.md)"
-        option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's stored model, else space.yaml project.model, else the pi default #{Harness::DEFAULT_MODEL}). Any provider/tier; pin a full id, not a floating alias"
+        option   :model,     default: nil,    desc: "Builder model to pin (default: the lane's stored model, else architect.yaml builder role, else space.yaml project.model, else the pi default #{Harness::DEFAULT_MODEL} — a loudly-informed last resort). Any provider/tier; pin a full id, not a floating alias"
         option   :max_turns, default: "200",  desc: "Max turns for the builder"
         option   :harness,   default: nil,    desc: "Harness (pi)"
         option   :effort,    default: nil,    desc: "Thinking/reasoning effort level — alias for --thinking/--reasoning (off, minimal, low, medium, high, xhigh, max)"
@@ -840,7 +844,7 @@ module Space::Architect
           argument :space,     required: false, desc: "Space identifier (default: $PWD)"
           option   :base,      default: nil,          desc: "Base ref (default: HEAD of repo)"
           option   :harness,   default: nil,          desc: "Harness (pi; default: space.yaml project.harness, else pi)"
-          option   :model,     default: nil,           desc: "Model; a trailing :<level> suffix (e.g. foo:high) is parsed into --effort (default: space.yaml project.model, else the pi default #{Harness::DEFAULT_MODEL})"
+          option   :model,     default: nil,           desc: "Model; a trailing :<level> suffix (e.g. foo:high) is parsed into --effort (default: architect.yaml builder role, else space.yaml project.model, else the pi default #{Harness::DEFAULT_MODEL} — a loudly-informed last resort)"
           option   :effort,    default: nil,           desc: "Thinking/reasoning effort level — alias for --thinking/--reasoning (off, minimal, low, medium, high, xhigh, max)"
           option   :thinking,  default: nil,           desc: "Thinking/reasoning effort level — alias for --effort/--reasoning (off, minimal, low, medium, high, xhigh, max)"
           option   :reasoning, default: nil,           desc: "Thinking/reasoning effort level — alias for --effort/--thinking (off, minimal, low, medium, high, xhigh, max)"
@@ -923,7 +927,7 @@ module Space::Architect
           argument :repo,      required: true,  desc: "Repo name (under repos/)"
           argument :iteration, required: true,  desc: "Iteration name"
           argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-          option   :pairs,     required: true,  desc: "Comma-separated harness[:model] pairs (e.g. pi,pi:#{Harness::DEFAULT_MODEL})"
+          option   :pairs,     required: true,  desc: "Comma-separated harness[:model] pairs (e.g. \"pi,pi:provider/model-id:high\"); a pair without a model resolves via the lane model chain (see worktree add)"
           option   :base,      default: nil,    desc: "Base ref (default: HEAD of repo)"
           option   :prompt,    default: nil,    desc: "Prompt file to fan-out byte-identical to each variant"
 

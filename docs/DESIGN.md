@@ -417,8 +417,10 @@ failure mode (§6) or a current source is a candidate for pruning.**
 This section documents the **concrete** builder interface. The methodology above
 is model-agnostic; since 8.0.0 the reference (and only) harness is headless
 `pi -p --mode json`, and the builder model is a **configurable placeholder**
-— `architect dispatch` pins it from the lane entry, else `space.yaml`
-`project.model`, else the reference default (`accounts/fireworks/models/glm-5p3-flash`).
+— `architect dispatch` pins it from the lane entry, else the space's
+`architect.yaml` builder role, else `space.yaml`
+`project.model`, else the reference default
+(`accounts/fireworks/models/glm-5p3-flash`, a loudly-informed last resort).
 Facts the skill encodes:
 
 - **The model is pinned explicitly**: `--model <builder-model>`. Pin the full id,

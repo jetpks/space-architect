@@ -51,7 +51,48 @@ class SupervisorTest < Space::ArchitectTest
     end
   end
 
-  # ── dispatch is non-blocking ──────────────────────────────────────────────
+  # ── the researcher default is loud (I02/AC3) ──────────────────────────
+
+  # Researchers are not loop roles: architect.yaml never routes them, so the
+  # pi default fires whenever no --model is given — loudly, once per dispatch.
+  def test_dispatch_informs_when_default_model_used
+    root = Dir.mktmpdir("sup-test")
+    space = setup_space(root)
+    p1 = write_prompt(space, "01-topic-one")
+
+    supervisor = Space::Architect::Research::Supervisor.new(space: space, bin: STUB_BIN)
+    err = StringIO.new
+    runs = supervisor.dispatch([p1.to_s], err: err)
+
+    assert_equal 1, runs.size
+    lines = err.string.lines
+    assert_equal 1, lines.length
+    assert_match(
+      /research: researchers are not architect\.yaml-routed \(loop roles only\) — no --model given, using default '#{Regexp.escape(Space::Architect::Harness::DEFAULT_MODEL)}'/,
+      lines.first)
+  ensure
+    sleep 0.1
+    FileUtils.rm_rf(root)
+  end
+
+  def test_dispatch_silent_when_model_given
+    root = Dir.mktmpdir("sup-test")
+    space = setup_space(root)
+    p1 = write_prompt(space, "01-topic-one")
+
+    supervisor = Space::Architect::Research::Supervisor.new(space: space, bin: STUB_BIN)
+    err = StringIO.new
+    runs = supervisor.dispatch([p1.to_s], model: "prov/researcher", err: err)
+
+    assert_equal 1, runs.size
+    assert_equal "prov/researcher", runs.first.model
+    assert_empty err.string
+  ensure
+    sleep 0.1
+    FileUtils.rm_rf(root)
+  end
+
+  # ── dispatch is non-blocking ─────────────────────────────────────────
 
   def test_dispatch_returns_immediately_with_pids
     root = Dir.mktmpdir("sup-test")
