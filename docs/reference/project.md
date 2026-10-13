@@ -1,7 +1,8 @@
 # Project commands 🧭
 
 Project-level commands: scaffolding, grounding, state, repo sync, skill
-installation, and bug reporting. Usage lines are the shipped binary's own.
+installation, bug reporting, and read-only loop cost accounting. Usage lines
+are the shipped binary's own.
 
 ## `architect init [SPACE]`
 
@@ -86,4 +87,39 @@ space-architect.
 
 ```sh
 architect bug-report --title "dispatch --detach exits 1 on first poll"
+```
+
+## `architect cost`
+
+Account the loop's spend and speed from the pi session artifacts already on
+disk: run metas (`*_meta.json`, at any depth) plus the interactive and
+runner session files (any other `.jsonl` whose first line is a
+`type: "session"` header) under the space's session dir —
+`~/.pi/agent/sessions/--<slug>--`, where `<slug>` is the space path with
+every `/` replaced by `-`. Read-only: nothing is written, stdout only.
+
+Three views, one per invocation:
+
+- default — agent × model cost table (input/output tokens, cache
+  read/write, $, turns, cache hit ratio) with a totals row
+- `--by-iteration` — the same table split into per-iteration windows
+  (`[freeze_i, freeze_{i+1})` by each artifact's start time; artifacts
+  before the first boundary land in `unattributed`) with a grand total
+- `--latency` — per model: assistant-round count, mean round wall seconds,
+  and output tokens/sec (a round is one user message through the last
+  assistant message before the next)
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--json` | `false` | Emit the machine-readable JSON contract instead of tables. |
+| `--space=VALUE` | nearest ancestor with `space.yaml` | Space path or id to account. |
+| `--sessions-root=VALUE` | `~/.pi/agent/sessions` | pi sessions root to scan. |
+| `--since=VALUE` | — | Only artifacts starting at/after this ISO-8601 timestamp or `YYYY-MM-DD` date. |
+| `--by-iteration` | `false` | Split the cost table into per-iteration windows. |
+| `--latency` | `false` | Per-model round latency instead of the cost table. |
+
+```sh
+architect cost
+architect cost --space 20261009-pi-port --by-iteration
+architect cost --latency --json
 ```

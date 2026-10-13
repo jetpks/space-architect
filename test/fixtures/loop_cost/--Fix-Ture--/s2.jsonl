@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"s2","timestamp":"2020-08-16T00:00:00.000Z","cwd":"/x"}
+{"type":"message","timestamp":"2020-08-16T00:00:00.000Z","message":{"role":"user","content":"fast"}}
+{"type":"message","timestamp":"2020-08-16T00:00:00.000Z","message":{"role":"assistant","provider":"test","model":"model","usage":{"input":0,"output":5,"cacheRead":0,"cacheWrite":0,"cost":{"total":0}}}}
+{"type":"message","timestamp":"2020-08-16T00:00:01.000Z","message":{"role":"user","content":"again"}}
+{"type":"message","timestamp":"2020-08-16T00:00:06.000Z","message":{"role":"assistant","provider":"test","model":"model","usage":{"input":0,"output":5,"cacheRead":0,"cacheWrite":0,"cost":0}}}

@@ -1,0 +1,1 @@
+{"runId":"run-r4","parentSessionId":"p","agent":"worker","model":"fireworks/accounts/fireworks/models/glm-5p3-flash","usage":{"input":5,"output":1,"cacheRead":2,"cacheWrite":0,"cost":0.03,"turns":4},"timestamp":1587340800000,"exitCode":0}

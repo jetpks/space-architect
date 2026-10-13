@@ -1,0 +1,2 @@
+{"version":1,"recordType":"message","runId":"run-orphan","ts":1588291200000,"timestamp":"2020-05-01T00:00:00.000Z","role":"user","message":{"role":"user","content":"q"}}
+{"version":1,"recordType":"message","runId":"run-orphan","ts":1588291202000,"timestamp":"2020-05-01T00:00:02.000Z","role":"assistant","model":"unknown/model","usage":{"output":4},"message":{"role":"assistant"}}

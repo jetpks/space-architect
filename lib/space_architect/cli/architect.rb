@@ -4,6 +4,7 @@ require "json"
 require "fileutils"
 require_relative "../jobs_client"
 require_relative "../conversations_client"
+require_relative "../loop_cost"
 require_relative "../session_sync"
 
 module Space::Architect
@@ -812,6 +813,102 @@ module Space::Architect
         end
       end
 
+      # Read-only loop accounting: spend and speed from the pi session
+      # artifacts already on disk (run metas + interactive/runner session
+      # files), stdout only. All view math lives in LoopCost; this class only
+      # resolves the space and renders — text tables and --json come from the
+      # same report hash so the two surfaces can never disagree.
+      class Cost < BaseCommand
+        desc "Account loop cost and latency from pi session artifacts (read-only)"
+        phase 54, "Project"
+        # The three view flags declare dry-cli's :flag type, not :boolean —
+        # the frozen cost-flags gate pins the literal `--json`-style tokens in
+        # --help, which :boolean would render as `--[no-]json`.
+        option :json,          type: :flag, default: false, desc: "Emit the frozen JSON contract instead of tables"
+        option :space,         desc: "Space identifier or path (default: nearest ancestor with space.yaml)"
+        option :sessions_root, desc: "pi sessions root (default: ~/.pi/agent/sessions via SessionSync)"
+        option :since,         desc: "Only artifacts starting at/after this ISO-8601 timestamp or YYYY-MM-DD date"
+        option :by_iteration,  type: :flag, default: false, desc: "Split the cost table into per-iteration windows"
+        option :latency,       type: :flag, default: false, desc: "Per-model assistant-round latency (wall seconds, output tok/s)"
+
+        def call(json: false, space: nil, sessions_root: nil, since: nil,
+                 by_iteration: false, latency: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            if by_iteration && latency
+              raise Space::Core::Error, "--by-iteration and --latency are mutually exclusive — one view per invocation"
+            end
+            render(store.find(space)) do |sp|
+              report = LoopCost.report(
+                space: sp,
+                sessions_root: sessions_root || SessionSync.default_pi_root,
+                since: since,
+                by_iteration: by_iteration,
+                latency: latency
+              )
+              terminal.say(json ? JSON.pretty_generate(report) : render_cost_text(report, by_iteration, latency))
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+
+        private
+
+        def render_cost_text(report, by_iteration, latency)
+          if latency
+            latency_table(report["latency"])
+          elsif by_iteration
+            by_iteration_text(report)
+          else
+            cost_table(report["rows"], report["totals"])
+          end
+        end
+
+        def cost_table(rows, totals)
+          headers = %w[Agent Model Runs Input Output CacheRead CacheWrite $ Turns Hit%]
+          body = rows.map do |row|
+            [row["agent"], row["model"], row["runs"], row["input"], row["output"],
+             row["cache_read"], row["cache_write"], format("%.4f", row["cost"]),
+             row["turns"], hit_label(row["cache_hit_ratio"])]
+          end
+          body << totals_cells(totals)
+          terminal.table(headers, body)
+        end
+
+        def by_iteration_text(report)
+          report["iterations"].flat_map do |bucket|
+            label = bucket["starts_at"] || "-"
+            [
+              "—— #{bucket['name']} (starts_at #{label})",
+              cost_table(bucket["rows"], bucket["totals"]),
+              ""
+            ]
+          end + ["Grand total", totals_table(report["grand_total"])]
+        end
+
+        def latency_table(rows)
+          body = rows.map do |row|
+            [row["model"], row["rounds"], format("%.2f", row["mean_wall_s"]),
+             format("%.2f", row["output_toks_per_s"])]
+          end
+          terminal.table(%w[Model Rounds Mean\ wall\ (s) Tok/s], body)
+        end
+
+        def totals_table(totals)
+          terminal.table(%w[Runs Input Output CacheRead CacheWrite $ Turns Hit%], [totals_cells(totals)[2..]])
+        end
+
+        def totals_cells(totals)
+          ["TOTAL", "", totals["runs"], totals["input"], totals["output"],
+           totals["cache_read"], totals["cache_write"], format("%.4f", totals["cost"]),
+           totals["turns"], hit_label(totals["cache_hit_ratio"])]
+        end
+
+        def hit_label(ratio)
+          format("%.1f%%", ratio * 100)
+        end
+      end
+
       class InstallSkills < BaseCommand
         desc "Install bundled skills (architect, architect-research, architect-vocabulary) for a harness"
         phase 53, "Project"
@@ -1292,6 +1389,7 @@ Space::Architect::CLI::Registry.register "integrate", Space::Architect::CLI::Arc
 Space::Architect::CLI::Registry.register "gate",      Space::Architect::CLI::Architect::Gate
 Space::Architect::CLI::Registry.register "install-skills", Space::Architect::CLI::Architect::InstallSkills
 Space::Architect::CLI::Registry.register "bug-report",     Space::Architect::CLI::Architect::BugReport
+Space::Architect::CLI::Registry.register "cost",           Space::Architect::CLI::Architect::Cost
 Space::Architect::CLI::Registry.register "brief" do |b|
   b.register "new", Space::Architect::CLI::Architect::Brief::New
 end
