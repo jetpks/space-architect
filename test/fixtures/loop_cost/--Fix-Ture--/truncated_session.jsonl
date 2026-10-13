@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"s3","timestamp":"2020-08-17T00:00:00.000Z","cwd":"/x"}
+{"type":"message","timestamp":"2020-08-17T00:00:00.000Z","message":{"role":"user","content":"hi"}}
+{"type":"message","timestamp":"2020-08-17T00:00:01.000Z","message":{"role":"assistant","provider":"zai","model":"glm-5.3-flash","usage":{"input":7,"output":7,"cacheRead":0,"cacheWrite":0,"cost":{"total":0.05}}}}
+TRUNCATED{"garbage

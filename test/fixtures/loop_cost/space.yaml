@@ -1,0 +1,24 @@
+# Synthetic space for loop_cost_test.rb: two iterations whose boundaries come
+# from rehearsal.at alone (the git-free fallback shape). The git-boundary test
+# rewrites this file in its tmp copy to carry a resolvable freeze_sha.
+version: 1
+id: cost-fixture
+title: Cost Fixture
+status: active
+created_at: "2026-10-12T00:00:00Z"
+updated_at: "2026-10-12T00:00:00Z"
+project:
+  current_iteration: second
+  iterations:
+    - ordinal: 1
+      name: first
+      file: architecture/I01-first.md
+      rehearsal:
+        at: "2020-03-01T00:00:00Z"
+      lanes: []
+    - ordinal: 2
+      name: second
+      file: architecture/I02-second.md
+      rehearsal:
+        at: "2020-06-01T00:00:00Z"
+      lanes: []

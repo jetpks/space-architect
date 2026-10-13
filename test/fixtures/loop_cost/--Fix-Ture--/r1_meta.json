@@ -1,0 +1,1 @@
+{"runId":"run-r1","agent":"worker","model":"zai/glm-5.3-flash:high","requestedModel":"zai/glm-5.3-flash","usage":{"input":10,"output":5,"cacheRead":100,"cacheWrite":0,"cost":0.01,"turns":2},"timestamp":1586952000000,"transcriptPath":"r1_worker_transcript.jsonl","exitCode":0}
