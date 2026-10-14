@@ -1,4 +1,6 @@
 {"version":1,"recordType":"message","runId":"run-r1","ts":1586952000000,"timestamp":"2020-04-15T12:00:00.000Z","role":"user","message":{"role":"user","content":"q1"}}
-{"version":1,"recordType":"message","runId":"run-r1","ts":1586952008000,"timestamp":"2020-04-15T12:00:08.000Z","role":"assistant","model":"glm-5.3-flash","usage":{"input":100,"output":10,"cost":0.005},"message":{"role":"assistant"}}
+{"version":1,"recordType":"message","runId":"run-r1","ts":1586952008000,"timestamp":"2020-04-15T12:00:08.000Z","role":"assistant","model":"glm-5.3-flash","usage":{"input":100,"output":10,"cost":0.005},"message":{"role":"assistant","durationMs":3000}}
 {"version":1,"recordType":"message","runId":"run-r1","ts":1586952009000,"timestamp":"2020-04-15T12:00:09.000Z","role":"user","message":{"role":"user","content":"q2"}}
-{"version":1,"recordType":"message","runId":"run-r1","ts":1586952017000,"timestamp":"2020-04-15T12:00:17.000Z","role":"assistant","model":"glm-5.3-flash","usage":{"input":100,"output":20,"cost":0.006},"message":{"role":"assistant"}}
+{"version":1,"recordType":"tool_start","runId":"run-r1","ts":1586952010000,"timestamp":"2020-04-15T12:00:10.000Z","toolCallId":"t1"}
+{"version":1,"recordType":"tool_end","runId":"run-r1","ts":1586952012000,"timestamp":"2020-04-15T12:00:12.000Z","toolCallId":"t1"}
+{"version":1,"recordType":"message","runId":"run-r1","ts":1586952017000,"timestamp":"2020-04-15T12:00:17.000Z","role":"assistant","model":"glm-5.3-flash","usage":{"input":100,"output":20,"cost":0.006},"message":{"role":"assistant","durationMs":6000}}

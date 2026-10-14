@@ -829,10 +829,11 @@ module Space::Architect
         option :sessions_root, desc: "pi sessions root (default: ~/.pi/agent/sessions via SessionSync)"
         option :since,         desc: "Only artifacts starting at/after this ISO-8601 timestamp or YYYY-MM-DD date"
         option :by_iteration,  type: :flag, default: false, desc: "Split the cost table into per-iteration windows"
-        option :latency,       type: :flag, default: false, desc: "Per-model assistant-round latency (wall seconds, output tok/s)"
+        option :latency,       type: :flag, default: false, desc: "Per-model latency: round wall, turn vs generation tok/s, tool wait share"
+        option :precise,       type: :flag, default: false, desc: "Exact token counts with thousands separators (default: 3 significant figures)"
 
         def call(json: false, space: nil, sessions_root: nil, since: nil,
-                 by_iteration: false, latency: false, **opts)
+                 by_iteration: false, latency: false, precise: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             if by_iteration && latency
@@ -846,7 +847,7 @@ module Space::Architect
                 by_iteration: by_iteration,
                 latency: latency
               )
-              terminal.say(json ? JSON.pretty_generate(report) : render_cost_text(report, by_iteration, latency))
+              terminal.say(json ? JSON.pretty_generate(report) : render_cost_text(report, by_iteration, latency, precise))
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
           end
@@ -854,58 +855,120 @@ module Space::Architect
 
         private
 
-        def render_cost_text(report, by_iteration, latency)
+        def render_cost_text(report, by_iteration, latency, precise)
           if latency
-            latency_table(report["latency"])
+            latency_table(report["latency"], precise)
           elsif by_iteration
-            by_iteration_text(report)
+            by_iteration_text(report, precise)
           else
-            cost_table(report["rows"], report["totals"])
+            cost_table(report["rows"], report["totals"], precise)
           end
         end
 
-        def cost_table(rows, totals)
+        def cost_table(rows, totals, precise)
           headers = %w[Agent Model Runs Input Output CacheRead CacheWrite $ Turns Hit%]
-          body = rows.map do |row|
-            [row["agent"], row["model"], row["runs"], row["input"], row["output"],
-             row["cache_read"], row["cache_write"], format("%.4f", row["cost"]),
-             row["turns"], hit_label(row["cache_hit_ratio"])]
-          end
-          body << totals_cells(totals)
-          terminal.table(headers, body)
+          body = rows.map { |row| cost_cells(row, precise) }
+          body << totals_cells(totals, precise)
+          render_table(headers, body)
         end
 
-        def by_iteration_text(report)
+        def by_iteration_text(report, precise)
           report["iterations"].flat_map do |bucket|
             label = bucket["starts_at"] || "-"
             [
               "—— #{bucket['name']} (starts_at #{label})",
-              cost_table(bucket["rows"], bucket["totals"]),
+              cost_table(bucket["rows"], bucket["totals"], precise),
               ""
             ]
-          end + ["Grand total", totals_table(report["grand_total"])]
+          end + ["Grand total", totals_table(report["grand_total"], precise)]
         end
 
-        def latency_table(rows)
+        def latency_table(rows, precise)
+          headers = %w[Model Rounds Mean\ wall\ (s) Turn\ tok/s Gen\ tok/s Wait%]
           body = rows.map do |row|
-            [row["model"], row["rounds"], format("%.2f", row["mean_wall_s"]),
-             format("%.2f", row["output_toks_per_s"])]
+            [row["model"], count_label(row["rounds"], precise), format("%.2f", row["mean_wall_s"]),
+             format("%.2f", row["output_toks_per_s"]), format("%.2f", row["gen_toks_per_s"]),
+             format("%.1f%%", row["wait_share"] * 100)]
           end
-          terminal.table(%w[Model Rounds Mean\ wall\ (s) Tok/s], body)
+          render_table(headers, body)
         end
 
-        def totals_table(totals)
-          terminal.table(%w[Runs Input Output CacheRead CacheWrite $ Turns Hit%], [totals_cells(totals)[2..]])
+        def totals_table(totals, precise)
+          render_table(%w[Runs Input Output CacheRead CacheWrite $ Turns Hit%], [totals_cells(totals, precise)[2..]])
         end
 
-        def totals_cells(totals)
-          ["TOTAL", "", totals["runs"], totals["input"], totals["output"],
-           totals["cache_read"], totals["cache_write"], format("%.4f", totals["cost"]),
-           totals["turns"], hit_label(totals["cache_hit_ratio"])]
+        def totals_cells(totals, precise)
+          ["TOTAL", "", count_label(totals["runs"], precise), count_label(totals["input"], precise),
+           count_label(totals["output"], precise), count_label(totals["cache_read"], precise),
+           count_label(totals["cache_write"], precise), format("%.4f", totals["cost"]),
+           count_label(totals["turns"], precise), hit_label(totals["cache_hit_ratio"])]
+        end
+
+        def cost_cells(row, precise)
+          [row["agent"], row["model"], count_label(row["runs"], precise), count_label(row["input"], precise),
+           count_label(row["output"], precise), count_label(row["cache_read"], precise),
+           count_label(row["cache_write"], precise), format("%.4f", row["cost"]),
+           count_label(row["turns"], precise), hit_label(row["cache_hit_ratio"])]
         end
 
         def hit_label(ratio)
           format("%.1f%%", ratio * 100)
+        end
+
+        # Token counts are unreadable as raw digit strings at loop scale
+        # (1,833,889,482 cache-read tokens): 3 significant figures with an SI
+        # suffix by default, exact thousands-separated integers for --precise.
+        SIG_UNITS = [["T", 1e12], ["B", 1e9], ["M", 1e6], ["K", 1e3]].freeze
+        private_constant :SIG_UNITS
+
+        def count_label(value, precise)
+          integer = value.to_i
+          return integer.to_s if integer < 1000
+          # stdlib has no thousands-separator format (the %'d flag is glibc, not Ruby)
+          return integer.to_s.reverse.scan(/\d{1,3}/).join(",").reverse if precise
+
+          SIG_UNITS.each_with_index do |(suffix, scale), index|
+            next unless integer >= scale
+            mantissa = integer.fdiv(scale)
+            decimals = mantissa >= 100 ? 0 : mantissa >= 10 ? 1 : 2
+            text = format("%.#{decimals}f", mantissa)
+            # Rounding overflowed the mantissa (999,500 → "1000K") — bump one
+            # scale up (units run large → small).
+            return "1#{SIG_UNITS[index - 1][0]}" if text.to_f >= 1000 && index.positive?
+            return "#{text}#{suffix}"
+          end
+        end
+
+        # Colors on the human views: header and TOTAL rows bold, the $ column
+        # yellow. terminal.table cannot do this — it pads by raw length before
+        # styling, so a pre-colored cell would skew alignment (and its by-header
+        # color dispatch belongs to space-cadet) — so the cost views pad from
+        # plain strings here, then style through terminal.pastel: the
+        # --color/--colors gating is inherited unchanged.
+        def render_table(headers, rows)
+          widths = headers.each_index.map do |index|
+            ([headers[index]] + rows.map { |row| row[index].to_s }).map(&:length).max
+          end
+          lines = [table_line(headers, widths, bold: true)]
+          cost_index = headers.index("$")
+          rows.each do |row|
+            lines << table_line(row, widths, bold: row.first.to_s == "TOTAL", color_index: cost_index)
+          end
+          lines.join("\n")
+        end
+
+        def table_line(cells, widths, bold: false, color_index: nil)
+          cells.each_with_index.map do |cell, index|
+            text = cell.to_s
+            styled = if bold
+              terminal.pastel.bold(text)
+            elsif index == color_index
+              terminal.pastel.yellow(text)
+            else
+              text
+            end
+            "#{styled}#{' ' * (widths[index] - text.length)}"
+          end.join("   ").rstrip
         end
       end
 

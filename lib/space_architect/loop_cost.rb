@@ -210,7 +210,8 @@ module Space::Architect
         sessions.each do |session|
           session[:rounds].each do |model, cell|
             corpus[:rounds] <<
-              { model: model, rounds: cell[:count], wall_s: cell[:wall_s], output_tokens: cell[:output_tokens] }
+              { model: model, rounds: cell[:count], wall_s: cell[:wall_s], output_tokens: cell[:output_tokens],
+                gen_ms: cell[:gen_ms], tool_ms: cell[:tool_ms] }
           end
         end
         return corpus unless with_transcripts
@@ -288,7 +289,7 @@ module Space::Architect
             close_round!(rounds, open_round) if open_round
             # A user record without a timestamp cannot anchor a wall time —
             # the round would be unmeasurable, so it opens nothing.
-            open_round = ts ? { user_ts: ts, wall_s: 0.0, output_tokens: 0, model: nil } : nil
+            open_round = ts ? new_round(ts) : nil
           elsif role == "assistant"
             message_usage = message["usage"].is_a?(Hash) ? message["usage"] : nil
             model = session_model_key(message)
@@ -300,11 +301,17 @@ module Space::Architect
               cell[:cache_write] += numeric(message_usage["cacheWrite"])
               cell[:cost] += cost_of(message_usage)
             end
-            if open_round && ts
+            if open_round
+              # Generation time is self-contained (durationMs), so it accrues
+              # even when a missing ts leaves the round wall unmeasurable.
+              open_round[:gen_ms] += numeric(message["durationMs"])
+              next unless ts
               open_round[:wall_s] = [ts - open_round[:user_ts], 0.0].max
               open_round[:output_tokens] += numeric(message_usage["output"]) if message_usage
               open_round[:model] = model if model
             end
+          elsif role == "toolResult" && open_round
+            open_round[:tool_ms] += numeric(message["durationMs"])
           end
         end
         close_round!(rounds, open_round) if open_round
@@ -324,13 +331,31 @@ module Space::Architect
         normalize_model("#{provider}/#{model}")
       end
 
+      # ---- shared round state ---------------------------------------------
+
+      # One assistant round: user anchor → last assistant before the next
+      # user. wall_s is turn wall (includes tool and child-wait time); gen_ms
+      # sums the assistants' own durationMs (generation time); tool_ms sums
+      # tool execution time (toolResult.durationMs session-side, tool_start →
+      # tool_end spans transcript-side).
+      def new_round(user_ts)
+        { user_ts: user_ts, wall_s: 0.0, output_tokens: 0, gen_ms: 0, tool_ms: 0, model: nil }
+      end
+
       def close_round!(rounds, round)
         return unless round[:model]
 
-        cell = (rounds[round[:model]] ||= { count: 0, wall_s: 0.0, output_tokens: 0 })
+        cell = (rounds[round[:model]] ||= { count: 0, wall_s: 0.0, output_tokens: 0, gen_ms: 0, tool_ms: 0 })
+        absorb_round!(cell, round)
+      end
+
+      def absorb_round!(cell, round)
         cell[:count] += 1
         cell[:wall_s] += round[:wall_s]
         cell[:output_tokens] += round[:output_tokens]
+        cell[:gen_ms] += round[:gen_ms]
+        cell[:tool_ms] += round[:tool_ms]
+        cell
       end
 
       # Same round state machine as read_session: user opens, the last
@@ -341,11 +366,28 @@ module Space::Architect
       def read_transcript(path, runs_by_id)
         rounds = []
         open_round = nil
+        open_tools = {}
         run_ids = []
         first_ts = nil
         File.foreach(path) do |line|
           record = parse_line(line)
-          next unless record.is_a?(Hash) && record["recordType"] == "message"
+          next unless record.is_a?(Hash)
+
+          if %w[tool_start tool_end].include?(record["recordType"])
+            id = record["toolCallId"]
+            ts = record_time(record)
+            if record["recordType"] == "tool_start"
+              open_tools[id] = ts if id && ts
+            elsif id && ts && (start = open_tools.delete(id))
+              # Attributed to the round open at tool end — a span crossing a
+              # user boundary lands in the round it finished inside. record_time
+              # yields Time objects, so the difference is seconds → ms for the
+              # round accumulator.
+              open_round[:tool_ms] += [(ts - start) * 1000, 0.0].max if open_round
+            end
+            next
+          end
+          next unless record["recordType"] == "message"
 
           run_ids << record["runId"] if record["runId"].is_a?(String)
           first_ts ||= record_time(record)
@@ -354,8 +396,10 @@ module Space::Architect
           if role == "user"
             close_transcript_round!(rounds, open_round) if open_round
             # No timestamp → no wall to measure; the round opens nothing.
-            open_round = ts ? { user_ts: ts, wall_s: 0.0, output_tokens: 0, model: nil } : nil
-          elsif role == "assistant" && ts && open_round
+            open_round = ts ? new_round(ts) : nil
+          elsif role == "assistant" && open_round
+            open_round[:gen_ms] += numeric(record.dig("message", "durationMs"))
+            next unless ts
             usage = record["usage"].is_a?(Hash) ? record["usage"] : nil
             open_round[:wall_s] = [ts - open_round[:user_ts], 0.0].max
             open_round[:output_tokens] += numeric(usage["output"]) if usage
@@ -390,7 +434,10 @@ module Space::Architect
       def close_transcript_round!(rounds, round)
         return unless round[:model]
 
-        rounds << { model: round[:model], rounds: 1, wall_s: round[:wall_s], output_tokens: round[:output_tokens] }
+        rounds << { model: round[:model], rounds: 1 }.merge(
+          wall_s: round[:wall_s], output_tokens: round[:output_tokens],
+          gen_ms: round[:gen_ms], tool_ms: round[:tool_ms]
+        )
       end
 
       # ---- aggregation -----------------------------------------------------
@@ -509,23 +556,34 @@ module Space::Architect
 
       # Rounds from run transcripts and session files share one shape; wall is
       # clamped at zero because a clock-skewed negative round would otherwise
-      # drag the reported means below AC's non-negative floor.
+      # drag the reported means below AC's non-negative floor. Two speeds, two
+      # truths (the frozen output_toks_per_s key stays the wall-based figure):
+      # turn throughput (output ÷ round wall — tool and child-wait time included,
+      # so a bg_wait-heavy coordinator deflates ~3×) and generation speed
+      # (output ÷ Σ assistant durationMs — what the model actually emits per
+      # second of generating). wait_share is Σ tool time ÷ wall: how much of
+      # the turn the model spent waiting on tools.
       def latency_rows(rounds)
-        cells = Hash.new { |hash, key| hash[key] = { rounds: 0, wall_s: 0.0, output_tokens: 0 } }
+        cells = Hash.new { |hash, key| hash[key] = { rounds: 0, wall_s: 0.0, output_tokens: 0, gen_ms: 0, tool_ms: 0 } }
         rounds.each do |round|
           cell = cells[round[:model]]
           cell[:rounds] += round[:rounds]
           cell[:wall_s] += round[:wall_s]
           cell[:output_tokens] += round[:output_tokens]
+          cell[:gen_ms] += round[:gen_ms].to_f
+          cell[:tool_ms] += round[:tool_ms].to_f
         end
         cells.sort_by { |model, _| model }.map do |model, cell|
+          gen_s = cell[:gen_ms] / 1000.0
           {
             "model" => model,
             "rounds" => cell[:rounds],
             "wall_s" => cell[:wall_s],
             "mean_wall_s" => cell[:rounds].positive? ? cell[:wall_s] / cell[:rounds] : 0.0,
             "output_tokens" => cell[:output_tokens],
-            "output_toks_per_s" => cell[:wall_s].positive? ? cell[:output_tokens] / cell[:wall_s] : 0.0
+            "output_toks_per_s" => cell[:wall_s].positive? ? cell[:output_tokens] / cell[:wall_s] : 0.0,
+            "gen_toks_per_s" => gen_s.positive? ? cell[:output_tokens] / gen_s : 0.0,
+            "wait_share" => cell[:wall_s].positive? ? cell[:tool_ms] / 1000.0 / cell[:wall_s] : 0.0
           }
         end
       end

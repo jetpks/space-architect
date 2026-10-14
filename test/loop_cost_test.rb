@@ -134,21 +134,32 @@ class LoopCostTest < Space::ArchitectTest
     assert_in_delta 26.0, flash["wall_s"], 1e-9
     assert_equal 41, flash["output_tokens"]
     assert_in_delta 26.0 / 5, flash["mean_wall_s"], 1e-9
+    # Turn throughput keeps the frozen wall denominator (tool time included);
+    # generation speed divides by Σ assistant durationMs — transcript 9s +
+    # s1 4s, runner and truncated carry none. wait_share: transcript's 2s tool
+    # span ÷ 26s wall.
     assert_in_delta 41 / 26.0, flash["output_toks_per_s"], 1e-9
+    assert_in_delta 41 / 13.0, flash["gen_toks_per_s"], 1e-9
+    assert_in_delta 2 / 26.0, flash["wait_share"], 1e-9
 
-    bare = lat.fetch("zai/glm-5.3") # s1's second round: 10s, 6 out
+    bare = lat.fetch("zai/glm-5.3") # s1's second round: 10s, 6 out, 8s gen, 3s tool
     assert_equal 1, bare["rounds"]
     assert_in_delta 10.0, bare["wall_s"], 1e-9
     assert_in_delta 10.0, bare["mean_wall_s"], 1e-9
     assert_in_delta 0.6, bare["output_toks_per_s"], 1e-9
+    assert_in_delta 6 / 8.0, bare["gen_toks_per_s"], 1e-9
+    assert_in_delta 0.3, bare["wait_share"], 1e-9
 
     # s2's first round is zero-wall (same millisecond): it counts as a round,
     # adds 0 s, and the tok/s denominator is total wall, never round count.
+    # No durationMs on its assistants: generation speed is 0, not NaN.
     zero = lat.fetch("test/model")
     assert_equal 2, zero["rounds"]
     assert_in_delta 5.0, zero["wall_s"], 1e-9
     assert_in_delta 2.5, zero["mean_wall_s"], 1e-9
     assert_in_delta 2.0, zero["output_toks_per_s"], 1e-9
+    assert_equal 0.0, zero["gen_toks_per_s"]
+    assert_equal 0.0, zero["wait_share"]
 
     # The orphan transcript joins no meta → its own record model + timestamps.
     orphan = lat.fetch("unknown/model")
@@ -186,7 +197,7 @@ class LoopCostTest < Space::ArchitectTest
 
     latency = cost_json("--latency")
     assert_equal %w[latency rows runs sessions sessions_root since slug_dir space totals], latency.keys.sort
-    assert_equal %w[mean_wall_s model output_tokens output_toks_per_s rounds wall_s],
+    assert_equal %w[gen_toks_per_s mean_wall_s model output_tokens output_toks_per_s rounds wait_share wall_s],
       latency["latency"].first.keys.sort
   end
 
@@ -196,6 +207,43 @@ class LoopCostTest < Space::ArchitectTest
     assert_includes out, "(session)"
     assert_includes out, "TOTAL"
     assert_includes out, "0.2100"
+  end
+
+  def test_human_token_counts_are_3_sig_figs_by_default_and_delimited_for_precise
+    root = Dir.mktmpdir("loop-cost-sigfig")
+    slug = File.join(root, Space::Architect::LoopCost.slug_dir(@space_dir))
+    FileUtils.mkdir_p(slug)
+    File.write(File.join(slug, "big_meta.json"),
+      '{"runId":"big","agent":"worker","requestedModel":"zai/glm-5.3-flash",' \
+       '"usage":{"input":1833889482,"output":999,"cacheRead":999500,"cacheWrite":0,"cost":0.01,"turns":1},' \
+       '"timestamp":1586952000000}')
+
+    out, = invoke("cost", "--space", @space_dir, "--sessions-root", root)
+    assert_includes out, "1.83B"  # input, 3 significant figures
+    assert_includes out, "1M"     # cache_read 999,500: mantissa rounds to 1000K → bumps a scale
+    refute_includes out, "1833889482"
+
+    out, = invoke("cost", "--space", @space_dir, "--sessions-root", root, "--precise")
+    assert_includes out, "1,833,889,482"
+    assert_includes out, "999,500"
+  ensure
+    FileUtils.remove_entry(root) if root
+  end
+
+  def test_human_view_colors_header_total_and_cost_columns_when_enabled
+    plain, = invoke("cost", "--space", @space_dir, "--sessions-root", @root)
+    refute_includes plain, "\e["
+
+    colored, = invoke("cost", "--space", @space_dir, "--sessions-root", @root, "--colors", "always")
+    header = colored.lines.first
+    total = colored.lines.find { |l| l.include?("TOTAL") }
+    assert_includes header, "\e[1mAgent"      # header row bold
+    assert_includes total, "\e[1mTOTAL"       # TOTAL row bold (bold beats the column color)
+    assert_includes total, "\e[1m0.2100"      # …its cost cell included
+    assert_includes colored, "\e[33m0.1100"   # $ column yellow on data rows
+    # alignment survives the escapes: column padding matches the plain render
+    assert_equal plain.lines.first.gsub(/\e\[[0-9;]*m/, ""),
+      header.gsub(/\e\[[0-9;]*m/, "")
   end
 
   def test_missing_slug_dir_fails_loud_naming_the_expected_path

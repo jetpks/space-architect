@@ -106,8 +106,16 @@ Three views, one per invocation:
   (`[freeze_i, freeze_{i+1})` by each artifact's start time; artifacts
   before the first boundary land in `unattributed`) with a grand total
 - `--latency` — per model: assistant-round count, mean round wall seconds,
-  and output tokens/sec (a round is one user message through the last
-  assistant message before the next)
+  turn throughput (output tokens ÷ round wall — tool and child-wait time
+  included, so tool-heavy runs deflate it), generation speed (output ÷ Σ
+  assistant `durationMs` — what the model actually emits per generating
+  second), and wait share (Σ tool time ÷ wall; a round is one user message
+  through the last assistant message before the next)
+
+Token counts print at 3 significant figures (`1.83B`, `999K`) by default;
+  `--precise` prints exact integers with thousands separators. Colors
+  (bold header/TOTAL rows, yellow $ column) follow the standard
+  `--color`/`--colors` flags. `--json` is never rounded or colored.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -117,9 +125,11 @@ Three views, one per invocation:
 | `--since=VALUE` | — | Only artifacts starting at/after this ISO-8601 timestamp or `YYYY-MM-DD` date. |
 | `--by-iteration` | `false` | Split the cost table into per-iteration windows. |
 | `--latency` | `false` | Per-model round latency instead of the cost table. |
+| `--precise` | `false` | Exact token counts with thousands separators (default: 3 significant figures). |
 
 ```sh
 architect cost
 architect cost --space 20261009-pi-port --by-iteration
 architect cost --latency --json
+architect cost --precise
 ```
