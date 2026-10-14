@@ -59,6 +59,41 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # Scaffold race (2026-10-13): two processes that booted with the same
+  # space.yaml snapshot scaffold concurrently — the flock + in-lock reload
+  # must serialize them into distinct ordinals with neither iterations entry
+  # lost. Forked children race from the identical in-memory snapshot the
+  # unchecked path would double-allocate from.
+  def test_new_iteration_serializes_concurrent_scaffolds
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+
+    pids = %w[first second].map do |name|
+      fork do
+        project.new_iteration!(name)
+        exit!(true)
+      rescue StandardError
+        exit!(false)
+      end
+    end
+    statuses = pids.map { |pid| Process.wait2(pid).last.success? }
+
+    assert_equal [true, true], statuses, "both concurrent scaffolds must succeed"
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    entries = yml.dig("project", "iterations")
+    assert_equal %w[first second], entries.map { |e| e["name"] }.sort,
+                 "both iterations entries must survive (no last-writer-wins)"
+    assert_equal [1, 2], entries.map { |e| e["ordinal"] }.sort,
+                 "ordinals must be distinct"
+    entries.each { |e| assert_path_exists File.join(dir, e["file"]) }
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # G4: verify looks for the scratch report at I-prefixed iteration_id path
   #     (build/I01-my-slice-lane-a/report.md) — bare-name path is not found
   def test_verify_finds_ordinal_prefixed_scratch_report

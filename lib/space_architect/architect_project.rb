@@ -127,38 +127,47 @@ module Space::Architect
     end
 
     # Allocate the next ordinal and scaffold architecture/I<NN>-<iteration>.md.
+    # Serialized across processes: ordinal allocation is a read-modify-write of
+    # space.yaml's project block, and two concurrent `architect new` processes
+    # would duplicate the ordinal and silently drop the loser's iterations
+    # entry (last writer wins). The metadata is saved by atomic replace, so the
+    # lock is a sibling file under tmp/ (gitignored, space-standard) — never
+    # space.yaml itself — and the metadata is re-loaded inside the lock because
+    # every process booted with its own pre-scaffold snapshot.
     def new_iteration!(name, message: nil)
-      block = space.data["project"] || {}
-      iterations = block["iterations"] || []
-      if iterations.any? { |s| s["name"] == name }
-        raise Space::Core::Error, "iteration '#{name}' already exists in space.yaml"
+      with_scaffold_lock do
+        block = space.data["project"] || {}
+        iterations = block["iterations"] || []
+        if iterations.any? { |s| s["name"] == name }
+          raise Space::Core::Error, "iteration '#{name}' already exists in space.yaml"
+        end
+
+        ordinal = (iterations.map { |s| s["ordinal"] || 0 }.max || 0) + 1
+        nn = format("%02d", ordinal)
+        rel = "architecture/I#{nn}-#{name}.md"
+        path = space.path.join(rel)
+        raise Space::Core::Error, "#{rel} already exists" if path.exist?
+
+        FileUtils.mkdir_p(path.dirname)
+        path.write(render_iteration(nn, name))
+
+        update_architect_block do |b|
+          b["current_iteration"] = name
+          list = b["iterations"] || []
+          list << {
+            "name" => name, "ordinal" => ordinal, "file" => rel,
+            "freeze_sha" => nil, "verdict" => "pending", "lanes" => []
+          }
+          b["iterations"] = list
+          b
+        end
+
+        git_run("-C", space.path.to_s, "add", rel, Space::Core::Space::METADATA_FILE)
+        git_run("-C", space.path.to_s, "commit", "-m",
+          compose_message("I#{nn} scaffold:", "I#{nn}: scaffold #{name}", message))
+
+        path
       end
-
-      ordinal = (iterations.map { |s| s["ordinal"] || 0 }.max || 0) + 1
-      nn = format("%02d", ordinal)
-      rel = "architecture/I#{nn}-#{name}.md"
-      path = space.path.join(rel)
-      raise Space::Core::Error, "#{rel} already exists" if path.exist?
-
-      FileUtils.mkdir_p(path.dirname)
-      path.write(render_iteration(nn, name))
-
-      update_architect_block do |b|
-        b["current_iteration"] = name
-        list = b["iterations"] || []
-        list << {
-          "name" => name, "ordinal" => ordinal, "file" => rel,
-          "freeze_sha" => nil, "verdict" => "pending", "lanes" => []
-        }
-        b["iterations"] = list
-        b
-      end
-
-      git_run("-C", space.path.to_s, "add", rel, Space::Core::Space::METADATA_FILE)
-      git_run("-C", space.path.to_s, "commit", "-m",
-        compose_message("I#{nn} scaffold:", "I#{nn}: scaffold #{name}", message))
-
-      path
     end
 
     def status
@@ -1036,6 +1045,25 @@ module Space::Architect
     private
 
     attr_reader :space
+
+    # Exclusive cross-process lock around one whole critical section (used by
+    # new_iteration!): flock on .git/architect.lock — the metadata file itself
+    # cannot be the lock because save() replaces it by atomic rename (a new
+    # inode would not contend), and .git is the one directory every scaffoldable
+    # space guarantees (new_iteration! commits) that git never reports as
+    # untracked noise (git's own index.lock lives by the same convention).
+    # Inside the lock the metadata is adopted in place (data.replace, keeping
+    # object identity for every holder of this space) — each process booted
+    # with its own pre-scaffold snapshot, so the ordinal must be read from
+    # disk truth.
+    def with_scaffold_lock
+      lock_path = space.path.join(".git", "architect.lock")
+      File.open(lock_path, File::RDWR | File::CREAT, 0o644) do |lock|
+        lock.flock(File::LOCK_EX)
+        space.data.replace(Space::Core::Space.load(space.path).data)
+        yield
+      end
+    end
 
     # The vendored builder-guard extension shipped in the gem (lib/space_architect/pi/).
     def vendored_guard_path
