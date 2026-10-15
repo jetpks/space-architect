@@ -1,5 +1,0 @@
-/log/*
-/config/master.key
-/storage/
-node_modules/
-/public/vite*/
