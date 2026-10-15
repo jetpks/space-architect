@@ -1740,7 +1740,12 @@ module Space::Architect
       if prompt
         src = Pathname.new(prompt)
         raise Space::Core::Error, "prompt file not found: #{src}" unless src.exist?
-        File.open(prompt_path, "wb") { |f| f.write(File.binread(src)) }
+        # src == dst: the file is already canonical — skip the copy; a truncate-then-
+        # write onto the source itself would destroy the prompt before dispatch (I61
+        # 20261009-pi-port: --prompt <canonical> emptied the kit to 0 bytes).
+        unless src.expand_path == Pathname(prompt_path).expand_path
+          File.binwrite(prompt_path, File.binread(src))
+        end
       end
 
       raise Space::Core::Error, "prompt.md not found: #{prompt_path}" unless prompt_path.exist?
