@@ -800,6 +800,15 @@ class ArchitectCLITest < Space::ArchitectTest
     refute_includes out, "--force-effort"
   end
 
+  # ── push: registration smoke — the frozen --host/--token contract flags ────
+
+  def test_push_help_lists_host_and_token
+    out = IO.popen(["bundle", "exec", "architect", "push", "--help"],
+                   err: [:child, :out]) { |f| f.read }
+    assert_includes out, "--host"
+    assert_includes out, "--token"
+  end
+
   def test_dispatch_cli_multiple_thinking_aliases_raises
     setup = temp_env
     env = setup.fetch(:env)
