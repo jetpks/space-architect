@@ -9,11 +9,22 @@ Materialize declared lanes (worktree + `lane/<id>-<lane>` branch) from the
 frozen lane plan. Reads the frozen ```lanes block — one worktree per entry at
 `build/<id>-<lane>/wt`.
 
+Before cutting any worktree, provision fast-forwards each selected lane repo's
+`project/<slug>` integration branch from the repo's default branch — local-only
+and fast-forward-only, no fetch, no pull. When the two branches have diverged
+(each holds commits the other lacks), provision refuses the entire run and
+creates nothing: merge the default branch into `project/<slug>` deliberately, or
+pin a base explicitly with `--base`. An explicit `--base` skips the sync
+entirely and cuts exactly the given ref. A no-op sync (integration branch at or
+ahead of the default branch) prints nothing; a moved branch is reported on
+stdout, and the auto-materialize paths (dispatch/gate/integrate/verify hitting a
+missing lane worktree) report theirs on stderr.
+
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--base=REF` | `project/<slug>` HEAD if it exists, else the repo's default branch | Base ref override. |
+| `--base=REF` | `project/<slug>` after a fast-forward sync from the repo's default branch (diverged → refusal); `--base` itself skips the sync | Base ref override — cuts exactly the given ref, no sync, no divergence refusal. |
 | `--lane=NAME` | all declared lanes | Provision only this lane. |
-| `--[no-]force` | `false` | Clear and re-create a stale (unregistered) worktree directory. |
+| `--[no-]force` | `false` | Clear and re-create a stale (unregistered) worktree directory. Does not bypass the diverged-branch refusal. |
 
 ```sh
 architect provision my-feature

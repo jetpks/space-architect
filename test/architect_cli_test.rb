@@ -2787,6 +2787,381 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # ── I06: provision integration-branch sync (stale-tip repro, refusal, no-op, pin) ──
+
+  # Frozen one-lane iteration over a repo clone on `main` with `project/test-space`
+  # (the "Test Space" slug) already created at the first commit. The block shapes
+  # the two branches BEFORE provision runs — the shapes under test (behind /
+  # equal / ahead / diverged) are pure git state. Returns [space_path, repo_dir,
+  # first_sha].
+  def frozen_sync_fixture(env, name = "slice-1")
+    space_invoke("init")
+    space_path = create_real_space(File.join(env["HOME"]))
+    repo_dir = create_real_repo(space_path, "my-repo")
+    first, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "HEAD")
+    system("git", "-C", repo_dir, "branch", "project/test-space", first.strip, out: File::NULL, err: File::NULL)
+
+    Dir.chdir(space_path) do
+      invoke("init")
+      invoke("new", name)
+      File.write(File.join(space_path, "architecture", "I01-#{name}.md"), <<~MD)
+        # I01: #{name}
+
+        ## Specification
+
+        ```lanes
+        - name: lane-a
+          repo: my-repo
+          touch:
+            - lib/**
+        ```
+
+        ## Acceptance Criteria
+
+        ## Builder Prompt
+      MD
+
+      freeze_for_test(name)
+      yield repo_dir, first.strip if block_given?
+    end
+    [space_path, repo_dir, first.strip]
+  end
+
+  # An empty commit on `branch` (checked out for the commit, main restored);
+  # returns the new branch tip.
+  def commit_on_branch(repo_dir, branch, message)
+    system("git", "-C", repo_dir, "checkout", "-q", branch, out: File::NULL, err: File::NULL)
+    system("git", "-C", repo_dir, "commit", "-q", "--allow-empty", "-m", message, out: File::NULL, err: File::NULL)
+    system("git", "-C", repo_dir, "checkout", "-q", "main", out: File::NULL, err: File::NULL)
+    tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", branch)
+    tip.strip
+  end
+
+  # AC1 (the I05 burn, repro'd cold): main advanced, `project/test-space` left at
+  # the first commit — provision must fast-forward the integration branch BEFORE
+  # the cut, so the worktree lands at the default-branch head (never the stale
+  # tip), the recorded base_sha equals it, and stdout names the movement.
+  def test_provision_fast_forwards_stale_integration_branch_before_cutting_worktrees
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      space_path, repo_dir, = frozen_sync_fixture(env) do |repo_dir, _first|
+        system("git", "-C", repo_dir, "commit", "-q", "--allow-empty", "-m", "advance main",
+               out: File::NULL, err: File::NULL)
+      end
+      main_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "main")
+
+      Dir.chdir(space_path) do
+        out, err = invoke("provision", "slice-1")
+        assert_empty err
+        assert_match(/my-repo: fast-forwarded project\/test-space to [0-9a-f]{8}/, out,
+          "the sync must be reported on stdout")
+
+        head, = Open3.capture3("git", "-C", File.join(space_path, "build", "I01-slice-1-lane-a", "wt"),
+                               "rev-parse", "HEAD")
+        assert_equal main_tip.strip, head.strip, "the worktree must be cut at the default-branch tip, not the stale project tip"
+        integration, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "project/test-space")
+        assert_equal main_tip.strip, integration.strip, "the integration ref must end at the default-branch tip"
+        yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
+        assert_equal main_tip.strip, yml.dig("project", "iterations", 0, "lanes", 0, "base_sha")
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC2: a diverged integration branch (both sides ahead) refuses the whole
+  # provision — non-zero exit, no worktree created, ref unchanged, message names
+  # the repo, both branches + short tips, the remediation, and --base; --force
+  # does not bypass it.
+  def test_provision_refuses_diverged_integration_branch_before_cutting_worktrees
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      space_path, repo_dir, = frozen_sync_fixture(env) do |repo_dir, _first|
+        system("git", "-C", repo_dir, "commit", "-q", "--allow-empty", "-m", "advance main",
+               out: File::NULL, err: File::NULL)
+        commit_on_branch(repo_dir, "project/test-space", "advance integration")
+      end
+      main_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "main")
+      integration_before, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "project/test-space")
+
+      Dir.chdir(space_path) do
+        out, err = invoke("provision", "slice-1")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_empty out
+        assert_match(/repos\/my-repo has diverged/, err)
+        assert_match(/main \(#{main_tip.strip[0, 8]}\)/, err)
+        assert_match(/project\/test-space \(#{integration_before.strip[0, 8]}\)/, err)
+        assert_match(/ahead by 1, project\/test-space ahead by 1/, err)
+        assert_match(/merge main into project\/test-space deliberately/, err)
+        assert_match(/--base/, err)
+        refute_path_exists File.join(space_path, "build", "I01-slice-1-lane-a", "wt"),
+          "the refusal must create no worktree"
+        integration_after, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "project/test-space")
+        assert_equal integration_before.strip, integration_after.strip, "the refusal must not move the integration ref"
+
+        _out2, err2 = invoke("provision", "slice-1", "--force")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code, "--force must not bypass the divergence refusal"
+        assert_match(/diverged/, err2)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC3: integration equal to (0 0) or ahead of (0 2) the default branch —
+  # provision behaves exactly as before: no sync line, no refusal, worktree at
+  # the integration tip.
+  def test_provision_syncs_nothing_when_integration_is_equal_or_ahead
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      # shape `0 0`: integration already at the default tip
+      space_path, repo_dir, = frozen_sync_fixture(env) do |repo_dir, _first|
+        system("git", "-C", repo_dir, "commit", "-q", "--allow-empty", "-m", "advance main",
+               out: File::NULL, err: File::NULL)
+        tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "main")
+        system("git", "-C", repo_dir, "branch", "-f", "project/test-space", tip.strip,
+               out: File::NULL, err: File::NULL)
+      end
+      integration_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "project/test-space")
+
+      Dir.chdir(space_path) do
+        out, err = invoke("provision", "slice-1")
+        assert_empty err
+        refute_match(/fast-forwarded/, out)
+        head, = Open3.capture3("git", "-C", File.join(space_path, "build", "I01-slice-1-lane-a", "wt"),
+                               "rev-parse", "HEAD")
+        assert_equal integration_tip.strip, head.strip
+      end
+    end
+    FileUtils.rm_rf(setup[:root])
+
+    # shape `0 2`: integration ahead of the default branch by two commits
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      space_path, repo_dir, = frozen_sync_fixture(env) do |repo_dir, _first|
+        commit_on_branch(repo_dir, "project/test-space", "ahead 1")
+        commit_on_branch(repo_dir, "project/test-space", "ahead 2")
+      end
+      integration_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "project/test-space")
+
+      Dir.chdir(space_path) do
+        out, err = invoke("provision", "slice-1")
+        assert_empty err
+        refute_match(/fast-forwarded/, out)
+        head, = Open3.capture3("git", "-C", File.join(space_path, "build", "I01-slice-1-lane-a", "wt"),
+                               "rev-parse", "HEAD")
+        assert_equal integration_tip.strip, head.strip
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC4: an explicit --base is the deliberate case — with the integration branch
+  # stale-behind AND (second shape) diverged, provision cuts exactly the pinned
+  # ref with no sync and no refusal.
+  def test_provision_base_pin_skips_the_sync_and_cuts_exactly_the_pinned_ref
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      # stale-behind: project/test-space at `first`, main advanced — the sync
+      # would fire without --base
+      space_path, _repo_dir, first = frozen_sync_fixture(env) do |repo_dir, _first|
+        system("git", "-C", repo_dir, "commit", "-q", "--allow-empty", "-m", "advance main",
+               out: File::NULL, err: File::NULL)
+      end
+
+      Dir.chdir(space_path) do
+        out, err = invoke("provision", "slice-1", "--base", first)
+        assert_empty err
+        refute_match(/fast-forwarded/, out)
+        head, = Open3.capture3("git", "-C", File.join(space_path, "build", "I01-slice-1-lane-a", "wt"),
+                               "rev-parse", "HEAD")
+        assert_equal first, head.strip
+        yml = YAML.safe_load(File.read(File.join(space_path, "space.yaml")), aliases: false)
+        assert_equal first, yml.dig("project", "iterations", 0, "lanes", 0, "base_sha")
+      end
+    end
+    FileUtils.rm_rf(setup[:root])
+
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      # diverged: both sides ahead — --base must cut without refusal
+      space_path, _repo_dir, first = frozen_sync_fixture(env) do |repo_dir, _first|
+        system("git", "-C", repo_dir, "commit", "-q", "--allow-empty", "-m", "advance main",
+               out: File::NULL, err: File::NULL)
+        commit_on_branch(repo_dir, "project/test-space", "advance integration")
+      end
+
+      Dir.chdir(space_path) do
+        out, err = invoke("provision", "slice-1", "--base", first)
+        assert_empty err
+        refute_match(/fast-forwarded/, out)
+        head, = Open3.capture3("git", "-C", File.join(space_path, "build", "I01-slice-1-lane-a", "wt"),
+                               "rev-parse", "HEAD")
+        assert_equal first, head.strip
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC2: the same sync-or-refuse guards the auto-materialization path — verify
+  # materializing a removed lane worktree hits the diverged integration branch
+  # and refuses: non-zero exit, no worktree recreated, ref unchanged.
+  def test_provision_refuses_diverged_integration_branch_on_auto_materialization
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      space_path, repo_dir, = frozen_sync_fixture(env)
+
+      Dir.chdir(space_path) do
+        invoke("provision", "slice-1") # 0 0 — worktree created at the shared tip
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        out, err = invoke("worktree", "remove", "slice-1", "lane-a")
+        assert_empty err
+        assert_match(/Removed worktree/, out)
+
+        system("git", "-C", repo_dir, "commit", "-q", "--allow-empty", "-m", "advance main",
+               out: File::NULL, err: File::NULL)
+        commit_on_branch(repo_dir, "project/test-space", "advance integration")
+        integration_before, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "project/test-space")
+
+        _out2, err2 = invoke("verify", "slice-1")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/repos\/my-repo has diverged/, err2)
+        refute_path_exists File.join(space_path, "build", "I01-slice-1-lane-a", "wt"),
+          "the materialize refusal must not recreate the worktree"
+        integration_after, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "project/test-space")
+        assert_equal integration_before.strip, integration_after.strip
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # AC1: the sync runs once per distinct repo of the selected set BEFORE any
+  # worktree is cut — with lanes across two repos where the second is diverged,
+  # the refusal aborts the whole provision and NO worktree exists afterwards
+  # (the first repo's safe fast-forward stands; no lane was cut from either).
+  def test_provision_refuses_diverged_second_repo_before_any_worktree_is_cut
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      space_invoke("init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      repo_one = create_real_repo(space_path, "repo-one")
+      repo_two = create_real_repo(space_path, "repo-two")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "slice-1")
+        first_one, = Open3.capture3("git", "-C", repo_one, "rev-parse", "HEAD")
+        system("git", "-C", repo_one, "branch", "project/test-space", first_one.strip, out: File::NULL, err: File::NULL)
+        first_two, = Open3.capture3("git", "-C", repo_two, "rev-parse", "HEAD")
+        system("git", "-C", repo_two, "branch", "project/test-space", first_two.strip, out: File::NULL, err: File::NULL)
+        File.write(File.join(space_path, "architecture", "I01-slice-1.md"), <<~MD)
+          # I01: slice-1
+
+          ## Specification
+
+          ```lanes
+          - name: lane-a
+            repo: repo-one
+            touch:
+              - lib/**
+          - name: lane-b
+            repo: repo-two
+            touch:
+              - lib/**
+          ```
+
+          ## Acceptance Criteria
+
+          ## Builder Prompt
+        MD
+        freeze_for_test("slice-1")
+
+        # repo-one: integration stale-behind a fast-forwardable main (the safe case);
+        # repo-two: diverged (the aborting case). Both share the project/<slug> name.
+        system("git", "-C", repo_one, "commit", "-q", "--allow-empty", "-m", "advance main",
+               out: File::NULL, err: File::NULL)
+        one_tip, = Open3.capture3("git", "-C", repo_one, "rev-parse", "main")
+        system("git", "-C", repo_two, "commit", "-q", "--allow-empty", "-m", "advance main",
+               out: File::NULL, err: File::NULL)
+        commit_on_branch(repo_two, "project/test-space", "advance integration")
+        two_integration_before, = Open3.capture3("git", "-C", repo_two, "rev-parse", "project/test-space")
+
+        out, err = invoke("provision", "slice-1")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_empty out
+        assert_match(/repos\/repo-two has diverged/, err)
+        assert_empty Dir.glob(File.join(space_path, "build", "*", "wt")),
+          "the refusal must leave NO worktree standing"
+        one_integration, = Open3.capture3("git", "-C", repo_one, "rev-parse", "project/test-space")
+        assert_equal one_tip.strip, one_integration.strip,
+          "repo-one's safe fast-forward stands (it ran before the divergence aborted the run)"
+        two_integration_after, = Open3.capture3("git", "-C", repo_two, "rev-parse", "project/test-space")
+        assert_equal two_integration_before.strip, two_integration_after.strip
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # Rule 6's materialize surface: a ff-able sync behind a missing-worktree
+  # materialize moves the integration ref and emits a one-line inform on the
+  # command's error stream ($stderr), naming repo, branch, and new short tip.
+  # The surviving lane branch reattaches at its own tip (#88: never re-point
+  # without an explicit ask) — only the integration ref moves.
+  def test_provision_fast_forwards_on_auto_materialization_and_informs_on_stderr
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      space_path, repo_dir, first = frozen_sync_fixture(env)
+
+      Dir.chdir(space_path) do
+        invoke("provision", "slice-1")
+        invoke("worktree", "remove", "slice-1", "lane-a")
+        system("git", "-C", repo_dir, "commit", "-q", "--allow-empty", "-m", "advance main",
+               out: File::NULL, err: File::NULL)
+        main_tip, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "main")
+
+        err_cap = StringIO.new
+        original = $stderr
+        $stderr = err_cap
+        _out, err = invoke("verify", "slice-1")
+        $stderr = original
+        assert_empty err
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/my-repo: fast-forwarded project\/test-space to [0-9a-f]{8}/, err_cap.string)
+
+        integration, = Open3.capture3("git", "-C", repo_dir, "rev-parse", "project/test-space")
+        assert_equal main_tip.strip, integration.strip, "the integration ref must move before the materialize"
+        assert_path_exists File.join(space_path, "build", "I01-slice-1-lane-a", "wt")
+        head, = Open3.capture3("git", "-C", File.join(space_path, "build", "I01-slice-1-lane-a", "wt"),
+                               "rev-parse", "HEAD")
+        assert_equal first, head.strip, "the surviving lane branch reattaches at its own tip (#88)"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   # ── I02: destructive guards ─────────────────────────────────────────────
 
   # `worktree remove` (CLI) refuses a dirty worktree — non-zero

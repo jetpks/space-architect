@@ -5098,6 +5098,159 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(origin_dir)
   end
 
+  # ── I06: provision integration-branch sync (sync_integration_branch!) ───────
+
+  # Fixture for the sync_integration_branch! tests whose clone stays on `main`
+  # (so repo_default_branch's HEAD fallback resolves main): `project/test` (the
+  # "Test" slug) created at the first commit, one extra commit on main. Returns
+  # [dir, project, repo, first_sha, main_tip].
+  def sync_branch_fixture
+    dir  = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo  = create_real_repo(dir, "my-repo")
+    first, = Open3.capture3("git", "-C", repo, "rev-parse", "HEAD")
+    system("git", "-C", repo, "branch", "project/test", first.strip, out: File::NULL, err: File::NULL)
+    system("git", "-C", repo, "commit", "-q", "--allow-empty", "-m", "advance main", out: File::NULL, err: File::NULL)
+    main_tip, = Open3.capture3("git", "-C", repo, "rev-parse", "main")
+    [dir, Space::Architect::ArchitectProject.new(space: space), repo, first.strip, main_tip.strip]
+  end
+
+  # An empty commit on `branch` (checked out for the commit, main restored);
+  # returns the new branch tip.
+  def commit_on_branch(repo, branch, message)
+    system("git", "-C", repo, "checkout", "-q", branch, out: File::NULL, err: File::NULL)
+    system("git", "-C", repo, "commit", "-q", "--allow-empty", "-m", message, out: File::NULL, err: File::NULL)
+    system("git", "-C", repo, "checkout", "-q", "main", out: File::NULL, err: File::NULL)
+    tip, = Open3.capture3("git", "-C", repo, "rev-parse", branch)
+    tip.strip
+  end
+
+  # AC5: ff mechanics, checked-out case — the clone has the integration branch
+  # checked out (the real post-integrate state), so `fetch .` would refuse and
+  # the merge --ff-only leg must run: the ref AND the clone's HEAD move. The
+  # fixture is a local-origin clone (mirroring test_sync_fast_forwards_behind_repo):
+  # repo_default_branch must resolve main via origin/HEAD here, because the HEAD
+  # fallback sees the checked-out integration branch itself.
+  def test_sync_integration_branch_fast_forwards_checked_out_integration_branch
+    dir        = Dir.mktmpdir("architect-project-test")
+    origin_dir = Dir.mktmpdir("architect-project-sync-origin-test")
+    system("git", "-C", origin_dir, "init", "-q", "-b", "main")
+    system("git", "-C", origin_dir, "config", "user.name", "Test Builder")
+    system("git", "-C", origin_dir, "config", "user.email", "test@example.com")
+    File.write(File.join(origin_dir, "README.md"), "# origin\n")
+    system("git", "-C", origin_dir, "add", "README.md")
+    system("git", "-C", origin_dir, "commit", "-q", "-m", "init")
+
+    space = create_real_space(dir)
+    repo  = File.join(dir, "repos", "my-repo")
+    system("git", "clone", "-q", origin_dir, repo)
+    first, = Open3.capture3("git", "-C", repo, "rev-parse", "HEAD")
+    system("git", "-C", repo, "branch", "project/test", first.strip, out: File::NULL, err: File::NULL)
+    system("git", "-C", repo, "commit", "-q", "--allow-empty", "-m", "advance main", out: File::NULL, err: File::NULL)
+    main_tip, = Open3.capture3("git", "-C", repo, "rev-parse", "main")
+    system("git", "-C", repo, "checkout", "-q", "project/test", out: File::NULL, err: File::NULL)
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    report = project.send(:sync_integration_branch!, "my-repo", "my-slice")
+
+    assert_equal({ repo: "my-repo", branch: "project/test", sha: main_tip.strip }, report)
+    tip, = Open3.capture3("git", "-C", repo, "rev-parse", "project/test")
+    assert_equal main_tip.strip, tip.strip
+    head, = Open3.capture3("git", "-C", repo, "rev-parse", "HEAD")
+    assert_equal main_tip.strip, head.strip, "the checked-out branch must move with its ref (merge --ff-only leg)"
+  ensure
+    FileUtils.rm_rf(dir)
+    FileUtils.rm_rf(origin_dir)
+  end
+
+  # AC5: ff mechanics, non-checked-out case — the clone's HEAD is elsewhere, so
+  # the `fetch .` leg must run and move the integration ref (a wrongly-chosen
+  # merge would act on HEAD and leave the ref stale).
+  def test_sync_integration_branch_fast_forwards_unchecked_out_integration_branch
+    dir, project, repo, _first, main_tip = sync_branch_fixture
+
+    report = project.send(:sync_integration_branch!, "my-repo", "my-slice")
+
+    assert_equal({ repo: "my-repo", branch: "project/test", sha: main_tip }, report)
+    tip, = Open3.capture3("git", "-C", repo, "rev-parse", "project/test")
+    assert_equal main_tip, tip.strip, "the integration ref must move to the default tip (fetch . leg)"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC3: both no-op shapes — integration equal to (0 0) or ahead of (0 2) the
+  # default branch — return nil, move nothing, raise nothing.
+  def test_sync_integration_branch_is_a_noop_when_default_is_not_ahead
+    dir, project, repo, _first, main_tip = sync_branch_fixture
+    system("git", "-C", repo, "branch", "-f", "project/test", main_tip, out: File::NULL, err: File::NULL)
+
+    assert_nil project.send(:sync_integration_branch!, "my-repo", "my-slice"), "0 0: already equal — no-op"
+    tip, = Open3.capture3("git", "-C", repo, "rev-parse", "project/test")
+    assert_equal main_tip, tip.strip
+
+    commit_on_branch(repo, "project/test", "ahead 1")
+    ahead2 = commit_on_branch(repo, "project/test", "ahead 2")
+    assert_nil project.send(:sync_integration_branch!, "my-repo", "my-slice"), "0 2: integration ahead — no-op"
+    tip2, = Open3.capture3("git", "-C", repo, "rev-parse", "project/test")
+    assert_equal ahead2, tip2.strip
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC2/AC5: both sides ahead → refusal naming repo, both branches + short tips,
+  # the ahead counts, and the remediation (--base pin) — ref left untouched.
+  def test_sync_integration_branch_refuses_diverged_integration_branch
+    dir, project, repo, _first, main_tip = sync_branch_fixture
+    integration_tip = commit_on_branch(repo, "project/test", "advance integration")
+
+    err = assert_raises(Space::Core::Error) { project.send(:sync_integration_branch!, "my-repo", "my-slice") }
+
+    assert_match(/repos\/my-repo has diverged/, err.message)
+    assert_match(/main \(#{main_tip[0, 8]}\)/, err.message)
+    assert_match(/project\/test \(#{integration_tip[0, 8]}\)/, err.message)
+    assert_match(/main ahead by 1, project\/test ahead by 1/, err.message)
+    assert_match(/merge main into project\/test deliberately/, err.message)
+    assert_match(/--base/, err.message)
+    tip, = Open3.capture3("git", "-C", repo, "rev-parse", "project/test")
+    assert_equal integration_tip, tip.strip, "the refusal must not move the integration ref"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # Rule 2: the sync targets the space.yaml `project.integration_branch` override
+  # when set (same accessor merge_lane! targets), not just project/<slug>.
+  def test_sync_integration_branch_targets_the_space_yaml_integration_branch_override
+    dir, project, repo, first, main_tip = sync_branch_fixture
+    system("git", "-C", repo, "branch", "custom/target", first, out: File::NULL, err: File::NULL)
+    project.send(:space).data["project"] ||= {}
+    project.send(:space).data["project"]["integration_branch"] = "custom/target"
+
+    report = project.send(:sync_integration_branch!, "my-repo", "my-slice")
+
+    assert_equal({ repo: "my-repo", branch: "custom/target", sha: main_tip }, report)
+    stale, = Open3.capture3("git", "-C", repo, "rev-parse", "project/test")
+    assert_equal first, stale.strip, "the non-target branch must be untouched"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # AC5: a mechanics failure (integration branch checked out in a linked
+  # worktree — `fetch .` refuses a checked-out dst) raises carrying git's own
+  # stderr — never a silent skip.
+  def test_sync_integration_branch_raises_carrying_git_stderr_on_failure
+    dir, project, repo, _first, main_tip = sync_branch_fixture
+    system("git", "-C", repo, "worktree", "add", "-q", File.join(dir, "elsewhere-wt"), "project/test",
+           out: File::NULL, err: File::NULL)
+
+    err = assert_raises(Space::Core::Error) { project.send(:sync_integration_branch!, "my-repo", "my-slice") }
+
+    assert_match(/refusing to fetch into branch/, err.message)
+    tip, = Open3.capture3("git", "-C", repo, "rev-parse", "project/test")
+    refute_equal main_tip, tip.strip, "the failed sync must leave the integration ref unchanged"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # AC2: ground emits a staleness warning when a tracked repo is behind origin,
   #      is silent when up-to-date, and preserves existing ordering + worktree guard.
   def test_ground_warns_stale_repo
