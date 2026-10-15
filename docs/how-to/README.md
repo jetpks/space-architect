@@ -15,8 +15,6 @@ matches your problem and follow only its steps.
   upload pi/claude conversation transcripts to a space-server on an interval.
 - **[Upgrade from the 8.x monolith](upgrade-from-the-8x-monolith.md)** — move
   to the three-gem 9.x layout without losing config or state.
-- **[Deploy on the studio](deploy-on-the-studio.md)** — run
-  `space-architect-server` on `studio.slush.systems` (apply runbook).
 
 **Maintainer-facing** (releasing the gem, not using it):
 

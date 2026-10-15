@@ -1,8 +1,0 @@
-{
-  "all": {
-    "sourceCodeDir": "app/frontend",
-    "publicOutputDir": "vite",
-    "skipCompatibilityCheck": true,
-    "autoBuild": false
-  }
-}
