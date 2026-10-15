@@ -1,0 +1,9 @@
+{"recordType":"message","role":"user","text":"Task: write the thing","ts":1700000000000,"timestamp":"2023-11-14T22:13:20.000Z","cwd":"/tmp/looplog-space/build/I07-gem/wt"}
+{"recordType":"tool_start","toolName":"read","argsPayload":"{\"path\":\"/tmp/a.txt\"}","ts":1700000001000,"timestamp":"2023-11-14T22:13:21.000Z"}
+{"recordType":"tool_end","ts":1700000001100,"timestamp":"2023-11-14T22:13:21.100Z"}
+{"recordType":"message","role":"toolResult","text":"alpha beta\ngamma delta\nepsilon","isError":false,"ts":1700000001200,"timestamp":"2023-11-14T22:13:21.200Z"}
+{"recordType":"message","role":"assistant","message":{"content":[{"type":"thinking","thinking":"step one\nstep two"},{"type":"text","text":"Doing it."}]},"usage":{"output":30,"cacheRead":12,"cost":0.004},"stopReason":"toolUse","ts":1700000002000,"timestamp":"2023-11-14T22:13:22.000Z"}
+{"recordType":"tool_start","toolName":"edit","argsPreview":"path=/tmp/b.txt verbose=true","ts":1700000003000,"timestamp":"2023-11-14T22:13:23.000Z"}
+{"recordType":"message","role":"toolResult","text":"boom","isError":true,"ts":1700000003100,"timestamp":"2023-11-14T22:13:23.100Z"}
+{"recordType":"system","ts":1700000003200,"timestamp":"2023-11-14T22:13:23.200Z"}
+{"recordType":"message","role":"assistant","message":{"content":[{"type":"text","text":"Done."}]},"usage":{"output":7,"cacheRead":3,"cost":0.002},"stopReason":"stop","ts":1700000004000,"timestamp":"2023-11-14T22:13:24.000Z"}

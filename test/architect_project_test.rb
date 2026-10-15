@@ -2600,6 +2600,139 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # ── I07: gate transcript ─────────────────────────────────────────────────
+
+  # The gate transcript mirrors rehearse's structure under build/gate/ with
+  # PASS/FAIL verdicts and a Lane context line; the failing gate's reason and
+  # every stdout/stderr byte are present, not truncated.
+  def test_gate_transcript_writes_pass_fail_sections_under_build_gate
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = <<~YAML
+      - id: noisy-gate
+        ac: AC1
+        cmd: "seq 1 50"
+        expect:
+          exit_code: 0
+      - id: red-gate
+        ac: AC2
+        cmd: sh -c 'exit 1'
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+    freeze_for_test!(project, dir, "my-slice")
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    results = project.run_gates("my-slice", lane: "lane-a")
+    path = project.gate_transcript("my-slice", results, lane: "lane-a", now: fixed_time)
+
+    assert_match %r{build/gate/I01-my-slice-20260531T134800\.000000\.md\z}, path.to_s
+    transcript = File.read(path)
+    assert_match(/\A# Gate transcript — my-slice — #{Regexp.escape(fixed_time.iso8601)}/, transcript)
+    assert_match(/\ALane: lane-a \(/, transcript.split("\n")[1])
+    assert_match(/## AC1 noisy-gate — PASS \(exit 0\)/, transcript)
+    assert_match(/## AC2 red-gate — FAIL \(exit 1\)/, transcript)
+    assert_match(/reason: #{Regexp.escape(results[1][:reason])}/, transcript)
+    (1..50).each { |n| assert_match(/^#{n}$/, transcript) }
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # Without a lane, the context line names the integration repo — the same
+  # directory #run_gates resolved (the "Repo: <name> (<dir>)" rehearse shape).
+  def test_gate_transcript_names_the_repo_context_without_a_lane
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    gates_yaml = <<~YAML
+      - id: echo-gate
+        ac: AC1
+        cmd: echo hello-gate
+        expect:
+          exit_code: 0
+    YAML
+    text = File.read(File.join(dir, "architecture", "I01-my-slice.md"))
+    text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gates_yaml}```")
+    File.write(File.join(dir, "architecture", "I01-my-slice.md"), text)
+    freeze_for_test!(project, dir, "my-slice")
+    # Records the lane (repo) entry in space.yaml that the no-lane gate run resolves.
+    project.worktree_add("my-repo", "my-slice", "lane-a")
+
+    results = project.run_gates("my-slice")
+    path = project.gate_transcript("my-slice", results, now: fixed_time)
+
+    lines = File.read(path).split("\n")
+    assert_equal "Repo: my-repo (#{repo_dir})", lines[1]
+    assert_equal "## AC1 echo-gate — PASS (exit 0)", lines[3]
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # The shared transcript writer must not have shifted rehearsal bytes: a
+  # full golden compare against the pre-I07 format, held at a fixed now.
+  def test_rehearsal_transcript_bytes_unchanged
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    repo_dir = create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    lanes_yaml = "- name: lane-a\n  repo: my-repo\n  touch:\n    - lib/**\n"
+    gates_yaml = <<~YAML
+      - id: green-gate
+        ac: AC1
+        cmd: echo hi
+        expect:
+          exit_code: 0
+      - id: red-gate
+        ac: AC2
+        cmd: sh -c 'exit 1'
+        expect:
+          exit_code: 0
+    YAML
+    write_iteration_with_lanes(dir, "my-slice", lanes_yaml, gates_yaml: gates_yaml)
+
+    result = project.rehearse("my-slice", now: fixed_time)
+
+    expected = <<~MD
+      # Rehearsal transcript — my-slice — #{fixed_time.iso8601}
+      Repo: my-repo (#{repo_dir})
+
+      ## AC1 green-gate — GREEN (exit 0)
+      cmd: echo hi
+      dir: #{repo_dir}
+      --- stdout ---
+      hi
+
+      --- stderr ---
+
+
+      ## AC2 red-gate — RED (exit 1)
+      cmd: sh -c 'exit 1'
+      dir: #{repo_dir}
+      reason: #{result[:gates][1][:reason]}
+      --- stdout ---
+
+      --- stderr ---
+
+    MD
+    assert_equal expected, File.read(result[:transcript])
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # AC4: gates sharing an identical (cmd, resolved dir) pair execute once —
   # proven behaviorally via a side-effecting command (append to a counter
   # file) rather than by asserting on an internal call count.

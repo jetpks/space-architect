@@ -15,7 +15,7 @@ binary (with the deprecated `src` shim) — see those gems for their references.
 | [Build-phase commands](build.md) | `provision`, `dispatch`, `worktree add/list/remove` |
 | [Judge-phase commands](judge.md) | `verify`, `evidence`, `gate`, `verdict` |
 | [Land-phase commands](land.md) | `integrate`, `merge` |
-| [Project commands](project.md) | `init`, `ground`, `status`, `sync`, `install-skills`, `bug-report` |
+| [Project commands](project.md) | `init`, `ground`, `status`, `sync`, `install-skills`, `install-extensions`, `bug-report`, `runlog`, `looplog` |
 | [Subcommand groups](groups.md) | `variant`, `research`, `jobs`, `sessions` |
 | [Gates and lanes block format](gates-and-lanes.md) | the fenced ```gates / ```lanes YAML blocks |
 | [Space and project state](space-and-project-state.md) | `space.yaml` project block, `architecture/` file anatomy, XDG paths |

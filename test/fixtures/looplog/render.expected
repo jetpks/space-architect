@@ -1,0 +1,12 @@
+⚒ read path: /tmp/a.txt
+← alpha beta gamma delta epsilon (3 lines)
+· thinking
+step one
+step two
+● assistant
+Doing it.
+⚒ edit path=/tmp/b.txt verbose=true
+✗ boom
+● assistant
+Done.
+✓ done  7 out  3 cache read  $0.00  4s
