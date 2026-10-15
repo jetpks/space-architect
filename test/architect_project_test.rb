@@ -4886,6 +4886,100 @@ class ArchitectProjectTest < Space::ArchitectTest
     FileUtils.rm_rf(dir)
   end
 
+  # I08: dispatch --prompt pointed at the canonical prompt.md itself must be a
+  # no-op copy — the file is already canonical; a truncate-then-write onto the
+  # source destroys the kit (the I61 20261009-pi-port burn).
+  def test_dispatch_prompt_same_path_is_noop
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+
+    canonical = File.join(dir, "build", "I01-demo-A", "prompt.md")
+    kit = +"### A\n\n## §1 Goal\n\nShip it.\n\n## §2 Notes\n"
+    kit << "Detail line for the lane. é✓\n" * 80 # kit-shaped body, > 2 KB, not the stub
+    File.binwrite(canonical, kit)
+    assert_operator kit.bytesize, :>=, 2048
+
+    res = project.dispatch("demo", "A", bin: write_fake_pi(dir), prompt: canonical)
+
+    assert_equal kit.b, File.binread(canonical), "same-path --prompt must leave the canonical kit untouched"
+    assert_equal canonical, res[:prompt_copied].to_s
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_dispatch_prompt_same_path_alternate_spelling
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+
+    canonical = File.join(dir, "build", "I01-demo-A", "prompt.md")
+    kit = +"### A\n\n## §1 Goal\n\nShip it.\n\n## §2 Notes\n"
+    kit << "Detail line for the lane. é✓\n" * 80
+    File.binwrite(canonical, kit)
+
+    # Equivalent but unnormalized spelling — proves expand_path matching, not string equality.
+    res = project.dispatch("demo", "A", bin: write_fake_pi(dir),
+      prompt: File.join(dir, "build", ".", "I01-demo-A", "prompt.md"))
+
+    assert_equal kit.b, File.binread(canonical), "same-path --prompt must leave the canonical kit untouched"
+    assert_equal canonical, res[:prompt_copied].to_s
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_dispatch_prompt_same_path_still_validates
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+
+    canonical = File.join(dir, "build", "I01-demo-A", "prompt.md")
+    File.binwrite(canonical, "   \n")
+
+    err = assert_raises(Space::Core::Error) do
+      project.dispatch("demo", "A", bin: write_fake_pi(dir), prompt: canonical)
+    end
+    assert_match(/Write this lane's prompt/, err.message)
+    assert_equal "   \n", File.binread(canonical), "refusal must not modify the canonical file"
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  def test_dispatch_prompt_overwrites_stale_canonical
+    dir = Dir.mktmpdir("architect-project-test")
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("demo")
+    project.worktree_add("my-repo", "demo", "A")
+
+    canonical = File.join(dir, "build", "I01-demo-A", "prompt.md")
+    File.binwrite(canonical, "stale bytes from a previous attempt\n")
+    scratch = File.join(dir, "tmp-lane-prompt.md")
+    scratch_kit = "### A\n\n## §1 Goal\n\nFresh kit. é✓\n"
+    File.binwrite(scratch, scratch_kit)
+
+    res = project.dispatch("demo", "A", bin: write_fake_pi(dir), prompt: scratch)
+
+    assert_equal scratch_kit.b, File.binread(canonical), "distinct --prompt must overwrite the stale canonical copy"
+    assert_equal canonical, res[:prompt_copied].to_s
+  ensure
+    FileUtils.rm_rf(dir)
+  end
+
   # ── brief_new! with authored content ───────────────────────────────────────
 
   def test_brief_new_with_content_writes_authored_brief
