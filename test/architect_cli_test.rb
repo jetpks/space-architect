@@ -2058,6 +2058,58 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
+  # I07: gate's inline output is bounded like rehearse's, and every run writes
+  # a durable transcript under build/gate/ whose final line the CLI names —
+  # the file holds the full stdout the terminal elided.
+  def test_gate_writes_a_transcript_and_bounds_inline_output
+    setup = temp_env
+    env   = setup.fetch(:env)
+
+    with_env(env) do
+      space_invoke("init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        slice = File.join(space_path, "architecture", "I01-demo.md")
+        text  = File.read(slice)
+        gate_yaml = <<~YAML
+          - id: noisy-gate
+            ac: AC1
+            cmd: "seq 1 30"
+            expect:
+              exit_code: 0
+        YAML
+        text = text.sub(/^```gates\n.*?^```/m, "```gates\n#{gate_yaml}```")
+        File.write(slice, text)
+        freeze_for_test("demo")
+        invoke("worktree", "add", "my-repo", "demo", "lane-a")
+
+        out, err = invoke("gate", "demo", "lane-a")
+
+        assert_empty err
+        assert_match(/── AC1 noisy-gate: seq 1 30  \(exit 0\)  \[PASS\]/, out)
+        assert_match(/… 10 more line\(s\) elided — full output in /, out, "inline output bounded at 20 lines")
+        (11..20).each { |n| assert_match(/^#{n}$/, out) }
+        refute_match(/^10$/, out, "the elided head lines stay out of the inline report")
+        assert_match(%r{transcript: .*build/gate/I01-demo-}, out, "the transcript line is the final line")
+
+        transcripts = Dir.glob(File.join(space_path, "build", "gate", "I01-demo-*.md"))
+        assert_equal 1, transcripts.size
+        transcript = File.read(transcripts.first)
+        assert_match(/\A# Gate transcript — demo — /, transcript)
+        assert_match(/\ALane: lane-a \(/, transcript.split("\n")[1])
+        assert_match(/## AC1 noisy-gate — PASS \(exit 0\)/, transcript)
+        (1..30).each { |n| assert_match(/^#{n}$/, transcript, "the full stdout lives in the transcript") }
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
   # ── rehearse: RED/GREEN/BROKEN/EMPTY reporting, dir, --record ─────────────
 
   def test_rehearse_reports_red_green_and_dir_before_freeze

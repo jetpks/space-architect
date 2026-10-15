@@ -1,29 +1,35 @@
 # DESIGN — The Architect Loop
 
-**A source-backed design for a harness in which a strong judgment model (the
-_architect_) plans and reviews while cheaper execution agents (the _builders_)
-do the implementation and research in fresh, isolated git worktrees — with the
-space as the memory.**
+**A source-backed design for a loop in which the human's architect session
+plans and rules, a detached coordinator works the plan iteration by
+iteration, and role subagents — spec, builders, judge, narrator — do the
+specification, implementation, and cold judgment in fresh, isolated git
+worktrees — with the space as the memory.**
 
-The loop is **model-agnostic**. What matters is the two _identities_ and the
-capability relationship between them — a strong reasoning model (or a human)
-judging; one or more cheaper, faster agents building — not which specific models
-fill those roles. Concrete model/CLI pairings are an implementation choice that
-belongs in the README and in per-lane configuration (`architect dispatch
---model …`, `architect variant add`), never baked into the methodology. Where a
-section below documents the concrete builder interface (§4) it names the
-_reference_ harness (headless `pi -p --mode json`) and treats the model id as a
-configurable placeholder.
+The loop is **model-agnostic**. It routes six roles (§2), each with its own
+model/thinking pin, from config (`architect.yaml`) — never hardcoded anywhere.
+What matters is the separation of concerns — judgment in a fresh session
+against criteria frozen before results existed; orchestration judged by
+structure; execution isolated in worktrees — not which specific models fill
+the roles. Pairing (same-vendor, cross-vendor, all-one-model) is an operator
+knob (§1–§2). Concrete model/CLI pairings are an implementation choice that
+belongs in the README and in configuration (`architect.yaml`, `architect
+dispatch --model …`, `architect variant add`), never baked into the
+methodology. Where a section below documents the concrete builder interface
+(§4) it names the _reference_ harness (headless `pi -p --mode json`) and
+treats the model id as a configurable placeholder.
 
 Project memory lives in the space's `architecture/` directory (committed to the
-space repo), scratch in `build/` (gitignored), and a project spans one or more
-repos under `repos/`. Each iteration is **one self-contained file**,
+space repo), decision-bearing loop documents (plans, spec digests, end-of-loop
+and exception reports, narrations) in `notes/` (also committed), scratch in
+`build/` (gitignored), and a project spans one or more repos under `repos/`.
+Each iteration is **one self-contained file**,
 `architecture/I<NN>-<name>.md`, grown section by section (Grounds /
 Specification / Acceptance Criteria / Builder Prompt / Builder Report /
 Verdict), **one commit per section** — the commits give the differentiation and
 git gives the change guarantees, so there are no separate `gates/`/`lanes/`/`prd/`
 directories. The `architect` command family
-(`init`/`new`/`rehearse`/`freeze`/`worktree`/`dispatch`/`verify`/`gate`/`integrate`/`status`)
+(`init`/`new`/`rehearse`/`freeze`/`worktree`/`dispatch`/`verify`/`gate`/`integrate`/`status`/`looplog`/`cost`)
 is the primary workspace mechanism, wrapping plain git: the freeze is the commit
 that adds the Acceptance Criteria, worktrees are `git worktree`, and verification
 is `git diff` + `git log`.
@@ -31,7 +37,8 @@ is `git diff` + `git log`.
 Researched June 2026 from Anthropic engineering posts, agent-harness research,
 and widely used community harness skills. Prescriptive claims below cite their
 sources (see §8 for the dated-provenance caveat). This document is the "why";
-the skill files in `skill/architect/` are the "how". The invariant rules R1–R12
+the skill files in `skill/` (`architect`, `architect-plan`, `architect-research`,
+`architect-vocabulary`) are the "how". The invariant rules R1–R12
 are model-agnostic and unchanged across provider retargets; only the concrete
 interface in §4 is implementation-specific.
 
@@ -63,10 +70,10 @@ Kit:
 > not the conversation. Dispatch fresh-context workers per task. Verify with an
 > agent that didn't write the code.**
 
-This loop adds one more separation on top: **a stronger model judges a different
-model's work in a fresh context.** How much that split buys depends on how far
-apart the two models are, and that is a knob the operator sets, not a fixed
-property of the design:
+This loop adds separation on top: **a judge that is a different session
+from the builder, graded against criteria frozen before results existed.**
+How much a capability gap adds on top of that depends on the pairing the
+operator configures (see §2).
 
 - The load-bearing separations in the cited evidence are **judge-≠-builder**,
   the **always-fresh judging context**, and a **capability gap where the judge
@@ -98,23 +105,42 @@ it is secondary to the coherence.
 
 ## 2. Roles
 
-| Role | Who | Effort | Owns |
-|---|---|---|---|
-| **Architect** | a strong reasoning model (or a human), run interactively | minutes per work block | arbitration, judging raw evidence against frozen gates, next-iteration specs, kill/continue calls |
-| **Builder** | a cheaper/faster model run headless, one per lane (high thinking budget default; architect may dial per lane) | ~30–60 min per lane | implementation, lane agents, raw-results reporting |
-| **Memory** | the space: per-iteration `architecture/I<NN>-<name>.md` files (indexed by `architecture/ARCHITECT.md`) + space git history | permanent | everything; not in the committed architecture = didn't happen |
-| **Human** | you | final | scope, irreversible calls, taste |
+The loop routes **six roles**, each with its own runtime identity and its own
+model/thinking pin. Which concrete model fills a role is an **operator
+decision expressed as config** (`architect.yaml`: space-local at the space
+root overriding `~/.config/space-architect/architect.yaml`, per role key) —
+never hardcoded in the CLI, the skills, or the extension. The strong/weak
+two-identity framing is retired: pairing (same-vendor, cross-vendor, all-one-
+model) is a knob the operator sets per space, and its consequences are the
+judge-≠-builder / fresh-context / frozen-gates separations of §1, which hold
+regardless of pairing.
 
-The architect runs with full reasoning; judgment over a small handoff file is not
-effort-sensitive, so there is no effort knob to pin — the skill carries no
-`effort:` frontmatter (that was a field of one early harness).
+| Role | Session | Owns |
+|---|---|---|
+| **Human** | you | final: scope, irreversible calls, taste, escalation rulings, landing |
+| **Architect** | interactive session the human talks to | plans, arbitration, kill/continue calls when consulted, landing; conversational by default |
+| **Coordinator** | detached, run while the human's session may end | drives the plan: spawns/tends spec → provision → builders → judge per iteration; relays escalations verbatim; never does lane work |
+| **Spec** | one subagent per iteration | Grounds/Specification/Acceptance Criteria; rehearse; freeze; the `notes/spec-digest-*` handoff |
+| **Builder** | one subagent per lane | implementation in an isolated worktree; raw-results report; never commits |
+| **Judge** | one subagent per iteration, fresh session | mechanical post-flight, cold gates, PHASE 0 rulings, per-AC verdicts, integration |
+| **Narrator** | one subagent per settled event | one `notes/narrative-*` file — verbatim facts, best-effort, never a gate |
+| **Memory** | the space: `architecture/I<NN>-*.md` + `ARCHITECT.md` + `notes/` + space git history | everything; not in the committed space = didn't happen |
 
-Why a high thinking budget for the builder: it runs unattended for a stretch
-(30–60 minutes in practice), where the metric to buy is review-survival, not
-first-token latency — so default to a high budget and let the architect downgrade
-routine, tightly-specified lanes. How thinking depth is set is harness-specific —
-a reasoning-effort flag on some CLIs, escalation keywords or an env var on others
-(see §4). This is a per-lane judgment call the spec records explicitly.
+Two operating shapes over the same roles: the **coordinator path** (default —
+the human's architect session plans and hands off via `/loop`; the coordinator
+works the plan, so the expensive interactive session never absorbs a builder
+wakeup) and the **interactive path** (the architect session runs the
+iteration steps itself — requested, or when the coordinator is down). The
+hard rules are shape-independent.
+
+Why a cheap model can drive: the coordinator's work is orchestration judged
+by structure — spawn, tend, relay, narrate, stop-on-exception — never lane
+work, never judgment. Routing it to a fast model moves the hot path off the
+expensive interactive sessions; judgment stays on the strong models (spec,
+judge) where review-survival matters. The builder runs unattended for a
+stretch (30–60 minutes in practice), where the metric to buy is
+review-survival, not first-token latency — so its thinking budget defaults
+high, downgraded per lane by the spec for routine, tightly-specified work.
 
 The concrete model/CLI pairing is an operator choice — the same repo can run an
 all-one-vendor pairing, a cross-vendor pairing for stronger review independence,
@@ -240,7 +266,7 @@ edited or widened after results (R2), the fix cannot land at judging time; it
 lands at authoring: property criteria bounded from the defect's side only (a
 floor, not an equality), exactness reserved for criteria whose number is itself
 the deliverable, and the pre-freeze check (snapshot, control, mechanism,
-dry-run) in SKILL.md §4. The builder side is the lane-prompt's
+dry-run) in SKILL.md §Interactive path. The builder side is the lane-prompt's
 letter-versus-spirit clause (dispatch.md): a lane that would have to degrade the
 artifact to satisfy an AC's letter builds the stated property and reports the
 conflict — a permission valve, so the honest path never requires tampering with
@@ -293,7 +319,7 @@ boolean and silently discards its argument. The code lane verified that against
 the live gem and shipped a working `--skip-rehearse`; the prose lane, writing
 faithfully against the frozen contract exactly as a code/prose split intends,
 documented the broken spelling in four places. Hence the pre-freeze
-**interface** item (SKILL.md §4): any CLI surface a Specification names — a
+**interface** item (SKILL.md §Interactive path): any CLI surface a Specification names — a
 verb, a flag spelling, a subcommand — is executed once before it is frozen,
 because **a frozen interface is only safe if it is implementable** — precisely
 the assumption a code/prose lane split rests on when it says the lanes need not

@@ -58,15 +58,24 @@ currently-checked-out branch (typically `project/<slug>` after `architect
 integrate`). With a lane name, gates run in that lane's worktree.
 
 ```text
-── AC1: test -f docs/hello.md && … && echo HELLO_OK  (exit 0)  [PASS]
+── AC1 noisy-gate: seq 1 30  (exit 0)  [PASS]
    dir: ~/architect/spaces/<id>/build/I01-hello-loop-docs/wt
-HELLO_OK
+   … 10 more line(s) elided — full output in ~/architect/spaces/<id>/build/gate/I01-hello-….md
 
 Mechanical gate results above; the Acceptance-Criteria verdict — necessary, not
 sufficient — remains the architect's.
+transcript: ~/architect/spaces/<id>/build/gate/I01-hello-….md
 ```
 
 Exits `1` when any gate fails, `0` otherwise.
+
+Every gate run that executes gates also writes ONE durable markdown transcript
+under `build/gate/` — the full, unbounded counterpart of the bounded terminal
+report, holding each gate's command, dir, verdict, reason, and complete
+stdout+stderr (`# Gate transcript — <name> — <timestamp>`). Agent runners read
+the last lines of a terminal tail; the file is the record a judge reads whole.
+`architect rehearse` writes the analogous rehearsal transcript under
+`build/rehearse/`.
 
 ```sh
 architect gate my-feature
