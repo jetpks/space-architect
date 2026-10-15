@@ -562,7 +562,7 @@ module Space::Architect
         phase 20, "Build"
         argument :iteration, required: true,  desc: "Iteration name"
         argument :space,     required: false, desc: "Space identifier (default: $PWD)"
-        option   :base,      default: nil,    desc: "Base ref override (default: project/<slug> HEAD if it exists, else the repo's default branch)"
+        option   :base,      default: nil,    desc: "Base ref override (default: project/<slug> fast-forward-synced from the repo's default branch first — diverged → refuse; --base skips the sync and cuts exactly the given ref)"
         option   :lane,      default: nil,    desc: "Provision only this lane (default: all declared lanes)"
         option   :force,     type: :boolean, default: false, desc: "Clear and re-create a stale (unregistered) worktree directory"
 
@@ -575,6 +575,12 @@ module Space::Architect
               if results.empty?
                 terminal.say "No declared lanes to provision for '#{iteration}'"
               else
+                # Sync report first (the sync ran before any cut): one line per
+                # moved branch — repo, branch, new short tip. No-op syncs are
+                # nil here and print nothing.
+                results.filter_map { |r| r[:synced] }.uniq.each do |s|
+                  terminal.say "#{s[:repo]}: fast-forwarded #{s[:branch]} to #{s[:sha][0, 8]}"
+                end
                 results.each do |r|
                   state = case r[:outcome]
                   when :created   then "created"

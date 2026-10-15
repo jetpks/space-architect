@@ -929,12 +929,21 @@ module Space::Architect
       base_explicit = !base.nil?
       refuse_repoint_if_dirty!(iteration, lanes, base, iteration_id(entry)) if base_explicit && !force
 
+      # Sync-or-refuse ONCE per distinct repo of the selected set (lane order,
+      # first occurrence) BEFORE any worktree is cut — a divergence aborts the
+      # entire provision. An explicit --base is the deliberate case (#88): the
+      # pin is cut exactly as given, no sync, no divergence refusal.
+      synced = {}
+      unless base_explicit
+        lanes.map { |l| l["repo"] }.uniq.each { |repo| synced[repo] = sync_integration_branch!(repo, iteration) }
+      end
+
       lanes.map do |l|
         name = l["name"]
         result = worktree_add(l["repo"], iteration, name, base: resolve_lane_base(l["repo"], base),
                               base_explicit: base_explicit, force: force, **recorded_lane_fields(l))
         { lane: name, worktree: result[:worktree], base_sha: result[:base_sha], outcome: result[:outcome],
-          discarded: result[:discarded] }
+          discarded: result[:discarded], synced: synced[l["repo"]] }
       end
     end
 
@@ -1622,6 +1631,15 @@ module Space::Architect
       wt_path = space.path.join(lane_entry["worktree"] || "build/#{iteration_id(entry)}-#{lane}/wt")
       return lane_entry if wt_path.exist? && worktree_registered?(repo_path, wt_path)
 
+      # Same sync-or-refuse as provision, immediately before the cut — a
+      # dispatch/gate/integrate/verify that materializes a missing worktree must
+      # never cut it from a stale integration tip. Already-materialized lanes
+      # returned above and stay a true no-op. The inform goes on $stderr, like
+      # worktree_add's own informs on this path; no-op syncs print nothing.
+      report = sync_integration_branch!(lane_entry["repo"], iteration)
+      $stderr.puts "#{report[:repo]}: fast-forwarded #{report[:branch]} to #{report[:sha][0, 8]} — " \
+        "synced before materializing #{iteration}/#{lane}" if report
+
       worktree_add(lane_entry["repo"], iteration, lane, base: resolve_lane_base(lane_entry["repo"], nil),
                    base_explicit: false, **recorded_lane_fields(lane_entry))
       (slice_entry(iteration)["lanes"] || []).find { |l| l["name"] == lane }
@@ -1733,6 +1751,57 @@ module Space::Architect
       return out.strip.sub(%r{\Aorigin/}, "") if st.success? && !out.strip.empty?
       out, _, st = git_capture("-C", repo_path.to_s, "symbolic-ref", "--short", "HEAD")
       st.success? && !out.strip.empty? ? out.strip : "HEAD"
+    end
+
+    # Fast-forward the repo's project integration branch from its default branch
+    # BEFORE any lane worktree is cut from it (I06 provision-sync — the I05 burn:
+    # a worktree cut from a stale project/<slug> tip). Local-to-local only — no
+    # fetch/pull, no remote-tracking ref is read or written. Compare before moving:
+    # default not ahead → no-op (nil, callers print nothing); default ahead and
+    # integration not ahead → fast-forward; both ahead → refuse (a human merges
+    # deliberately, or pins --base) — --force has no bypass. Bang: it raises.
+    # Returns nil for a no-op, or { repo:, branch:, sha: } for the moved ref so
+    # callers can report the movement (never silently move a branch).
+    def sync_integration_branch!(repo, iteration)
+      repo_path = space.path.join("repos", repo)
+      integration = project_integration_branch
+      return nil unless branch_exists?(repo_path, integration)
+
+      default = repo_default_branch(repo_path)
+      counts_out, counts_err, counts_st = git_capture("-C", repo_path.to_s, "rev-list", "--left-right", "--count",
+        "#{default}...#{integration}")
+      unless counts_st.success?
+        raise Space::Core::Error, "Cannot compare #{default}...#{integration} in repos/#{repo} — #{counts_err.strip}"
+      end
+
+      default_ahead, integration_ahead = counts_out.strip.split.map(&:to_i)
+      return nil if default_ahead.zero?
+
+      default_tip, = git_capture("-C", repo_path.to_s, "rev-parse", default)
+      integration_tip, = git_capture("-C", repo_path.to_s, "rev-parse", integration)
+      if integration_ahead.positive?
+        raise Space::Core::Error,
+          "Refusing to provision '#{iteration}' — repos/#{repo} has diverged: #{default} (#{default_tip[0, 8]}) and " \
+          "#{integration} (#{integration_tip[0, 8]}) each hold commits the other lacks " \
+          "(#{default} ahead by #{default_ahead}, #{integration} ahead by #{integration_ahead}) — not fast-forwardable. " \
+          "A human must merge #{default} into #{integration} deliberately, or pin the base explicitly with " \
+          "`architect provision #{iteration} --base <sha>`. --force does not bypass this refusal."
+      end
+
+      head_out, _, head_st = git_capture("-C", repo_path.to_s, "symbolic-ref", "--short", "HEAD")
+      if head_st.success? && head_out.strip == integration
+        # The integration branch is the clone's checked-out branch (the real
+        # post-integrate state — merge_lane! checks it out) — fetch refuses a
+        # checked-out dst, so fast-forward via merge instead.
+        git_run("-C", repo_path.to_s, "merge", "--ff-only", default)
+      else
+        # Unprefixed refspecs are ff-only by construction — git rejects a non-ff
+        # update here, so the branch can only ever move forward.
+        git_run("-C", repo_path.to_s, "fetch", ".", "#{default}:#{integration}")
+      end
+
+      new_tip, = git_capture("-C", repo_path.to_s, "rev-parse", integration)
+      { repo: repo, branch: integration, sha: new_tip.strip }
     end
 
     def slice_entry(iteration)
