@@ -6,6 +6,7 @@ require_relative "../jobs_client"
 require_relative "../conversations_client"
 require_relative "../loop_cost"
 require_relative "../session_sync"
+require_relative "../space_push"
 
 module Space::Architect
   module CLI
@@ -208,6 +209,41 @@ module Space::Architect
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
           end
+        end
+      end
+
+      class Push < BaseCommand
+        desc "Pack the current space and push it to a space-server for import"
+        phase 53, "Project"
+        argument :space, required: false, desc: "Space identifier (default: $PWD)"
+        option :host,  required: true, desc: "Base URL of the space-server"
+        option :token, required: true, desc: "Bearer token for authorization"
+
+        def call(space: nil, host: nil, token: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            raise Space::Core::Error, "--host is required" unless host
+            raise Space::Core::Error, "--token is required" unless token
+
+            render(store.find(space)) do |sp|
+              bundle = SpacePush::Packer.new(sp.path).pack
+              begin
+                terminal.say "Packed #{sp.id}: #{format_bytes(File.size(bundle))}"
+                summary = SpacePush.new(host, token).push(bundle)
+                terminal.say "Imported: #{summary['slug']} (id #{summary['id']}) — " \
+                  "#{summary['iterations']} iterations, #{summary['artifacts']} artifacts, #{summary['runs']} runs"
+                CLI.record_outcome(Outcome.new(exit_code: 0))
+              ensure
+                File.delete(bundle)
+              end
+            end
+          end
+        end
+
+        private
+
+        def format_bytes(size)
+          format("%.1f MiB", size.to_f / (1024 * 1024))
         end
       end
 
@@ -1444,6 +1480,7 @@ Space::Architect::CLI::Registry.register "init",   Space::Architect::CLI::Archit
 Space::Architect::CLI::Registry.register "ground", Space::Architect::CLI::Architect::Ground
 Space::Architect::CLI::Registry.register "new",    Space::Architect::CLI::Architect::New
 Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Architect::Status
+Space::Architect::CLI::Registry.register "push",   Space::Architect::CLI::Architect::Push
 Space::Architect::CLI::Registry.register "sync",   Space::Architect::CLI::Architect::Sync
 Space::Architect::CLI::Registry.register "rehearse", Space::Architect::CLI::Architect::Rehearse
 Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
