@@ -1,5 +1,53 @@
 # Builder dispatch reference
 
+## The coordinator path (default) — how builders actually launch
+
+When a plan runs under the coordinator (see SKILL.md §Starting a loop), the
+coordinator itself spawns each role as a **pi subagent** — native async
+completion wakes, not `architect dispatch` headless runs. Per iteration:
+
+1. **spec** — agent `architect-spec`, cwd = the space root, task = the plan
+   ENTRY verbatim. Writes Grounds/Specification/Acceptance Criteria via
+   `architect section`, rehearses, freezes, assembles each lane's prompt in a
+   scratch file, records the scratch paths in its report, and writes the
+   `notes/spec-digest-*` handoff. `timeoutMs` 3600000 (1h).
+2. **provision** — the coordinator runs `architect provision <iteration>` via
+   bash; the CLI materializes every declared lane's worktree + lane branch.
+3. **prompt copy** — the coordinator copies each spec-assembled scratch prompt
+   to `build/<id>-<lane>/prompt.md` (canonical path, CLI-owned in the
+   interactive path; the coordinator's `cp` is the sanctioned equivalent).
+4. **builder per lane** — agent `architect-builder`, cwd = that lane's
+   worktree, task = read `build/<id>-<lane>/prompt.md` before anything else.
+   `timeoutMs` 7200000 (2h). The lane-prompt template below is the contract
+   the spec assembles against.
+5. **judge** — agent `architect-judge`, cwd = the space root, task = judge the
+   iteration by id. `timeoutMs` 7200000 (2h). The judge is a fresh session —
+   §1 fresh-session judgment holds structurally: the judge session never
+   dispatched or built anything.
+6. **narrator** — one `architect-narrator` spawn per settled event
+   (builders-settled, judge-settled, verdict-landed, exception, plan-complete),
+   `timeoutMs` 300000 (5m), best-effort, never a gate on the loop.
+
+Spawn contract (all paths): every spawn pins its model explicitly
+(provider/id[:thinking]) and carries an explicit `timeoutMs` — never the
+30-minute default. A child that hit its timeout is **replaced in-place, never
+resumed** (upstream resume of a timed-out session fails deterministically):
+exactly one replacement, same cwd, larger `timeoutMs`, and auditing the
+inherited uncommitted diff is its first task. Infrastructure death (failed to
+start, crashed before work) gets one relaunch. Anything unrootable is an
+exception: `notes/exception-<ts>.md`, narrate, terminate — no improvised
+repairs.
+
+The coordinator never edits files except its own `notes/` reports and never
+writes into `architecture/`.
+
+`architect dispatch` (everything below) remains the **interactive-path**
+mechanism — and the reference implementation of the lane contract the
+coordinator's spawns inherit (same prompt template, same builder guard
+discipline — interactive dispatch injects the guard via `-e`; a coordinator
+spawn relies on the playbook's no-git-writes rule plus the judge's post-flight
+`git log` check, which stays the authoritative proof in both paths).
+
 Verified against `pi` 1.1.0 (badlogic/pi-mono) headless print mode — the reference
 harness. The builder is `pi -p` (`--print`, the non-interactive mode) pinned to
 the configured builder model (`<builder-model>`) — a cheaper model run headless
@@ -29,9 +77,14 @@ not airtight (a builder can shell out — `sh -c 'git commit …'` — past the
 parse), so the post-flight `git log` is what the loop actually trusts.
 If a lane committed, treat the worktree as tampered: reset and re-dispatch.
 
-**Preflight (once per environment):** run `pi --version`, and confirm the
+**Preflight (once per environment):** run `pi --version`, confirm the
 builder model resolves with a one-message probe
-(`echo ok | pi -p --model <builder-model>`). No API-key/env ceremony — provider
+(`echo ok | pi -p --model <builder-model>`), confirm the role playbooks are
+installed (`architect install-agents` — once per machine, idempotent), and
+for a coordinator run confirm the routing config resolves — an
+`architect.yaml` role pinning a model the registry doesn't know throws loudly
+at /loop pre-flight, before any spawn (/loop pre-flight does this for you).
+No API-key/env ceremony — provider
 config (e.g. the Fireworks key) resolves from `~/.pi/agent`; pi needs no
 `ANTHROPIC_*` env. Past that one-time check, no dispatch needs a manual
 start-check: every foreground dispatch self-verifies. Shortly after launch it
@@ -154,17 +207,19 @@ The guard is a first line, not a sandbox — the post-flight `git log` check
 ### Integration (judging session — after per-lane post-flight passes)
 
 This block runs in the judging session, not the dispatch session — the dispatch
-session's job ends when builders finish (see SKILL.md §5–6). You decide which
+session's job ends when builders finish (see SKILL.md §Interactive path). You decide which
 lanes pass; the CLI does the git mechanics. Canonical path:
 
 ```bash
 architect integrate <iteration> --lanes <passing-set>   # e.g. --lanes lane-a,lane-b
-architect gate <iteration>                              # integration smoke (raw output; verdict stays yours)
+architect gate <iteration>    # integration smoke — writes the full transcript to
+                              # build/gate/<id>-<ts>.md and prints the path; the
+                              # inline report is bounded, the file is the record
 architect integrate <iteration> --lanes <passing-set> --teardown   # or remove worktrees + lane branches after
 # end of project: landing is the architect's, not a CLI command — write the PR
 # body to a fresh build/land/<repo>-pr-body-<yyyymmdd-hhmm>.md yourself, then
 # present the paste-and-run block (cd, git push -u origin project/<slug>,
-# gh pr create) — see SKILL.md §6
+# gh pr create) — see SKILL.md §After a loop lands
 ```
 
 `architect integrate` commits each named lane on its branch and merges it
@@ -184,6 +239,9 @@ per lane when that lane's worktree still holds uncommitted work, untracked
 files included, because that's what a dispatched lane always holds; `--force`
 overrides and discards it. The `--lanes <passing-set>` integration path itself
 is unaffected — `integrate` commits each lane's work before tearing it down.
+`architect gate` never evaluates — it streams raw output for the judging
+session to read; its transcript file (`build/gate/…`) holds every gate's
+complete stdout/stderr when the terminal report has been trimmed.
 
 Under the hood / manual fallback (one lane shown):
 
@@ -369,6 +427,11 @@ instruction.
   blocking `while pgrep …; sleep` wait loop as a Bash command — that is itself
   a launcher that ties up a turn. When you return to a lane, check liveness via
   run-log growth (the stall rules below still apply unchanged).
+- Visibility while anything runs: `architect looplog` follows every active
+  subagent run in the space (transcripts from pi's sessions dir and the
+  space's `build/` tree); `--list` inventories without following;
+  `architect runlog build/<id>-<lane>/run.jsonl` pretty-prints one dispatch
+  event stream (or streams it: `tail -f … | architect runlog`).
 - Pin the model explicitly. The tool does this automatically (`--model
   <builder-model>`). A floating alias (a bare "latest"/tier tag) drifts to
   whatever ships next — fine interactively, but automations pin the full id so a
@@ -456,6 +519,14 @@ look broken).
 Paste the lane-prompt into an interactive `pi` session (no `-p`). pi's agent
 loop runs plan→act→test against the block's stopping condition while you watch
 and steer. Use when the human wants to babysit a run.
+
+A coordinator can be launched the same way when /loop is unavailable: spawn
+the agent `architect-coordinator` (role agents resolve from
+`~/.pi/agent/agents/`, user-level, installed by `architect install-agents` —
+no project trust involved) with cwd = the space root, the plan text verbatim
+as the task, the coordinator's model pin from `architect.yaml` in the spawn's
+model field, and `timeoutMs` 43200000 (12h) — the exact contract
+`coordinatorSpawnScript` in architect-loop.ts assembles.
 
 ## Lane-prompt template
 
