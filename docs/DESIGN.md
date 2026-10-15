@@ -1,29 +1,35 @@
 # DESIGN — The Architect Loop
 
-**A source-backed design for a harness in which a strong judgment model (the
-_architect_) plans and reviews while cheaper execution agents (the _builders_)
-do the implementation and research in fresh, isolated git worktrees — with the
-space as the memory.**
+**A source-backed design for a loop in which the human's architect session
+plans and rules, a detached coordinator works the plan iteration by
+iteration, and role subagents — spec, builders, judge, narrator — do the
+specification, implementation, and cold judgment in fresh, isolated git
+worktrees — with the space as the memory.**
 
-The loop is **model-agnostic**. What matters is the two _identities_ and the
-capability relationship between them — a strong reasoning model (or a human)
-judging; one or more cheaper, faster agents building — not which specific models
-fill those roles. Concrete model/CLI pairings are an implementation choice that
-belongs in the README and in per-lane configuration (`architect dispatch
---model …`, `architect variant add`), never baked into the methodology. Where a
-section below documents the concrete builder interface (§4) it names the
-_reference_ harness (headless `pi -p --mode json`) and treats the model id as a
-configurable placeholder.
+The loop is **model-agnostic**. It routes six roles (§2), each with its own
+model/thinking pin, from config (`architect.yaml`) — never hardcoded anywhere.
+What matters is the separation of concerns — judgment in a fresh session
+against criteria frozen before results existed; orchestration judged by
+structure; execution isolated in worktrees — not which specific models fill
+the roles. Pairing (same-vendor, cross-vendor, all-one-model) is an operator
+knob (§1–§2). Concrete model/CLI pairings are an implementation choice that
+belongs in the README and in configuration (`architect.yaml`, `architect
+dispatch --model …`, `architect variant add`), never baked into the
+methodology. Where a section below documents the concrete builder interface
+(§4) it names the _reference_ harness (headless `pi -p --mode json`) and
+treats the model id as a configurable placeholder.
 
 Project memory lives in the space's `architecture/` directory (committed to the
-space repo), scratch in `build/` (gitignored), and a project spans one or more
-repos under `repos/`. Each iteration is **one self-contained file**,
+space repo), decision-bearing loop documents (plans, spec digests, end-of-loop
+and exception reports, narrations) in `notes/` (also committed), scratch in
+`build/` (gitignored), and a project spans one or more repos under `repos/`.
+Each iteration is **one self-contained file**,
 `architecture/I<NN>-<name>.md`, grown section by section (Grounds /
 Specification / Acceptance Criteria / Builder Prompt / Builder Report /
 Verdict), **one commit per section** — the commits give the differentiation and
 git gives the change guarantees, so there are no separate `gates/`/`lanes/`/`prd/`
 directories. The `architect` command family
-(`init`/`new`/`rehearse`/`freeze`/`worktree`/`dispatch`/`verify`/`gate`/`integrate`/`status`)
+(`init`/`new`/`rehearse`/`freeze`/`worktree`/`dispatch`/`verify`/`gate`/`integrate`/`status`/`looplog`/`cost`)
 is the primary workspace mechanism, wrapping plain git: the freeze is the commit
 that adds the Acceptance Criteria, worktrees are `git worktree`, and verification
 is `git diff` + `git log`.
@@ -31,7 +37,8 @@ is `git diff` + `git log`.
 Researched June 2026 from Anthropic engineering posts, agent-harness research,
 and widely used community harness skills. Prescriptive claims below cite their
 sources (see §8 for the dated-provenance caveat). This document is the "why";
-the skill files in `skill/architect/` are the "how". The invariant rules R1–R12
+the skill files in `skill/` (`architect`, `architect-plan`, `architect-research`,
+`architect-vocabulary`) are the "how". The invariant rules R1–R12
 are model-agnostic and unchanged across provider retargets; only the concrete
 interface in §4 is implementation-specific.
 
