@@ -17,9 +17,9 @@ module Space::Architect
   # XDG_CONFIG_HOME); space-local is architect.yaml beside the loaded
   # space.yaml (the CLI already resolved the space — no walk-up).
   module Routing
-    ROLES          = %w[architect spec builder judge coordinator].freeze
-    # The four agent roles that must be routed after the merge; `architect` is optional.
-    REQUIRED_ROLES = %w[spec builder judge coordinator].freeze
+    ROLES          = %w[architect spec builder judge coordinator narrator].freeze
+    # The five agent roles that must be routed after the merge; `architect` is optional.
+    REQUIRED_ROLES = %w[spec builder judge coordinator narrator].freeze
     ENTRY_KEYS     = %w[model thinking].freeze
 
     def self.global_path
@@ -34,7 +34,7 @@ module Space::Architect
 
     # Parse one file's text into { role => {"model" => id, "thinking" => level|nil} }.
     # +path+ is used only in error messages. Frozen v1 rules: integer version 1,
-    # the five known roles, entries ⊆ {model, thinking} with a non-empty model,
+    # the six known roles, entries ⊆ {model, thinking} with a non-empty model,
     # duplicate mapping keys rejected (psych's plain load silently keeps the
     # last — the npm yaml the extension parses with throws), aliases accepted,
     # a trailing :level suffix on model parsed via Harness.parse_model_suffix

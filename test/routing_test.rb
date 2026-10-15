@@ -15,6 +15,7 @@ class RoutingTest < Space::ArchitectTest
       builder:     { model: "prov/global-builder" }
       judge:       { model: "prov/judge" }
       coordinator: { model: "prov/coordinator" }
+      narrator:    { model: "prov/narrator" }
   YAML
 
   def routing
@@ -62,6 +63,7 @@ class RoutingTest < Space::ArchitectTest
       assert_equal({ "model" => "prov/spec",        "thinking" => "low"  }, merged["spec"])
       assert_equal({ "model" => "prov/judge",       "thinking" => nil    }, merged["judge"])
       assert_equal({ "model" => "prov/coordinator", "thinking" => nil    }, merged["coordinator"])
+      assert_equal({ "model" => "prov/narrator",    "thinking" => nil    }, merged["narrator"])
       assert_equal "prov/architect", merged["architect"]["model"]
     end
   end
@@ -94,7 +96,7 @@ class RoutingTest < Space::ArchitectTest
   end
 
   def test_unknown_role_key_fails_loud
-    assert_config_error(<<~YAML, /roles\.qa — expected one of architect\|spec\|builder\|judge\|coordinator, got "qa"/)
+    assert_config_error(<<~YAML, /roles\.qa — expected one of architect\|spec\|builder\|judge\|coordinator\|narrator, got "qa"/)
       version: 1
       roles:
         qa: { model: "prov/qa" }
@@ -200,7 +202,43 @@ class RoutingTest < Space::ArchitectTest
     with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => global) do
       error = assert_raises(Space::Core::Error) { routing.for_space(@dir) }
       assert_match(/#{Regexp.escape(global)} \+ #{Regexp.escape(File.join(@dir, "architect.yaml"))}/, error.message)
-      assert_match(/roles\.spec — expected all agent roles spec\|builder\|judge\|coordinator to be routed, got \(missing\)/, error.message)
+      assert_match(/roles\.spec — expected all agent roles spec\|builder\|judge\|coordinator\|narrator to be routed, got \(missing\)/, error.message)
+    end
+  end
+
+  # I05: narrator is the fifth required role — a merge routing only the original
+  # four fails loud naming roles.narrator and the full required set.
+  def test_missing_narrator_after_merge_fails_loud
+    global = write_global(<<~YAML)
+      version: 1
+      roles:
+        spec:        { model: "prov/spec" }
+        builder:     { model: "prov/builder" }
+        judge:       { model: "prov/judge" }
+        coordinator: { model: "prov/coordinator" }
+    YAML
+
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => global) do
+      error = assert_raises(Space::Core::Error) { routing.for_space(@dir) }
+      assert_match(/roles\.narrator — expected all agent roles spec\|builder\|judge\|coordinator\|narrator to be routed, got \(missing\)/, error.message)
+    end
+  end
+
+  # I05: narrator routes like any other role — the space-local entry overrides
+  # the global one per role key, the rest inherited.
+  def test_narrator_routes_through_global_and_space_merge
+    global = write_global(GLOBAL_YAML)
+    File.write(File.join(@dir, "architect.yaml"), <<~YAML)
+      version: 1
+      roles:
+        narrator: { model: "prov/space-narrator", thinking: low }
+    YAML
+
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => global) do
+      merged = routing.for_space(@dir)
+      assert_equal({ "model" => "prov/space-narrator", "thinking" => "low" }, merged["narrator"])
+      assert_equal({ "model" => "prov/spec", "thinking" => "low" }, merged["spec"])
+      assert_equal "prov/judge", merged["judge"]["model"]
     end
   end
 
@@ -247,7 +285,7 @@ class RoutingTest < Space::ArchitectTest
   end
 
   def test_non_string_role_key_fails_loud
-    assert_config_error(<<~YAML, /roles\.1 — expected one of architect\|spec\|builder\|judge\|coordinator, got 1/)
+    assert_config_error(<<~YAML, /roles\.1 — expected one of architect\|spec\|builder\|judge\|coordinator\|narrator, got 1/)
       version: 1
       roles:
         1: { model: "prov/builder" }

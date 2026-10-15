@@ -285,7 +285,7 @@ class ArchitectProjectTest < Space::ArchitectTest
   # ── architect.yaml routing layer (I02) ──────────────────────────────────
 
   # Full v1 routing fixture with the builder entry swapped in; every agent role
-  # routed, since for_space requires all four after merge.
+  # routed, since for_space requires all five after merge.
   def routing_yaml(builder_entry)
     <<~YAML
       version: 1
@@ -294,6 +294,7 @@ class ArchitectProjectTest < Space::ArchitectTest
         builder:     #{builder_entry}
         judge:       { model: "prov/judge" }
         coordinator: { model: "prov/coordinator" }
+        narrator:    { model: "prov/narrator" }
     YAML
   end
 
