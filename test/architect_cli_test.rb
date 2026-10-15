@@ -571,6 +571,7 @@ class ArchitectCLITest < Space::ArchitectTest
             builder:     { model: "prov/config-status" }
             judge:       { model: "prov/judge" }
             coordinator: { model: "prov/coordinator" }
+            narrator:    { model: "prov/narrator" }
         YAML
         out, err = invoke("status")
         assert_empty err
