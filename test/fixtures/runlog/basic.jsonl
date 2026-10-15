@@ -1,0 +1,19 @@
+{"type":"message_end","message":{"role":"user","timestamp":1700000000000}}
+{"type":"message_start","message":{"role":"assistant"}}
+{"type":"message_update","assistantMessageEvent":{"type":"thinking_start"}}
+{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":" thinking about "}}
+{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"the task"}}
+{"type":"message_update","assistantMessageEvent":{"type":"thinking_end","content":" thinking about the task"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_start"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Running the "}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"check now."}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","content":"Running the check now."}}
+{"type":"message_end","message":{"role":"assistant"}}
+{"type":"turn_end","message":{"usage":{"output":12,"cacheRead":40,"cost":{"total":0.0025}},"durationMs":1400,"stopReason":"toolUse","timestamp":1700000001500}}
+{"type":"tool_execution_start","toolName":"read","args":{"path":"/tmp/runlog-fixture.txt","limit":3}}
+{"type":"tool_execution_end","result":{"content":[{"type":"text","text":"alpha beta\ngamma delta\nepsilon"}]},"isError":false}
+{"type":"message_start","message":{"role":"assistant"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_start"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"All checks pass."}}
+{"type":"message_end","message":{"role":"assistant"}}
+{"type":"turn_end","message":{"usage":{"output":37,"cacheRead":65,"cost":{"total":0.0099}},"durationMs":2600,"stopReason":"stop","timestamp":1700000004000}}

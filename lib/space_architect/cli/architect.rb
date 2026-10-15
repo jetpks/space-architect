@@ -6,6 +6,9 @@ require_relative "../jobs_client"
 require_relative "../conversations_client"
 require_relative "../loop_cost"
 require_relative "../session_sync"
+require_relative "../runlog"
+require_relative "../looplog"
+require_relative "../extension_installer"
 
 module Space::Architect
   module CLI
@@ -230,7 +233,57 @@ module Space::Architect
         end
       end
 
+      # I07: the bounded per-gate terminal report, shared byte-for-byte by
+      # rehearse and gate — one identity line per gate, at most
+      # OUTPUT_LINE_CAP lines of tail output, and a pointer at the transcript
+      # that holds the rest (the same one-instrument discipline as
+      # #execute_gates below the CLI). The verdict label, the reason
+      # visibility, and any verdict-specific advisory are hooks; everything
+      # else — identity line shape, dir line, output elision — is shared so the
+      # two commands can never drift.
+      module GateRendering
+        # Identity (AC label, gate id, verdict, exit code) always lands on one
+        # stdout line, however many lines `cmd` spans — the command itself is
+        # shown as at most its first line, truncated; the full command lives
+        # in the transcript.
+        CMD_LINE_MAX    = 100
+        OUTPUT_LINE_CAP = 20
+
+        def render_gate(g, transcript_path)
+          terminal.say ""
+          terminal.say "── #{g[:ac].empty? ? "(gate)" : g[:ac]} #{g[:id]}: #{truncated_cmd(g[:cmd])}  (exit #{g[:exit_code].inspect})  [#{gate_verdict(g)}]"
+          terminal.say "   dir: #{terminal.path(g[:dir])}"
+          terminal.say "   reason: #{g[:reason]}" if gate_reason_visible?(g) && !g[:reason].to_s.empty?
+          if g[:shared_with]&.any?
+            terminal.say "   shared execution with: #{g[:shared_with].join(', ')} (identical cmd+dir, captured once)"
+          end
+          render_gate_extras(g)
+          render_gate_output(g, transcript_path)
+        end
+
+        def truncated_cmd(cmd)
+          first, *rest = cmd.to_s.each_line.map(&:chomp)
+          clipped = first.length > CMD_LINE_MAX ? "#{first[0, CMD_LINE_MAX]}…" : first
+          rest.any? || clipped != first ? "#{clipped} …" : clipped
+        end
+
+        def render_gate_output(g, transcript_path)
+          combined = [g[:stdout], g[:stderr]].map { |s| s.to_s.rstrip }.reject(&:empty?).join("\n")
+          return if combined.empty?
+
+          lines = combined.lines(chomp: true)
+          if lines.size > OUTPUT_LINE_CAP
+            terminal.say lines.last(OUTPUT_LINE_CAP).join("\n")
+            terminal.say "   … #{lines.size - OUTPUT_LINE_CAP} more line(s) elided — full output in #{terminal.path(transcript_path)}"
+          else
+            terminal.say lines.join("\n")
+          end
+        end
+      end
+
       class Rehearse < BaseCommand
+        include GateRendering
+
         desc "Rehearse the DRAFTED (unfrozen, working-tree) gates against the repo checkout and report RED/GREEN/BROKEN/EMPTY — runs and reports, never judges"
         phase 12, "Spec"
         argument :iteration, required: true,  desc: "Iteration name"
@@ -283,6 +336,20 @@ module Space::Architect
           "Discrimination report only — this runs and reports; it never judges whether these gates are good, bad, or ready."
         end
 
+        # GateRendering hooks: rehearse renders the RED/GREEN/BROKEN verdict,
+        # shows a gate's reason whenever one exists, and adds the BROKEN
+        # advisory — everything else comes from the shared concern.
+        def gate_verdict(g) = g[:rehearsal].to_s.upcase
+
+        def gate_reason_visible?(g) = true
+
+        def render_gate_extras(g)
+          return unless g[:rehearsal] == :broken
+
+          terminal.say "   BROKEN is advisory, not certain — a correct RED can look broken (e.g. a file the lane " \
+            "hasn't written yet). Confirm before treating it as a defect."
+        end
+
         # #90/AC7: with a single defaultable repo, name it as before; a cross-repo
         # run (or one where every gate declares its own `cwd`) has no one repo to
         # name — each gate's own "dir:" line (below) already says where it ran.
@@ -291,47 +358,6 @@ module Space::Architect
             "Rehearsing #{result[:iteration]} against #{terminal.path(result[:base_dir])} (repo: #{result[:repo]})"
           else
             "Rehearsing #{result[:iteration]} — #{result[:gates].size} gate(s), each in its own declared cwd"
-          end
-        end
-
-        # I01/AC "bounded terminal report": identity (AC label, gate id, verdict,
-        # exit code) always lands on one stdout line, however many lines `cmd`
-        # spans — the command itself is shown as at most its first line,
-        # truncated; the full command lives in the transcript.
-        CMD_LINE_MAX    = 100
-        OUTPUT_LINE_CAP = 20
-
-        def render_gate(g, transcript_path)
-          terminal.say ""
-          terminal.say "── #{g[:ac].empty? ? "(gate)" : g[:ac]} #{g[:id]}: #{truncated_cmd(g[:cmd])}  (exit #{g[:exit_code].inspect})  [#{g[:rehearsal].to_s.upcase}]"
-          terminal.say "   dir: #{terminal.path(g[:dir])}"
-          terminal.say "   reason: #{g[:reason]}" unless g[:reason].to_s.empty?
-          if g[:shared_with]&.any?
-            terminal.say "   shared execution with: #{g[:shared_with].join(', ')} (identical cmd+dir, captured once)"
-          end
-          if g[:rehearsal] == :broken
-            terminal.say "   BROKEN is advisory, not certain — a correct RED can look broken (e.g. a file the lane " \
-              "hasn't written yet). Confirm before treating it as a defect."
-          end
-          render_gate_output(g, transcript_path)
-        end
-
-        def truncated_cmd(cmd)
-          first, *rest = cmd.to_s.each_line.map(&:chomp)
-          clipped = first.length > CMD_LINE_MAX ? "#{first[0, CMD_LINE_MAX]}…" : first
-          rest.any? || clipped != first ? "#{clipped} …" : clipped
-        end
-
-        def render_gate_output(g, transcript_path)
-          combined = [g[:stdout], g[:stderr]].map { |s| s.to_s.rstrip }.reject(&:empty?).join("\n")
-          return if combined.empty?
-
-          lines = combined.lines(chomp: true)
-          if lines.size > OUTPUT_LINE_CAP
-            terminal.say lines.last(OUTPUT_LINE_CAP).join("\n")
-            terminal.say "   … #{lines.size - OUTPUT_LINE_CAP} more line(s) elided — full output in #{terminal.path(transcript_path)}"
-          else
-            terminal.say lines.join("\n")
           end
         end
 
@@ -759,6 +785,8 @@ module Space::Architect
       end
 
       class Gate < BaseCommand
+        include GateRendering
+
         desc "Run the frozen Acceptance Criteria gate commands and report PASS/FAIL"
         phase 32, "Judge"
         argument :iteration, required: true,  desc: "Iteration name"
@@ -771,22 +799,29 @@ module Space::Architect
             render(store.find(space)) do |sp|
               project = ArchitectProject.new(space: sp)
               results = project.run_gates(iteration, lane: lane)
-              results.each do |r|
-                marker = r[:status] == :pass ? "PASS" : "FAIL"
-                terminal.say ""
-                terminal.say "── #{r[:ac].empty? ? "(gate)" : r[:ac]}: #{r[:cmd]}  (exit #{r[:exit_code]})  [#{marker}]"
-                terminal.say "   dir: #{terminal.path(r[:dir])}"
-                terminal.say "   reason: #{r[:reason]}" if r[:status] == :fail && !r[:reason].to_s.empty?
-                terminal.say r[:stdout].rstrip unless r[:stdout].strip.empty?
-                terminal.say r[:stderr].rstrip unless r[:stderr].strip.empty?
-              end
+              # I07: the Gate CLI composes run_gates + gate_transcript — the
+              # transcript is the durable record a judge reads whole, so the
+              # bounded terminal output can always point at it.
+              transcript = project.gate_transcript(iteration, results, lane: lane)
+              results.each { |r| render_gate(r, transcript) }
               terminal.say ""
               terminal.say "Mechanical gate results above; the Acceptance-Criteria verdict — necessary, not sufficient — remains the architect's."
+              terminal.say "transcript: #{terminal.path(transcript)}"
               any_fail = results.any? { |r| r[:status] == :fail }
               CLI.record_outcome(Outcome.new(exit_code: any_fail ? 1 : 0))
             end
           end
         end
+
+        private
+
+        # GateRendering hooks: gate renders the mechanical verdict, shows the
+        # reason only on a fail, and adds no advisory of its own.
+        def gate_verdict(g) = g[:status] == :pass ? "PASS" : "FAIL"
+
+        def gate_reason_visible?(g) = g[:status] == :fail
+
+        def render_gate_extras(g) = nil
       end
 
       class BugReport < BaseCommand
@@ -815,6 +850,56 @@ module Space::Architect
             terminal.say "  ruby #{RUBY_VERSION} (#{RUBY_PLATFORM})"
             terminal.say "  space: #{space.id} — #{space.title}" if space
             CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
+      # Pretty-print a pi agent run.jsonl as it streams — the ported runlog
+      # printer. No space resolution: the stream is the whole input.
+      class Runlog < BaseCommand
+        desc "Pretty-print a pi agent run.jsonl as it streams (thinking dim, tool calls one-lined)"
+        phase 54, "Project"
+        argument :file, required: false, desc: "run.jsonl to read (default: stdin)"
+
+        def call(file: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            if file
+              begin
+                File.open(file) { |f| Space::Architect::Runlog.stream(input: f, io: out, env: project_config.env) }
+              rescue Errno::ENOENT
+                raise Space::Core::Error, "file not found: #{file}"
+              end
+            else
+              Space::Architect::Runlog.stream(input: $stdin, io: out, env: project_config.env)
+            end
+            CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
+      # Follow every active pi-subagents run transcript in a space, live — the
+      # ported looplog follower. BLOCKS until ctrl+c (quiet exit).
+      class Looplog < BaseCommand
+        desc "Follow every active pi-subagents run in this space, live (--list inventories only)"
+        phase 54, "Project"
+        argument :space, required: false, desc: "Space identifier (default: nearest ancestor with space.yaml)"
+        option :list,   type: :flag, default: false, desc: "Inventory only — one line per run (active/age/size/agent/task), no follow"
+        option :replay, type: :flag, default: false, desc: "Print existing history on adoption, then follow"
+        option :all,    type: :flag, default: false, desc: "Adopt every transcript, however stale (default: only within LOOPLOG_WINDOW seconds)"
+
+        def call(space: nil, list: false, replay: false, all: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            render(store.find(space)) do |sp|
+              if list
+                Space::Architect::Looplog.list(space: sp.path.to_s, io: out, env: project_config.env)
+              else
+                Space::Architect::Looplog.follow(space: sp.path.to_s, io: out, env: project_config.env,
+                                                 replay: replay, all: all)
+              end
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
           end
         end
       end
@@ -996,6 +1081,24 @@ module Space::Architect
             result[:skills].each do |s|
               terminal.say "  #{s[:name]}: #{terminal.style_skill_action(s[:action])} (#{terminal.path(s[:path])})"
             end
+            CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
+      # I07: install the architect-loop pi extension package via pi's own
+      # mechanics — the gem owns the standing declaration (PACKAGE_SOURCE), pi
+      # owns settings.json. No space resolution: a machine-level operation.
+      class InstallExtensions < BaseCommand
+        desc "Install the architect-loop pi extension package via pi (idempotent by pi's semantics)"
+        phase 53, "Project"
+
+        def call(**opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            result = ExtensionInstaller.install(env: project_config.env)
+            result[:steps].each { |s| terminal.say "  #{s[:cmd]} (exit #{s[:exit_code]})" }
+            terminal.say "Extensions source: #{result[:source]}"
             CLI.record_outcome(Outcome.new(exit_code: 0))
           end
         end
@@ -1457,6 +1560,9 @@ Space::Architect::CLI::Registry.register "merge",     Space::Architect::CLI::Arc
 Space::Architect::CLI::Registry.register "integrate", Space::Architect::CLI::Architect::Integrate
 Space::Architect::CLI::Registry.register "gate",      Space::Architect::CLI::Architect::Gate
 Space::Architect::CLI::Registry.register "install-skills", Space::Architect::CLI::Architect::InstallSkills
+Space::Architect::CLI::Registry.register "install-extensions", Space::Architect::CLI::Architect::InstallExtensions
+Space::Architect::CLI::Registry.register "runlog",          Space::Architect::CLI::Architect::Runlog
+Space::Architect::CLI::Registry.register "looplog",         Space::Architect::CLI::Architect::Looplog
 Space::Architect::CLI::Registry.register "bug-report",     Space::Architect::CLI::Architect::BugReport
 Space::Architect::CLI::Registry.register "cost",           Space::Architect::CLI::Architect::Cost
 Space::Architect::CLI::Registry.register "brief" do |b|

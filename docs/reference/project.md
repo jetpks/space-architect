@@ -1,8 +1,8 @@
 # Project commands 🧭
 
-Project-level commands: scaffolding, grounding, state, repo sync, skill
-installation, bug reporting, and read-only loop cost accounting. Usage lines
-are the shipped binary's own.
+Project-level commands: scaffolding, grounding, state, repo sync, skill and
+extension installation, bug reporting, read-only loop cost accounting, and the
+run/loop log viewers. Usage lines are the shipped binary's own.
 
 ## `architect init [SPACE]`
 
@@ -74,6 +74,77 @@ the gem, or after upgrading to pick up skill changes.
 architect install-skills                       # claude (default)
 architect install-skills --provider pi         # or codex | opencode
 architect install-skills --project --dry-run   # show what would change
+```
+
+## `architect install-extensions`
+
+Install the architect-loop pi extension package through pi's own mechanics:
+runs `pi install <source>` then `pi update --extension <source>`, in order,
+aborting on the first failure. The gem owns the standing declaration (the
+package source, `git:git@github.com:jetpks/pi-extensions.git`); pi owns
+`settings.json` and the update mechanics. Idempotent by pi's semantics — safe
+to re-run. `--extension` (singular) on purpose: the gem reconciles exactly the
+package it declares, not the operator's other packages.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| — | — | No options beyond the shared `--color`/`--colors` flags. |
+
+A missing `pi` binary or a failing step is a loud error naming the exact
+command and its captured output.
+
+```sh
+architect install-extensions
+```
+
+## `architect runlog [FILE]`
+
+Pretty-print a pi agent run.jsonl as it streams: thinking dim, assistant text
+plain, tool calls and their results one-lined, and a final `✓ done` / `✗ failed`
+line with usage summed across the whole exchange (output, cache read, cost,
+elapsed). System/user/toolResult message echoes and non-JSON noise on the
+stream are dropped. Reads FILE, or stdin — the intended use is a live tail:
+
+```sh
+tail -f build/I08-…/run.jsonl | architect runlog
+architect runlog build/I08-…/run.jsonl
+```
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `RUNLOG_LIMIT` | `2000` | Character limit for one-lined tool inputs/outputs (clipped with a literal `…`). |
+| `NO_COLOR` | — | Set to disable color (color is also off when stdout is not a tty). |
+
+## `architect looplog [SPACE]`
+
+Follow every active pi-subagents run in a space, live. Watches the pi
+subagents' artifact transcripts from two roots — pi's default sessions dir for
+the space slug (`~/.pi/agent/sessions/--<slug>--/`) and the space's `build/`
+tree — and streams them with runlog's display discipline, each line prefixed
+with a colored per-run tag and the record's own timestamp. Lane worktrees
+(`wt/` directories) are pruned from discovery.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--list` | `false` | Inventory only — one line per run (active ●/·, agent tag, last-activity HH:MM, age, size, run id, task), newest first; no follow. |
+| `--replay` | `false` | Print existing history on adoption, then follow. |
+| `--all` | `false` | Adopt every transcript, however stale. |
+
+Blocks until ctrl+c (quiet exit). `SPACE` defaults to the nearest ancestor with
+`space.yaml`.
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `LOOPLOG_WINDOW` | `900` | Seconds: transcripts mtime-older than this are stale (not adopted) unless `--all`. |
+| `RUNLOG_LIMIT` | `2000` | Character limit for one-lined tool inputs/outputs. |
+| `RUNLOG_THINK` | — | When set (an integer), clamp thinking text to that many characters (otherwise unclipped). |
+| `PI_SESSIONS_DIR` | `~/.pi/agent/sessions` | pi sessions root to scan. |
+| `NO_COLOR` | — | Set to disable color (color is also off when stdout is not a tty). |
+
+```sh
+architect looplog                      # follow active runs from $PWD's space
+architect looplog --list               # inventory only
+architect looplog --replay --all       # full history, however stale, then follow
 ```
 
 ## `architect bug-report`

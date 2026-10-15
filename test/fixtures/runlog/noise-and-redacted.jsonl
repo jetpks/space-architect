@@ -1,0 +1,9 @@
+oops, not JSON at all
+{"type":"message_end","message":{"role":"user","timestamp":1700000009000}}
+{"type":"message_start","message":{"role":"assistant"}}
+{"type":"message_update","assistantMessageEvent":{"type":"thinking_start"},"usage":{"reasoning":256}}
+{"type":"message_update","assistantMessageEvent":{"type":"thinking_end","content":""},"usage":{"reasoning":256}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_start"},"usage":{"reasoning":256}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Done."},"usage":{"reasoning":256}}
+{"type":"message_end","message":{"role":"assistant"}}
+{"type":"turn_end","message":{"usage":{"output":9,"cacheRead":0,"cost":{"total":0}},"durationMs":1500,"stopReason":"stop","timestamp":1700000010500}}

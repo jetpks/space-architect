@@ -560,23 +560,22 @@ module Space::Architect
       gates = parse_gates(text)
       raise Space::Core::Error, "no gate commands found in the frozen Acceptance Criteria of #{rel}" if gates.empty?
 
-      lanes = entry["lanes"] || []
-      repo_root = nil
-      base_dir =
-        if lane
-          le = lanes.find { |l| l["name"] == lane }
-          raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless le
-          le = ensure_lane_materialized(iteration, lane)
-          repo_root = le["repo"] ? space.path.join("repos", le["repo"]) : nil
-          space.path.join(le["worktree"] || "build/#{iteration_id(entry)}-#{lane}/wt")
-        else
-          repo = lanes.first&.dig("repo")
-          raise Space::Core::Error, "No lane/repo recorded for '#{iteration}' — cannot resolve a directory to run gates in" unless repo
-          space.path.join("repos", repo)
-        end
+      entry, base_dir, repo = resolve_gate_run(iteration, lane)
+      repo_root = lane && repo ? space.path.join("repos", repo) : nil
       raise Space::Core::Error, "directory does not exist: #{base_dir}" unless base_dir.exist?
 
       execute_gates(gates, base_dir: base_dir, lane: lane, repo_root: repo_root)
+    end
+
+    # I07: the gate-side transcript — one durable file under build/gate/ per
+    # gate run, so a judge reading whole gates never depends on a terminal tail
+    # (agent runners read the last lines; the file is the record read whole).
+    # Re-slices the entry itself and re-resolves the run directory exactly as
+    # #run_gates does — a no-op when the Gate CLI composes it right after
+    # #run_gates, the only intended caller shape. Returns the path.
+    def gate_transcript(iteration, gate_results, lane: nil, now: Time.now)
+      entry, base_dir, repo = resolve_gate_run(iteration, lane)
+      write_transcript(:gate, entry, repo, base_dir, lane, gate_results, nil, now)
     end
 
     # Rehearse the DRAFTED gates in the WORKING-TREE iteration file — before the
@@ -1270,22 +1269,40 @@ module Space::Architect
       end
     end
 
-    # I01: the durable, unbounded counterpart to the CLI's bounded terminal
-    # report — one file per non-EMPTY rehearsal under build/rehearse/, holding
-    # every gate's full command, dir, exit code, verdict, reason, and complete
-    # stdout+stderr, plus the scope-asymmetry findings. The CLI prints this
-    # path so a rerun is never needed just to see output the terminal trimmed.
+    # I01 + I07: the durable, unbounded counterpart to the CLI's bounded terminal
+    # report — one file per run under build/rehearse/ (rehearse) or build/gate/
+    # (gate), holding every gate's full command, dir, exit code, verdict, reason,
+    # and complete stdout+stderr. ONE writer, parameterized by kind: rehearse
+    # additionally carries the scope-asymmetry findings and its RED/GREEN/BROKEN
+    # verdict; gate carries the mechanical PASS/FAIL and no scope section — but
+    # the per-gate emission is shared code, so the two transcripts can never drift.
+    TRANSCRIPT_KINDS = {
+      rehearse: { subdir: "rehearse", header: "Rehearsal transcript" },
+      gate:     { subdir: "gate",     header: "Gate transcript" }
+    }.freeze
+
     def write_rehearsal_transcript(entry, repo, base_dir, gate_results, scope_report, now)
-      dir  = space.path.join("build", "rehearse")
+      write_transcript(:rehearse, entry, repo, base_dir, nil, gate_results, scope_report, now)
+    end
+
+    def write_transcript(kind, entry, repo, base_dir, lane, gate_results, scope_report, now)
+      spec = TRANSCRIPT_KINDS.fetch(kind)
+      dir  = space.path.join("build", spec[:subdir])
       FileUtils.mkdir_p(dir)
       path = dir.join("#{iteration_id(entry)}-#{now.strftime('%Y%m%dT%H%M%S.%6N')}.md")
 
-      lines = ["# Rehearsal transcript — #{entry['name']} — #{now.iso8601}"]
-      lines << (repo ? "Repo: #{repo} (#{base_dir})" : "Each gate ran in its own declared cwd")
+      lines = ["# #{spec[:header]} — #{entry['name']} — #{now.iso8601}"]
+      lines << if lane
+                 "Lane: #{lane} (#{base_dir})"
+               elsif repo
+                 "Repo: #{repo} (#{base_dir})"
+               else
+                 "Each gate ran in its own declared cwd"
+               end
 
       gate_results.each do |g|
         lines << ""
-        lines << "## #{g[:ac].empty? ? "(gate)" : g[:ac]} #{g[:id]} — #{g[:rehearsal].to_s.upcase} (exit #{g[:exit_code].inspect})"
+        lines << "## #{g[:ac].empty? ? "(gate)" : g[:ac]} #{g[:id]} — #{transcript_verdict(kind, g)} (exit #{g[:exit_code].inspect})"
         lines << "cmd: #{g[:cmd]}"
         lines << "dir: #{g[:dir]}"
         lines << "reason: #{g[:reason]}" unless g[:reason].to_s.empty?
@@ -1313,6 +1330,37 @@ module Space::Architect
 
       path.write("#{lines.join("\n")}\n")
       path
+    end
+
+    # rehearse reports the RED/GREEN/BROKEN discrimination verdict per gate;
+    # gate reports the mechanical PASS/FAIL.
+    def transcript_verdict(kind, g)
+      if kind == :rehearse
+        g[:rehearsal].to_s.upcase
+      else
+        g[:status] == :pass ? "PASS" : "FAIL"
+      end
+    end
+
+    # WHERE gates run for an iteration — shared by #run_gates and
+    # #gate_transcript so the two can never disagree about it: the lane worktree
+    # when a lane is given (materialized on demand), else the integration repo
+    # checkout. Returns [entry, base_dir, repo_name] — repo_name is the run's
+    # repo (the lane's declared repo, else the first recorded lane's), nil only
+    # for a lane run in a repo-less lane.
+    def resolve_gate_run(iteration, lane)
+      entry = slice_entry(iteration)
+      lanes = entry["lanes"] || []
+      if lane
+        le = lanes.find { |l| l["name"] == lane }
+        raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{iteration}'" unless le
+        le = ensure_lane_materialized(iteration, lane)
+        [entry, space.path.join(le["worktree"] || "build/#{iteration_id(entry)}-#{lane}/wt"), le["repo"]]
+      else
+        repo = lanes.first&.dig("repo")
+        raise Space::Core::Error, "No lane/repo recorded for '#{iteration}' — cannot resolve a directory to run gates in" unless repo
+        [entry, space.path.join("repos", repo), repo]
+      end
     end
 
     # I09/AC4, #90/AC5-AC6: resolve the repo to default for gates that declare no
