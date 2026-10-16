@@ -22,6 +22,49 @@ module Space::Architect
     REQUIRED_ROLES = %w[spec builder judge coordinator narrator].freeze
     ENTRY_KEYS     = %w[model thinking].freeze
 
+    # I09: the `architect routing init` scaffold — the exact bytes the command
+    # writes, living beside the parsers that must accept it. Example models are
+    # loud REPLACE_MEs; the header comment carries both locations and the merge
+    # order so the file is self-documenting. Byte-exact contract: the extension
+    # lane's tests carry an inline copy, and the command round-trips the write
+    # through parse below — a template the machinery rejects is a bug.
+    TEMPLATE = <<~'YAML'.freeze
+      # architect.yaml — space-architect loop role routing, scaffolded by `architect routing init`.
+      # Locations (merged in this order; the space-local entry wins per role):
+      #   global:  ~/.config/space-architect/architect.yaml   (machine-wide)
+      #   local:   architect.yaml beside this space's space.yaml (this file)
+      # A local entry overrides the global entry for THAT ROLE only; after the
+      # merge every agent role must be routed: spec, builder, judge, coordinator,
+      # narrator (architect is optional).
+      # Replace every example/REPLACE_ME below with a real provider/model-id
+      # (e.g. zai/glm-5.3). thinking is optional: off|minimal|low|medium|high|xhigh|max.
+      # Once saved, the next /loop or architect command picks the file up.
+      version: 1
+      roles:
+        architect:
+          model: example/REPLACE_ME
+          thinking: high
+        spec:
+          model: example/REPLACE_ME
+          thinking: high
+        builder:
+          model: example/REPLACE_ME
+          thinking: high
+        judge:
+          model: example/REPLACE_ME
+          thinking: high
+        coordinator:
+          model: example/REPLACE_ME
+          thinking: high
+        narrator:
+          model: example/REPLACE_ME
+          thinking: low
+    YAML
+
+    # The one canonical cure line appended to default_model_inform's last-resort
+    # inform — self-punctuating, appended after a single space by the caller.
+    INIT_HINT = "Create one: `architect routing init` (beside space.yaml) or `architect routing init --global` (~/.config/space-architect/architect.yaml).".freeze
+
     def self.global_path
       env = ENV["SPACE_ARCHITECT_GLOBAL_CONFIG"]
       return Pathname.new(env) unless env.nil?

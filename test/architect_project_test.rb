@@ -31,6 +31,25 @@ class ArchitectProjectTest < Space::ArchitectTest
     repo_dir
   end
 
+  # I09: these tests assert model resolution with NO architect.yaml anywhere,
+  # but Routing.for_space leaks the real ~/.config/space-architect/architect.yaml
+  # when SPACE_ARCHITECT_GLOBAL_CONFIG is unset — pin the global layer to a
+  # missing path under the test dir so the suite is indifferent to machine
+  # state. Duplicated from HarnessTest: test/test_helper.rb is outside this
+  # lane's declared touch set, so the shared base class isn't where this lives.
+  def pin_global_absent(dir)
+    @saved_global_config = ENV["SPACE_ARCHITECT_GLOBAL_CONFIG"]
+    ENV["SPACE_ARCHITECT_GLOBAL_CONFIG"] = File.join(dir, "absent-global.yaml")
+  end
+
+  def restore_global_config
+    if @saved_global_config
+      ENV["SPACE_ARCHITECT_GLOBAL_CONFIG"] = @saved_global_config
+    else
+      ENV.delete("SPACE_ARCHITECT_GLOBAL_CONFIG")
+    end
+  end
+
   # G3: worktree_add records I-prefixed iteration_id worktree path and creates
   #     an I-prefixed branch (e.g. wt/I01-my-slice-lane-a, lane/I01-my-slice-lane-a)
   def test_worktree_add_records_ordinal_prefixed_path_and_branch
@@ -184,6 +203,7 @@ class ArchitectProjectTest < Space::ArchitectTest
   # pi without a model resolves to the pi default model instead.
   def test_worktree_add_nil_model_resolves_to_per_harness_default
     dir = Dir.mktmpdir("architect-project-test")
+    pin_global_absent(dir)
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
@@ -202,6 +222,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     assert_equal "accounts/fireworks/models/glm-5p3-flash", lane_oc["model"]
     assert_equal "accounts/fireworks/models/glm-5p3-flash", lane_pi["model"]
   ensure
+    restore_global_config
     FileUtils.rm_rf(dir)
   end
 
@@ -209,6 +230,7 @@ class ArchitectProjectTest < Space::ArchitectTest
   # to pi/accounts/fireworks/models/glm-5p3-flash
   def test_worktree_add_no_flags_resolves_to_pi_default
     dir = Dir.mktmpdir("architect-project-test")
+    pin_global_absent(dir)
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
@@ -223,6 +245,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     assert_equal "pi", lane["harness"]
     assert_equal "accounts/fireworks/models/glm-5p3-flash", lane["model"]
   ensure
+    restore_global_config
     FileUtils.rm_rf(dir)
   end
 
@@ -230,6 +253,7 @@ class ArchitectProjectTest < Space::ArchitectTest
   # the per-harness default — worktree_add with no flags resolves to them.
   def test_worktree_add_no_flags_resolves_to_space_yaml_project_defaults
     dir = Dir.mktmpdir("architect-project-test")
+    pin_global_absent(dir)
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
@@ -249,6 +273,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     assert_equal "pi", lane["harness"]
     assert_equal "accounts/fireworks/models/glm-5p3-flash", lane["model"]
   ensure
+    restore_global_config
     FileUtils.rm_rf(dir)
   end
 
@@ -424,6 +449,33 @@ class ArchitectProjectTest < Space::ArchitectTest
       /model: no architect\.yaml found \(looked at #{Regexp.escape(dir)}\/architect\.yaml \+ .*no-global\.yaml\) — using default 'accounts\/fireworks\/models\/glm-5p3-flash'/,
       lines.first)
   ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I09: the last-resort inform now ends with the self-service hint naming
+  # `architect routing init` (and --global) — the current text is untouched, the
+  # hint appends after one space. Verified through the same worktree_add seam
+  # as the base inform test above.
+  def test_default_model_inform_carries_init_hint
+    dir = Dir.mktmpdir("architect-project-test")
+    pin_global_absent(dir)
+    space = create_real_space(dir)
+    create_real_repo(dir, "my-repo")
+
+    project = Space::Architect::ArchitectProject.new(space: space)
+    project.init!
+    project.new_iteration!("my-slice")
+    err = StringIO.new
+    project.worktree_add("my-repo", "my-slice", "lane-a", err: err)
+
+    lines = err.string.lines
+    assert_equal 1, lines.length
+    hint = Space::Architect::Routing::INIT_HINT
+    assert_match(
+      /using default 'accounts\/fireworks\/models\/glm-5p3-flash' #{Regexp.escape(hint)}$/,
+      lines.first)
+  ensure
+    restore_global_config
     FileUtils.rm_rf(dir)
   end
 
@@ -649,6 +701,7 @@ class ArchitectProjectTest < Space::ArchitectTest
   # AC2: variant_add creates v01/v02 with variant: true and correct harness/model
   def test_variant_add_creates_named_lanes_with_variant_true
     dir = Dir.mktmpdir("architect-project-test")
+    pin_global_absent(dir)
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
@@ -689,6 +742,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     assert_path_exists File.join(repo_path, ".git", "refs", "heads", "lane", "I01-my-slice-v01")
     assert_path_exists File.join(repo_path, ".git", "refs", "heads", "lane", "I01-my-slice-v02")
   ensure
+    restore_global_config
     FileUtils.rm_rf(dir)
   end
 
@@ -747,6 +801,7 @@ class ArchitectProjectTest < Space::ArchitectTest
   # variant_add with pi+nil model resolves the pi default model through worktree_add
   def test_variant_add_resolves_nil_model_to_per_harness_default
     dir = Dir.mktmpdir("architect-project-test")
+    pin_global_absent(dir)
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
@@ -762,6 +817,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     refute_nil v01, "expected v01 lane to be persisted"
     assert_equal "accounts/fireworks/models/glm-5p3-flash", v01["model"]
   ensure
+    restore_global_config
     FileUtils.rm_rf(dir)
   end
 
@@ -943,6 +999,7 @@ class ArchitectProjectTest < Space::ArchitectTest
   # AC5(b): no effort kwarg → NO "effort" key in lane entry at all
   def test_worktree_add_no_effort_key_when_not_set
     dir = Dir.mktmpdir("architect-project-test")
+    pin_global_absent(dir)
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
@@ -958,6 +1015,7 @@ class ArchitectProjectTest < Space::ArchitectTest
 
     refute lane.key?("effort"), "effort key must be absent when not set"
   ensure
+    restore_global_config
     FileUtils.rm_rf(dir)
   end
 
@@ -1011,6 +1069,7 @@ class ArchitectProjectTest < Space::ArchitectTest
   #      variant lane (non-variant lanes excluded), status derived from winner
   def test_variant_compare_returns_structured_descriptor_with_status
     dir = Dir.mktmpdir("architect-project-test")
+    pin_global_absent(dir)
     space = create_real_space(dir)
     create_real_repo(dir, "my-repo")
 
@@ -1049,6 +1108,7 @@ class ArchitectProjectTest < Space::ArchitectTest
     assert_nil                       v02[:integration_branch]
     assert_equal "winner",            v02[:status]
   ensure
+    restore_global_config
     FileUtils.rm_rf(dir)
   end
 

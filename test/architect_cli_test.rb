@@ -3315,4 +3315,125 @@ class ArchitectCLITest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
+
+  # ── routing init: scaffold the loop's architect.yaml (I09) ─────────────────
+
+  # I09: `architect routing init` writes the byte-exact Routing::TEMPLATE to the
+  # space root and nothing else. The global layer is pinned absent so the real
+  # ~/.config/space-architect/architect.yaml is never consulted (or touched).
+  def test_routing_init_writes_template_to_space_root
+    setup = temp_env
+    env = setup.fetch(:env).merge(
+      "SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(setup[:root], "absent-global.yaml")
+    )
+
+    with_env(env) do
+      space_invoke("init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        out, err = invoke("routing", "init")
+
+        assert_empty err
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_equal Space::Architect::Routing::TEMPLATE, File.read(File.join(space_path, "architect.yaml"))
+        assert_match(/architect\.yaml/, out)
+        assert_match(/REPLACE_ME/, out)
+        refute File.exist?(env["SPACE_ARCHITECT_GLOBAL_CONFIG"]), "space-root mode must not write the global config"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # I09: --global writes the env-pinned machine-wide path (never re-derived),
+  # creating its missing parent directory first. An explicit space alongside
+  # --global refuses before anything is written.
+  def test_routing_init_global_writes_env_pinned_global_and_mkdirs
+    setup = temp_env
+    # parent deliberately missing — --global must mkdir_p it
+    global_path = File.join(setup[:root], "no-such-parent", "architect.yaml")
+    env = setup.fetch(:env).merge("SPACE_ARCHITECT_GLOBAL_CONFIG" => global_path)
+
+    with_env(env) do
+      space_invoke("init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        _out, err = invoke("routing", "init", "20260619-test-space", "--global")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/mutually exclusive/, err)
+        refute File.exist?(global_path)
+
+        out, err = invoke("routing", "init", "--global")
+
+        assert_empty err
+        assert_equal 0, Space::Architect::CLI.last_outcome&.exit_code
+        assert_path_exists File.dirname(global_path)
+        assert_equal Space::Architect::Routing::TEMPLATE, File.read(global_path)
+        refute File.exist?(File.join(space_path, "architect.yaml")), "--global must not touch the space root"
+        assert_match(/REPLACE_ME/, out)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # I09: an existing target refuses loud, in either mode, without touching a
+  # single byte — no overwrite, no force flag.
+  def test_routing_init_refuses_when_target_exists
+    setup = temp_env
+    global_path = File.join(setup[:root], "xdg-global", "architect.yaml")
+    env = setup.fetch(:env).merge("SPACE_ARCHITECT_GLOBAL_CONFIG" => global_path)
+
+    with_env(env) do
+      space_invoke("init")
+      space_path = create_real_space(File.join(env["HOME"]))
+
+      Dir.chdir(space_path) do
+        existing_space = File.join(space_path, "architect.yaml")
+        File.write(existing_space, "version: 1\nroles: {}\n")
+        _out, err = invoke("routing", "init")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/already exists/, err)
+        assert_match(/architect\.yaml/, err)
+        assert_equal "version: 1\nroles: {}\n", File.read(existing_space)
+
+        FileUtils.mkdir_p(File.dirname(global_path))
+        File.write(global_path, "version: 1\nroles: {}\n")
+        _out, err = invoke("routing", "init", "--global")
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/already exists/, err)
+        assert_match(/xdg-global\/architect\.yaml/, err)
+        assert_equal "version: 1\nroles: {}\n", File.read(global_path)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # I09: with no space.yaml anywhere upward, the command refuses BEFORE any
+  # write and points at `architect routing init --global` as the alternative.
+  def test_routing_init_refuses_without_space_root_pointing_at_global
+    setup = temp_env
+    env = setup.fetch(:env).merge(
+      "SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(setup[:root], "absent-global.yaml")
+    )
+
+    with_env(env) do
+      nowhere = File.join(setup[:root], "nowhere")
+      FileUtils.mkdir_p(nowhere)
+
+      Dir.chdir(nowhere) do
+        _out, err = invoke("routing", "init")
+
+        assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+        assert_match(/no space\.yaml found upward from/, err)
+        assert_match(/--global/, err)
+        refute File.exist?(File.join(nowhere, "architect.yaml"))
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
 end
