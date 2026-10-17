@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.5.0] - 2026-10-17
+
+### Added
+
+- **`architect install`** — the one-shot machine install: skills
+  (`--provider`, default pi), the architect-loop extension, then the role
+  playbooks, in that order (install-agents renders from the extension the
+  prior step installs). Each step aborts loudly; no partial silent states.
+- **`architect install-agents`** — the role playbooks to
+  `~/.pi/agent/agents/`, rendered by the installed architect-loop extension
+  (the single owner of the playbook text) with global-routing pins;
+  write-if-changed, `--force`, `--dry-run` like install-skills. Loud
+  failures name the prerequisite (`install-extensions`) or the cure
+  (`routing init --global`).
+
+### Changed
+
+- **install-skills targets pi by default** (was claude; `--provider` still
+  selects claude/codex/opencode).
+- **looplog tags**: the narrator abbreviates to `narr` (it previously
+  truncated to "architect-"), and lane-worktree tags carry the iteration
+  ordinal plus the lane, resolved against the space's iteration ids —
+  `[bld:67-core]` instead of the old clipped
+  `[bld:rig-oracle-repin-core]`.
+
 ## [9.4.0] - 2026-10-17
 
 ### Added
