@@ -5,6 +5,39 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.4.0] - 2026-10-17
+
+### Added
+
+- **The skill family.** `/architect` is now the inline working mode — work
+  outside the loop at a conversational cadence (UI, ops, small fixes), with
+  the space as the workspace (notes kept, `ARCHITECT.md` updated, commits
+  when the work calls for them) and the vocabulary glossary folded in.
+  **`/architect-discuss`** carries the judgment seat: exploration,
+  arbitration, judging finished runs, landing, iteration surgery.
+  **`/architect-status`** reports state read-only from CLI output and the
+  newest notes. The coordinator launch is agent-owned end to end:
+  **`/architect-action`** (renamed from `/architect-plan`) launches via the
+  new `architect_loop` pi-extension tool (jetpks/pi-extensions) — the
+  agent-side equivalent of `/loop`, sharing one spawn path so the two cannot
+  drift, awaiting the run id, then self-compacting the launching session
+  into a small on-call escalation seat.
+
+### Changed
+
+- The `install-skills` help text, `docs/DESIGN.md`, and
+  `docs/reference/project.md` describe the five-skill family; the
+  `/architect-discuss` routing section now describes the real dual
+  agent-file mechanism (per-space `.pi/agents/` generation with resolved
+  pins, plus user-level `install-agents` playbooks as the headless/
+  untrusted fallback) instead of claiming nothing generates into the space.
+
+### Removed
+
+- **`/architect-plan`** (renamed to `/architect-action`) and
+  **`/architect-vocabulary`** (folded into `/architect`); the `dispatch.md`
+  and `research.md` companion references moved to the discuss skill.
+
 ## [9.3.0] - 2026-10-17
 
 ### Removed
