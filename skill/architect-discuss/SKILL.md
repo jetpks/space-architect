@@ -140,11 +140,12 @@ the iteration verdicts, the integrated diff, and the BRIEF — to a fresh
 paste-and-run block (cd, `git push -u origin project/<slug>`, `gh pr
 create`). Releases of the space-architect gem itself are tag-driven
 (annotated `vX.Y.Z` tag on main → GitHub Action publishes to rubygems).
-Post-landing rollout for spaces running the loop's own tooling: rebuild +
-force-install the gem from the project branch, `architect install-skills`,
-`architect install-extensions`, `architect install-agents` — a config that
-moved ahead of the installed CLI rejects every command (the stale-gem
-trap). No push, no `gh` call by you; the human runs the block when ready.
+Post-landing rollout for spaces running the loop's own tooling: once the
+release is out (or rebuilt + force-installed from the project branch), run
+`architect install` — the one-shot machine install: skills (pi by default),
+the architect-loop extension, then the role playbooks. A config that moved
+ahead of the installed CLI rejects every command (the stale-gem trap). No
+push, no `gh` call by you; the human runs the block when ready.
 
 ## Iteration surgery (interactive path)
 
@@ -239,7 +240,8 @@ architect looplog [--list|--replay|--all|--space PATH]
   Follow every active loop run in this space, live (--list: inventory only)
 architect runlog [FILE]
   Pretty-print a pi run.jsonl (FILE or stdin; RUNLOG_LIMIT, NO_COLOR honored)
-architect install-skills                 bundled skills for a harness (--provider)
+architect install                    one-shot: skills (--provider, default pi) + extension + role playbooks
+architect install-skills                 bundled skills for a harness (--provider, default pi)
 architect install-extensions             reconcile the architect-loop pi extension package
 architect install-agents                 role playbooks to ~/.pi/agent/agents (pi)
 architect bug-report                     prefilled GitHub issue template for the CLI

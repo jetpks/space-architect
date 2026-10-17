@@ -4,6 +4,11 @@
 // and commands bash cannot parse (a parse error at tool time burns a turn).
 // Parse-level only: `bash -n` cannot catch runtime failures — those are the
 // bash tool's own domain.
+//
+// NOTE: a sibling copy of the guard logic lives in jetpks/pi-extensions
+// (imported by architect-loop.ts, which applies the same denials to sessions
+// whose cwd is a lane worktree — coordinator-spawned builders cannot get -e
+// injection). The logic is kept identical across both — change them together.
 import { spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -80,6 +85,13 @@ function parseDenial(command: string): string | null {
 		`fix the command's syntax — bash said: ${(check.stderr ?? "").trim()}`;
 }
 
+// The combined denial for a bash command: why it must not run, or null.
+// Exported pure so architect-loop.ts can apply the same rules to sessions
+// running inside lane worktrees (see the NOTE above).
+export function guardDenial(command: string): string | null {
+	return gitWriteDenial(command) ?? parseDenial(command);
+}
+
 export default function builderGuard(pi: ExtensionAPI): void {
 	pi.on("tool_call", (event) => {
 		// bash only: the deny list is shell-command shaped; edit/write tools are
@@ -90,7 +102,7 @@ export default function builderGuard(pi: ExtensionAPI): void {
 
 		// Test the command string itself, never the JSON-rendered whole input —
 		// a payload that merely mentions `git commit` in prose must not match.
-		const denial = gitWriteDenial(command) ?? parseDenial(command);
+		const denial = guardDenial(command);
 		if (denial) {
 			return {
 				block: true,

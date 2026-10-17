@@ -6,6 +6,7 @@ require_relative "../loop_cost"
 require_relative "../runlog"
 require_relative "../looplog"
 require_relative "../extension_installer"
+require_relative "../agent_installer"
 
 module Space::Architect
   module CLI
@@ -1064,12 +1065,12 @@ module Space::Architect
       class InstallSkills < BaseCommand
         desc "Install bundled skills (architect, architect-discuss, architect-action, architect-status, architect-research) for a harness"
         phase 53, "Project"
-        option :provider, default: "claude", desc: "Skill install target (default: claude; validated by the installer)"
+        option :provider, default: "pi", desc: "Skill install target (default: pi; validated by the installer)"
         option :project, type: :boolean, default: false, desc: "Install to CWD instead of global"
         option :force,   type: :boolean, default: false, desc: "Overwrite existing skills that differ"
         option :dry_run, type: :boolean, default: false, desc: "Print what would happen without writing files"
 
-        def call(provider: "claude", project: false, force: false, dry_run: false, **opts)
+        def call(provider: "pi", project: false, force: false, dry_run: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             result = SkillInstaller.install(provider, project: project, force: force,
@@ -1097,6 +1098,61 @@ module Space::Architect
             result = ExtensionInstaller.install(env: project_config.env)
             result[:steps].each { |s| terminal.say "  #{s[:cmd]} (exit #{s[:exit_code]})" }
             terminal.say "Extensions source: #{result[:source]}"
+            CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
+      # Role playbooks to ~/.pi/agent/agents, rendered from the installed
+      # architect-loop extension (the single owner of the playbook text) with
+      # global-routing pins — the machine-wide fallback for sessions that
+      # cannot see a space's .pi dir. Needs install-extensions to have run.
+      class InstallAgents < BaseCommand
+        desc "Install the role playbooks (architect-coordinator/spec/builder/judge/narrator) to ~/.pi/agent/agents, rendered from the installed architect-loop extension"
+        phase 53, "Project"
+        option :force,   type: :boolean, default: false, desc: "Overwrite existing playbooks that differ"
+        option :dry_run, type: :boolean, default: false, desc: "Print what would happen without writing files"
+
+        def call(force: false, dry_run: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            result = AgentInstaller.install(env: project_config.env, force: force, dry_run: dry_run)
+            verb = dry_run ? "Would install" : "Installed"
+            terminal.say "#{verb} role playbooks for pi → #{terminal.path(result[:dest_root])}"
+            result[:agents].each do |a|
+              terminal.say "  #{a[:name]}: #{terminal.style_skill_action(a[:action])} (#{terminal.path(a[:path])})"
+            end
+            CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
+      # The one-shot machine install: skills (pi by default), the
+      # architect-loop extension, then the role playbooks — in that order,
+      # because install-agents renders from the extension the prior step just
+      # installed. Each step aborts loudly on failure; there are no partial
+      # silent states to reason about afterwards.
+      class Install < BaseCommand
+        desc "Install everything for this machine: skills (--provider, default pi), the architect-loop extension, then the role playbooks"
+        phase 53, "Project"
+        option :provider, default: "pi", desc: "Skill install target (default: pi; validated by the installer; passed through to install-skills)"
+        option :force,   type: :boolean, default: false, desc: "Overwrite existing skills/playbooks that differ (passed through)"
+
+        def call(provider: "pi", force: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            skills = SkillInstaller.install(provider, project: false, force: force,
+                                             env: project_config.env)
+            terminal.say "skills → #{terminal.path(skills[:dest_root])}"
+            skills[:skills].each { |s| terminal.say "  #{s[:name]}: #{terminal.style_skill_action(s[:action])}" }
+
+            extensions = ExtensionInstaller.install(env: project_config.env)
+            extensions[:steps].each { |s| terminal.say "  #{s[:cmd]} (exit #{s[:exit_code]})" }
+
+            agents = AgentInstaller.install(env: project_config.env, force: force)
+            terminal.say "role playbooks → #{terminal.path(agents[:dest_root])}"
+            agents[:agents].each { |a| terminal.say "  #{a[:name]}: #{terminal.style_skill_action(a[:action])}" }
+
             CLI.record_outcome(Outcome.new(exit_code: 0))
           end
         end
@@ -1378,8 +1434,10 @@ Space::Architect::CLI::Registry.register "evidence",  Space::Architect::CLI::Arc
 Space::Architect::CLI::Registry.register "merge",     Space::Architect::CLI::Architect::Merge
 Space::Architect::CLI::Registry.register "integrate", Space::Architect::CLI::Architect::Integrate
 Space::Architect::CLI::Registry.register "gate",      Space::Architect::CLI::Architect::Gate
+Space::Architect::CLI::Registry.register "install",         Space::Architect::CLI::Architect::Install
 Space::Architect::CLI::Registry.register "install-skills", Space::Architect::CLI::Architect::InstallSkills
 Space::Architect::CLI::Registry.register "install-extensions", Space::Architect::CLI::Architect::InstallExtensions
+Space::Architect::CLI::Registry.register "install-agents",   Space::Architect::CLI::Architect::InstallAgents
 Space::Architect::CLI::Registry.register "runlog",          Space::Architect::CLI::Architect::Runlog
 Space::Architect::CLI::Registry.register "looplog",         Space::Architect::CLI::Architect::Looplog
 Space::Architect::CLI::Registry.register "bug-report",     Space::Architect::CLI::Architect::BugReport
