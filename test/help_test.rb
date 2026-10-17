@@ -30,7 +30,8 @@ class HelpTest < Space::ArchitectTest
     assert_operator plain.index(/^Groups$/), :<, plain.index("architect worktree ")
 
     %w[init ground new status freeze verify provision dispatch section verdict
-       evidence merge integrate gate install-skills install-extensions bug-report
+       evidence merge integrate gate install install-skills install-extensions
+       install-agents bug-report
        brief worktree variant research runlog looplog].each do |cmd|
       count = plain.scan(/^  architect #{Regexp.escape(cmd)}(?=[ \[\n])/).length
       assert_equal 1, count, "#{cmd} must appear exactly once, saw #{count}"
