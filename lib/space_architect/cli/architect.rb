@@ -1062,7 +1062,7 @@ module Space::Architect
       end
 
       class InstallSkills < BaseCommand
-        desc "Install bundled skills (architect, architect-research, architect-vocabulary) for a harness"
+        desc "Install bundled skills (architect, architect-discuss, architect-action, architect-status, architect-research) for a harness"
         phase 53, "Project"
         option :provider, default: "claude", desc: "Skill install target (default: claude; validated by the installer)"
         option :project, type: :boolean, default: false, desc: "Install to CWD instead of global"
