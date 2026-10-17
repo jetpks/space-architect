@@ -7,6 +7,6 @@ knowing the tool. One tutorial lives here:
   end to end on a scratch space: init → brief → spec → freeze → provision →
   dispatch → verify → evidence → gate → verdict → integrate.
 
-For goal-oriented tasks (upgrade, session-sync rail, parallel lanes, research
-fan-out), see [docs/how-to](../how-to/). For command facts, see
+For goal-oriented tasks (upgrade, parallel lanes, research fan-out), see
+[docs/how-to](../how-to/). For command facts, see
 [docs/reference](../reference/); for the why, [docs/explanation](../explanation/).

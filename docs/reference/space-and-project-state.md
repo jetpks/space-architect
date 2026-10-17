@@ -94,7 +94,6 @@ build/
 |------|-------|-------|
 | `~/.config/space-cadet/config.yml` | space-cadet | the spaces config (`base_dir`, `src_dir`, protocol, …) — see `space config show`; the loop has no config of its own |
 | `$XDG_STATE_HOME/space-cadet/state.yml` | space-cadet | substrate state (recent spaces, current space) |
-| `$XDG_STATE_HOME/space-architect/session-sync.yaml` | space-architect | the session-sync upload cursor (`architect sessions sync --state-file` overrides) |
 
 All are XDG-aware: `XDG_CONFIG_HOME` and `XDG_STATE_HOME` are honored; the
 defaults under `$HOME` otherwise.

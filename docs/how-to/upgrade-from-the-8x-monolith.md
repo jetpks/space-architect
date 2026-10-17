@@ -18,7 +18,7 @@ executables collide with the ones the new gems ship.
 
 ```sh
 gem install space-architect          # the Architect Loop — pulls in space-cadet
-gem install repo-tender              # optional: evergreen tending + the session-sync rail
+gem install repo-tender              # optional: evergreen tending
 ```
 
 What you now have:
@@ -41,8 +41,7 @@ space-cadet 9.1+ migrates the substrate's config and state from the old
 - the state file likewise, under your state home
 
 On space-architect/space-cadet **9.0.0** there is no auto-migration — move
-those two files across by hand. The loop's own session-sync cursor stays where
-it is.
+those two files across by hand.
 
 ## 4. Re-point scripts and aliases
 

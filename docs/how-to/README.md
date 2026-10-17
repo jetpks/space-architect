@@ -11,8 +11,6 @@ matches your problem and follow only its steps.
   2–4 builders in isolated worktrees, then integrate the passing ones.
 - **[Run a research fan-out](run-a-research-fan-out.md)** — dispatch parallel
   read-only researchers before writing a spec.
-- **[Install the session-sync rail](install-the-session-sync-rail.md)** —
-  upload pi/claude conversation transcripts to a space-server on an interval.
 - **[Upgrade from the 8.x monolith](upgrade-from-the-8x-monolith.md)** — move
   to the three-gem 9.x layout without losing config or state.
 

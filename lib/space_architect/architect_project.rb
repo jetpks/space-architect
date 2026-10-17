@@ -956,13 +956,7 @@ module Space::Architect
 
     def dispatch(iteration, lane, model: nil, max_turns: 200, bin: nil, harness: nil, effort: nil,
                  force: false, quiet: false,
-                 detach: false, push_url: nil, push_token: nil, push_host: nil, run_creator: nil,
-                 push_client: nil, timeout: nil, prompt: nil, now: Time.now)
-      raise Space::Core::Error, "Specify --push-host or --push-url, not both" if push_host && push_url
-      raise Space::Core::Error, "--push-host requires --push-token"           if push_host && !push_token
-      raise Space::Core::Error, "--detach cannot be combined with --push-url or --push-host" \
-        if detach && (push_url || push_host)
-
+                 detach: false, timeout: nil, prompt: nil, now: Time.now)
       err = quiet ? File.open(File::NULL, "w") : $stderr
 
       entry = slice_entry(iteration)
@@ -1026,26 +1020,14 @@ module Space::Architect
         result[:prompt_copied] = prompt_path if prompt
         result
       else
-        created_run_id = nil
-        if push_host
-          creator        = run_creator || RunCreator.new(push_host, push_token)
-          created_run_id = creator.create
-          push_url       = "#{push_host.chomp('/')}/runs/#{created_run_id}/ingest"
-        end
-
         run_kwargs = { prompt_path: prompt_path, run_log_path: run_log_path, chdir: wt_path }
         run_kwargs[:timeout] = timeout if timeout
-        run_kwargs[:push_url]    = push_url    if push_url
-        run_kwargs[:push_token]  = push_token  if push_token
-        run_kwargs[:push_client] = push_client if push_client
-        run_kwargs[:err]         = err         if quiet
+        run_kwargs[:err] = err if quiet
         exit_code = harness_obj.run(**run_kwargs)
 
         result = { exit_code: exit_code, run_log: run_log_path, report: report_path, worktree: wt_path }
         result[:prompt_copied]  = prompt_path    if prompt
         result[:timed_out]      = true           if exit_code == Harness::PiHarness::TIMEOUT_EXIT_CODE
-        result[:created_run_id] = created_run_id if created_run_id
-        result[:push_url]       = push_url       if push_url
         result
       end
     end
