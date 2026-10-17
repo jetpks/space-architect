@@ -1,12 +1,8 @@
 # frozen_string_literal: true
 
 require "async/process"
-require "async/http/client"
-require "async/http/endpoint"
-require "protocol/http/body/writable"
 require "json"
 require "pathname"
-require "uri"
 
 module Space::Architect
   module Harness
@@ -106,8 +102,7 @@ module Space::Architect
         @guard_path = guard_path
       end
 
-      def run(prompt_path:, run_log_path:, chdir:, push_url: nil, push_token: nil,
-              push_client: nil, timeout: nil, liveness_delay: LIVENESS_DELAY_SECONDS, err: $stderr)
+      def run(prompt_path:, run_log_path:, chdir:, timeout: nil, liveness_delay: LIVENESS_DELAY_SECONDS, err: $stderr)
         prompt_path  = Pathname.new(prompt_path)
         run_log_path = Pathname.new(run_log_path)
 
@@ -117,7 +112,7 @@ module Space::Architect
             Sync do
               child = Async::Process::Child.new(*argv, chdir: chdir.to_s, in: prompt_io, out: w, err: log)
               w.close
-              tasks = start_tee(r, log, push_url: push_url, push_token: push_token, push_client: push_client, err: err)
+              tasks = [Async { drain_pipe(r, log) }]
               timed_out    = false
               timeout_task = nil
 
@@ -264,50 +259,6 @@ module Space::Architect
         end
       rescue StandardError
         # Best-effort: an internal read/parse failure must never break the run.
-      end
-
-      def start_tee(r, log, push_url:, push_token:, push_client:, err: $stderr)
-        if push_url || push_client
-          body = Protocol::HTTP::Body::Writable.new(queue: Thread::SizedQueue.new(32))
-          push = Async { push_body(body, push_url: push_url, push_token: push_token, push_client: push_client, err: err) }
-          [Async { tee_pipe(r, log, body, err: err) }, push]
-        else
-          [Async { drain_pipe(r, log) }]
-        end
-      end
-
-      def push_body(body, push_url:, push_token:, push_client:, err: $stderr)
-        path    = push_url ? URI.parse(push_url).path : "/"
-        headers = [["content-type", "application/x-ndjson"]]
-        headers << ["authorization", "Bearer #{push_token}"] if push_token
-        if push_client
-          push_client.post(path, headers: headers, body: body).discard
-        else
-          Async::HTTP::Client.open(Async::HTTP::Endpoint.parse(push_url)) do |c|
-            c.post(path, headers: headers, body: body).discard
-          end
-        end
-      rescue StandardError => e
-        err.puts "push_body: transport error (best-effort, run log intact): #{e.class}: #{e.message}"
-      end
-
-      def tee_pipe(r, log, body, err: $stderr)
-        pushing = true
-        while (chunk = r.gets)
-          log.write(chunk)
-          log.flush
-          if pushing
-            begin
-              body.write(chunk)
-            rescue StandardError => e
-              err.puts "tee_pipe: push write failed (best-effort, continuing log): #{e.class}: #{e.message}"
-              pushing = false
-            end
-          end
-        end
-      ensure
-        body.close_write
-        r.close
       end
 
       def drain_pipe(r, log)

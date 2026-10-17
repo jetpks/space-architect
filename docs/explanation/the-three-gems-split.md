@@ -21,7 +21,7 @@ made this gem consume them as libraries instead of vendoring them:
 | Gem | Binary(s) | Library | Owns |
 |-----|-----------|---------|------|
 | **space-cadet** | `space` | `Space::Core` | the spaces substrate: config, state, XDG, the space store, copy-on-write provisioning, OCI pack/build/run |
-| **repo-tender** | `repo-tender` (with the deprecated `src` shim) | `RepoTender` | evergreen clone tending; the launchd agent `architect sessions agent` drives |
+| **repo-tender** | `repo-tender` (with the deprecated `src` shim) | `RepoTender` | evergreen clone tending |
 | **space-architect** | `architect` | `Space::Architect` | the loop only: project state, the builder harness, dispatch, the research supervisor |
 
 Dropped from this gem: the vendored `lib/space_core` / `lib/space_src`
@@ -37,11 +37,8 @@ forward: don't reach for `architect space new`; call `space new`.
   shouldn't gate on either.
 - **Honest dependencies.** space-architect hard-depends on space-cadet
   (`~> 9.1` — the loop's help header brands itself through the substrate's
-  product-name seam) but only *softly* touches repo-tender: the session-sync
-  launchd rail is the sole consumer, so repo-tender is deliberately absent
-  from the gemspec and required lazily — without it, the sessions commands
-  print a short error naming `gem install repo-tender` and everything else
-  works.
+  product-name seam) and does not touch repo-tender at all: repo-tender is a
+  standalone gem for evergreen tending, deliberately absent from the gemspec.
 - **One binary per concern.** Each gem's CLI documents and tests its own
   surface; the loop's reference doesn't have to explain `space pack` to
   someone who only wants evergreen checkouts.
@@ -52,8 +49,7 @@ forward: don't reach for `architect space new`; call `space new`.
   `space-architect` app dirs to `space-cadet` ones
   (`~/.config/space-cadet/config.yml`, state home likewise).
   space-cadet 9.1+ migrates the old files automatically on first run of
-  `space` or `architect`; on 9.0.0 you move them by hand. The loop's own
-  session-sync cursor stays under `space-architect`.
+  `space` or `architect`; on 9.0.0 you move them by hand.
 - **Own version line.** `Space::Architect::VERSION` is decoupled from
   `Space::Core::VERSION` — the gemspec, `architect version`, and the
   bug-report diagnostics derive from the loop's own constant.

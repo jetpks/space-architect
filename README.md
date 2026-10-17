@@ -12,19 +12,17 @@ task-scoped **spaces**: directories that hold repos, notes, and artifacts under
 one obvious filesystem root. Nothing lives only in a chat window — every
 decision, spec, and verdict is committed to the space repo.
 
-It installs **one executable**, `architect`. The spaces substrate and the
-evergreen-checkout engine are two sibling gems:
+It installs **one executable**, `architect`. The spaces substrate is a sibling
+gem:
 
 | Gem | Dependency | What it provides |
 |-----|------------|------------------|
 | **space-cadet** | hard | The spaces substrate (`Space::Core`): create, manage & containerize task-scoped workspaces — the `space` binary — plus the copy-on-write evergreen-checkout substrate repos provision from |
-| **repo-tender** | soft | Evergreen clone tending — the `repo-tender` binary (with the deprecated `src` shim) — and the launchd agent the `architect sessions agent` commands drive. Install with `gem install repo-tender` when you want the session-sync rail — everything else works without it |
 
 ## Installation 📦
 
 ```bash
 gem install space-architect
-gem install repo-tender   # optional: enables the sessions launchd agent
 ```
 
 The gem installs one executable: `architect`. 🎀 (Or add
