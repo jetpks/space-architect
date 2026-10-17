@@ -1713,7 +1713,7 @@ module Space::Architect
     # two paths looked at, and the default in use.
     def default_model_inform
       "model: no architect.yaml found (looked at #{Routing.space_path(space.path)} + #{Routing.global_path}) — " \
-        "using default '#{Harness::DEFAULT_MODEL}'"
+        "using default '#{Harness::DEFAULT_MODEL}' #{Routing::INIT_HINT}"
     end
 
     # --prompt: the caller authors the lane prompt anywhere (a fresh scratch file) and

@@ -169,7 +169,9 @@ module Space::Architect
               # Legacy lanes store no model — resolve the config layer once so the
               # display shows what they would actually route, and mark the bare
               # constant as the last resort it is, not ordinary behavior.
-              config_model = Routing.for_space(sp.path)&.dig("builder", "model")
+              # Fully qualified: the Architect::Routing subcommand namespace
+              # (I09) lexically shadows Space::Architect::Routing inside this module.
+              config_model = Space::Architect::Routing.for_space(sp.path)&.dig("builder", "model")
 
               terminal.say "Project status:     #{block['status'] || '(none)'}"
               terminal.say "Current iteration:  #{block['current_iteration'] || '(none)'}"
@@ -1060,7 +1062,7 @@ module Space::Architect
       end
 
       class InstallSkills < BaseCommand
-        desc "Install bundled skills (architect, architect-research, architect-vocabulary) for a harness"
+        desc "Install bundled skills (architect, architect-discuss, architect-action, architect-status, architect-research) for a harness"
         phase 53, "Project"
         option :provider, default: "claude", desc: "Skill install target (default: claude; validated by the installer)"
         option :project, type: :boolean, default: false, desc: "Install to CWD instead of global"
@@ -1096,6 +1098,56 @@ module Space::Architect
             result[:steps].each { |s| terminal.say "  #{s[:cmd]} (exit #{s[:exit_code]})" }
             terminal.say "Extensions source: #{result[:source]}"
             CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
+      module Routing
+        # I09: `architect routing init` — the self-service cure for the
+        # missing-config wall (default_model_inform's hint names this command).
+        # Writes Routing::TEMPLATE verbatim and round-trips the write through
+        # Routing.parse before claiming success; the routing machinery itself
+        # is untouched — the command only writes a file it already accepts.
+        class Init < BaseCommand
+          desc "Write a commented starter architect.yaml (space root by default; --global for the machine-wide config)"
+          phase 53, "Project"
+          argument :space, required: false, desc: "Space identifier (default: $PWD)"
+          option :global, type: :boolean, default: false,
+            desc: "Write ~/.config/space-architect/architect.yaml (the machine-wide config; SPACE_ARCHITECT_GLOBAL_CONFIG overrides the path) instead of the space root, creating parent directories as needed"
+
+          def call(space: nil, global: false, **opts)
+            setup_terminal(**opts.slice(:color, :colors))
+            handle_errors do
+              target =
+                if global
+                  raise Space::Core::Error, "--global and an explicit space argument are mutually exclusive" if space
+                  # Routing.global_path is the env-overridable canonical path — never re-derive it here.
+                  path = Space::Architect::Routing.global_path
+                  FileUtils.mkdir_p(path.dirname)
+                  path
+                else
+                  # The house walk-up: empty identifier looks for space.yaml from $PWD upward.
+                  found = store.find(space).value_or(nil)
+                  unless found
+                    raise Space::Core::Error,
+                      "no space.yaml found upward from #{Dir.pwd} — run `architect routing init --global` to scaffold the machine-wide config instead"
+                  end
+                  Space::Architect::Routing.space_path(found.path)
+                end
+
+              raise Space::Core::Error, "architect.yaml already exists: #{target} — routing init never overwrites" if target.exist?
+
+              File.write(target, Space::Architect::Routing::TEMPLATE)
+              # A scaffold that fails its own parser (or misses a required role)
+              # is a bug — validate the round-trip, let the error escape loud.
+              parsed = Space::Architect::Routing.parse(File.read(target), target)
+              missing = Space::Architect::Routing::REQUIRED_ROLES - parsed.keys
+              raise Space::Core::Error, "scaffolded #{target} is missing required roles: #{missing.join(', ')}" if missing.any?
+
+              terminal.say "Wrote starter routing config: #{terminal.path(target.to_s)}"
+              terminal.say "Edit the example/REPLACE_ME models; the next command or /loop picks the file up."
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
           end
         end
       end
@@ -1339,6 +1391,9 @@ Space::Architect::CLI::Registry.register "worktree" do |wt|
   wt.register "add",    Space::Architect::CLI::Architect::Worktree::Add
   wt.register "remove", Space::Architect::CLI::Architect::Worktree::Remove
   wt.register "list",   Space::Architect::CLI::Architect::Worktree::List
+end
+Space::Architect::CLI::Registry.register "routing" do |r|
+  r.register "init", Space::Architect::CLI::Architect::Routing::Init
 end
 Space::Architect::CLI::Registry.register "variant" do |v|
   v.register "add",     Space::Architect::CLI::Architect::Variant::Add

@@ -59,8 +59,9 @@ architect sync my-app        # one repo
 
 ## `architect install-skills`
 
-Install the bundled skills (`architect`, `architect-research`,
-`architect-vocabulary`) for a harness. Run once per machine after installing
+Install the bundled skills (`architect`, `architect-discuss`,
+`architect-action`, `architect-status`, `architect-research`) for a harness.
+Run once per machine after installing
 the gem, or after upgrading to pick up skill changes.
 
 | Option | Default | Description |

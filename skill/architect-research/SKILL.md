@@ -8,7 +8,8 @@ description: >
   synthesizes a decision-oriented report. Use when
   brainstorming a project or feature, choosing a technology, or asked to
   "research X", "what's the state of the art", "deep research". For narrow
-  slice-level fact checks inside the build loop, /architect handles those inline.
+  slice-level fact checks inside the build loop, /architect-discuss handles
+  those inline.
 ---
 
 # Architect Research
@@ -167,6 +168,6 @@ Commit the report. Raw findings stay in `build/research/` (gitignored).
 ### 7. Hand off
 
 If this feeds the build loop: distill the report into the iteration's **Grounds**
-section (`architecture/I<NN>-<name>.md`) per `/architect`, or into
+section (`architecture/I<NN>-<name>.md`) per `/architect-discuss`, or into
 `architecture/BRIEF.md` §sections when it is project-scope, and continue there.
 The builder's PHASE 0 will challenge Grounds' claims — that's a feature.
