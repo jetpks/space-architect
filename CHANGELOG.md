@@ -5,6 +5,62 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.3.0] - 2026-10-17
+
+### Removed
+
+- **The gem cut (observation-deck entry 2).** Session capture moved to the
+  session-sink pi extension (jetpks/pi-extensions), so the gem's entire
+  push/streaming surface is gone: `SpacePush`/`Packer` and the `architect
+  push` command; dispatch `--push-url/--push-host/--push-token`, `RunCreator`,
+  and the harness tee; `ConversationsClient` + `session_sync/**` and the
+  sessions CLI that drove them; `JobsClient` (its only consumer was the
+  removed server jobs API). looplog, runlog, cost, routing, and the loop
+  lifecycle are untouched.
+
+## [9.2.1] - 2026-10-15
+
+### Fixed
+
+- dispatch copies the lane prompt into the build dir (`build/<id>-<lane>/`
+  `prompt.md`) at dispatch time, so the record is self-contained even if the
+  scratch source is removed.
+
+## [9.2.0] - 2026-10-15
+
+### Added
+
+- **CLI observability:** `architect looplog` (follow every active loop run
+  live; `--list`/`--replay`/`--all`), `architect runlog` (pretty-print or
+  stream a run.jsonl), and full gate transcripts written to
+  `build/gate/<id>-<ts>.md`.
+
+### Changed
+
+- Docs re-centered on the coordinator path; role agents installed user-level
+  by `architect install-agents`.
+
+## [9.1.1] - 2026-10-14
+
+### Fixed
+
+- `architect provision` fast-forward-syncs the integration branch from the
+  default branch (or cuts exactly `--base REF`), refusing loudly on
+  divergence instead of silently building on a stale base.
+
+## [9.1.0] - 2026-10-13
+
+### Added
+
+- **The narrator role:** a sixth loop role (cheap model, one file per settled
+  event) writing `notes/narrative-*.md` — verbatim facts, never a gate.
+
+### Changed
+
+- `architect cost` gains human formatting (significant figures, `--precise`,
+  color) and a latency turn/generation split.
+- `architect new` flocks the scaffold critical section across processes.
+
 ## [9.0.0] - 2026-10-09
 
 ### Changed
