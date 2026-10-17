@@ -85,28 +85,29 @@ human again until the loop needs them.
 5. **Commit the plan doc** to the space — an uncommitted plan is scratch, and
    decision-bearing documents live in `notes/` (not-committed = didn't
    happen).
-6. **Launch it yourself.** You cannot run `/loop` — it is a user command in
-   the interactive session, and the human has disengaged. The launch is
-   yours: spawn the coordinator directly with the subagent tool —
-   - agent `architect-coordinator`, async, cwd = the space root;
-   - model = the coordinator's pin from `architect.yaml` (resolve it — read
-     the space-local file first, then the global config);
-   - `timeoutMs` 43200000 (the 12h coordinator ceiling — never the default);
-   - task = the plan text verbatim (paste the full plan doc; the coordinator
-     works it iteration by iteration).
-
-   If the human is still around and prefers it, they can run
-   `/loop --from notes/plan-<ts>-<name>.md` instead — it validates routing
-   and spawns the coordinator detached, so the loop outlives their session.
-   Your direct spawn keeps the loop tied to this session staying alive.
+6. **Launch it with the `architect_loop` tool.** You cannot run `/loop` — it is
+   a user command in the interactive session, and the human has disengaged.
+   The launch is yours, and the tool is your equivalent of `/loop`: call
+   `architect_loop` with `from` = the plan file path. It resolves and
+   validates routing, regenerates the role agent files, spawns
+   `architect-coordinator` detached (its pin, a 12h ceiling), waits for the
+   run id, and then schedules a compaction of this session — after which you
+   are a small on-call escalation seat that still knows where everything
+   lives. Pass `compact: false` only if the human asks to keep full context.
+   Fallback when the tool is missing (older extension): spawn the coordinator
+   directly with the subagent tool — agent `architect-coordinator`, async,
+   cwd = the space root, the coordinator's pin from `architect.yaml` in the
+   model field, `timeoutMs` 43200000, task = the plan text verbatim — and
+   tell the human a `/compact` whenever suits (no timing point, unlike
+   `/loop`).
 7. **Report the handoff, then stay on-call.** Tell the human: the plan path,
    the coordinator run id, and how to watch — `architect looplog` (live),
    `--list` (inventory), `architect status`, `architect cost`. Then: this
-   session is the escalation seat — leave it open (a `/compact` whenever
-   suits; no timing required) or close it, knowing a coordinator with no
-   listener parks questions in `notes/escalation-<ts>.md` and stops via the
-   exception path rather than improvising. When you do get an escalation:
-   rule on it; the coordinator steers your ruling to the child unchanged.
+   session is the escalation seat — the human may keep it open, close it, or
+   compact it further whenever they like; a coordinator with no listener parks
+   questions in `notes/escalation-<ts>.md` and stops via the exception path
+   rather than improvising. When you do get an escalation: rule on it; the
+   coordinator steers your ruling to the child unchanged.
 
 ## Failure modes to check before launching
 
