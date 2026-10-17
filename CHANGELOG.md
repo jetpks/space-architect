@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.6.0] - 2026-10-17
+
+### Changed
+
+- **`architect looplog`** — run tags show the full agent name
+  (`[architect-builder:67-core]`) instead of the ROLE_ABBREV table's
+  abbreviations (`bld:`): no lookup table to keep in sync, forwards
+  compatible with new roles (none of the names are long enough to need
+  clipping). Lane tags keep the iteration-ordinal + lane suffix.
+
 ## [9.5.0] - 2026-10-17
 
 ### Added

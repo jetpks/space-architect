@@ -32,7 +32,7 @@ class LooplogTest < Space::ArchitectTest
   end
 
   # --list byte-shape: both discovery roots hit, wt/ pruned, active ● vs stale
-  # · beyond the window, and the bld:<lane> tag from a lane-worktree cwd.
+  # · beyond the window, and the <agent>:<lane> tag from a lane-worktree cwd.
   def test_looplog_list_inventories_both_roots_prunes_wt_and_flags_staleness
     root = Dir.mktmpdir("looplog-test")
     space = File.join(root, "space")
@@ -59,10 +59,10 @@ class LooplogTest < Space::ArchitectTest
     size = File.size(fresh_path) / 1024
     expected = [
       format("%s %-9s %5s %5.0fm %7sK  %s  %s",
-             "●", "coord:07-gem", Time.at(fresh_mtime).strftime("%H:%M"),
+             "●", "architect-coordinator:07-gem", Time.at(fresh_mtime).strftime("%H:%M"),
              (Time.now.to_f - fresh_mtime) / 60, size, "11111111", "Task: write the thing"),
       format("%s %-9s %5s %5.0fm %7sK  %s  %s",
-             "·", "bld:07-gem", Time.at(stale_mtime).strftime("%H:%M"),
+             "·", "architect-builder:07-gem", Time.at(stale_mtime).strftime("%H:%M"),
              (Time.now.to_f - stale_mtime) / 60, size, "22222222", "Task: write the thing")
     ]
     assert_equal "#{expected.join("\n")}\n", out.string,
@@ -103,7 +103,7 @@ class LooplogTest < Space::ArchitectTest
     follower.scan
 
     banner, rest = out.string.split("\n", 2)
-    assert_match(%r{\A\[bld:07-gem\] \d{2}:\d{2}:\d{2} ▶ architect-builder 22222222  @ /tmp/looplog-space/build/I07-gem/wt — Task: write the thing\z}, banner,
+    assert_match(%r{\A\[architect-builder:07-gem\] \d{2}:\d{2}:\d{2} ▶ architect-builder 22222222  @ /tmp/looplog-space/build/I07-gem/wt — Task: write the thing\z}, banner,
                  "adoption prints the tagged banner with cwd and task")
     assert_equal "", rest, "a fresh adoption starts at the file's end — no history"
 
@@ -124,7 +124,7 @@ class LooplogTest < Space::ArchitectTest
     follower.scan
 
     banner, rest = out.string.split("\n", 2)
-    assert_match(%r{\A\[bld:07-gem\] \d{2}:\d{2}:\d{2} ▶ architect-builder 22222222  @ /tmp/looplog-space/build/I07-gem/wt — Task: write the thing\z}, banner)
+    assert_match(%r{\A\[architect-builder:07-gem\] \d{2}:\d{2}:\d{2} ▶ architect-builder 22222222  @ /tmp/looplog-space/build/I07-gem/wt — Task: write the thing\z}, banner)
     assert_equal "", rest, "adoption prints only the banner; history streams on drain"
 
     follower.drain(follower.runs.fetch(path))
@@ -164,8 +164,8 @@ class LooplogTest < Space::ArchitectTest
     )
 
     lines = out.string.lines
-    assert_match(/bld:06-markdown-seam /, lines[0], "hyphenated lane resolved via the iteration id")
-    assert_match(/narr:06-editor /, lines[1], "narrator carries its own abbrev, not a truncation")
+    assert_match(/architect-builder:06-markdown-seam /, lines[0], "hyphenated lane resolved via the iteration id")
+    assert_match(/architect-narrator:06-editor /, lines[1], "narrator shows its full agent name")
   end
 
   private
@@ -193,7 +193,7 @@ class LooplogTest < Space::ArchitectTest
   end.freeze
 
   def expected_lines(render_lines, elapsed:)
-    render_lines.map { |ts, line| "[bld:07-gem] #{Time.at(ts).strftime('%H:%M:%S')} #{line}" }
+    render_lines.map { |ts, line| "[architect-builder:07-gem] #{Time.at(ts).strftime('%H:%M:%S')} #{line}" }
                 .join("\n") << "\n"
   end
 

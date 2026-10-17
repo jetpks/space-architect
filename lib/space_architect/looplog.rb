@@ -52,14 +52,6 @@ module Space
       # script. Color and the truncation budgets arrive per call (env/io), not
       # as load-time globals like the script's.
       module Support
-        ROLE_ABBREV = {
-          "architect-coordinator" => "coord",
-          "architect-spec" => "spec",
-          "architect-judge" => "judge",
-          "architect-builder" => "bld",
-          "architect-narrator" => "narr"
-        }.freeze
-
         TAG_COLORS = %w[36 35 33 32 34 95 96 91].freeze
 
         private
@@ -167,23 +159,24 @@ module Space
           [cwd, task]
         end
 
-        # [bld:67-core] when cwd is a lane worktree — the iteration ordinal
-        # plus the lane name, resolved against the space's known iteration ids
-        # (architecture/I<NN>-<name>.md) so a hyphenated iteration slug cannot
-        # bleed into the lane (I06-editor-markdown-markdown-seam → 06-markdown-seam).
-        # An unrecognized dir (no architecture/, or a legacy name) falls back
-        # to the whole dir name minus the I<NN>- prefix, clipped.
+        # [architect-builder:67-core] when cwd is a lane worktree — the full
+        # agent name plus the iteration ordinal and the lane name, resolved
+        # against the space's known iteration ids (architecture/I<NN>-<name>.md)
+        # so a hyphenated iteration slug cannot bleed into the lane
+        # (I06-editor-markdown-markdown-seam → 06-markdown-seam). The agent name
+        # is shown verbatim — no abbrev map (forwards-compatible with new
+        # roles). An unrecognized dir (no architecture/, or a legacy name)
+        # falls back to the whole dir name minus the I<NN>- prefix, clipped.
         def tag_label(agent, cwd, iteration_ids: [])
-          role = ROLE_ABBREV.fetch(agent, agent[0, 10])
-          return role unless cwd && File.basename(cwd) == "wt"
+          return agent unless cwd && File.basename(cwd) == "wt"
 
           dir = File.basename(File.dirname(cwd))
           ordinal = dir[/\A[Ii](\d+)-/, 1]
-          return "#{role}:#{dir[0, 26]}" unless ordinal
+          return "#{agent}:#{dir[0, 26]}" unless ordinal
 
           lane = iteration_ids.filter_map { |id| dir.delete_prefix("#{id}-") if dir.start_with?("#{id}-") }.first
           lane ||= dir.sub(/\A[Ii]\d+-/, "")
-          "#{role}:#{ordinal}-#{lane[0, 26]}"
+          "#{agent}:#{ordinal}-#{lane[0, 26]}"
         end
 
         def paint_tag(label, run_id)
