@@ -523,9 +523,8 @@ specific pools as dated facts (§8).
 ### CLI principles
 
 - The loop is one binary (`architect`) over a clean library seam: the spaces
-  substrate is the space-cadet gem (`Space::Core`, the `space` binary), the
-  evergreen engine (`repo-tender` + the `src` shim) is its own gem, and the
-  sessions launchd agent comes from repo-tender too (soft dep) — the split
+  substrate is the space-cadet gem (`Space::Core`, the `space` binary), and the
+  evergreen engine (`repo-tender` + the `src` shim) is its own gem — the split
   keeps each surface's CLI in its own gem.
 - Output is readable manually and useful in scripts; paths under `$HOME` render
   as `~/…` in human output; color auto-detects the TTY and honors

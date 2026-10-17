@@ -2,14 +2,10 @@
 
 require "json"
 require "fileutils"
-require_relative "../jobs_client"
-require_relative "../conversations_client"
 require_relative "../loop_cost"
-require_relative "../session_sync"
 require_relative "../runlog"
 require_relative "../looplog"
 require_relative "../extension_installer"
-require_relative "../space_push"
 
 module Space::Architect
   module CLI
@@ -212,41 +208,6 @@ module Space::Architect
               CLI.record_outcome(Outcome.new(exit_code: 0))
             end
           end
-        end
-      end
-
-      class Push < BaseCommand
-        desc "Pack the current space and push it to a space-server for import"
-        phase 53, "Project"
-        argument :space, required: false, desc: "Space identifier (default: $PWD)"
-        option :host,  required: true, desc: "Base URL of the space-server"
-        option :token, required: true, desc: "Bearer token for authorization"
-
-        def call(space: nil, host: nil, token: nil, **opts)
-          setup_terminal(**opts.slice(:color, :colors))
-          handle_errors do
-            raise Space::Core::Error, "--host is required" unless host
-            raise Space::Core::Error, "--token is required" unless token
-
-            render(store.find(space)) do |sp|
-              bundle = SpacePush::Packer.new(sp.path).pack
-              begin
-                terminal.say "Packed #{sp.id}: #{format_bytes(File.size(bundle))}"
-                summary = SpacePush.new(host, token).push(bundle)
-                terminal.say "Imported: #{summary['slug']} (id #{summary['id']}) — " \
-                  "#{summary['iterations']} iterations, #{summary['artifacts']} artifacts, #{summary['runs']} runs"
-                CLI.record_outcome(Outcome.new(exit_code: 0))
-              ensure
-                File.delete(bundle)
-              end
-            end
-          end
-        end
-
-        private
-
-        def format_bytes(size)
-          format("%.1f MiB", size.to_f / (1024 * 1024))
         end
       end
 
@@ -560,17 +521,14 @@ module Space::Architect
         option   :force_effort,    default: nil, desc: "Force the literal level onto the --thinking flag, skipping architect's validation — alias for --force-thinking/--force-reasoning (dispatch only; the binary's rejection is final)"
         option   :force_thinking,  default: nil, desc: "Force the literal level onto the --thinking flag, skipping architect's validation — alias for --force-effort/--force-reasoning (dispatch only; the binary's rejection is final)"
         option   :force_reasoning, default: nil, desc: "Force the literal level onto the --thinking flag, skipping architect's validation — alias for --force-effort/--force-thinking (dispatch only; the binary's rejection is final)"
-        option   :quiet,    type: :boolean, default: false, desc: "Suppress thinking-translation and harness run-time warn lines (liveness/push) on $stderr for this dispatch"
+        option   :quiet,    type: :boolean, default: false, desc: "Suppress thinking-translation and harness run-time warn lines (liveness) on $stderr for this dispatch"
         option   :detach,    type: :boolean, default: false, desc: "Detach the builder process (returns immediately with PID; poll report for completion)"
         option   :timeout,   default: "14400", desc: "Wall-clock timeout in seconds (0 disables; default 4h); foreground only"
-        option   :push_url,   default: nil,   desc: "HTTP endpoint for streaming push (POST body to this URL)"
-        option   :push_token, default: nil,   desc: "Bearer token for push endpoint authorization"
-        option   :push_host,  default: nil,   desc: "Base URL of the ingest server; the CLI creates a run via POST <host>/runs and streams to /runs/<id>/ingest (requires --push-token)"
 
         def call(iteration:, lane:, space: nil, prompt: nil, model: nil,
                  max_turns: "200", harness: nil, effort: nil, thinking: nil, reasoning: nil,
                  force_effort: nil, force_thinking: nil, force_reasoning: nil, quiet: false, detach: false,
-                 timeout: "14400", push_url: nil, push_token: nil, push_host: nil, **opts)
+                 timeout: "14400", **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             level = resolve_thinking_alias(effort: effort, thinking: thinking, reasoning: reasoning)
@@ -588,9 +546,6 @@ module Space::Architect
               kwargs[:force]      = true            if forced_level
               kwargs[:quiet]      = true             if quiet
               kwargs[:timeout]    = timeout.to_i    unless detach
-              kwargs[:push_url]   = push_url        if push_url
-              kwargs[:push_token] = push_token      if push_token
-              kwargs[:push_host]  = push_host       if push_host
               res = project.dispatch(iteration, lane, **kwargs)
               terminal.say "Prompt:  #{prompt} → #{terminal.path(res[:prompt_copied])}" if res[:prompt_copied]
               if detach
@@ -607,7 +562,6 @@ module Space::Architect
               else
                 terminal.say "Run log: #{terminal.path(res[:run_log])}"
                 terminal.say "Report:  #{terminal.path(res[:report])}"
-                terminal.say "Ingest URL:  #{res[:push_url]}" if res[:push_url]
                 terminal.say "Builder exited with status #{res[:exit_code]}"
                 unless res[:report].exist? && !res[:report].read.strip.empty?
                   terminal.say "WARNING: no report at #{terminal.path(res[:report])} — the lane produced no deliverable."
@@ -953,7 +907,7 @@ module Space::Architect
         # --help, which :boolean would render as `--[no-]json`.
         option :json,          type: :flag, default: false, desc: "Emit the frozen JSON contract instead of tables"
         option :space,         desc: "Space identifier or path (default: nearest ancestor with space.yaml)"
-        option :sessions_root, desc: "pi sessions root (default: ~/.pi/agent/sessions via SessionSync)"
+        option :sessions_root, desc: "pi sessions root (default: ~/.pi/agent/sessions)"
         option :since,         desc: "Only artifacts starting at/after this ISO-8601 timestamp or YYYY-MM-DD date"
         option :by_iteration,  type: :flag, default: false, desc: "Split the cost table into per-iteration windows"
         option :latency,       type: :flag, default: false, desc: "Per-model latency: round wall, turn vs generation tok/s, tool wait share"
@@ -969,7 +923,7 @@ module Space::Architect
             render(store.find(space)) do |sp|
               report = LoopCost.report(
                 space: sp,
-                sessions_root: sessions_root || SessionSync.default_pi_root,
+                sessions_root: sessions_root || default_pi_sessions_root,
                 since: since,
                 by_iteration: by_iteration,
                 latency: latency
@@ -981,6 +935,12 @@ module Space::Architect
         end
 
         private
+
+        # The pi sessions root Cost reads by default — the same value the cut
+        # session-sync rail's default computed.
+        def default_pi_sessions_root(env: ENV)
+          File.join(Space::Core::XDG.home(env: env), ".pi", "agent", "sessions")
+        end
 
         def render_cost_text(report, by_iteration, latency, precise)
           if latency
@@ -1340,235 +1300,6 @@ module Space::Architect
           end
         end
       end
-
-      module Jobs
-        # dry-cli 1.4.1 only enforces `required: true` on argument, not on
-        # option (Dry::CLI::Parser#parse_required_params only ever consults
-        # command.required_arguments) — a missing --host/--token would
-        # otherwise surface as a raw ArgumentError from the **opts keyword
-        # splat, uncaught by handle_errors. Every subcommand below validates
-        # explicitly so the failure is a clean Space::Core::Error instead.
-        def self.require_credentials!(host, token)
-          raise Space::Core::Error, "--host is required" unless host
-          raise Space::Core::Error, "--token is required" unless token
-        end
-
-        class List < BaseCommand
-          desc "List jobs for the authenticated user (owner-scoped, newest-first)"
-          option :host,  required: true, desc: "Base URL of the space-server"
-          option :token, required: true, desc: "Bearer token for authorization"
-
-          def call(host: nil, token: nil, **opts)
-            setup_terminal(**opts.slice(:color, :colors))
-            handle_errors do
-              Jobs.require_credentials!(host, token)
-              jobs = JobsClient.new(host, token).list
-              if jobs.empty?
-                terminal.say "No jobs"
-              else
-                rows = jobs.map do |j|
-                  [j["id"], j["status"], j["run_id"], j["created_at"],
-                   j["harness"], j["model"], j.dig("provenance", "lane")]
-                end
-                terminal.say terminal.table(%w[ID Status RunID CreatedAt Harness Model Lane], rows)
-              end
-              CLI.record_outcome(Outcome.new(exit_code: 0))
-            end
-          end
-        end
-
-        class Show < BaseCommand
-          desc "Show a job's full JSON"
-          argument :id, required: true, desc: "Job id"
-          option   :host,  required: true, desc: "Base URL of the space-server"
-          option   :token, required: true, desc: "Bearer token for authorization"
-
-          def call(id:, host: nil, token: nil, **opts)
-            setup_terminal(**opts.slice(:color, :colors))
-            handle_errors do
-              Jobs.require_credentials!(host, token)
-              job = JobsClient.new(host, token).show(id)
-              terminal.say JSON.pretty_generate(job)
-              CLI.record_outcome(Outcome.new(exit_code: 0))
-            end
-          end
-        end
-
-        class Cancel < BaseCommand
-          desc "Cancel a job"
-          argument :id, required: true, desc: "Job id"
-          option   :host,  required: true, desc: "Base URL of the space-server"
-          option   :token, required: true, desc: "Bearer token for authorization"
-
-          def call(id:, host: nil, token: nil, **opts)
-            setup_terminal(**opts.slice(:color, :colors))
-            handle_errors do
-              Jobs.require_credentials!(host, token)
-              result = JobsClient.new(host, token).cancel(id)
-              terminal.say JSON.pretty_generate(result)
-              CLI.record_outcome(Outcome.new(exit_code: 0))
-            end
-          end
-        end
-
-        class Watch < BaseCommand
-          desc "Resolve a job's run and stream its live events (SSE) until run_complete"
-          argument :id, required: true, desc: "Job id"
-          option   :host,  required: true, desc: "Base URL of the space-server"
-          option   :token, required: true, desc: "Bearer token for authorization"
-
-          def call(id:, host: nil, token: nil, **opts)
-            setup_terminal(**opts.slice(:color, :colors))
-            handle_errors do
-              Jobs.require_credentials!(host, token)
-              client = JobsClient.new(host, token)
-              run_id = client.wait_for_run_id(id)
-              client.stream(run_id) { |data| terminal.say data }
-              CLI.record_outcome(Outcome.new(exit_code: 0))
-            end
-          end
-        end
-      end
-
-      module Sessions
-        # See Jobs.require_credentials! above for why this is validated
-        # explicitly rather than relying on dry-cli's `required:` option flag.
-        def self.require_credentials!(host, token)
-          raise Space::Core::Error, "--host is required" unless host
-          raise Space::Core::Error, "--token or #{SessionSync::TOKEN_ENV} is required" unless token
-        end
-
-        class Sync < BaseCommand
-          desc "Scan pi/claude session files and upload new/grown conversations to a space-server"
-          option :host,        required: true, desc: "Base URL of the space-server"
-          option :token,       default: nil,   desc: "Bearer token for authorization (defaults to $#{SessionSync::TOKEN_ENV}; an explicit --token wins; an op:// ref is resolved once via `op read`)"
-          option :state_file,  default: nil,   desc: "Cursor YAML path (default: $XDG_STATE_HOME/space-architect/session-sync.yaml)"
-          option :pi_root,     default: nil,   desc: "Override the pi sessions root (default: ~/.pi/agent/sessions)"
-          option :claude_root, default: nil,   desc: "Override the claude projects root (default: ~/.claude/projects)"
-          option :dry_run,     type: :boolean, default: false, desc: "Report what would upload without uploading or recording the cursor"
-
-          def call(host: nil, token: nil, state_file: nil, pi_root: nil, claude_root: nil, dry_run: false, **opts)
-            setup_terminal(**opts.slice(:color, :colors))
-            handle_errors do
-              resolved_token = token || ENV[SessionSync::TOKEN_ENV]
-              Sessions.require_credentials!(host, resolved_token)
-              runner = SessionSync::Runner.new(
-                client: ConversationsClient.new(host, resolved_token),
-                state_path: state_file || SessionSync.default_state_file,
-                pi_root: pi_root || SessionSync.default_pi_root,
-                claude_root: claude_root || SessionSync.default_claude_root,
-                dry_run: dry_run
-              )
-              results = runner.call
-              results.each do |r|
-                terminal.say "#{r[:action]}: #{r[:path]}#{r[:action] == :failed ? " (#{r[:status]}: #{r[:errors]})" : ""}"
-              end
-              failed = results.count { |r| r[:action] == :failed }
-              terminal.say "#{results.size} file(s): #{results.size - failed} ok, #{failed} failed"
-              CLI.record_outcome(Outcome.new(exit_code: failed.zero? ? 0 : 1))
-            end
-          end
-        end
-
-        module Agent
-          module Helpers
-            def plist_path
-              File.join(SessionSync.launch_agents_dir, "#{SessionSync::LABEL}.plist")
-            end
-
-            def format_failure(f) = f.is_a?(Hash) ? f.inspect : f.to_s
-
-            # The launchd-agent seam is repo-tender's — a soft dependency, never a
-            # gemspec runtime dep. Required lazily so `sessions agent …` degrades
-            # with an actionable hint instead of failing at boot when the gem is
-            # absent; handle_errors turns the raise into a red message + exit 1.
-            def agent
-              require "repo_tender"
-              RepoTender::Launchd::Agent
-            rescue LoadError
-              raise Space::Core::Error, "sessions agent needs the repo-tender gem — install it with: gem install repo-tender"
-            end
-          end
-
-          class Install < BaseCommand
-            include Helpers
-            desc "Install the launchd agent that periodically runs `architect sessions sync`"
-            option :host,     required: true, desc: "Base URL of the space-server"
-            option :token,    required: true, desc: "Bearer token for authorization (an op:// ref is resolved once at install time; the raw value is stored in the plist's EnvironmentVariables, not argv)"
-            option :interval, default: "900", desc: "StartInterval in seconds (default 900)"
-
-            def call(host: nil, token: nil, interval: "900", **opts)
-              setup_terminal(**opts.slice(:color, :colors))
-              handle_errors do
-                Sessions.require_credentials!(host, token)
-                resolved_token = token.start_with?("op://") ? SessionSync.resolve_token(token) : token
-                pp = plist_path
-                xml = SessionSync::Plist.call(
-                  label: SessionSync::LABEL,
-                  refresh_interval: interval.to_i,
-                  log_dir: SessionSync.log_dir,
-                  bin_path: SessionSync::BinPath.detect,
-                  ruby_bin: RbConfig.ruby,
-                  host: host,
-                  env: {SessionSync::TOKEN_ENV => resolved_token}
-                )
-                FileUtils.mkdir_p(File.dirname(pp))
-                File.write(pp, xml)
-                File.chmod(0o600, pp)
-
-                result = agent.new(label: SessionSync::LABEL).install(pp)
-                raise Space::Core::Error, "bootstrap failed: #{format_failure(result.failure)}" if result.failure?
-
-                terminal.say "Installed: #{terminal.path(pp)}"
-                CLI.record_outcome(Outcome.new(exit_code: 0))
-              end
-            end
-          end
-
-          class Uninstall < BaseCommand
-            include Helpers
-            desc "Uninstall the session-sync launchd agent (bootout + remove the plist)"
-
-            def call(**opts)
-              setup_terminal(**opts.slice(:color, :colors))
-              handle_errors do
-                pp = plist_path
-                result = agent.new(label: SessionSync::LABEL).uninstall
-                terminal.say "bootout reported: #{format_failure(result.failure)}" if result.failure?
-
-                if File.exist?(pp)
-                  File.delete(pp)
-                  terminal.say "Removed plist: #{terminal.path(pp)}"
-                else
-                  terminal.say "Plist not present: #{terminal.path(pp)}"
-                end
-                CLI.record_outcome(Outcome.new(exit_code: 0))
-              end
-            end
-          end
-
-          class Status < BaseCommand
-            include Helpers
-            desc "Report the session-sync launchd agent's loaded/running/last-exit state"
-
-            def call(**opts)
-              setup_terminal(**opts.slice(:color, :colors))
-              handle_errors do
-                result = agent.new(label: SessionSync::LABEL).status
-                raise Space::Core::Error, "status failed: #{format_failure(result.failure)}" if result.failure?
-
-                s = result.success
-                terminal.say "label: #{SessionSync::LABEL}"
-                terminal.say "loaded: #{s[:loaded]}"
-                terminal.say "running: #{s[:running]}"
-                terminal.say "pid: #{s[:pid].inspect}"
-                terminal.say "last_exit: #{s[:last_exit].inspect}"
-                CLI.record_outcome(Outcome.new(exit_code: 0))
-              end
-            end
-          end
-        end
-      end
     end
   end
 end
@@ -1583,7 +1314,6 @@ Space::Architect::CLI::Registry.register "init",   Space::Architect::CLI::Archit
 Space::Architect::CLI::Registry.register "ground", Space::Architect::CLI::Architect::Ground
 Space::Architect::CLI::Registry.register "new",    Space::Architect::CLI::Architect::New
 Space::Architect::CLI::Registry.register "status", Space::Architect::CLI::Architect::Status
-Space::Architect::CLI::Registry.register "push",   Space::Architect::CLI::Architect::Push
 Space::Architect::CLI::Registry.register "sync",   Space::Architect::CLI::Architect::Sync
 Space::Architect::CLI::Registry.register "rehearse", Space::Architect::CLI::Architect::Rehearse
 Space::Architect::CLI::Registry.register "freeze", Space::Architect::CLI::Architect::Freeze
@@ -1609,20 +1339,6 @@ Space::Architect::CLI::Registry.register "worktree" do |wt|
   wt.register "add",    Space::Architect::CLI::Architect::Worktree::Add
   wt.register "remove", Space::Architect::CLI::Architect::Worktree::Remove
   wt.register "list",   Space::Architect::CLI::Architect::Worktree::List
-end
-Space::Architect::CLI::Registry.register "jobs" do |j|
-  j.register "list",   Space::Architect::CLI::Architect::Jobs::List
-  j.register "show",   Space::Architect::CLI::Architect::Jobs::Show
-  j.register "watch",  Space::Architect::CLI::Architect::Jobs::Watch
-  j.register "cancel", Space::Architect::CLI::Architect::Jobs::Cancel
-end
-Space::Architect::CLI::Registry.register "sessions" do |s|
-  s.register "sync", Space::Architect::CLI::Architect::Sessions::Sync
-  s.register "agent" do |a|
-    a.register "install",   Space::Architect::CLI::Architect::Sessions::Agent::Install
-    a.register "uninstall", Space::Architect::CLI::Architect::Sessions::Agent::Uninstall
-    a.register "status",    Space::Architect::CLI::Architect::Sessions::Agent::Status
-  end
 end
 Space::Architect::CLI::Registry.register "variant" do |v|
   v.register "add",     Space::Architect::CLI::Architect::Variant::Add

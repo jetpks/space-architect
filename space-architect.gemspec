@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.email = ["eric@ebj.dev"]
 
   spec.summary = "The Architect Loop — structured judgment-and-build cycles for humans and headless AI builders"
-  spec.description = "A dry-cli CLI for the Architect Loop: iterations, briefs, freezes, verdicts, lane worktrees, and headless pi dispatch — the judgment loop that runs inside space-cadet's task-scoped workspaces. Depends on the space-cadet gem for the spaces substrate (hard) and the repo-tender gem for the session-sync launchd agent (soft, install at will)."
+  spec.description = "A dry-cli CLI for the Architect Loop: iterations, briefs, freezes, verdicts, lane worktrees, and headless pi dispatch — the judgment loop that runs inside space-cadet's task-scoped workspaces. Depends on the space-cadet gem for the spaces substrate (hard)."
   spec.homepage = "https://github.com/jetpks/space-architect"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 4.0.5"
@@ -25,9 +25,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "space-cadet", "~> 9.1"
-  spec.add_dependency "async-http", "~> 0.95"
   spec.add_dependency "async-process", "~> 1.4"
-  spec.add_dependency "protocol-http", "~> 0.62"
   spec.add_dependency "pastel", "~> 0.8"
   spec.add_dependency "dry-cli", "~> 1.4"
   spec.add_dependency "dry-monads", "~> 1.10"

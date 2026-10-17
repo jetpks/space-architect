@@ -49,12 +49,9 @@ still-stubbed prompt. Under the hood it runs:
 | `--harness=VALUE` | lane entry, else `space.yaml` `project.harness`, else `pi` | Harness (`pi` is the only valid value; anything else is rejected with an actionable error). |
 | `--effort` / `--thinking` / `--reasoning=VALUE` | — | Thinking/reasoning effort level — aliases of one another (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). |
 | `--force-effort` / `--force-thinking` / `--force-reasoning=VALUE` | — | Force the literal level onto the `--thinking` flag, skipping architect's validation (dispatch only; the binary's rejection is final). |
-| `--[no-]quiet` | `false` | Suppress thinking-translation and harness run-time warn lines (liveness/push) on stderr. |
-| `--[no-]detach` | `false` | Detach the builder process — returns immediately with a PID; poll the report for completion. Cannot combine with `--push-url`/`--push-host`. |
+| `--[no-]quiet` | `false` | Suppress thinking-translation and harness run-time warn lines (liveness) on stderr. |
+| `--[no-]detach` | `false` | Detach the builder process — returns immediately with a PID; poll the report for completion. |
 | `--timeout=SECONDS` | `14400` (4h) | Wall-clock timeout; the wedged builder's process group is killed (TERM → grace → KILL). `0` disables. Foreground only. |
-| `--push-url=URL` | — | HTTP endpoint for streaming push (POST body to this URL). Requires `--push-token`. |
-| `--push-host=URL` | — | Base URL of the ingest server; the CLI creates a run via `POST <host>/runs` and streams to `/runs/<id>/ingest`. Requires `--push-token`; mutually exclusive with `--push-url`. |
-| `--push-token=TOKEN` | — | Bearer token for push endpoint authorization. |
 
 The model resolution chain: the `--model` flag > the lane's stored model > the
 `architect.yaml` builder role > `space.yaml` `project.model` > the pi default
