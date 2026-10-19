@@ -5,6 +5,130 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.6.0] - 2026-10-17
+
+### Changed
+
+- **`architect looplog`** — run tags show the full agent name
+  (`[architect-builder:67-core]`) instead of the ROLE_ABBREV table's
+  abbreviations (`bld:`): no lookup table to keep in sync, forwards
+  compatible with new roles (none of the names are long enough to need
+  clipping). Lane tags keep the iteration-ordinal + lane suffix.
+
+## [9.5.0] - 2026-10-17
+
+### Added
+
+- **`architect install`** — the one-shot machine install: skills
+  (`--provider`, default pi), the architect-loop extension, then the role
+  playbooks, in that order (install-agents renders from the extension the
+  prior step installs). Each step aborts loudly; no partial silent states.
+- **`architect install-agents`** — the role playbooks to
+  `~/.pi/agent/agents/`, rendered by the installed architect-loop extension
+  (the single owner of the playbook text) with global-routing pins;
+  write-if-changed, `--force`, `--dry-run` like install-skills. Loud
+  failures name the prerequisite (`install-extensions`) or the cure
+  (`routing init --global`).
+
+### Changed
+
+- **install-skills targets pi by default** (was claude; `--provider` still
+  selects claude/codex/opencode).
+- **looplog tags**: the narrator abbreviates to `narr` (it previously
+  truncated to "architect-"), and lane-worktree tags carry the iteration
+  ordinal plus the lane, resolved against the space's iteration ids —
+  `[bld:67-core]` instead of the old clipped
+  `[bld:rig-oracle-repin-core]`.
+
+## [9.4.0] - 2026-10-17
+
+### Added
+
+- **The skill family.** `/architect` is now the inline working mode — work
+  outside the loop at a conversational cadence (UI, ops, small fixes), with
+  the space as the workspace (notes kept, `ARCHITECT.md` updated, commits
+  when the work calls for them) and the vocabulary glossary folded in.
+  **`/architect-discuss`** carries the judgment seat: exploration,
+  arbitration, judging finished runs, landing, iteration surgery.
+  **`/architect-status`** reports state read-only from CLI output and the
+  newest notes. The coordinator launch is agent-owned end to end:
+  **`/architect-action`** (renamed from `/architect-plan`) launches via the
+  new `architect_loop` pi-extension tool (jetpks/pi-extensions) — the
+  agent-side equivalent of `/loop`, sharing one spawn path so the two cannot
+  drift, awaiting the run id, then self-compacting the launching session
+  into a small on-call escalation seat.
+
+### Changed
+
+- The `install-skills` help text, `docs/DESIGN.md`, and
+  `docs/reference/project.md` describe the five-skill family; the
+  `/architect-discuss` routing section now describes the real dual
+  agent-file mechanism (per-space `.pi/agents/` generation with resolved
+  pins, plus user-level `install-agents` playbooks as the headless/
+  untrusted fallback) instead of claiming nothing generates into the space.
+
+### Removed
+
+- **`/architect-plan`** (renamed to `/architect-action`) and
+  **`/architect-vocabulary`** (folded into `/architect`); the `dispatch.md`
+  and `research.md` companion references moved to the discuss skill.
+
+## [9.3.0] - 2026-10-17
+
+### Removed
+
+- **The gem cut (observation-deck entry 2).** Session capture moved to the
+  session-sink pi extension (jetpks/pi-extensions), so the gem's entire
+  push/streaming surface is gone: `SpacePush`/`Packer` and the `architect
+  push` command; dispatch `--push-url/--push-host/--push-token`, `RunCreator`,
+  and the harness tee; `ConversationsClient` + `session_sync/**` and the
+  sessions CLI that drove them; `JobsClient` (its only consumer was the
+  removed server jobs API). looplog, runlog, cost, routing, and the loop
+  lifecycle are untouched.
+
+## [9.2.1] - 2026-10-15
+
+### Fixed
+
+- dispatch copies the lane prompt into the build dir (`build/<id>-<lane>/`
+  `prompt.md`) at dispatch time, so the record is self-contained even if the
+  scratch source is removed.
+
+## [9.2.0] - 2026-10-15
+
+### Added
+
+- **CLI observability:** `architect looplog` (follow every active loop run
+  live; `--list`/`--replay`/`--all`), `architect runlog` (pretty-print or
+  stream a run.jsonl), and full gate transcripts written to
+  `build/gate/<id>-<ts>.md`.
+
+### Changed
+
+- Docs re-centered on the coordinator path; role agents installed user-level
+  by `architect install-agents`.
+
+## [9.1.1] - 2026-10-14
+
+### Fixed
+
+- `architect provision` fast-forward-syncs the integration branch from the
+  default branch (or cuts exactly `--base REF`), refusing loudly on
+  divergence instead of silently building on a stale base.
+
+## [9.1.0] - 2026-10-13
+
+### Added
+
+- **The narrator role:** a sixth loop role (cheap model, one file per settled
+  event) writing `notes/narrative-*.md` — verbatim facts, never a gate.
+
+### Changed
+
+- `architect cost` gains human formatting (significant figures, `--precise`,
+  color) and a latency turn/generation split.
+- `architect new` flocks the scaffold critical section across processes.
+
 ## [9.0.0] - 2026-10-09
 
 ### Changed

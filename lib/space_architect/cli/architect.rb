@@ -6,6 +6,7 @@ require_relative "../loop_cost"
 require_relative "../runlog"
 require_relative "../looplog"
 require_relative "../extension_installer"
+require_relative "../agent_installer"
 
 module Space::Architect
   module CLI
@@ -169,7 +170,9 @@ module Space::Architect
               # Legacy lanes store no model — resolve the config layer once so the
               # display shows what they would actually route, and mark the bare
               # constant as the last resort it is, not ordinary behavior.
-              config_model = Routing.for_space(sp.path)&.dig("builder", "model")
+              # Fully qualified: the Architect::Routing subcommand namespace
+              # (I09) lexically shadows Space::Architect::Routing inside this module.
+              config_model = Space::Architect::Routing.for_space(sp.path)&.dig("builder", "model")
 
               terminal.say "Project status:     #{block['status'] || '(none)'}"
               terminal.say "Current iteration:  #{block['current_iteration'] || '(none)'}"
@@ -844,6 +847,60 @@ module Space::Architect
         end
       end
 
+      # I16: re-send the structured iteration emissions for ONE iteration —
+      # payloads re-derived from the canonical sources through the exact
+      # builders the live hook call sites use, so a replay is byte-identical
+      # to what the loop sent. Deliberately single-iteration: no bulk
+      # backfill surface, no enumeration of historical I*.md files.
+      class Emit < BaseCommand
+        desc "Re-send the structured emissions for one iteration (freeze/lane/verdict/integration; idempotent replay)"
+        phase 53, "Project"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option :facet, default: "all", desc: "Which facet to emit: freeze, lane, verdict, integration, or all (default)"
+        option :lane,  default: nil,   desc: "Lane name filter (lane facet only; default: all recorded lanes)"
+
+        FACETS = %w[freeze lane verdict integration].freeze
+
+        def call(iteration:, space: nil, facet: "all", lane: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            requested = facet == "all" ? FACETS : FACETS & [facet]
+            if requested.empty?
+              raise Space::Core::Error,
+                "unknown facet '#{facet}' — one of: #{(FACETS + ["all"]).join(', ')}"
+            end
+
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              emitter = IterationEmission.emitter_for(sp)
+              failed = false
+              requested.each do |f|
+                payloads = project.emission_replays(iteration, facet: f, lane: lane)
+                if payloads.empty?
+                  terminal.say "nothing to emit (#{f})"
+                  next
+                end
+                payloads.each do |payload|
+                  unless emitter
+                    terminal.say "emission off (unconfigured)"
+                    next
+                  end
+                  res = emitter.post(f, payload)
+                  if res
+                    terminal.say "emitted #{f} → #{res[:status]}"
+                  else
+                    failed = true
+                    terminal.say "emission failed (#{f}) — see stderr"
+                  end
+                end
+              end
+              CLI.record_outcome(Outcome.new(exit_code: failed ? 1 : 0))
+            end
+          end
+        end
+      end
+
       # Pretty-print a pi agent run.jsonl as it streams — the ported runlog
       # printer. No space resolution: the stream is the whole input.
       class Runlog < BaseCommand
@@ -1060,14 +1117,14 @@ module Space::Architect
       end
 
       class InstallSkills < BaseCommand
-        desc "Install bundled skills (architect, architect-research, architect-vocabulary) for a harness"
+        desc "Install bundled skills (architect, architect-discuss, architect-action, architect-status, architect-research) for a harness"
         phase 53, "Project"
-        option :provider, default: "claude", desc: "Skill install target (default: claude; validated by the installer)"
+        option :provider, default: "pi", desc: "Skill install target (default: pi; validated by the installer)"
         option :project, type: :boolean, default: false, desc: "Install to CWD instead of global"
         option :force,   type: :boolean, default: false, desc: "Overwrite existing skills that differ"
         option :dry_run, type: :boolean, default: false, desc: "Print what would happen without writing files"
 
-        def call(provider: "claude", project: false, force: false, dry_run: false, **opts)
+        def call(provider: "pi", project: false, force: false, dry_run: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
             result = SkillInstaller.install(provider, project: project, force: force,
@@ -1096,6 +1153,111 @@ module Space::Architect
             result[:steps].each { |s| terminal.say "  #{s[:cmd]} (exit #{s[:exit_code]})" }
             terminal.say "Extensions source: #{result[:source]}"
             CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
+      # Role playbooks to ~/.pi/agent/agents, rendered from the installed
+      # architect-loop extension (the single owner of the playbook text) with
+      # global-routing pins — the machine-wide fallback for sessions that
+      # cannot see a space's .pi dir. Needs install-extensions to have run.
+      class InstallAgents < BaseCommand
+        desc "Install the role playbooks (architect-coordinator/spec/builder/judge/narrator) to ~/.pi/agent/agents, rendered from the installed architect-loop extension"
+        phase 53, "Project"
+        option :force,   type: :boolean, default: false, desc: "Overwrite existing playbooks that differ"
+        option :dry_run, type: :boolean, default: false, desc: "Print what would happen without writing files"
+
+        def call(force: false, dry_run: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            result = AgentInstaller.install(env: project_config.env, force: force, dry_run: dry_run)
+            verb = dry_run ? "Would install" : "Installed"
+            terminal.say "#{verb} role playbooks for pi → #{terminal.path(result[:dest_root])}"
+            result[:agents].each do |a|
+              terminal.say "  #{a[:name]}: #{terminal.style_skill_action(a[:action])} (#{terminal.path(a[:path])})"
+            end
+            CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
+      # The one-shot machine install: skills (pi by default), the
+      # architect-loop extension, then the role playbooks — in that order,
+      # because install-agents renders from the extension the prior step just
+      # installed. Each step aborts loudly on failure; there are no partial
+      # silent states to reason about afterwards.
+      class Install < BaseCommand
+        desc "Install everything for this machine: skills (--provider, default pi), the architect-loop extension, then the role playbooks"
+        phase 53, "Project"
+        option :provider, default: "pi", desc: "Skill install target (default: pi; validated by the installer; passed through to install-skills)"
+        option :force,   type: :boolean, default: false, desc: "Overwrite existing skills/playbooks that differ (passed through)"
+
+        def call(provider: "pi", force: false, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            skills = SkillInstaller.install(provider, project: false, force: force,
+                                             env: project_config.env)
+            terminal.say "skills → #{terminal.path(skills[:dest_root])}"
+            skills[:skills].each { |s| terminal.say "  #{s[:name]}: #{terminal.style_skill_action(s[:action])}" }
+
+            extensions = ExtensionInstaller.install(env: project_config.env)
+            extensions[:steps].each { |s| terminal.say "  #{s[:cmd]} (exit #{s[:exit_code]})" }
+
+            agents = AgentInstaller.install(env: project_config.env, force: force)
+            terminal.say "role playbooks → #{terminal.path(agents[:dest_root])}"
+            agents[:agents].each { |a| terminal.say "  #{a[:name]}: #{terminal.style_skill_action(a[:action])}" }
+
+            CLI.record_outcome(Outcome.new(exit_code: 0))
+          end
+        end
+      end
+
+      module Routing
+        # I09: `architect routing init` — the self-service cure for the
+        # missing-config wall (default_model_inform's hint names this command).
+        # Writes Routing::TEMPLATE verbatim and round-trips the write through
+        # Routing.parse before claiming success; the routing machinery itself
+        # is untouched — the command only writes a file it already accepts.
+        class Init < BaseCommand
+          desc "Write a commented starter architect.yaml (space root by default; --global for the machine-wide config)"
+          phase 53, "Project"
+          argument :space, required: false, desc: "Space identifier (default: $PWD)"
+          option :global, type: :boolean, default: false,
+            desc: "Write ~/.config/space-architect/architect.yaml (the machine-wide config; SPACE_ARCHITECT_GLOBAL_CONFIG overrides the path) instead of the space root, creating parent directories as needed"
+
+          def call(space: nil, global: false, **opts)
+            setup_terminal(**opts.slice(:color, :colors))
+            handle_errors do
+              target =
+                if global
+                  raise Space::Core::Error, "--global and an explicit space argument are mutually exclusive" if space
+                  # Routing.global_path is the env-overridable canonical path — never re-derive it here.
+                  path = Space::Architect::Routing.global_path
+                  FileUtils.mkdir_p(path.dirname)
+                  path
+                else
+                  # The house walk-up: empty identifier looks for space.yaml from $PWD upward.
+                  found = store.find(space).value_or(nil)
+                  unless found
+                    raise Space::Core::Error,
+                      "no space.yaml found upward from #{Dir.pwd} — run `architect routing init --global` to scaffold the machine-wide config instead"
+                  end
+                  Space::Architect::Routing.space_path(found.path)
+                end
+
+              raise Space::Core::Error, "architect.yaml already exists: #{target} — routing init never overwrites" if target.exist?
+
+              File.write(target, Space::Architect::Routing::TEMPLATE)
+              # A scaffold that fails its own parser (or misses a required role)
+              # is a bug — validate the round-trip, let the error escape loud.
+              parsed = Space::Architect::Routing.parse(File.read(target), target)
+              missing = Space::Architect::Routing::REQUIRED_ROLES - parsed.keys
+              raise Space::Core::Error, "scaffolded #{target} is missing required roles: #{missing.join(', ')}" if missing.any?
+
+              terminal.say "Wrote starter routing config: #{terminal.path(target.to_s)}"
+              terminal.say "Edit the example/REPLACE_ME models; the next command or /loop picks the file up."
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
           end
         end
       end
@@ -1326,10 +1488,13 @@ Space::Architect::CLI::Registry.register "evidence",  Space::Architect::CLI::Arc
 Space::Architect::CLI::Registry.register "merge",     Space::Architect::CLI::Architect::Merge
 Space::Architect::CLI::Registry.register "integrate", Space::Architect::CLI::Architect::Integrate
 Space::Architect::CLI::Registry.register "gate",      Space::Architect::CLI::Architect::Gate
+Space::Architect::CLI::Registry.register "install",         Space::Architect::CLI::Architect::Install
 Space::Architect::CLI::Registry.register "install-skills", Space::Architect::CLI::Architect::InstallSkills
 Space::Architect::CLI::Registry.register "install-extensions", Space::Architect::CLI::Architect::InstallExtensions
+Space::Architect::CLI::Registry.register "install-agents",   Space::Architect::CLI::Architect::InstallAgents
 Space::Architect::CLI::Registry.register "runlog",          Space::Architect::CLI::Architect::Runlog
 Space::Architect::CLI::Registry.register "looplog",         Space::Architect::CLI::Architect::Looplog
+Space::Architect::CLI::Registry.register "emit",           Space::Architect::CLI::Architect::Emit
 Space::Architect::CLI::Registry.register "bug-report",     Space::Architect::CLI::Architect::BugReport
 Space::Architect::CLI::Registry.register "cost",           Space::Architect::CLI::Architect::Cost
 Space::Architect::CLI::Registry.register "brief" do |b|
@@ -1339,6 +1504,9 @@ Space::Architect::CLI::Registry.register "worktree" do |wt|
   wt.register "add",    Space::Architect::CLI::Architect::Worktree::Add
   wt.register "remove", Space::Architect::CLI::Architect::Worktree::Remove
   wt.register "list",   Space::Architect::CLI::Architect::Worktree::List
+end
+Space::Architect::CLI::Registry.register "routing" do |r|
+  r.register "init", Space::Architect::CLI::Architect::Routing::Init
 end
 Space::Architect::CLI::Registry.register "variant" do |v|
   v.register "add",     Space::Architect::CLI::Architect::Variant::Add

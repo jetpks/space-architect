@@ -1,6 +1,7 @@
 # Research fan-out reference
 
-Read this only when a research trigger fires (see SKILL.md step 3). The fan-out
+Read this only when a research trigger fires (see the /architect-discuss
+skill, §Research fan-out). The fan-out
 uses `architect research dispatch` to launch parallel detached `pi -p --mode
 json` researchers (a cheaper model, read-only by prompt contract — the
 supervisor injects the builder guard, so git writes are denied) and

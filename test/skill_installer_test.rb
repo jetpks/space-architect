@@ -79,8 +79,10 @@ class SkillInstallerTest < Space::ArchitectTest
   def test_source_skills_finds_architect
     names = Space::Architect::SkillInstaller.source_skills.map { |s| s.basename.to_s }
     assert_includes names, "architect"
+    assert_includes names, "architect-discuss"
+    assert_includes names, "architect-action"
+    assert_includes names, "architect-status"
     assert_includes names, "architect-research"
-    assert_includes names, "architect-vocabulary"
   end
 
   def test_install_excludes_dot_directories_from_skill_source
@@ -113,20 +115,22 @@ class SkillInstallerTest < Space::ArchitectTest
     skills = result[:skills]
     names = skills.map { |s| s[:name] }
     assert_includes names, "architect"
+    assert_includes names, "architect-discuss"
+    assert_includes names, "architect-action"
+    assert_includes names, "architect-status"
     assert_includes names, "architect-research"
-    assert_includes names, "architect-vocabulary"
 
     architect_dest = result[:dest_root].join("architect")
     assert architect_dest.join("SKILL.md").exist?
-    assert architect_dest.join("dispatch.md").exist?
-    assert architect_dest.join("research.md").exist?
+
+    discuss_dest = result[:dest_root].join("architect-discuss")
+    assert discuss_dest.join("SKILL.md").exist?
+    assert discuss_dest.join("dispatch.md").exist?
+    assert discuss_dest.join("research.md").exist?
 
     research_dest = result[:dest_root].join("architect-research")
     assert research_dest.join("SKILL.md").exist?
     assert research_dest.join("lanes.md").exist?
-
-    vocabulary_dest = result[:dest_root].join("architect-vocabulary")
-    assert vocabulary_dest.join("SKILL.md").exist?
   end
 
   def test_install_reports_installed_for_new_skills

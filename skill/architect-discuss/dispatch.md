@@ -2,7 +2,8 @@
 
 ## The coordinator path (default) — how builders actually launch
 
-When a plan runs under the coordinator (see SKILL.md §Starting a loop), the
+When a plan runs under the coordinator (see the /architect-action skill —
+launching is that skill's job), the
 coordinator itself spawns each role as a **pi subagent** — native async
 completion wakes, not `architect dispatch` headless runs. Per iteration:
 
@@ -207,7 +208,7 @@ The guard is a first line, not a sandbox — the post-flight `git log` check
 ### Integration (judging session — after per-lane post-flight passes)
 
 This block runs in the judging session, not the dispatch session — the dispatch
-session's job ends when builders finish (see SKILL.md §Interactive path). You decide which
+session's job ends when builders finish (see this skill's §Iteration surgery). You decide which
 lanes pass; the CLI does the git mechanics. Canonical path:
 
 ```bash
@@ -219,7 +220,7 @@ architect integrate <iteration> --lanes <passing-set> --teardown   # or remove w
 # end of project: landing is the architect's, not a CLI command — write the PR
 # body to a fresh build/land/<repo>-pr-body-<yyyymmdd-hhmm>.md yourself, then
 # present the paste-and-run block (cd, git push -u origin project/<slug>,
-# gh pr create) — see SKILL.md §After a loop lands
+# gh pr create) — see this skill's §Landing
 ```
 
 `architect integrate` commits each named lane on its branch and merges it
@@ -622,7 +623,7 @@ against them, do not edit or work around) ===
   build/test commands and repo gotchas there; the loop's PHASE rules stay in
   the dispatch block so they version with the skill.
 - The builder is a bare `pi -p` over the block — it is not invoking the
-  `/architect` skills, the block is its entire instruction set.
+  `/architect-discuss` skills, the block is its entire instruction set.
 - Billing: the builder draws on the provider account configured in
   `~/.pi/agent` (per-token API usage — e.g. the Fireworks key). There's no
   per-window quota that dies mid-run the way a chat session can, but a long

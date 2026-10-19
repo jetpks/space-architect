@@ -32,7 +32,7 @@ class LooplogTest < Space::ArchitectTest
   end
 
   # --list byte-shape: both discovery roots hit, wt/ pruned, active ● vs stale
-  # · beyond the window, and the bld:<lane> tag from a lane-worktree cwd.
+  # · beyond the window, and the <agent>:<lane> tag from a lane-worktree cwd.
   def test_looplog_list_inventories_both_roots_prunes_wt_and_flags_staleness
     root = Dir.mktmpdir("looplog-test")
     space = File.join(root, "space")
@@ -59,10 +59,10 @@ class LooplogTest < Space::ArchitectTest
     size = File.size(fresh_path) / 1024
     expected = [
       format("%s %-9s %5s %5.0fm %7sK  %s  %s",
-             "●", "coord:gem", Time.at(fresh_mtime).strftime("%H:%M"),
+             "●", "architect-coordinator:07-gem", Time.at(fresh_mtime).strftime("%H:%M"),
              (Time.now.to_f - fresh_mtime) / 60, size, "11111111", "Task: write the thing"),
       format("%s %-9s %5s %5.0fm %7sK  %s  %s",
-             "·", "bld:gem", Time.at(stale_mtime).strftime("%H:%M"),
+             "·", "architect-builder:07-gem", Time.at(stale_mtime).strftime("%H:%M"),
              (Time.now.to_f - stale_mtime) / 60, size, "22222222", "Task: write the thing")
     ]
     assert_equal "#{expected.join("\n")}\n", out.string,
@@ -103,7 +103,7 @@ class LooplogTest < Space::ArchitectTest
     follower.scan
 
     banner, rest = out.string.split("\n", 2)
-    assert_match(%r{\A\[bld:gem\] \d{2}:\d{2}:\d{2} ▶ architect-builder 22222222  @ /tmp/looplog-space/build/I07-gem/wt — Task: write the thing\z}, banner,
+    assert_match(%r{\A\[architect-builder:07-gem\] \d{2}:\d{2}:\d{2} ▶ architect-builder 22222222  @ /tmp/looplog-space/build/I07-gem/wt — Task: write the thing\z}, banner,
                  "adoption prints the tagged banner with cwd and task")
     assert_equal "", rest, "a fresh adoption starts at the file's end — no history"
 
@@ -124,13 +124,48 @@ class LooplogTest < Space::ArchitectTest
     follower.scan
 
     banner, rest = out.string.split("\n", 2)
-    assert_match(%r{\A\[bld:gem\] \d{2}:\d{2}:\d{2} ▶ architect-builder 22222222  @ /tmp/looplog-space/build/I07-gem/wt — Task: write the thing\z}, banner)
+    assert_match(%r{\A\[architect-builder:07-gem\] \d{2}:\d{2}:\d{2} ▶ architect-builder 22222222  @ /tmp/looplog-space/build/I07-gem/wt — Task: write the thing\z}, banner)
     assert_equal "", rest, "adoption prints only the banner; history streams on drain"
 
     follower.drain(follower.runs.fetch(path))
 
     _banner2, rest = out.string.split("\n", 2)
     assert_equal expected_lines(FULL_RENDER_LINES, elapsed: true), rest
+  end
+
+  # The iteration-id-aware builder tag: architecture/I<NN>-<name>.md is the
+  # authority for splitting a lane dir, so a hyphenated iteration slug cannot
+  # bleed into the lane (I06-editor-markdown + markdown-seam lane). The
+  # narrator maps to its own tag instead of truncating to "architect-".
+  # Transcripts sit at build/<id>-<lane>/subagent-artifacts (wt/ subtrees are
+  # pruned from build-root discovery); the recorded cwd drives the tag.
+  def test_looplog_tag_resolves_lane_via_iteration_ids_and_abbreviates_narrator
+    root = Dir.mktmpdir("looplog-test")
+    space = File.join(root, "space")
+    sessions = File.join(root, "sessions")
+    records = File.readlines(File.join(FIXTURES, "records.jsonl"))
+
+    FileUtils.mkdir_p(File.join(space, "architecture"))
+    File.write(File.join(space, "architecture", "I06-editor-markdown.md"), "# iteration\n")
+    seam_wt = File.join(space, "build", "I06-editor-markdown-markdown-seam", "wt")
+    editor_wt = File.join(space, "build", "I06-editor-markdown-editor", "wt")
+    seam_records = records.map { |r| r.gsub("/tmp/looplog-space/build/I07-gem/wt", seam_wt) }
+    editor_records = records.map { |r| r.gsub("/tmp/looplog-space/build/I07-gem/wt", editor_wt) }
+    write_and_stamp(File.join(seam_wt.delete_suffix("/wt"), "subagent-artifacts",
+                             "44444444_architect-builder_transcript.jsonl"), seam_records, 120)
+    write_and_stamp(File.join(editor_wt.delete_suffix("/wt"), "subagent-artifacts",
+                             "55555555_architect-narrator_transcript.jsonl"), editor_records, 600)
+
+    out = StringIO.new
+    Space::Architect::Looplog.list(
+      space: space,
+      io: out,
+      env: { "PI_SESSIONS_DIR" => sessions, "NO_COLOR" => "1", "LOOPLOG_WINDOW" => "900" }
+    )
+
+    lines = out.string.lines
+    assert_match(/architect-builder:06-markdown-seam /, lines[0], "hyphenated lane resolved via the iteration id")
+    assert_match(/architect-narrator:06-editor /, lines[1], "narrator shows its full agent name")
   end
 
   private
@@ -158,7 +193,7 @@ class LooplogTest < Space::ArchitectTest
   end.freeze
 
   def expected_lines(render_lines, elapsed:)
-    render_lines.map { |ts, line| "[bld:gem] #{Time.at(ts).strftime('%H:%M:%S')} #{line}" }
+    render_lines.map { |ts, line| "[architect-builder:07-gem] #{Time.at(ts).strftime('%H:%M:%S')} #{line}" }
                 .join("\n") << "\n"
   end
 
@@ -183,3 +218,4 @@ class LooplogTest < Space::ArchitectTest
     m
   end
 end
+

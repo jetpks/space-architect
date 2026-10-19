@@ -302,4 +302,20 @@ class RoutingTest < Space::ArchitectTest
     YAML
     assert_equal "prov/builder", parsed["builder"]["model"]
   end
+
+  # I09: the `architect routing init` scaffold must round-trip through the real
+  # parser with every required role routed — a template the machinery rejects
+  # (or that leaves a role unrouted) would be a bug in the scaffold itself.
+  def test_routing_template_parses_with_all_required_roles
+    parsed = routing.parse(Space::Architect::Routing::TEMPLATE, "scaffolded-architect.yaml")
+    assert_empty Space::Architect::Routing::REQUIRED_ROLES - parsed.keys
+
+    File.write(File.join(@dir, "architect.yaml"), Space::Architect::Routing::TEMPLATE)
+    with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(@dir, "missing-global.yaml")) do
+      merged = routing.for_space(@dir)
+      Space::Architect::Routing::REQUIRED_ROLES.each do |role|
+        assert merged[role], "scaffold must route #{role}"
+      end
+    end
+  end
 end

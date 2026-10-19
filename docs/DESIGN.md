@@ -37,8 +37,9 @@ is `git diff` + `git log`.
 Researched June 2026 from Anthropic engineering posts, agent-harness research,
 and widely used community harness skills. Prescriptive claims below cite their
 sources (see §8 for the dated-provenance caveat). This document is the "why";
-the skill files in `skill/` (`architect`, `architect-plan`, `architect-research`,
-`architect-vocabulary`) are the "how". The invariant rules R1–R12
+the skill files in `skill/` (`architect`, `architect-discuss`,
+`architect-action`, `architect-status`, `architect-research`) are the "how".
+The invariant rules R1–R12
 are model-agnostic and unchanged across provider retargets; only the concrete
 interface in §4 is implementation-specific.
 
@@ -617,7 +618,7 @@ itself. Design decisions behind it:
   citations (R1); raw researcher output stays in gitignored scratch. The builder's
   PHASE 0 challenges Grounds like any other spec input.
 
-### Three skills: `/architect`, `/architect-research`, and `/architect-vocabulary`
+### Skill family: `/architect-discuss`, `/architect-action`, `/architect-status`, and `/architect-research`
 
 Discovery-scale research (brainstorming, technology selection, SOTA surveys) is a
 **separate skill**, not a mode of the loop. Three reasons: different invocation
@@ -634,10 +635,15 @@ production deep-research systems use adaptive planner-driven decomposition, and
 dynamic beats static decomposition on GAIA
 ([OAgents](https://arxiv.org/abs/2506.15741): 47.88 static → 51.52 dynamic).
 
-A third skill, **`/architect-vocabulary`**, is reference-only: it loads the
-system's terms and a short "where you are" orientation for when you're standing in
-a space (or working on the skills themselves) and need the vocabulary understood
-without running the loop — it dispatches nothing, freezes nothing, judges nothing.
+The main skill, **`/architect`**, is the inline working mode — work outside the
+loop at a conversational cadence, with the space as the workspace (records kept,
+commits made when called for). **`/architect-discuss`** is the judgment seat:
+exploration, arbitration, judging finished runs, landing, iteration surgery.
+**`/architect-action`** takes over when discussion ends: it writes the plan doc
+and launches the coordinator itself. **`/architect-status`** reports state from
+files and CLI output, read-only. (The former `/architect-plan` and
+`/architect-vocabulary` were folded into this family — vocabulary now lives
+inline in `/architect`.)
 
 ---
 

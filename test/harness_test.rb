@@ -6,6 +6,26 @@ require "json"
 require "tmpdir"
 
 class HarnessTest < Space::ArchitectTest
+  # I09: these tests assert model resolution with NO architect.yaml anywhere,
+  # but Routing.for_space leaks the real ~/.config/space-architect/architect.yaml
+  # when SPACE_ARCHITECT_GLOBAL_CONFIG is unset — pin the global layer to a
+  # missing path under the test dir so the suite is indifferent to machine
+  # state. Duplicated from ArchitectProjectTest: test/test_helper.rb is
+  # outside this lane's declared touch set, so the shared base class isn't
+  # where this lives.
+  def pin_global_absent(dir)
+    @saved_global_config = ENV["SPACE_ARCHITECT_GLOBAL_CONFIG"]
+    ENV["SPACE_ARCHITECT_GLOBAL_CONFIG"] = File.join(dir, "absent-global.yaml")
+  end
+
+  def restore_global_config
+    if @saved_global_config
+      ENV["SPACE_ARCHITECT_GLOBAL_CONFIG"] = @saved_global_config
+    else
+      ENV.delete("SPACE_ARCHITECT_GLOBAL_CONFIG")
+    end
+  end
+
   FAKE_PI_SCRIPT = <<~RUBY
     #!/usr/bin/env ruby
     a = ARGV; c = Dir.pwd; s = $stdin.gets
@@ -115,6 +135,7 @@ class HarnessTest < Space::ArchitectTest
 
   def test_dispatch_without_model_resolves_to_pi_default
     root = Dir.mktmpdir("harness-test")
+    pin_global_absent(root)
     _space_dir, project, _fake_pi, _build_dir = setup_space(root)
 
     recorder = File.join(root, "recorder")
@@ -130,6 +151,8 @@ class HarnessTest < Space::ArchitectTest
     idx = recorded.index("--model")
     refute_nil idx, "argv must carry --model: #{recorded.inspect}"
     assert_equal "accounts/fireworks/models/glm-5p3-flash", recorded[idx + 1]
+  ensure
+    restore_global_config
   end
 
   # ── translate_thinking: unchanged passthrough ────────────────────────────
@@ -158,6 +181,7 @@ class HarnessTest < Space::ArchitectTest
   # --no-approve -e <guard>, and --thinking only when effort is set.
   def test_dispatch_argv_carries_pi_builder_flag_set
     root = Dir.mktmpdir("harness-test")
+    pin_global_absent(root)
     _space_dir, project, _fake_pi, build_dir = setup_space(root)
 
     recorder = File.join(root, "recorder")
@@ -181,6 +205,7 @@ class HarnessTest < Space::ArchitectTest
     refute_includes recorded, "--thinking", "no --thinking without effort"
     refute_includes recorded, "PROMPT-MARKER-99", "prompt arrives on stdin, not argv"
   ensure
+    restore_global_config
     FileUtils.rm_rf(root)
   end
 
