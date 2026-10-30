@@ -904,6 +904,59 @@ module Space::Architect
         end
       end
 
+      # I11: the phase ping — one small "where is the loop now" POST per
+      # playbook step; the between-command currency that lets narrations stay
+      # rare prose. An automated playbook step, deliberately quieter than
+      # emit: unconfigured is one inert stdout line; a POST failure NEVER
+      # fails the command (exit 0 — the Emitter's single stderr line is the
+      # whole report); the token never appears in any output. Writes nothing
+      # to disk — a ping is a fact about the loop, not a loop step, so the
+      # entry lookup is read-only (no ArchitectProject mutation).
+      class Ping < BaseCommand
+        desc "POST one phase ping for an iteration (spec-launched/builders-settled/judge-running; best-effort — never fails the loop step)"
+        phase 53, "Project"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :phase,     required: true,  desc: "Phase ping kind: spec-launched, builders-settled, or judge-running"
+        option   :space,     default: nil,    desc: "Space identifier (default: $PWD)"
+        option   :note,      default: nil,    desc: "Optional note carried in the ping payload (nil/empty omitted)"
+
+        def call(iteration:, phase:, space: nil, note: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            # Vocabulary is validated BEFORE space resolution — a typo'd phase
+            # must name the known set, not space-resolution noise.
+            unless IterationEmission::PHASE_KINDS.include?(phase)
+              raise Space::Core::Error,
+                "unknown phase '#{phase}' — one of: #{IterationEmission::PHASE_KINDS.join(', ')}"
+            end
+
+            render(store.find(space)) do |sp|
+              # Read-only slice of the space.yaml iteration record — the exact
+              # entry lookup and error text of ArchitectProject#slice_entry,
+              # mirrored here rather than instantiated: the ping path never
+              # mutates anything on disk (a ping is a fact, not a loop step).
+              entry = ((sp.data["project"] || {})["iterations"] || []).find { |s| s["name"] == iteration }
+              unless entry
+                raise Space::Core::Error,
+                  "Iteration '#{iteration}' not recorded in space.yaml — run `architect new #{iteration}` first"
+              end
+
+              emitter = IterationEmission.emitter_for(sp)
+              if emitter
+                res = emitter.post("phase", IterationEmission.build_phase(
+                  ordinal: entry["ordinal"], name: entry["name"], kind: phase, note: note))
+                # res nil: the Emitter already printed its one stderr line —
+                # a failed ping stays off stdout and never fails the step.
+                terminal.say "pinged #{iteration} #{phase} → #{res[:status]}" if res
+              else
+                terminal.say "emission off (unconfigured)"
+              end
+              CLI.record_outcome(Outcome.new(exit_code: 0))
+            end
+          end
+        end
+      end
+
       # Pretty-print a pi agent run.jsonl as it streams — the ported runlog
       # printer. No space resolution: the stream is the whole input.
       class Runlog < BaseCommand
@@ -1498,6 +1551,7 @@ Space::Architect::CLI::Registry.register "install-agents",   Space::Architect::C
 Space::Architect::CLI::Registry.register "runlog",          Space::Architect::CLI::Architect::Runlog
 Space::Architect::CLI::Registry.register "looplog",         Space::Architect::CLI::Architect::Looplog
 Space::Architect::CLI::Registry.register "emit",           Space::Architect::CLI::Architect::Emit
+Space::Architect::CLI::Registry.register "ping",           Space::Architect::CLI::Architect::Ping
 Space::Architect::CLI::Registry.register "bug-report",     Space::Architect::CLI::Architect::BugReport
 Space::Architect::CLI::Registry.register "cost",           Space::Architect::CLI::Architect::Cost
 Space::Architect::CLI::Registry.register "brief" do |b|

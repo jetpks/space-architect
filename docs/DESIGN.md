@@ -124,7 +124,7 @@ regardless of pairing.
 | **Spec** | one subagent per iteration | Grounds/Specification/Acceptance Criteria; rehearse; freeze; the `notes/spec-digest-*` handoff |
 | **Builder** | one subagent per lane | implementation in an isolated worktree; raw-results report; never commits |
 | **Judge** | one subagent per iteration, fresh session | mechanical post-flight, cold gates, PHASE 0 rulings, per-AC verdicts, integration |
-| **Narrator** | one subagent per settled event | one `notes/narrative-*` file — verbatim facts, best-effort, never a gate |
+| **Narrator** | one subagent per narration (rare) | one `notes/narrative-*` file at verdict-landed (+ exception, plan-complete) — prose for a human whose context went stale; best-effort, never a gate; the between-command currency is `architect ping` phases |
 | **Memory** | the space: `architecture/I<NN>-*.md` + `ARCHITECT.md` + `notes/` + space git history | everything; not in the committed space = didn't happen |
 
 Two operating shapes over the same roles: the **driver path** (default —

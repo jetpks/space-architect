@@ -14,6 +14,10 @@ module Space::Architect
   # ```rulings block parser. ArchitectProject's five hook call sites guard
   # through `emitter&.post` inside a rescue-all belt; nothing here may ever
   # raise into a loop command or change its exit code, stdout, or commits.
+  # I11 extends the same layer additively: the phase mouth (a fifth server
+  # mouth) and the `architect ping` payload — one small "where is the loop
+  # now" fact per playbook step, the between-command currency that lets
+  # narrations stay rare prose.
   module IterationEmission
     # Frozen tuning (mirrors the spec; session-sink pins its own constants the
     # same way): per attempt 2s open / 5s read, at most 2 attempts, retry on
@@ -22,12 +26,19 @@ module Space::Architect
     READ_TIMEOUT = 5
     MAX_ATTEMPTS = 2
 
-    # The four server mouths (I15, frozen): POST <host>/iterations/ingest/<mouth>.
-    MOUTHS = %w[freeze lane verdict integration].freeze
+    # The server mouths (I15's four frozen; I11 appends the fifth): POST
+    # <host>/iterations/ingest/<mouth>.
+    MOUTHS = %w[freeze lane verdict integration phase].freeze
 
     # Iteration/lane status vocabularies (frozen): nothing else is emitted.
     ITERATION_STATUSES = %w[frozen integrated].freeze
     LANE_STATUSES      = %w[complete integrated].freeze
+
+    # The phase-ping vocabulary (I11, CLI-frozen): nothing else pings. Sibling
+    # of the narration kinds — narrations stay rare prose at verdict-landed
+    # (+ exception, plan-complete); these pings carry the between-command
+    # "where is the loop now" currency.
+    PHASE_KINDS = %w[spec-launched builders-settled judge-running].freeze
 
     # The space-slug rule (architect_project.rb :1642), with the emission-layer
     # fallback: space.data["id"] when the title is absent or slugifies empty.
@@ -266,6 +277,18 @@ module Space::Architect
           "branch" => branch,
           "lanes" => lanes.map { |l| compact_scalars("name" => l[:name], "merge_sha" => l[:merge_sha], "integration_branch" => l[:integration_branch]) }
         }
+      }
+    end
+
+    # One phase ping (I11, the phase mouth): the iteration identity plus where
+    # the loop stands. The iteration hash carries ONLY ordinal + name — the
+    # mouth's other iteration keys belong to the other mouths and the ping
+    # path never sends them. note rides when given; nil/empty is omitted
+    # entirely (compact_scalars discipline).
+    def self.build_phase(ordinal:, name:, kind:, note: nil)
+      {
+        "iteration" => compact_scalars("ordinal" => ordinal, "name" => name),
+        "phase" => compact_scalars("kind" => kind, "note" => note)
       }
     end
 

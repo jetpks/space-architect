@@ -56,7 +56,7 @@ project — loads them.
 | **spec** | subagent | one iteration's Grounds/Specification/Acceptance Criteria; rehearses; freezes; writes the `notes/spec-digest-*` handoff |
 | **builder** | subagent per lane | implementation in the lane worktree; raw-results report; never commits |
 | **judge** | subagent, fresh session | mechanical post-flight, cold gates, per-AC verdicts, PHASE 0 rulings, integration |
-| **narrator** | subagent | one `notes/narrative-*` file per settled loop event — facts only, never a gate |
+| **narrator** | subagent | rare prose: one `notes/narrative-*` file per iteration at verdict-landed (plus exception, plan-complete), written for a human whose context went stale — never a gate; the between-command currency is `architect ping` phase pings |
 
 ## Visibility while a loop runs
 

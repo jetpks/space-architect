@@ -84,8 +84,10 @@ the space durable across sessions:
   `build/<id>-<lane>/run.jsonl`).
 - **judge** — a fresh session that runs the cold gates and rules per-AC
   verdicts; nobody grades their own work.
-- **narrator** — writes one `notes/narrative-*` best-effort update per
-  settled loop event; facts only, never a gate.
+- **narrator** — writes rare prose: one best-effort `notes/narrative-*` per
+  iteration at verdict-landed (plus exception, plan-complete), written for a
+  human whose context went stale; never a gate — the between-command currency
+  is `architect ping` phase pings.
 
 **The workspace**
 
