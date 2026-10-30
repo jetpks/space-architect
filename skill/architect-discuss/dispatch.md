@@ -11,7 +11,9 @@ completion wakes, not `architect dispatch` headless runs. Per iteration:
    ENTRY verbatim. Writes Grounds/Specification/Acceptance Criteria via
    `architect section`, rehearses, freezes, assembles each lane's prompt in a
    scratch file, records the scratch paths in its report, and writes the
-   `notes/spec-digest-*` handoff. `timeoutMs` 3600000 (1h).
+   `notes/spec-digest-*` handoff. `timeoutMs` 3600000 (1h). Once the spec
+   spawn is confirmed running, ping the phase — best-effort bash, never a
+   gate: `architect ping <iteration> spec-launched || true`.
 2. **provision** — the driver runs `architect provision <iteration>` via
    bash; the CLI materializes every declared lane's worktree + lane branch.
 3. **prompt copy** — the driver copies each spec-assembled scratch prompt
@@ -20,14 +22,18 @@ completion wakes, not `architect dispatch` headless runs. Per iteration:
 4. **builder per lane** — agent `architect-builder`, cwd = that lane's
    worktree, task = read `build/<id>-<lane>/prompt.md` before anything else.
    `timeoutMs` 7200000 (2h). The lane-prompt template below is the contract
-   the spec assembles against.
+   the spec assembles against. When every builder is tended to completion,
+   ping the phase — best-effort bash, never a gate:
+   `architect ping <iteration> builders-settled || true`.
 5. **judge** — agent `architect-judge`, cwd = the space root, task = judge the
    iteration by id. `timeoutMs` 7200000 (2h). The judge is a fresh session —
    §1 fresh-session judgment holds structurally: the judge session never
-   dispatched or built anything.
-6. **narrator** — one `architect-narrator` spawn per settled event
-   (builders-settled, judge-settled, verdict-landed, exception, plan-complete),
-   `timeoutMs` 300000 (5m), best-effort, never a gate on the loop.
+   dispatched or built anything. Once the judge spawn is confirmed running,
+   ping the phase — best-effort bash, never a gate:
+   `architect ping <iteration> judge-running || true`.
+6. **narrator** — one `architect-narrator` spawn per narration
+   (verdict-landed, exception, plan-complete), `timeoutMs` 300000 (5m),
+   best-effort, never a gate on the loop.
 
 Spawn contract (all paths): every spawn pins its model explicitly
 (provider/id[:thinking]) and carries an explicit `timeoutMs` — never the
