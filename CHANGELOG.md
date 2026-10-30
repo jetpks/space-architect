@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.8.0] - 2026-10-30
+
+### Removed
+
+- **The coordinator role (I10)** — the architect session itself drives the
+  loop in driver mode (the pi extension's `/loop` and agent-side launch
+  install a driver playbook instead of spawning a detached coordinator).
+  The role leaves the routing known set and the `architect routing init`
+  template (byte-exact contract re-frozen through both parsers), and
+  install no longer ships its playbook — a stale user-level
+  `architect-coordinator.md` is removed on install.
+
+### Changed
+
+- **Routing deprecation tolerance** — unknown `architect.yaml` role keys
+  (a retired key, or a typo) inform instead of rejecting: every command
+  proceeds, with one inform line naming the key and the known-role set.
+  Upgrading never breaks on an older config.
+- **Shipped skills rewritten for driver mode** — architect,
+  architect-action, and architect-discuss describe the session-driven
+  loop: one-hop escalations, state re-derived from disk each wake,
+  compaction after each child launch.
+
 ## [9.7.0] - 2026-10-30
 
 ### Added

@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    space-architect (9.7.0)
+    space-architect (9.8.0)
       async-process (~> 1.4)
       dry-cli (~> 1.4)
       dry-monads (~> 1.10)
@@ -192,7 +192,7 @@ CHECKSUMS
   reline (0.7.0) sha256=5b012d8e55dbf9d450f12bde2cf7d15ff546ae80b3f8f3b30e570d431815583d
   securerandom (0.4.1) sha256=cc5193d414a4341b6e225f0cb4446aceca8e50d5e1888743fac16987638ea0b1
   sorbet-runtime (0.6.13610) sha256=7d9dac415d7733c0cb669aa181e9cae3e87341db7ee48cc2dbf39c0a038118b4
-  space-architect (9.7.0)
+  space-architect (9.8.0)
   space-cadet (9.2.0) sha256=01d66112f3c03cbca59e70c7937e0eff4a7e1f49b2c023ec7eb70f6d324fbb24
   tsort (0.2.0) sha256=9650a793f6859a43b6641671278f79cfead60ac714148aabe4e3f0060480089f
   tty-color (0.6.0) sha256=6f9c37ca3a4e2367fb2e6d09722762647d6f455c111f05b59f35730eeb24332a
