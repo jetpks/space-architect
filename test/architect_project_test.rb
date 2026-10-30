@@ -560,6 +560,13 @@ class ArchitectProjectTest < Space::ArchitectTest
     $stderr = original
   end
 
+  # The I10 deprecation inform memoizes once per process; a test asserting the
+  # line resets the memo first so suite order can't consume it.
+  def reset_deprecation_inform
+    routing = Space::Architect::Routing
+    routing.remove_instance_variable(:@deprecation_informed) if routing.instance_variable_defined?(:@deprecation_informed)
+  end
+
   # I02/AC2: dispatch precedence — a stored (harness-matched) model beats the
   # config layer, and the inform stays silent when the model never hits the
   # last resort.
@@ -672,6 +679,44 @@ class ArchitectProjectTest < Space::ArchitectTest
       assert_equal Space::Architect::Harness::DEFAULT_MODEL, recorded[recorded.index("--model") + 1]
     end
   ensure
+    FileUtils.rm_rf(dir)
+  end
+
+  # I10: a config still carrying the retired coordinator role routes green —
+  # worktree_add resolves routing twice per invocation (harness/model + effort),
+  # and the deprecation inform must print EXACTLY ONE line for the whole run.
+  def test_worktree_add_informs_once_for_a_deprecated_role_key
+    dir = Dir.mktmpdir("architect-project-test")
+    space, project, _recorder = setup_dispatch_fixture(dir)
+    File.write(File.join(dir, "architect.yaml"), <<~YAML)
+      version: 1
+      roles:
+        spec:        { model: "prov/spec" }
+        builder:     { model: "prov/builder" }
+        judge:       { model: "prov/judge" }
+        narrator:    { model: "prov/narrator" }
+        coordinator: { model: "prov/coordinator" }
+    YAML
+    pin_global_absent(dir)
+    reset_deprecation_inform
+
+    stderr = capture_stderr do
+      project.worktree_add("my-repo", "my-slice", "lane-a")
+      project.worktree_add("my-repo", "my-slice", "lane-b")
+    end
+
+    inform_lines = stderr.lines
+    assert_equal 1, inform_lines.length, "expected exactly one inform line, got: #{stderr.inspect}"
+    assert_match(/roles\.coordinator/, inform_lines.first)
+    assert_match(/architect, spec, builder, judge, narrator/, inform_lines.first)
+
+    # tolerance proof: both lanes recorded the config builder model, not the default
+    yml = YAML.safe_load(File.read(File.join(dir, "space.yaml")), aliases: false)
+    lanes = yml.dig("project", "iterations", 0, "lanes")
+    assert_equal "prov/builder", lanes.find { |l| l["name"] == "lane-a" }["model"]
+    assert_equal "prov/builder", lanes.find { |l| l["name"] == "lane-b" }["model"]
+  ensure
+    restore_global_config
     FileUtils.rm_rf(dir)
   end
 

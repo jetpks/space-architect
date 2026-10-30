@@ -537,10 +537,16 @@ class ArchitectCLITest < Space::ArchitectTest
   end
 
   # I02/AC4: status resolves the config layer for legacy lanes with no stored
-  # model, and marks the bare constant as the last resort it is.
+  # model, and marks the bare constant as the last resort it is. The env pins
+  # SPACE_ARCHITECT_GLOBAL_CONFIG to an absent path (I10 hermeticity): the test
+  # builds its env from temp_env, which does not pin the global layer, so an
+  # exported coordinator-carrying global used to leak through the model
+  # resolution and the inform surfaces.
   def test_status_resolves_config_for_legacy_lane_and_marks_last_resort
     setup = temp_env
-    env = setup.fetch(:env)
+    env = setup.fetch(:env).merge(
+      "SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(setup[:root], "absent-architect.yaml")
+    )
 
     with_env(env) do
       space_invoke("init")
@@ -564,6 +570,8 @@ class ArchitectCLITest < Space::ArchitectTest
         assert_includes out, "#{Space::Architect::Harness::DEFAULT_MODEL} (last resort)"
 
         # With an architect.yaml, the display shows the config builder model.
+        # The fixture keeps carrying the retired coordinator key (I10 tolerance
+        # proof): status runs green and informs exactly once on $stderr.
         File.write("architect.yaml", <<~YAML)
           version: 1
           roles:
@@ -573,9 +581,66 @@ class ArchitectCLITest < Space::ArchitectTest
             coordinator: { model: "prov/coordinator" }
             narrator:    { model: "prov/narrator" }
         YAML
-        out, err = invoke("status")
-        assert_empty err
+        reset_deprecation_inform
+        out = nil
+        inform = capture_global_stderr { out, = invoke("status") }
         assert_includes out, "prov/config-status"
+        inform_lines = inform.lines.grep(/roles\.coordinator/)
+        assert_equal 1, inform_lines.length
+        assert_match(/architect, spec, builder, judge, narrator/, inform_lines.first)
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  # I10: a config still carrying the retired coordinator role runs status green
+  # with exactly one deprecation inform on $stderr (once per process — the memo
+  # suppresses repeats); a config with no unknown key never informs.
+  def test_status_informs_once_for_a_deprecated_role_key
+    setup = temp_env
+    env = setup.fetch(:env).merge(
+      "SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(setup[:root], "absent-architect.yaml")
+    )
+
+    with_env(env) do
+      space_invoke("init")
+      space_path = create_real_space(File.join(env["HOME"]))
+      create_real_repo(space_path, "my-repo")
+
+      Dir.chdir(space_path) do
+        invoke("init")
+        invoke("new", "demo")
+
+        # No config anywhere: nothing to deprecate, nothing on stderr.
+        inform = capture_global_stderr { invoke("status") }
+        assert_empty inform
+
+        File.write("architect.yaml", <<~YAML)
+          version: 1
+          roles:
+            spec:        { model: "prov/spec" }
+            builder:     { model: "prov/builder" }
+            judge:       { model: "prov/judge" }
+            narrator:    { model: "prov/narrator" }
+            coordinator: { model: "prov/coordinator" }
+        YAML
+        reset_deprecation_inform
+
+        exit_code = nil
+        inform = capture_global_stderr do
+          invoke("status")
+          exit_code = Space::Architect::CLI.last_outcome&.exit_code
+        end
+        assert_equal 0, exit_code
+        inform_lines = inform.lines
+        assert_equal 1, inform_lines.length, "expected exactly one inform line, got: #{inform.inspect}"
+        assert_match(/roles\.coordinator/, inform_lines.first)
+        assert_match(/architect, spec, builder, judge, narrator/, inform_lines.first)
+
+        # The memo is per process: a second resolving run prints nothing more.
+        inform = capture_global_stderr { invoke("status") }
+        assert_empty inform
       end
     end
   ensure
@@ -670,10 +735,13 @@ class ArchitectCLITest < Space::ArchitectTest
   end
 
   # AC6: dispatch --harness pi with no --model no longer raises — it resolves to
-  # pi's per-harness sensible default.
+  # pi's per-harness sensible default. The env pins SPACE_ARCHITECT_GLOBAL_CONFIG
+  # to an absent path (I10 hermeticity — see test_status_resolves_config…).
   def test_dispatch_cli_harness_pi_with_no_model_resolves_to_default
     setup = temp_env
-    env = setup.fetch(:env)
+    env = setup.fetch(:env).merge(
+      "SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(setup[:root], "absent-architect.yaml")
+    )
 
     fake_pi = File.join(setup[:root], "fake_pi")
     File.write(fake_pi, <<~RUBY)
@@ -760,6 +828,13 @@ class ArchitectCLITest < Space::ArchitectTest
     captured.string
   ensure
     $stderr = original
+  end
+
+  # The I10 deprecation inform memoizes once per process; a test asserting the
+  # line resets the memo first so suite order can't consume it.
+  def reset_deprecation_inform
+    routing = Space::Architect::Routing
+    routing.remove_instance_variable(:@deprecation_informed) if routing.instance_variable_defined?(:@deprecation_informed)
   end
 
 
@@ -1251,10 +1326,14 @@ class ArchitectCLITest < Space::ArchitectTest
 
   # ── I05: effort status render and CLI options ──────────────────────────────
 
-  # AC6: lane with effort renders ·<effort> suffix; lane without renders byte-identical to pre-I05
+  # AC6: lane with effort renders ·<effort> suffix; lane without renders byte-identical to pre-I05.
+  # The env pins SPACE_ARCHITECT_GLOBAL_CONFIG to an absent path (I10 hermeticity): an exported
+  # global's builder thinking used to leak into the effort column.
   def test_status_shows_effort_suffix_for_effort_lane
     setup = temp_env
-    env = setup.fetch(:env)
+    env = setup.fetch(:env).merge(
+      "SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(setup[:root], "absent-architect.yaml")
+    )
 
     with_env(env) do
       space_invoke("init")
@@ -1332,10 +1411,14 @@ class ArchitectCLITest < Space::ArchitectTest
     FileUtils.rm_rf(setup[:root]) if setup
   end
 
-  # AC6 control: worktree add without effort → CLI passes effort: nil → no effort key in yaml
+  # AC6 control: worktree add without effort → CLI passes effort: nil → no effort key in yaml.
+  # The env pins SPACE_ARCHITECT_GLOBAL_CONFIG to an absent path (I10 hermeticity — see
+  # test_status_resolves_config…).
   def test_worktree_add_cli_without_effort_produces_no_effort_key
     setup = temp_env
-    env = setup.fetch(:env)
+    env = setup.fetch(:env).merge(
+      "SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(setup[:root], "absent-architect.yaml")
+    )
 
     with_env(env) do
       space_invoke("init")
@@ -1383,10 +1466,14 @@ class ArchitectCLITest < Space::ArchitectTest
   end
 
   # AC3: variant compare CLI renders a side-by-side table with winner/discarded
-  #      statuses, (default) for nil-model, - for nil-effort, and exit code 0
+  #      statuses, (default) for nil-model, - for nil-effort, and exit code 0.
+  #      The env pins SPACE_ARCHITECT_GLOBAL_CONFIG to an absent path (I10 hermeticity):
+  #      an exported global's builder model used to leak into the no-model lane cell.
   def test_variant_compare_cli_renders_table_with_statuses
     setup = temp_env
-    env = setup.fetch(:env)
+    env = setup.fetch(:env).merge(
+      "SPACE_ARCHITECT_GLOBAL_CONFIG" => File.join(setup[:root], "absent-architect.yaml")
+    )
 
     with_env(env) do
       space_invoke("init")

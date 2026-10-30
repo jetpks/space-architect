@@ -1,10 +1,10 @@
 # Builder dispatch reference
 
-## The coordinator path (default) — how builders actually launch
+## The driver path (default) — how builders actually launch
 
-When a plan runs under the coordinator (see the /architect-action skill —
+When a plan runs under the driver (see the /architect-action skill —
 launching is that skill's job), the
-coordinator itself spawns each role as a **pi subagent** — native async
+driver itself spawns each role as a **pi subagent** — native async
 completion wakes, not `architect dispatch` headless runs. Per iteration:
 
 1. **spec** — agent `architect-spec`, cwd = the space root, task = the plan
@@ -12,11 +12,11 @@ completion wakes, not `architect dispatch` headless runs. Per iteration:
    `architect section`, rehearses, freezes, assembles each lane's prompt in a
    scratch file, records the scratch paths in its report, and writes the
    `notes/spec-digest-*` handoff. `timeoutMs` 3600000 (1h).
-2. **provision** — the coordinator runs `architect provision <iteration>` via
+2. **provision** — the driver runs `architect provision <iteration>` via
    bash; the CLI materializes every declared lane's worktree + lane branch.
-3. **prompt copy** — the coordinator copies each spec-assembled scratch prompt
+3. **prompt copy** — the driver copies each spec-assembled scratch prompt
    to `build/<id>-<lane>/prompt.md` (canonical path, CLI-owned in the
-   interactive path; the coordinator's `cp` is the sanctioned equivalent).
+   interactive path; the driver's `cp` is the sanctioned equivalent).
 4. **builder per lane** — agent `architect-builder`, cwd = that lane's
    worktree, task = read `build/<id>-<lane>/prompt.md` before anything else.
    `timeoutMs` 7200000 (2h). The lane-prompt template below is the contract
@@ -39,13 +39,13 @@ start, crashed before work) gets one relaunch. Anything unrootable is an
 exception: `notes/exception-<ts>.md`, narrate, terminate — no improvised
 repairs.
 
-The coordinator never edits files except its own `notes/` reports and never
+The driver never edits files except its own `notes/` reports and never
 writes into `architecture/`.
 
 `architect dispatch` (everything below) remains the **interactive-path**
 mechanism — and the reference implementation of the lane contract the
-coordinator's spawns inherit (same prompt template, same builder guard
-discipline — interactive dispatch injects the guard via `-e`; a coordinator
+driver's spawns inherit (same prompt template, same builder guard
+discipline — interactive dispatch injects the guard via `-e`; a driver
 spawn relies on the playbook's no-git-writes rule plus the judge's post-flight
 `git log` check, which stays the authoritative proof in both paths).
 
@@ -82,7 +82,7 @@ If a lane committed, treat the worktree as tampered: reset and re-dispatch.
 builder model resolves with a one-message probe
 (`echo ok | pi -p --model <builder-model>`), confirm the role playbooks are
 installed (`architect install-agents` — once per machine, idempotent), and
-for a coordinator run confirm the routing config resolves — an
+for a driver run confirm the routing config resolves — an
 `architect.yaml` role pinning a model the registry doesn't know throws loudly
 at /loop pre-flight, before any spawn (/loop pre-flight does this for you).
 No API-key/env ceremony — provider
@@ -520,14 +520,6 @@ look broken).
 Paste the lane-prompt into an interactive `pi` session (no `-p`). pi's agent
 loop runs plan→act→test against the block's stopping condition while you watch
 and steer. Use when the human wants to babysit a run.
-
-A coordinator can be launched the same way when /loop is unavailable: spawn
-the agent `architect-coordinator` (role agents resolve from
-`~/.pi/agent/agents/`, user-level, installed by `architect install-agents` —
-no project trust involved) with cwd = the space root, the plan text verbatim
-as the task, the coordinator's model pin from `architect.yaml` in the spawn's
-model field, and `timeoutMs` 43200000 (12h) — the exact contract
-`coordinatorSpawnScript` in architect-loop.ts assembles.
 
 ## Lane-prompt template
 

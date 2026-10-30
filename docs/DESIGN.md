@@ -1,12 +1,12 @@
 # DESIGN — The Architect Loop
 
 **A source-backed design for a loop in which the human's architect session
-plans and rules, a detached coordinator works the plan iteration by
-iteration, and role subagents — spec, builders, judge, narrator — do the
+plans and rules, then — in driver mode — works the plan iteration by
+iteration itself from a small, compacted context, and role subagents — spec, builders, judge, narrator — do the
 specification, implementation, and cold judgment in fresh, isolated git
 worktrees — with the space as the memory.**
 
-The loop is **model-agnostic**. It routes six roles (§2), each with its own
+The loop is **model-agnostic**. It routes five roles (§2), each with its own
 model/thinking pin, from config (`architect.yaml`) — never hardcoded anywhere.
 What matters is the separation of concerns — judgment in a fresh session
 against criteria frozen before results existed; orchestration judged by
@@ -106,7 +106,7 @@ it is secondary to the coherence.
 
 ## 2. Roles
 
-The loop routes **six roles**, each with its own runtime identity and its own
+The loop routes **five roles**, each with its own runtime identity and its own
 model/thinking pin. Which concrete model fills a role is an **operator
 decision expressed as config** (`architect.yaml`: space-local at the space
 root overriding `~/.config/space-architect/architect.yaml`, per role key) —
@@ -120,24 +120,25 @@ regardless of pairing.
 |---|---|---|
 | **Human** | you | final: scope, irreversible calls, taste, escalation rulings, landing |
 | **Architect** | interactive session the human talks to | plans, arbitration, kill/continue calls when consulted, landing; conversational by default |
-| **Coordinator** | detached, run while the human's session may end | drives the plan: spawns/tends spec → provision → builders → judge per iteration; relays escalations verbatim; never does lane work |
+| **Driver** | the architect session itself, after /loop (small, compacted context) | drives the plan: spawns/tends spec → provision → builders → judge per iteration; rules escalations in-seat; never does lane work |
 | **Spec** | one subagent per iteration | Grounds/Specification/Acceptance Criteria; rehearse; freeze; the `notes/spec-digest-*` handoff |
 | **Builder** | one subagent per lane | implementation in an isolated worktree; raw-results report; never commits |
 | **Judge** | one subagent per iteration, fresh session | mechanical post-flight, cold gates, PHASE 0 rulings, per-AC verdicts, integration |
 | **Narrator** | one subagent per settled event | one `notes/narrative-*` file — verbatim facts, best-effort, never a gate |
 | **Memory** | the space: `architecture/I<NN>-*.md` + `ARCHITECT.md` + `notes/` + space git history | everything; not in the committed space = didn't happen |
 
-Two operating shapes over the same roles: the **coordinator path** (default —
-the human's architect session plans and hands off via `/loop`; the coordinator
-works the plan, so the expensive interactive session never absorbs a builder
-wakeup) and the **interactive path** (the architect session runs the
-iteration steps itself — requested, or when the coordinator is down). The
-hard rules are shape-independent.
+Two operating shapes over the same roles: the **driver path** (default —
+the human's architect session plans and then `/loop` installs the driver
+playbook into that session and compacts it; the session itself works the
+plan, one hop from the human) and the **interactive path** (the architect
+session runs the iteration steps itself — requested, or outside the driver
+path). The hard rules are shape-independent.
 
-Why a cheap model can drive: the coordinator's work is orchestration judged
-by structure — spawn, tend, relay, narrate, stop-on-exception — never lane
-work, never judgment. Routing it to a fast model moves the hot path off the
-expensive interactive sessions; judgment stays on the strong models (spec,
+Why a compacted session can drive: the driver's work is orchestration judged
+by structure — spawn, tend, rule, narrate, stop-on-exception — never lane
+work, never judgment. The entry compaction leaves it a small, focused
+context (its orchestration state, not the human's whole history), so the
+hot path stays cheap; judgment stays on the strong models (spec,
 judge) where review-survival matters. The builder runs unattended for a
 stretch (30–60 minutes in practice), where the metric to buy is
 review-survival, not first-token latency — so its thinking budget defaults
@@ -640,7 +641,7 @@ loop at a conversational cadence, with the space as the workspace (records kept,
 commits made when called for). **`/architect-discuss`** is the judgment seat:
 exploration, arbitration, judging finished runs, landing, iteration surgery.
 **`/architect-action`** takes over when discussion ends: it writes the plan doc
-and launches the coordinator itself. **`/architect-status`** reports state from
+and drives the loop itself, as the driver. **`/architect-status`** reports state from
 files and CLI output, read-only. (The former `/architect-plan` and
 `/architect-vocabulary` were folded into this family — vocabulary now lives
 inline in `/architect`.)

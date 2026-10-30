@@ -4,8 +4,10 @@ require "open3"
 
 module Space
   module Architect
-    # Installs the role playbooks (architect-coordinator/spec/builder/judge/
-    # narrator) to ~/.pi/agent/agents. The playbook text is rendered by the
+    # Installs the role playbooks (architect-spec/builder/judge/narrator) to
+    # ~/.pi/agent/agents and removes a stale architect-coordinator.md left by a
+    # pre-driver-era install (I10: the coordinator role retired — the architect
+    # session itself drives the loop). The playbook text is rendered by the
     # installed architect-loop extension itself — the extension owns that text
     # (it renders the per-space .pi/agents files from the same source), so this
     # installer carries no second copy to drift. Routing pins come from the
@@ -14,7 +16,7 @@ module Space
     # machine-wide fallback for sessions that cannot see a space's .pi dir;
     # a space's own .pi/agents files always win inside that space.
     module AgentInstaller
-      ROLES = %w[coordinator spec builder judge narrator].freeze
+      ROLES = %w[spec builder judge narrator].freeze
 
       # Renders each role's agent file and prints it between ===FILE===<role>
       # markers. Dynamic import (node -e runs CJS; import() is legal there) so
@@ -29,7 +31,7 @@ module Space
             console.error("no architect.yaml found — run `architect routing init --global` to scaffold the machine-wide config first");
             process.exit(1);
           }
-          for (const role of ["coordinator", "spec", "builder", "judge", "narrator"]) {
+          for (const role of ["spec", "builder", "judge", "narrator"]) {
             console.log("===FILE===" + role);
             console.log(renderAgentFile(role, config));
           }
@@ -53,10 +55,22 @@ module Space
           results = ROLES.map do |role|
             write_agent(dest.join("architect-#{role}.md"), rendered.fetch(role), force: force, dry_run: dry_run)
           end
+          results.concat(remove_stale_coordinator(dest, dry_run: dry_run))
           { dest_root: dest, agents: results, dry_run: dry_run }
         end
 
         private
+
+        # The retired coordinator playbook: remove, never update — the loop is
+        # driven by the architect session itself, so a leftover fifth playbook
+        # can only mislead. A dry run reports the would-be removal untouched.
+        def remove_stale_coordinator(dest, dry_run:)
+          stale = dest.join("architect-coordinator.md")
+          return [] unless stale.exist?
+
+          FileUtils.rm(stale) unless dry_run
+          [{ name: stale.basename.to_s, action: dry_run ? :would_remove : :removed, path: stale }]
+        end
 
         def default_dest(env)
           Pathname.new(env.fetch("PI_AGENTS_DIR", File.join(pi_agent_dir(env), "agents")))

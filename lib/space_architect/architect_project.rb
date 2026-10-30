@@ -907,12 +907,12 @@ module Space::Architect
     def worktree_add(repo, iteration, lane, base: nil, base_explicit: !base.nil?, harness: nil, model: nil,
                      variant: false, effort: nil, touch: nil, force: false, err: $stderr)
       model, suffix_level = Harness.parse_model_suffix(model)
-      harness, model, inform = resolve_harness_model(harness, model)
+      harness, model, inform = resolve_harness_model(harness, model, err: err)
       err.puts inform if inform
       # The config layer sits above project.effort — architect.yaml is the
       # dedicated routing layer; unconfigured spaces fall through unchanged.
       resolved_level = effort || suffix_level ||
-        Routing.for_space(space.path)&.dig("builder", "thinking") || project_defaults["effort"]
+        Routing.for_space(space.path, err: err)&.dig("builder", "thinking") || project_defaults["effort"]
       Harness.validate_thinking_level!(resolved_level)
       if effort.nil? && suffix_level
         err.puts "thinking: model suffix ':#{suffix_level}' parsed from lane model → level=#{suffix_level} (model stripped)"
@@ -1992,12 +1992,14 @@ module Space::Architect
     # Returns [harness, model, inform] — inform is the loud last-resort line (nil
     # otherwise) for the caller to print once to its err stream when the model
     # fell all the way through to Harness::DEFAULT_MODEL (no flag, no stored
-    # value, no architect.yaml builder role, no project.model).
-    def resolve_harness_model(harness, model, stored_harness: nil, stored_model: nil)
+    # value, no architect.yaml builder role, no project.model). +err+ is additive
+    # (I10): given a stream, a config carrying an unknown role key prints the one
+    # per-process deprecation inform on it; nil (the default) resolves silently.
+    def resolve_harness_model(harness, model, stored_harness: nil, stored_model: nil, err: nil)
       defaults = project_defaults
       resolved_harness = (harness || stored_harness || defaults["harness"] || "pi").to_s
       stored_model = nil unless stored_harness.nil? || stored_harness.to_s == resolved_harness
-      config_model = Routing.for_space(space.path)&.dig("builder", "model")
+      config_model = Routing.for_space(space.path, err: err)&.dig("builder", "model")
       resolved_model = model || stored_model || config_model || defaults["model"] || Harness::DEFAULT_MODEL
       inform = default_model_inform if model.nil? && stored_model.nil? && config_model.nil? && defaults["model"].nil?
       [resolved_harness, resolved_model, inform]
@@ -2037,7 +2039,7 @@ module Space::Architect
     def resolve_dispatch_harness(lane_entry, model:, harness:, effort:, force:, err:)
       model, suffix_level = Harness.parse_model_suffix(model)
       resolved_harness, resolved_model, inform = resolve_harness_model(harness, model,
-        stored_harness: lane_entry["harness"], stored_model: lane_entry["model"])
+        stored_harness: lane_entry["harness"], stored_model: lane_entry["model"], err: err)
       err.puts inform if inform
 
       resolved_effort =
@@ -2050,7 +2052,7 @@ module Space::Architect
         else
           # Dispatch's tail is the lane's stored effort (project.effort was never
           # in the dispatch chain); architect.yaml builder thinking slots in above it.
-          lane_entry["effort"] || Routing.for_space(space.path)&.dig("builder", "thinking")
+          lane_entry["effort"] || Routing.for_space(space.path, err: err)&.dig("builder", "thinking")
         end
 
       [resolved_harness, resolved_model, resolved_effort]

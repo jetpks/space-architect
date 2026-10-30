@@ -72,13 +72,14 @@ the space durable across sessions:
 - **architect** — the judgment seat (this session in either mode: inline
   here, judgment in `/architect-discuss`): plans, arbitrates, rules on
   escalations, judges, lands. In inline mode it also does the work directly.
-- **coordinator** — a detached, cheap-model session that drives one plan:
-  spawns and tends spec → builders → judge per iteration; relays escalations
-  verbatim; never does lane work.
+- **driver** — the architect session itself, in driver mode (the /loop
+  tool installs the driver playbook as operating instructions): spawns and
+  tends spec → builders → judge per iteration; rules escalations in-seat;
+  never does lane work.
 - **spec** — writes one iteration's Grounds/Specification/Acceptance
   Criteria; rehearses; freezes; writes the `notes/spec-digest-*` handoff.
 - **builder** — implementation in one lane's worktree; reports raw evidence
-  only; never commits. Spawned by the coordinator as a subagent, or run via
+  only; never commits. Spawned by the driver as a subagent, or run via
   the `architect dispatch` CLI (which streams to
   `build/<id>-<lane>/run.jsonl`).
 - **judge** — a fresh session that runs the cold gates and rules per-AC
@@ -146,13 +147,14 @@ Read-only orientation commands: `architect status`, `architect looplog
 
 - **`/architect-discuss`** — engineering exploration and arbitration,
   judging a finished run, landing PRs, iteration surgery.
-- **`/architect-action`** — write the plan doc and launch the coordinator.
+- **`/architect-action`** — write the plan doc and drive the loop yourself
+  as the driver.
 - **`/architect-status`** — "what are we working on in here? is it done?"
 - **`/architect-research`** — discovery-scale research.
 
 ## Maintenance
 
 This skill carries the shared vocabulary inline. When loop mechanics change
-(the coordinator flow, dispatch, routing), re-read this file against the
+(the driver flow, dispatch, routing), re-read this file against the
 `architect-discuss` skill and the gem README and update the glossary —
 drift between the two is silent confusion for every future session.

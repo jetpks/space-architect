@@ -17,48 +17,47 @@ module Space::Architect
   # XDG_CONFIG_HOME); space-local is architect.yaml beside the loaded
   # space.yaml (the CLI already resolved the space — no walk-up).
   module Routing
-    ROLES          = %w[architect spec builder judge coordinator narrator].freeze
-    # The five agent roles that must be routed after the merge; `architect` is optional.
-    REQUIRED_ROLES = %w[spec builder judge coordinator narrator].freeze
+    ROLES          = %w[architect spec builder judge narrator].freeze
+    # The four agent roles that must be routed after the merge; `architect` is optional.
+    REQUIRED_ROLES = %w[spec builder judge narrator].freeze
     ENTRY_KEYS     = %w[model thinking].freeze
 
     # I09: the `architect routing init` scaffold — the exact bytes the command
     # writes, living beside the parsers that must accept it. Example models are
     # loud REPLACE_MEs; the header comment carries both locations and the merge
-    # order so the file is self-documenting. Byte-exact contract: the extension
-    # lane's tests carry an inline copy, and the command round-trips the write
-    # through parse below — a template the machinery rejects is a bug.
+    # order so the file is self-documenting. Byte-exact contract (1021 B): the
+    # extension lane's tests carry an inline copy, and the command round-trips
+    # the write through parse below — a template the machinery rejects is a bug.
+    # I10: the detached driver role retired (the architect session drives the
+    # loop itself); the scaffold routes the four required roles plus optional architect.
     TEMPLATE = <<~'YAML'.freeze
-      # architect.yaml — space-architect loop role routing, scaffolded by `architect routing init`.
-      # Locations (merged in this order; the space-local entry wins per role):
-      #   global:  ~/.config/space-architect/architect.yaml   (machine-wide)
-      #   local:   architect.yaml beside this space's space.yaml (this file)
-      # A local entry overrides the global entry for THAT ROLE only; after the
-      # merge every agent role must be routed: spec, builder, judge, coordinator,
-      # narrator (architect is optional).
-      # Replace every example/REPLACE_ME below with a real provider/model-id
-      # (e.g. zai/glm-5.3). thinking is optional: off|minimal|low|medium|high|xhigh|max.
-      # Once saved, the next /loop or architect command picks the file up.
-      version: 1
-      roles:
-        architect:
-          model: example/REPLACE_ME
-          thinking: high
-        spec:
-          model: example/REPLACE_ME
-          thinking: high
-        builder:
-          model: example/REPLACE_ME
-          thinking: high
-        judge:
-          model: example/REPLACE_ME
-          thinking: high
-        coordinator:
-          model: example/REPLACE_ME
-          thinking: high
-        narrator:
-          model: example/REPLACE_ME
-          thinking: low
+    # architect.yaml — space-architect loop role routing, scaffolded by `architect routing init`.
+    # Locations (merged in this order; the space-local entry wins per role):
+    #   global:  ~/.config/space-architect/architect.yaml   (machine-wide)
+    #   local:   architect.yaml beside this space's space.yaml (this file)
+    # A local entry overrides the global entry for THAT ROLE only; after the
+    # merge every agent role must be routed: spec, builder, judge, narrator
+    # (architect is optional).
+    # Replace every example/REPLACE_ME below with a real provider/model-id
+    # (e.g. zai/glm-5.3). thinking is optional: off|minimal|low|medium|high|xhigh|max.
+    # Once saved, the next /loop or architect command picks the file up.
+    version: 1
+    roles:
+      architect:
+        model: example/REPLACE_ME
+        thinking: high
+      spec:
+        model: example/REPLACE_ME
+        thinking: high
+      builder:
+        model: example/REPLACE_ME
+        thinking: high
+      judge:
+        model: example/REPLACE_ME
+        thinking: high
+      narrator:
+        model: example/REPLACE_ME
+        thinking: low
     YAML
 
     # The one canonical cure line appended to default_model_inform's last-resort
@@ -75,14 +74,34 @@ module Space::Architect
       Pathname.new(space_dir).join("architect.yaml")
     end
 
-    # Parse one file's text into { role => {"model" => id, "thinking" => level|nil} }.
-    # +path+ is used only in error messages. Frozen v1 rules: integer version 1,
-    # the six known roles, entries ⊆ {model, thinking} with a non-empty model,
-    # duplicate mapping keys rejected (psych's plain load silently keeps the
-    # last — the npm yaml the extension parses with throws), aliases accepted,
-    # a trailing :level suffix on model parsed via Harness.parse_model_suffix
-    # and beating the thinking key.
+    # Parse one file's text into { role => {"model" => id, "thinking" => level|nil} }
+    # for the KNOWN roles. +path+ is used only in error messages. Frozen v1 rules:
+    # integer version 1, the five known roles, entries ⊆ {model, thinking} with a
+    # non-empty model, duplicate mapping keys rejected (psych's plain load silently
+    # keeps the last — the npm yaml the extension parses with throws), aliases
+    # accepted, a trailing :level suffix on model parsed via Harness.parse_model_suffix
+    # and beating the thinking key. Unknown role keys (I10 deprecation tolerance: a
+    # config still carrying a retired role key, or a typo) are skipped for
+    # routing and collected — see split_known_and_unknown.
     def self.parse(text, path)
+      split_known_and_unknown(text, path).first
+    end
+
+    # The pure deprecation seam (I10): the unknown role keys under `roles:` in one
+    # file's text, in document order. Same parse rules as
+    # parse (known-role validation included); only unknown entries are skipped
+    # unvalidated, so the inform never fires for a config the parser rejects.
+    def self.unknown_role_keys(text, path)
+      split_known_and_unknown(text, path).last
+    end
+
+    # One parse, two results: [known-role hash, unknown role keys]. An unknown
+    # STRING key is skipped whole for routing — its entry content is never
+    # validated (an ignored key is ignored whole; garbage under
+    # roles.<retired-role>.thinking must not raise) — and collected for the one
+    # deprecation inform. A non-string key is corruption, not a retired role
+    # name, and still fails loud under the known-role error.
+    def self.split_known_and_unknown(text, path)
       assert_unique_keys!(text, path)
       doc = YAML.safe_load(text, aliases: true)
       unless doc.is_a?(Hash)
@@ -98,8 +117,14 @@ module Space::Architect
       end
 
       parsed = {}
+      unknown = []
       roles.each do |role, entry|
-        unless ROLES.include?(role)
+        if role.is_a?(String)
+          unless ROLES.include?(role)
+            unknown << role # an ignored key is ignored whole: skip for routing, no entry validation
+            next
+          end
+        else
           raise Space::Core::Error,
             "architect.yaml (#{path}): roles.#{role} — expected one of #{ROLES.join('|')}, got #{role.inspect}"
         end
@@ -136,24 +161,48 @@ module Space::Architect
         end
         parsed[role] = { "model" => model, "thinking" => suffix_level || thinking }
       end
-      parsed
+      [parsed, unknown]
     rescue Psych::Exception => e
       raise Space::Core::Error, "architect.yaml (#{path}): malformed YAML — #{e.message}"
+    end
+
+    # The one deprecation inform for unknown role keys (I10): names every
+    # roles.<key> found, the known-role set, and that the entries are ignored.
+    # Fired at most once per PROCESS via the class-level flag — worktree_add and
+    # dispatch each resolve routing twice per invocation, so per-call emission
+    # would double-print. A config with no unknown key never composes the
+    # message, so the memo never fires. Tests reset it with
+    # remove_instance_variable(:@deprecation_informed).
+    def self.inform_deprecated_roles!(err, keys, found)
+      return if keys.empty? || @deprecation_informed
+
+      @deprecation_informed = true
+      err.puts "architect.yaml (#{found.join(' + ')}): ignoring unknown role key(s) " \
+               "#{keys.map { |k| "roles.#{k}" }.join(', ')} — known roles: #{ROLES.join(', ')} (each entry is ignored)"
     end
 
     # The merged routing for a space: [global, space-local] merged per role key
     # (a space file may override only builder and inherit the rest). nil when
     # NEITHER file exists — no config is a normal state: no error, no side
     # effects. Any found file that is malformed/invalid fails loud at parse;
-    # after the merge all four agent roles must be routed.
-    def self.for_space(space_dir)
+    # after the merge all four agent roles must be routed. +err+ is additive
+    # (I10): when given, a merged config carrying unknown role keys prints the
+    # one per-process deprecation inform on it; existing callers (no err)
+    # resolve silently as before.
+    def self.for_space(space_dir, err: nil)
       global = global_path
       local  = space_path(space_dir)
       found  = [global, local].select { |p| File.file?(p.to_s) }
       return nil if found.empty?
 
       merged = {}
-      found.each { |p| merged.merge!(parse(File.read(p.to_s), p)) }
+      unknown = []
+      found.each do |p|
+        known, keys = split_known_and_unknown(File.read(p.to_s), p)
+        merged.merge!(known)
+        unknown |= keys
+      end
+      inform_deprecated_roles!(err, unknown, found) if err
       missing = REQUIRED_ROLES - merged.keys
       if missing.any?
         raise Space::Core::Error,

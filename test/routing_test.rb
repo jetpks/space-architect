@@ -62,7 +62,9 @@ class RoutingTest < Space::ArchitectTest
       assert_equal({ "model" => "prov/space-builder", "thinking" => "high" }, merged["builder"])
       assert_equal({ "model" => "prov/spec",        "thinking" => "low"  }, merged["spec"])
       assert_equal({ "model" => "prov/judge",       "thinking" => nil    }, merged["judge"])
-      assert_equal({ "model" => "prov/coordinator", "thinking" => nil    }, merged["coordinator"])
+      # I10 tolerance: the fixture keeps carrying coordinator; the merged routing
+      # drops it (deprecated key) instead of failing.
+      assert_nil merged["coordinator"]
       assert_equal({ "model" => "prov/narrator",    "thinking" => nil    }, merged["narrator"])
       assert_equal "prov/architect", merged["architect"]["model"]
     end
@@ -95,12 +97,43 @@ class RoutingTest < Space::ArchitectTest
     assert_equal({ "model" => "prov/builder:floaty", "thinking" => "low" }, parsed["builder"])
   end
 
-  def test_unknown_role_key_fails_loud
-    assert_config_error(<<~YAML, /roles\.qa — expected one of architect\|spec\|builder\|judge\|coordinator\|narrator, got "qa"/)
+  # I10: unknown role keys are deprecated, not fatal — a config still carrying
+  # the retired coordinator parses green: the key is skipped for routing (absent
+  # from the returned hash, entry content never validated) and collected by the
+  # unknown_role_keys seam for the one per-process deprecation inform.
+  def test_unknown_role_key_is_ignored_not_fatal
+    parsed = parse(<<~YAML)
       version: 1
       roles:
-        qa: { model: "prov/qa" }
+        spec:        { model: "prov/spec" }
+        builder:     { model: "prov/builder" }
+        judge:       { model: "prov/judge" }
+        narrator:    { model: "prov/narrator" }
+        coordinator: { model: "prov/coordinator" }
     YAML
+    assert_equal "prov/builder", parsed["builder"]["model"]
+    assert_nil parsed["coordinator"]
+    assert_equal ["coordinator"], routing.unknown_role_keys(<<~YAML, "architect.yaml")
+      version: 1
+      roles:
+        spec:        { model: "prov/spec" }
+        builder:     { model: "prov/builder" }
+        judge:       { model: "prov/judge" }
+        narrator:    { model: "prov/narrator" }
+        coordinator: { model: "prov/coordinator" }
+    YAML
+
+    # an ignored key is ignored whole: garbage under it must not raise
+    parsed = parse(<<~YAML)
+      version: 1
+      roles:
+        spec:        { model: "prov/spec" }
+        builder:     { model: "prov/builder" }
+        judge:       { model: "prov/judge" }
+        narrator:    { model: "prov/narrator" }
+        coordinator: { thinking: total-garbage }
+    YAML
+    assert_nil parsed["coordinator"]
   end
 
   def test_unknown_entry_key_fails_loud
@@ -202,7 +235,7 @@ class RoutingTest < Space::ArchitectTest
     with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => global) do
       error = assert_raises(Space::Core::Error) { routing.for_space(@dir) }
       assert_match(/#{Regexp.escape(global)} \+ #{Regexp.escape(File.join(@dir, "architect.yaml"))}/, error.message)
-      assert_match(/roles\.spec — expected all agent roles spec\|builder\|judge\|coordinator\|narrator to be routed, got \(missing\)/, error.message)
+      assert_match(/roles\.spec — expected all agent roles spec\|builder\|judge\|narrator to be routed, got \(missing\)/, error.message)
     end
   end
 
@@ -220,7 +253,7 @@ class RoutingTest < Space::ArchitectTest
 
     with_env("SPACE_ARCHITECT_GLOBAL_CONFIG" => global) do
       error = assert_raises(Space::Core::Error) { routing.for_space(@dir) }
-      assert_match(/roles\.narrator — expected all agent roles spec\|builder\|judge\|coordinator\|narrator to be routed, got \(missing\)/, error.message)
+      assert_match(/roles\.narrator — expected all agent roles spec\|builder\|judge\|narrator to be routed, got \(missing\)/, error.message)
     end
   end
 
@@ -285,7 +318,7 @@ class RoutingTest < Space::ArchitectTest
   end
 
   def test_non_string_role_key_fails_loud
-    assert_config_error(<<~YAML, /roles\.1 — expected one of architect\|spec\|builder\|judge\|coordinator\|narrator, got 1/)
+    assert_config_error(<<~YAML, /roles\.1 — expected one of architect\|spec\|builder\|judge\|narrator, got 1/)
       version: 1
       roles:
         1: { model: "prov/builder" }
