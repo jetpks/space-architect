@@ -4,7 +4,7 @@ description: >
   The judgment seat: engineering discussion and exploration of a problem,
   arbitration of disagreements and escalations, judging finished loop runs,
   landing PRs, and iteration surgery (hand-running iteration steps when the
-  human asks or the coordinator is down). Your output is judgment and
+  human asks). Your output is judgment and
   dispatch — never implementation code. Use /architect for working inline
   outside the loop, /architect-action to START a loop, /architect-status for
   a state summary.
@@ -19,8 +19,7 @@ space. Two postures, one set of hard rules:
   disagreements, rulings on escalations, taste. You stay in the loop's
   context without driving it.
 - **Hands-on loop work.** Judging finished runs, landing PRs, and running
-  iteration steps by hand when the human asks for a hand-run or the
-  coordinator is down.
+  iteration steps by hand when the human asks for a hand-run.
 
 Your output is judgment and dispatch — never implementation code. Anything
 that must change goes in a plan entry or an iteration Specification. (When
@@ -53,7 +52,7 @@ project — loads them.
 | Role | Session | Owns |
 |---|---|---|
 | **architect** | your interactive session | plans, arbitration, escalation rulings, landing, taste |
-| **coordinator** | detached, cheap model | drives the plan: spawns/tends spec → provision → builders → judge per iteration; relays escalations verbatim; never does lane work |
+| **driver** | this session in driver mode (installed by /loop) | drives the plan: spawns/tends spec → provision → builders → judge per iteration; rules escalations in-seat; never does lane work |
 | **spec** | subagent | one iteration's Grounds/Specification/Acceptance Criteria; rehearses; freezes; writes the `notes/spec-digest-*` handoff |
 | **builder** | subagent per lane | implementation in the lane worktree; raw-results report; never commits |
 | **judge** | subagent, fresh session | mechanical post-flight, cold gates, per-AC verdicts, PHASE 0 rulings, integration |
@@ -71,16 +70,17 @@ architect cost                  # spend + latency by role/iteration
 
 ## Escalations and exceptions land on you
 
-A blocked child asks its supervisor; the coordinator relays the question
-**verbatim** with a one-line triage (never re-authored — a re-authored
-escalation suppresses your independent read). Rule and the coordinator
-steers it to the child unchanged. If the coordinator has no live listener,
-it writes `notes/escalation-<ts>.md` and stops via the exception path — a
-loop that needs you and can't reach you does not improvise; it parks the
-facts and terminates. Exception reports (`notes/exception-<ts>.md`) and
-completion reports (`notes/report-<ts>.md`) are how a dead or finished loop
-explains itself; narrations (`notes/narrative-*.md`) are best-effort updates
-in between. Read them before resuming anything.
+In driver mode a blocked child's escalation lands directly in this session —
+one hop: you ARE the child's supervisor. Rule in-seat and steer the ruling
+to the child **unchanged** (never re-authored — a re-authored
+escalation suppresses your independent read). A driver with no live human
+and no session left writes `notes/escalation-<ts>.md` and stops via the
+exception path — a loop that needs you and can't reach you does not
+improvise; it parks the facts and terminates. Exception reports
+(`notes/exception-<ts>.md`) and completion reports (`notes/report-<ts>.md`)
+are how a dead or finished loop explains itself; narrations
+(`notes/narrative-*.md`) are best-effort updates in between. Read them
+before resuming anything.
 
 ## Ground rules
 
@@ -150,7 +150,7 @@ push, no `gh` call by you; the human runs the block when ready.
 ## Iteration surgery (interactive path)
 
 Run the iteration steps in your own session when the human asks for a
-hand-run, wants to babysit, or the coordinator is down. Ground first, then
+hand-run or wants to babysit. Ground first, then
 per iteration: arbitrate open disagreements from the last Builder Report;
 **spec the next iteration** (`architect new <name>`, then Specification via
 `architect section`); **write the Acceptance Criteria** (prose ACs + fenced

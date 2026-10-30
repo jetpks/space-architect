@@ -172,7 +172,10 @@ module Space::Architect
               # constant as the last resort it is, not ordinary behavior.
               # Fully qualified: the Architect::Routing subcommand namespace
               # (I09) lexically shadows Space::Architect::Routing inside this module.
-              config_model = Space::Architect::Routing.for_space(sp.path)&.dig("builder", "model")
+              # err: $stderr makes status one of the three deprecation-inform surfaces
+              # (I10) — a config still carrying an unknown role key informs once per
+              # process, here or on whichever surface resolves routing first.
+              config_model = Space::Architect::Routing.for_space(sp.path, err: $stderr)&.dig("builder", "model")
 
               terminal.say "Project status:     #{block['status'] || '(none)'}"
               terminal.say "Current iteration:  #{block['current_iteration'] || '(none)'}"
@@ -1162,7 +1165,7 @@ module Space::Architect
       # global-routing pins — the machine-wide fallback for sessions that
       # cannot see a space's .pi dir. Needs install-extensions to have run.
       class InstallAgents < BaseCommand
-        desc "Install the role playbooks (architect-coordinator/spec/builder/judge/narrator) to ~/.pi/agent/agents, rendered from the installed architect-loop extension"
+        desc "Install the role playbooks (architect-spec/builder/judge/narrator) to ~/.pi/agent/agents, rendered from the installed architect-loop extension, and remove a stale architect-coordinator.md"
         phase 53, "Project"
         option :force,   type: :boolean, default: false, desc: "Overwrite existing playbooks that differ"
         option :dry_run, type: :boolean, default: false, desc: "Print what would happen without writing files"

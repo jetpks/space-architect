@@ -2,12 +2,13 @@
 
 require_relative "test_helper"
 
-# AgentInstaller: renders the five role playbooks through the installed
+# AgentInstaller: renders the four role playbooks through the installed
 # architect-loop extension via node, then applies the skill installer's
-# write-if-changed / --force semantics. The extension itself is stubbed with
-# a minimal importable .ts (same export surface: resolveConfig, renderAgentFile)
-# — these tests own the Ruby plumbing, not the extension's rendering, which the
-# extension repo tests directly.
+# write-if-changed / --force semantics — plus the I10 removal of a stale
+# architect-coordinator.md left by a pre-driver install. The extension itself
+# is stubbed with a minimal importable .ts (same export surface: resolveConfig,
+# renderAgentFile) — these tests own the Ruby plumbing, not the extension's
+# rendering, which the extension repo tests directly.
 class AgentInstallerTest < Space::ArchitectTest
   def setup
     @tmp = temp_env
@@ -16,7 +17,7 @@ class AgentInstallerTest < Space::ArchitectTest
     @global_config = File.join(@tmp[:root], "global-architect.yaml")
     FileUtils.mkdir_p([@agent_dir, @ext_dir])
     File.write(File.join(@ext_dir, "architect-loop.ts"), STUB_EXTENSION)
-    File.write(@global_config, "version: 1\nroles:\n  coordinator:\n    model: prov/x\n")
+    File.write(@global_config, "version: 1\nroles:\n  coordinator:\n    model: prov/x\n")  # tolerance proof: the Ruby side never parses this file (the extension does)
   end
 
   def teardown
@@ -35,7 +36,7 @@ class AgentInstallerTest < Space::ArchitectTest
     import * as fs from "node:fs";
     export function resolveConfig(_startDir: string, _options: object): { roles: Record<string, { model: string }> } | null {
       return fs.existsSync(process.env.SPACE_ARCHITECT_GLOBAL_CONFIG || "")
-        ? { roles: { coordinator: { model: "prov/x" }, spec: { model: "prov/x" }, builder: { model: "prov/x" },
+        ? { roles: { spec: { model: "prov/x" }, builder: { model: "prov/x" },
                      judge: { model: "prov/x" }, narrator: { model: "prov/x" } } }
         : null;
     }
@@ -44,18 +45,33 @@ class AgentInstallerTest < Space::ArchitectTest
     }
   TS
 
-  def test_install_writes_all_five_playbooks_rendered_by_the_extension
-    result = Space::Architect::AgentInstaller.install(env: env, extension_dir: @ext_dir)
+  # I10: exactly the four playbooks render and install; a stale
+  # architect-coordinator.md (pre-driver install) is removed and reported —
+  # and a dry run reports the would-be removal without deleting.
+  def test_install_writes_the_four_playbooks_and_removes_a_stale_coordinator
+    installer = Space::Architect::AgentInstaller
+    stale = File.join(@agent_dir, "agents", "architect-coordinator.md")
+    FileUtils.mkdir_p(File.dirname(stale))
+    File.write(stale, "---\nname: architect-coordinator\nmodel: prov/x\n---\nstale pre-driver playbook\n")
+
+    result = installer.install(env: env, extension_dir: @ext_dir)
 
     assert_equal Pathname.new(File.join(@agent_dir, "agents")), result[:dest_root]
-    assert_equal %w[architect-builder.md architect-coordinator.md architect-judge.md
-                    architect-narrator.md architect-spec.md],
-                 result[:agents].map { |a| a[:name] }.sort
-    assert result[:agents].all? { |a| a[:action] == :installed }
+    installed = result[:agents].select { |a| a[:action] == :installed }
+    assert_equal %w[architect-builder.md architect-judge.md architect-narrator.md architect-spec.md],
+                 installed.map { |a| a[:name] }.sort
+    assert_equal({ name: "architect-coordinator.md", action: :removed, path: Pathname.new(stale) },
+                 result[:agents].find { |a| a[:name] == "architect-coordinator.md" })
+    refute File.exist?(stale), "the stale coordinator playbook must be gone"
 
-    coordinator = result[:dest_root].join("architect-coordinator.md")
-    assert_equal "---\nname: architect-coordinator\nmodel: prov/x\n---\nplaybook body for coordinator\n",
-                 File.read(coordinator)
+    spec = result[:dest_root].join("architect-spec.md")
+    assert_equal "---\nname: architect-spec\nmodel: prov/x\n---\nplaybook body for spec\n", File.read(spec)
+
+    # dry run: the would-be removal is reported, the stale file survives
+    File.write(stale, "stale again\n")
+    dry = installer.install(env: env, extension_dir: @ext_dir, dry_run: true)
+    assert_equal :would_remove, dry[:agents].find { |a| a[:name] == "architect-coordinator.md" }[:action]
+    assert_equal "stale again\n", File.read(stale)
   end
 
   def test_rerun_is_unchanged_and_tampering_needs_force
