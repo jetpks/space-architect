@@ -847,6 +847,60 @@ module Space::Architect
         end
       end
 
+      # I16: re-send the structured iteration emissions for ONE iteration —
+      # payloads re-derived from the canonical sources through the exact
+      # builders the live hook call sites use, so a replay is byte-identical
+      # to what the loop sent. Deliberately single-iteration: no bulk
+      # backfill surface, no enumeration of historical I*.md files.
+      class Emit < BaseCommand
+        desc "Re-send the structured emissions for one iteration (freeze/lane/verdict/integration; idempotent replay)"
+        phase 53, "Project"
+        argument :iteration, required: true,  desc: "Iteration name"
+        argument :space,     required: false, desc: "Space identifier (default: $PWD)"
+        option :facet, default: "all", desc: "Which facet to emit: freeze, lane, verdict, integration, or all (default)"
+        option :lane,  default: nil,   desc: "Lane name filter (lane facet only; default: all recorded lanes)"
+
+        FACETS = %w[freeze lane verdict integration].freeze
+
+        def call(iteration:, space: nil, facet: "all", lane: nil, **opts)
+          setup_terminal(**opts.slice(:color, :colors))
+          handle_errors do
+            requested = facet == "all" ? FACETS : FACETS & [facet]
+            if requested.empty?
+              raise Space::Core::Error,
+                "unknown facet '#{facet}' — one of: #{(FACETS + ["all"]).join(', ')}"
+            end
+
+            render(store.find(space)) do |sp|
+              project = ArchitectProject.new(space: sp)
+              emitter = IterationEmission.emitter_for(sp)
+              failed = false
+              requested.each do |f|
+                payloads = project.emission_replays(iteration, facet: f, lane: lane)
+                if payloads.empty?
+                  terminal.say "nothing to emit (#{f})"
+                  next
+                end
+                payloads.each do |payload|
+                  unless emitter
+                    terminal.say "emission off (unconfigured)"
+                    next
+                  end
+                  res = emitter.post(f, payload)
+                  if res
+                    terminal.say "emitted #{f} → #{res[:status]}"
+                  else
+                    failed = true
+                    terminal.say "emission failed (#{f}) — see stderr"
+                  end
+                end
+              end
+              CLI.record_outcome(Outcome.new(exit_code: failed ? 1 : 0))
+            end
+          end
+        end
+      end
+
       # Pretty-print a pi agent run.jsonl as it streams — the ported runlog
       # printer. No space resolution: the stream is the whole input.
       class Runlog < BaseCommand
@@ -1440,6 +1494,7 @@ Space::Architect::CLI::Registry.register "install-extensions", Space::Architect:
 Space::Architect::CLI::Registry.register "install-agents",   Space::Architect::CLI::Architect::InstallAgents
 Space::Architect::CLI::Registry.register "runlog",          Space::Architect::CLI::Architect::Runlog
 Space::Architect::CLI::Registry.register "looplog",         Space::Architect::CLI::Architect::Looplog
+Space::Architect::CLI::Registry.register "emit",           Space::Architect::CLI::Architect::Emit
 Space::Architect::CLI::Registry.register "bug-report",     Space::Architect::CLI::Architect::BugReport
 Space::Architect::CLI::Registry.register "cost",           Space::Architect::CLI::Architect::Cost
 Space::Architect::CLI::Registry.register "brief" do |b|

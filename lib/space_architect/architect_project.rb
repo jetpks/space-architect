@@ -2,6 +2,7 @@
 
 require "yaml"
 require "erb"
+require "json"
 require "open3"
 require "fileutils"
 require "pathname"
@@ -92,8 +93,23 @@ module Space::Architect
       }
     JSON
 
-    def initialize(space:)
+    def initialize(space:, emitter: nil)
       @space = space
+      # I16: the emission sink — an injected emitter (tests) always wins;
+      # the default resolves the emission config lazily, once per instance,
+      # and memoizes. nil resolution = unconfigured = every call site no-ops.
+      @injected_emitter = emitter unless emitter.nil?
+    end
+
+    # The resolved emitter for this space, or nil when unconfigured (no file,
+    # missing host/token, or disabled — Space::Architect::IterationEmission).
+    # Memoized on the first call-site resolution so machine state cannot
+    # differ between the five hooks of one command invocation.
+    def emitter
+      return @injected_emitter if instance_variable_defined?(:@injected_emitter)
+      return @resolved_emitter if instance_variable_defined?(:@resolved_emitter)
+
+      @resolved_emitter = IterationEmission.emitter_for(space)
     end
 
     def init!(message: nil)
@@ -261,6 +277,17 @@ module Space::Architect
       git_run("-C", space.path.to_s, "commit", "-m",
         compose_message("I#{nn} freeze:", "I#{nn}: record freeze sha", message), "--", Space::Core::Space::METADATA_FILE)
 
+      # I16 emission — mouth 1 (freeze): identity + the frozen gates, derived
+      # from the just-committed text. The already-frozen early return above
+      # emits nothing. Best-effort: unconfigured no-ops, failures never block.
+      safe_emit("freeze #{iteration}") do
+        em = emitter
+        next unless em
+        em.post("freeze", IterationEmission.build_freeze(
+          ordinal: entry["ordinal"], name: entry["name"], freeze_sha: sha,
+          branch: head_branch, gates: parse_gates(text)))
+      end
+
       sha
     end
 
@@ -352,6 +379,18 @@ module Space::Architect
         compose_message("I#{nn} verdict:", "I#{nn}: verdict", message), "--", rel, Space::Core::Space::METADATA_FILE)
 
       head, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
+
+      # I16 emission — mouth 3 (verdict): the decision plus ac_rulings /
+      # phase0_resolutions parsed from the body's ```rulings block when one is
+      # present. The body lands in the markdown verbatim either way.
+      safe_emit("verdict #{iteration}") do
+        em = emitter
+        next unless em
+        em.post("verdict", IterationEmission.build_verdict(
+          ordinal: entry["ordinal"], name: entry["name"], decision: decision,
+          rulings: IterationEmission.parse_rulings(body)))
+      end
+
       { decision: decision, sha: head.strip }
     end
 
@@ -387,6 +426,12 @@ module Space::Architect
         compose_message("I#{nn} evidence:", "I#{nn}: evidence", message), "--", rel)
       head, = git_capture("-C", space.path.to_s, "rev-parse", "HEAD")
 
+      # I16 emission — mouth 2 (lane): the lane's disposition scalars from the
+      # space.yaml record, status "complete". With lane nil, only when the
+      # entry records exactly ONE lane (the single-lane iteration shorthand);
+      # a multi-lane unlabeled run has no single owner — skip.
+      emit_lane_complete!(iteration, entry, lane)
+
       status_line = raw.lines.reverse_each.find { |l| l.strip.start_with?("STATUS:") }&.strip
       { sha: head.strip, lines: raw.lines.count, status_line: status_line, lane: lane }
     end
@@ -407,6 +452,149 @@ module Space::Architect
         end
       section_body(text, "## Acceptance Criteria")
     end
+
+    # I16 S4 — `architect emit`: re-derive the emission payloads for one facet
+    # from the canonical sources (space.yaml, the frozen iteration file via
+    # `git show`, the gate sidecars) through the EXACT builders the live hook
+    # call sites use, so a re-send replays the same bytes. Returns the array
+    # of payloads for the facet — empty for "nothing to emit". Deliberately
+    # single-iteration: no bulk backfill surface, no enumeration of
+    # historical I*.md files.
+    def emission_replays(iteration, facet:, lane: nil)
+      entry = slice_entry(iteration)
+      case facet
+      when "freeze"      then freeze_replay(entry)
+      when "lane"        then lane_replays(entry, lane)
+      when "verdict"     then verdict_replay(entry)
+      when "integration" then integration_replay(entry)
+      else raise Space::Core::Error, "unknown facet '#{facet}' — one of: freeze, lane, verdict, integration"
+      end
+    end
+
+    # freeze facet: gates re-parsed from the frozen file's byte state (same
+    # parse_gates path as the live freeze), branch re-read live — identical
+    # whenever the space repo's HEAD branch hasn't changed since the freeze.
+    def freeze_replay(entry)
+      sha = entry["freeze_sha"]
+      return [] unless sha
+
+      text, _, st = git_capture("-C", space.path.to_s, "show", "#{sha}:#{entry['file']}")
+      raise Space::Core::Error, "could not read #{entry['file']} at freeze #{sha[0, 8]}" unless st.success?
+
+      [IterationEmission.build_freeze(
+        ordinal: entry["ordinal"], name: entry["name"], freeze_sha: sha,
+        branch: head_branch, gates: parse_gates(text))]
+    end
+
+    # lane facet: the space.yaml lane records (or --lane NAME). When the lane
+    # has a gate sidecar, replay the gate-results shape (scalars minus status
+    # + gate_results re-attached from the sidecar, transcript from the sibling
+    # .md) — the live gate-time payload; otherwise the completion shape
+    # (status "complete") — the live evidence-time payload.
+    def lane_replays(entry, lane)
+      lanes = entry["lanes"] || []
+      if lane
+        lanes = lanes.select { |l| l["name"] == lane }
+        raise Space::Core::Error, "No lane '#{lane}' recorded for iteration '#{entry['name']}'" if lanes.empty?
+      end
+
+      lanes.map do |record|
+        sidecar = newest_lane_sidecar(record["name"])
+        if sidecar
+          IterationEmission.build_lane(ordinal: entry["ordinal"], name: entry["name"],
+            lane_record: record, gate_results: lane_sidecar_results(sidecar))
+        else
+          IterationEmission.build_lane(ordinal: entry["ordinal"], name: entry["name"],
+            lane_record: record, status: "complete")
+        end
+      end
+    end
+
+    # verdict facet: the entry's recorded decision + the current iteration
+    # file's Verdict section ```rulings block (the section the live verdict
+    # command wrote — post-freeze, so it is read from the working tree).
+    def verdict_replay(entry)
+      decision = entry["verdict"]
+      return [] if decision.nil? || decision == "pending"
+
+      path = space.path.join(entry["file"])
+      raise Space::Core::Error, "#{entry['file']} does not exist" unless path.exist?
+
+      [IterationEmission.build_verdict(ordinal: entry["ordinal"], name: entry["name"],
+        decision: decision,
+        rulings: IterationEmission.parse_rulings(section_body(path.read, "## Verdict").to_s))]
+    end
+
+    # integration facet: the lanes' recorded integrate_sha/integration_branch
+    # plus the project integration branch. "nothing to emit" ([]) when no lane
+    # has merge data.
+    def integration_replay(entry)
+      lanes = (entry["lanes"] || []).select { |l| l["integrate_sha"] }
+      return [] if lanes.empty?
+
+      branch = lanes.filter_map { |l| l["integration_branch"] }.first || project_integration_branch
+      merge_commits = lane_merge_commits(lanes, branch)
+      [IterationEmission.build_integration(
+        ordinal: entry["ordinal"], name: entry["name"], branch: branch,
+        lanes: lanes.map { |l|
+          { name: l["name"], merge_sha: merge_commits[l["name"]] || l["integrate_sha"],
+            integration_branch: l["integration_branch"] }
+        })]
+    end
+
+    # The live integration emission carries each lane's repo MERGE commit (the
+    # tip after its --no-ff merge); space.yaml records the lane WORKTREE commit
+    # (integrate_sha). The merge commit is derivable from the canonical repo
+    # history — each merge's second parent is exactly the lane branch tip — so
+    # the re-send replays the same merge_sha the live path posted. When the
+    # branch history no longer holds the merge (rewritten/deleted), the
+    # recorded integrate_sha is the only remaining truth and is used as-is.
+    def lane_merge_commits(lanes, branch)
+      lanes.group_by { |l| l["repo"] }.flat_map do |repo, group|
+        next [] unless repo
+        out, _, st = git_capture("-C", space.path.join("repos", repo).to_s,
+          "rev-list", "--merges", "--parents", branch)
+        next [] unless st.success?
+        group.filter_map do |l|
+          next unless l["integrate_sha"]
+          commit = out.strip.split("\n")
+                       .find { |line| line.split.drop(1).include?(l["integrate_sha"]) }
+                       &.split
+                       &.first
+          commit ? [l["name"], commit] : nil
+        end
+      end.to_h
+    end
+
+    # The newest lane gate sidecar in build/gate/ whose sibling .md transcript
+    # names the lane: sidecar files are keyed to their .md by basename, and
+    # the .md's "Lane: <name> (…}" header line is the only recorded lane
+    # association. Filenames embed a monotonic timestamp — reverse sort is
+    # newest-first.
+    def newest_lane_sidecar(lane_name)
+      dir = space.path.join("build", "gate")
+      return nil unless dir.exist?
+
+      # paths:exempt - the .extname == ".json" filter structurally cannot match a dotfile-prefixed name (".json" has no extname), so raw enumeration of the build/gate scratch dir is already dotfile-safe here
+      candidates = dir.children.select { |f| f.extname == ".json" }.sort_by(&:to_s).reverse
+      candidates.find do |sidecar|
+        md = sidecar.sub_ext(".md")
+        md.exist? && File.foreach(md).any? { |line| line.start_with?("Lane: #{lane_name} (") }
+      end
+    end
+
+    # Re-attach gate_results from a sidecar: same entry shape the live
+    # gate-time lane emission built (reason omitted when empty — the server
+    # stores NULL for ""), transcript from the sibling .md.
+    def lane_sidecar_results(sidecar)
+      transcript = sidecar.sub_ext(".md").read
+      JSON.parse(sidecar.read).map do |r|
+        IterationEmission.map_gate_result(
+          { gate_id: r["gate_id"], status: r["status"], reason: r["reason"] },
+          transcript)
+      end
+    end
+
 
     # Integrate ONE architect-judged-passing lane: commit the builder's working tree on
     # the lane branch, then merge --no-ff into the repo's lane/<id> integration branch.
@@ -534,6 +722,14 @@ module Space::Architect
         raise Space::Core::Error, "Integrated #{done.empty? ? "(none)" : done} then stopped at '#{lane}': #{e.message}"
       end
 
+      # I16 emission — mouth 4 (integration): one integration POST, then a
+      # per-merged-lane lane-mouth scalar re-emission re-sliced from space.yaml
+      # AFTER the merge mutations (a bounds override accepted at integrate
+      # time must land in the record). Teardown-only calls never reach this —
+      # they early-return above. Emission happens before teardown so a
+      # teardown failure can never cost an already-merged lane its record.
+      emit_integration!(iteration, merged)
+
       teardown_lanes!(iteration, merged, force: force) if teardown
       merged
     ensure
@@ -575,7 +771,9 @@ module Space::Architect
     # #run_gates, the only intended caller shape. Returns the path.
     def gate_transcript(iteration, gate_results, lane: nil, now: Time.now)
       entry, base_dir, repo = resolve_gate_run(iteration, lane)
-      write_transcript(:gate, entry, repo, base_dir, lane, gate_results, nil, now)
+      path = write_transcript(:gate, entry, repo, base_dir, lane, gate_results, nil, now)
+      emit_lane_gate_results!(entry, lane, path, gate_results) if lane
+      path
     end
 
     # Rehearse the DRAFTED gates in the WORKING-TREE iteration file — before the
@@ -1072,6 +1270,103 @@ module Space::Architect
       composed = "#{prefix} #{subject.strip}"
       body = body.strip
       body.empty? ? composed : "#{composed}\n\n#{body}"
+    end
+
+    # The emission belt: a payload-build or call-site bug must never change a
+    # loop command's exit code, stdout, or commit behavior — exactly one
+    # stderr line, then the command carries on. (Emitter#post itself never
+    # raises; this belt guards the payload construction around it.)
+    def safe_emit(context)
+      yield
+    rescue Exception => e # belt, by contract — even a NoMemoryError must not kill the loop
+      $stderr.puts "emission skipped (#{context}): #{e.class}: #{e.message.to_s[0, 200]}"
+    end
+
+    # I16 emission — mouth 2 (lane): the lane's disposition scalars from the
+    # space.yaml record, status "complete". With lane nil, only when the
+    # entry records exactly ONE lane (the single-lane iteration shorthand);
+    # a multi-lane unlabeled run has no single owner — skip.
+    def emit_lane_complete!(iteration, entry, lane)
+      lane_name = lane
+      unless lane_name
+        lanes = entry["lanes"] || []
+        lane_name = lanes.first["name"] if lanes.one?
+      end
+      return unless lane_name
+
+      safe_emit("lane complete #{lane_name}") do
+        em = emitter
+        next unless em
+        record = (slice_entry(iteration)["lanes"] || []).find { |l| l["name"] == lane_name }
+        next unless record
+        em.post("lane", IterationEmission.build_lane(
+          ordinal: entry["ordinal"], name: entry["name"], lane_record: record, status: "complete"))
+      end
+    end
+
+    # I16: the structured sidecar — a JSON mirror of the executed gates
+    # (gate_id/status/reason/stdout/stderr/exit_code/cmd/dir) written beside
+    # the transcript .md (same basename; additive — the .md stays
+    # byte-unchanged). Lane runs only: unlabeled gate runs emit nothing, and
+    # `architect emit` re-attaches gate_results from the newest sidecar whose
+    # sibling .md names the lane.
+    def write_gate_sidecar(transcript_path, gate_results)
+      safe_emit("gate sidecar #{transcript_path.basename}") do
+        sidecar = transcript_path.sub_ext(".json")
+        sidecar.write(JSON.generate(gate_results.map { |g| IterationEmission.map_sidecar_gate(g) }))
+      end
+    end
+
+    # I16 emission — mouth 2 (lane), gate-results shape: the same scalars as
+    # the completion shape MINUS status, plus one gate_results entry per gate
+    # ({gate_id, status exactly "pass"/"fail", reason omitted when empty,
+    # transcript = the .md content just written}). Only called for lane runs.
+    def emit_lane_gate_results!(entry, lane, transcript_path, gate_results)
+      write_gate_sidecar(transcript_path, gate_results)
+      safe_emit("lane gate results #{lane}") do
+        em = emitter
+        next unless em
+        record = (entry["lanes"] || []).find { |l| l["name"] == lane }
+        next unless record
+        transcript = transcript_path.read
+        em.post("lane", IterationEmission.build_lane(
+          ordinal: entry["ordinal"], name: entry["name"], lane_record: record,
+          gate_results: gate_results.map { |g|
+            IterationEmission.map_gate_result({ gate_id: g[:id], status: g[:status], reason: g[:reason] }, transcript)
+          }))
+      end
+    end
+
+    # I16 emission — mouth 4 (integration): one integration POST, then a
+    # per-merged-lane lane-mouth scalar re-emission re-sliced from space.yaml
+    # AFTER the merge mutations (a bounds override accepted at integrate time
+    # must land in the record). Emission happens before teardown so a teardown
+    # failure can never cost an already-merged lane its record.
+    def emit_integration!(iteration, merged)
+      safe_emit("integration #{iteration}") do
+        em = emitter
+        next unless em
+        fresh = slice_entry(iteration)
+        em.post("integration", IterationEmission.build_integration(
+          ordinal: fresh["ordinal"], name: fresh["name"],
+          branch: merged.first[:integration_branch],
+          lanes: merged.map { |m|
+            { name: m[:lane], merge_sha: m[:merge_sha], integration_branch: m[:integration_branch] }
+          }))
+        (fresh["lanes"] || []).each do |l|
+          next unless merged.any? { |m| m[:lane] == l["name"] }
+          em.post("lane", IterationEmission.build_lane(
+            ordinal: fresh["ordinal"], name: fresh["name"], lane_record: l, status: "integrated"))
+        end
+      end
+    end
+
+    # The space repo's HEAD branch, nil when detached (git abbrev-ref prints
+    # "HEAD" there; a real branch of that name is not a thing git creates).
+    def head_branch
+      out, = git_capture("-C", space.path.to_s, "rev-parse", "--abbrev-ref", "HEAD")
+      branch = out.strip
+      branch unless branch == "HEAD"
     end
 
     # integrate!'s own space.yaml commit, by pathspec — like record_verdict!'s sweep, so

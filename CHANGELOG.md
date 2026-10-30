@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.7.0] - 2026-10-30
+
+### Added
+
+- **Structured-record emission (I16)** — the loop commands now mirror the
+  iteration record to a space-server as structured data: `architect
+  freeze`/`verdict`/`integrate` and lane completion POST to the four ingest
+  mouths (`/iterations/ingest/{freeze,lane,verdict,integration}`). Payloads
+  derive from the canonical sources (the iteration file, space.yaml lane
+  records, gate sidecars); the verdict detail rides a new fenced ` ```rulings `
+  YAML block (ac_rulings + phase0_resolutions) in the `## Verdict` body.
+  Config: `~/.config/space-architect/emission.yaml` (host/token/disabled),
+  session-sink semantics — unconfigured is fully inert, ENV overrides per
+  field (`SPACE_ARCHITECT_EMISSION_HOST/_TOKEN/_DISABLED`), best-effort
+  POSTs that never raise into or block a loop command. `architect emit`
+  replays the emission byte-stable.
+
 ## [9.6.0] - 2026-10-17
 
 ### Changed
