@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.9.1] - 2026-10-30
+
+### Changed
+
+- **Driver-mode launch prose (matches the pi-extensions entry-compaction fix)** —
+  architect-action and DESIGN no longer describe an entry compaction at
+  `architect_loop` launch: a compaction aborts the in-flight turn and, with no
+  subagent in flight, nothing resumes the session. The driver begins driving in
+  the launch turn and first compacts (`architect_compact`) only after its first
+  child launch.
+
 ## [9.9.0] - 2026-10-30
 
 ### Added
