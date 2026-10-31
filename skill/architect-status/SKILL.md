@@ -39,7 +39,7 @@ tool result from this session — no recall, no conversation-only claims.
    - **Loop:** live or not; if live, which plan, which role runs are in
      flight and their ages; if not, when the last one settled and how it
      ended (report/exception).
-   - **Last settled event:** from the newest narrative — one line of fact.
+   - **Newest narrative:** what it records — one line of fact.
    - **Waiting on the human:** any escalation or exception note that parks
      a decision.
    - **Next:** what the plan or ARCHITECT.md says comes next.

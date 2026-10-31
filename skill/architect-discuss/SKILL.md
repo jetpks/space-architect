@@ -79,8 +79,8 @@ exception path — a loop that needs you and can't reach you does not
 improvise; it parks the facts and terminates. Exception reports
 (`notes/exception-<ts>.md`) and completion reports (`notes/report-<ts>.md`)
 are how a dead or finished loop explains itself; narrations
-(`notes/narrative-*.md`) are best-effort updates in between. Read them
-before resuming anything.
+(`notes/narrative-*.md`) are the rare prose refreshes — verdict-landed,
+exception, plan-complete. Read them before resuming anything.
 
 ## Ground rules
 
