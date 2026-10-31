@@ -89,11 +89,12 @@ human again until the loop needs them.
    a user command in the interactive session, and the human has disengaged.
    The launch is yours, and the tool is your equivalent of `/loop`: call
    `architect_loop` with `from` = the plan file path. The tool installs the
-   driver playbook into THIS session as operating instructions and schedules
-   the entry compaction — after which this session IS the loop driver: it
-   spawns and tends spec → builders → judge itself, one hop from the human.
-   Pass `compact: false` only if the human asks to keep full context. An
-   older extension without the driver-mode `architect_loop` is updated via
+   driver playbook into THIS session as operating instructions — and driving
+   starts in this same turn: the session spawns and tends spec → builders →
+   judge itself, one hop from the human. It compacts only after its first
+   child launch (`architect_compact`, never before — a compaction with no
+   child in flight aborts the turn with no wake source, and the loop stalls).
+   An older extension without the driver-mode `architect_loop` is updated via
    `architect install-extensions` — never spawned around.
 7. **Report the launch, then drive.** Tell the human: the plan path and how
    to watch — `architect looplog` (live), `--list` (inventory), `architect

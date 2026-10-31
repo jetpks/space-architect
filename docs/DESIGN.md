@@ -134,11 +134,12 @@ plan, one hop from the human) and the **interactive path** (the architect
 session runs the iteration steps itself — requested, or outside the driver
 path). The hard rules are shape-independent.
 
-Why a compacted session can drive: the driver's work is orchestration judged
+Why a small session can drive: the driver's work is orchestration judged
 by structure — spawn, tend, rule, narrate, stop-on-exception — never lane
-work, never judgment. The entry compaction leaves it a small, focused
-context (its orchestration state, not the human's whole history), so the
-hot path stays cheap; judgment stays on the strong models (spec,
+work, never judgment. The session compacts only while a child is in flight
+(the playbook rides every compaction as keep-essentials), which keeps it a
+small, focused context (its orchestration state, not the human's whole
+history); the hot path stays cheap; judgment stays on the strong models (spec,
 judge) where review-survival matters. The builder runs unattended for a
 stretch (30–60 minutes in practice), where the metric to buy is
 review-survival, not first-token latency — so its thinking budget defaults
