@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.9.0] - 2026-10-30
+
+### Added
+
+- **`architect ping` (I11)** — phase pings for driver-mode loops: `architect
+  ping ITERATION PHASE` emits an iteration phase transition (spec-launched,
+  builders-settled, judge-running) to the configured space server via the I16
+  emission surface. Vocabulary-first validation (unknown phase = 422-style
+  error naming the set), `--note` rides along, `--space` overrides the cwd
+  walk, and an unconfigured emission stack is inert — one inform line, exit 0.
+  A ping never gates the loop: every failure mode is one line.
+
+### Changed
+
+- **Narration cadence (I11)** — shipped skills and docs carry the three-kind
+  cadence: narrations are exactly verdict-landed, exception, and
+  plan-complete; builders-settled and judge-settled stop being narration
+  kinds (the driver pings those transitions instead). Back-to-back rule:
+  when two narration-worthy events are back-to-back, one narration lands —
+  the more-final kind absorbs the earlier. dispatch.md's narrator contract
+  now asks for composed prose (situates the project, the iteration's place,
+  what happened and what it means), never transcribed STATUS lines, run ids,
+  or gate vectors.
+
 ## [9.8.0] - 2026-10-30
 
 ### Removed
