@@ -3523,4 +3523,111 @@ class ArchitectCLITest < Space::ArchitectTest
   ensure
     FileUtils.rm_rf(setup[:root]) if setup
   end
+
+  # ── I93: tart installer CLI — skills / playbooks / one-shot for the tart
+  # provider, live through invoke (node renders for real). The stub extension
+  # is duplicated from agent_installer_test.rb — test/test_helper.rb is
+  # outside this lane's declared touch set.
+  STUB_EXTENSION = <<~TS
+    import * as fs from "node:fs";
+    export function resolveConfig(_startDir: string, _options: object): { roles: Record<string, { model: string }> } | null {
+      return fs.existsSync(process.env.SPACE_ARCHITECT_GLOBAL_CONFIG || "")
+        ? { roles: { spec: { model: "prov/x" }, builder: { model: "prov/x" },
+                     judge: { model: "prov/x" }, narrator: { model: "prov/x" } } }
+        : null;
+    }
+    export function renderAgentFile(role: string, config: { roles: Record<string, { model: string }> }): string {
+      return `---\\nname: architect-${role}\\nmodel: ${config.roles[role].model}\\n---\\nplaybook body for ${role}`;
+    }
+  TS
+
+  # Stages the stub extension at pi's git-install layout under the staged
+  # PI_CODING_AGENT_DIR (the layout locate_extension globs) plus the global
+  # routing yaml the extension's resolveConfig requires, and plants a stale
+  # coordinator playbook in the staged ~/.tart/agents. Returns the env to
+  # pass to with_env.
+  def stage_tart_stub(setup)
+    pi_agent_dir = File.join(setup[:root], "home", ".pi", "agent")
+    global_config = File.join(setup[:root], "architect.yaml")
+    ext_dir = File.join(pi_agent_dir, "git", "gate.local", "stub", "pi-extensions")
+    FileUtils.mkdir_p(ext_dir)
+    File.write(File.join(ext_dir, "architect-loop.ts"), STUB_EXTENSION)
+    File.write(global_config, "version: 1\nroles: {}\n")
+    stale = File.join(setup[:env].fetch("HOME"), ".tart", "agents", "architect-coordinator.md")
+    FileUtils.mkdir_p(File.dirname(stale))
+    File.write(stale, "stale pre-driver playbook\n")
+    setup[:env].merge("PI_CODING_AGENT_DIR" => pi_agent_dir, "SPACE_ARCHITECT_GLOBAL_CONFIG" => global_config)
+  end
+
+  def test_install_skills_provider_tart_cli
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      out, err = invoke("install-skills", "--provider", "tart")
+      assert_empty err
+      assert_match(/skills for tart/, out)
+      %w[architect architect-discuss architect-action architect-status architect-research].each do |skill|
+        assert File.exist?(File.join(env["HOME"], ".tart", "skills", skill, "SKILL.md")),
+               "expected staged #{skill}/SKILL.md under HOME/.tart/skills"
+      end
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_install_agents_provider_tart_cli
+    setup = temp_env
+    env = stage_tart_stub(setup)
+    stale = File.join(env["HOME"], ".tart", "agents", "architect-coordinator.md")
+
+    with_env(env) do
+      out, err = invoke("install-agents", "--provider", "tart")
+      assert_empty err
+      assert_match(/role playbooks for tart/, out)
+      %w[spec builder judge narrator].each do |role|
+        assert File.exist?(File.join(env["HOME"], ".tart", "agents", "architect-#{role}.md")),
+               "expected architect-#{role}.md under HOME/.tart/agents"
+      end
+      refute File.exist?(stale), "the stale coordinator must be gone"
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_install_provider_tart_skips_the_extension_step
+    setup = temp_env
+    env = stage_tart_stub(setup)
+
+    with_env(env) do
+      out, err = invoke("install", "--provider", "tart")
+      assert_empty err
+      assert_includes out, "extension: skipped (tart's architect surfaces are native — no pi extension step)"
+      assert_operator out.index(".tart/skills"), :<, out.index("extension: skipped"),
+                     "skills line must precede the frozen skip line"
+      assert_operator out.index("extension: skipped"), :<, out.index(".tart/agents"),
+                     "frozen skip line must precede the playbooks line"
+      refute_includes out, "Extensions source"
+      assert File.exist?(File.join(env["HOME"], ".tart", "skills", "architect", "SKILL.md"))
+      assert File.exist?(File.join(env["HOME"], ".tart", "agents", "architect-spec.md"))
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
+
+  def test_install_rejects_a_skills_only_provider
+    setup = temp_env
+    env = setup.fetch(:env)
+
+    with_env(env) do
+      _out, err = invoke("install", "--provider", "claude")
+      assert_equal 1, Space::Architect::CLI.last_outcome&.exit_code
+      assert_includes err,
+                      "claude is a skills-only provider — architect install runs the full stack (skills, extension, playbooks) for pi or tart; for skills only, run: architect install-skills --provider claude"
+      refute File.exist?(File.join(env["HOME"], ".claude")),
+             "validation must precede every side effect: no .claude under the staged HOME"
+    end
+  ensure
+    FileUtils.rm_rf(setup[:root]) if setup
+  end
 end

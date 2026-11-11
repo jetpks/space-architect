@@ -1175,7 +1175,7 @@ module Space::Architect
       class InstallSkills < BaseCommand
         desc "Install bundled skills (architect, architect-discuss, architect-action, architect-status, architect-research) for a harness"
         phase 53, "Project"
-        option :provider, default: "pi", desc: "Skill install target (default: pi; validated by the installer)"
+        option :provider, default: "pi", desc: "Skill install target: claude | codex | opencode | pi | tart (default: pi)"
         option :project, type: :boolean, default: false, desc: "Install to CWD instead of global"
         option :force,   type: :boolean, default: false, desc: "Overwrite existing skills that differ"
         option :dry_run, type: :boolean, default: false, desc: "Print what would happen without writing files"
@@ -1213,22 +1213,26 @@ module Space::Architect
         end
       end
 
-      # Role playbooks to ~/.pi/agent/agents, rendered from the installed
-      # architect-loop extension (the single owner of the playbook text) with
-      # global-routing pins — the machine-wide fallback for sessions that
-      # cannot see a space's .pi dir. Needs install-extensions to have run.
+      # Role playbooks to the provider's agents dir (~/.pi/agent/agents for pi,
+      # ~/.tart/agents for tart), rendered from the installed architect-loop
+      # extension (the single owner of the playbook text) with global-routing
+      # pins — the machine-wide fallback for sessions that cannot see a space's
+      # .pi dir. Needs install-extensions to have run (both providers render
+      # from the same installed pi extension).
       class InstallAgents < BaseCommand
-        desc "Install the role playbooks (architect-spec/builder/judge/narrator) to ~/.pi/agent/agents, rendered from the installed architect-loop extension, and remove a stale architect-coordinator.md"
+        desc "Install the role playbooks (architect-spec/builder/judge/narrator) to the provider's agents dir (~/.pi/agent/agents for pi, ~/.tart/agents for tart), rendered from the installed architect-loop extension, and remove a stale architect-coordinator.md"
         phase 53, "Project"
+        option :provider, default: "pi", desc: "Playbook install target: pi | tart (default: pi)"
         option :force,   type: :boolean, default: false, desc: "Overwrite existing playbooks that differ"
         option :dry_run, type: :boolean, default: false, desc: "Print what would happen without writing files"
 
-        def call(force: false, dry_run: false, **opts)
+        def call(provider: "pi", force: false, dry_run: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
-            result = AgentInstaller.install(env: project_config.env, force: force, dry_run: dry_run)
+            result = AgentInstaller.install(env: project_config.env, provider: provider,
+                                            force: force, dry_run: dry_run)
             verb = dry_run ? "Would install" : "Installed"
-            terminal.say "#{verb} role playbooks for pi → #{terminal.path(result[:dest_root])}"
+            terminal.say "#{verb} role playbooks for #{provider} → #{terminal.path(result[:dest_root])}"
             result[:agents].each do |a|
               terminal.say "  #{a[:name]}: #{terminal.style_skill_action(a[:action])} (#{terminal.path(a[:path])})"
             end
@@ -1240,31 +1244,58 @@ module Space::Architect
       # The one-shot machine install: skills (pi by default), the
       # architect-loop extension, then the role playbooks — in that order,
       # because install-agents renders from the extension the prior step just
-      # installed. Each step aborts loudly on failure; there are no partial
-      # silent states to reason about afterwards.
+      # installed. The extension step is pi-only: for tart it is skipped with
+      # one say line (tart's architect surfaces are native; the playbooks
+      # still render from the installed pi extension). Each step aborts loudly
+      # on failure; there are no partial silent states to reason about
+      # afterwards.
       class Install < BaseCommand
-        desc "Install everything for this machine: skills (--provider, default pi), the architect-loop extension, then the role playbooks"
+        desc "Install everything for this machine: skills, the architect-loop extension (pi only), then the role playbooks (--provider pi|tart, default pi)"
         phase 53, "Project"
-        option :provider, default: "pi", desc: "Skill install target (default: pi; validated by the installer; passed through to install-skills)"
+        option :provider, default: "pi", desc: "Full-stack install target: pi | tart (default: pi; skills-only providers are rejected — use install-skills for those)"
         option :force,   type: :boolean, default: false, desc: "Overwrite existing skills/playbooks that differ (passed through)"
 
         def call(provider: "pi", force: false, **opts)
           setup_terminal(**opts.slice(:color, :colors))
           handle_errors do
+            validate_install_provider!(provider)
+
             skills = SkillInstaller.install(provider, project: false, force: force,
                                              env: project_config.env)
             terminal.say "skills → #{terminal.path(skills[:dest_root])}"
             skills[:skills].each { |s| terminal.say "  #{s[:name]}: #{terminal.style_skill_action(s[:action])}" }
 
-            extensions = ExtensionInstaller.install(env: project_config.env)
-            extensions[:steps].each { |s| terminal.say "  #{s[:cmd]} (exit #{s[:exit_code]})" }
+            if provider == "tart"
+              # tart's architect surfaces are native (BRIEF §6) — no pi
+              # extension step, so no extension output at all; the playbooks
+              # below still render from the installed pi extension.
+              terminal.say "extension: skipped (tart's architect surfaces are native — no pi extension step)"
+            else
+              extensions = ExtensionInstaller.install(env: project_config.env)
+              extensions[:steps].each { |s| terminal.say "  #{s[:cmd]} (exit #{s[:exit_code]})" }
+            end
 
-            agents = AgentInstaller.install(env: project_config.env, force: force)
+            agents = AgentInstaller.install(env: project_config.env, provider: provider, force: force)
             terminal.say "role playbooks → #{terminal.path(agents[:dest_root])}"
             agents[:agents].each { |a| terminal.say "  #{a[:name]}: #{terminal.style_skill_action(a[:action])}" }
 
             CLI.record_outcome(Outcome.new(exit_code: 0))
           end
+        end
+
+        private
+
+        # The one-shot is the full stack — pi or tart only. Validation runs
+        # before any step, so a rejected provider leaves zero side effects.
+        def validate_install_provider!(provider)
+          return if AgentInstaller::PROVIDERS.include?(provider.to_s)
+
+          if SkillInstaller::PROVIDERS.include?(provider.to_s)
+            raise Space::Core::Error,
+                  "#{provider} is a skills-only provider — architect install runs the full stack (skills, extension, playbooks) for pi or tart; for skills only, run: architect install-skills --provider #{provider}"
+          end
+
+          raise Space::Core::Error, "Unknown provider '#{provider}'. architect install supports: pi, tart"
         end
       end
 

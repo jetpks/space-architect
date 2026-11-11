@@ -4,19 +4,23 @@ require "open3"
 
 module Space
   module Architect
-    # Installs the role playbooks (architect-spec/builder/judge/narrator) to
-    # ~/.pi/agent/agents and removes a stale architect-coordinator.md left by a
+    # Installs the role playbooks (architect-spec/builder/judge/narrator) to the
+    # provider's agents dir — ~/.pi/agent/agents for pi, ~/.tart/agents for tart
+    # — and removes a stale architect-coordinator.md left by a
     # pre-driver-era install (I10: the coordinator role retired — the architect
-    # session itself drives the loop). The playbook text is rendered by the
-    # installed architect-loop extension itself — the extension owns that text
-    # (it renders the per-space .pi/agents files from the same source), so this
-    # installer carries no second copy to drift. Routing pins come from the
-    # global architect.yaml (ENV["SPACE_ARCHITECT_GLOBAL_CONFIG"] overrides the
-    # path, honored inside the extension): the user-level files are the
-    # machine-wide fallback for sessions that cannot see a space's .pi dir;
-    # a space's own .pi/agents files always win inside that space.
+    # session itself drives the loop). One render, two dest roots: the playbook
+    # text is rendered by the installed architect-loop extension itself — the
+    # extension owns that text (it renders the per-space .pi/agents files from
+    # the same source), so this installer carries no second copy to drift; tart
+    # gets the same render from the same installed pi extension (tart has no
+    # extension of its own — its architect surfaces are native). Routing pins
+    # come from the global architect.yaml (ENV["SPACE_ARCHITECT_GLOBAL_CONFIG"]
+    # overrides the path, honored inside the extension): the user-level files
+    # are the machine-wide fallback for sessions that cannot see a space's .pi
+    # dir; a space's own .pi/agents files always win inside that space.
     module AgentInstaller
       ROLES = %w[spec builder judge narrator].freeze
+      PROVIDERS = %w[pi tart].freeze
 
       # Renders each role's agent file and prints it between ===FILE===<role>
       # markers. Dynamic import (node -e runs CJS; import() is legal there) so
@@ -42,7 +46,8 @@ module Space
       JS
 
       class << self
-        def install(env: ENV, force: false, dry_run: false, dest: nil, extension_dir: nil)
+        def install(env: ENV, provider: "pi", force: false, dry_run: false, dest: nil, extension_dir: nil)
+          validate_provider!(provider)
           source = extension_dir ? Pathname.new(extension_dir).join("architect-loop.ts") : locate_extension(env)
           unless source&.exist?
             raise Space::Core::Error,
@@ -50,7 +55,7 @@ module Space
                   "(install-agents renders its playbooks from the installed extension)"
           end
 
-          dest ||= default_dest(env)
+          dest ||= default_dest(env, provider)
           rendered = render_via_node(source, env)
           results = ROLES.map do |role|
             write_agent(dest.join("architect-#{role}.md"), rendered.fetch(role), force: force, dry_run: dry_run)
@@ -72,8 +77,21 @@ module Space
           [{ name: stale.basename.to_s, action: dry_run ? :would_remove : :removed, path: stale }]
         end
 
-        def default_dest(env)
-          Pathname.new(env.fetch("PI_AGENTS_DIR", File.join(pi_agent_dir(env), "agents")))
+        # Provider first: validation precedes the extension lookup and any
+        # render, so an unknown provider can never produce side effects.
+        def validate_provider!(provider)
+          return if PROVIDERS.include?(provider.to_s)
+
+          raise Space::Core::Error, "Unknown provider '#{provider}'. Expected one of: #{PROVIDERS.join(', ')}"
+        end
+
+        def default_dest(env, provider)
+          case provider.to_s
+          when "tart"
+            Pathname.new(Space::Core::XDG.home(env: env)).join(".tart", "agents")
+          else
+            Pathname.new(env.fetch("PI_AGENTS_DIR", File.join(pi_agent_dir(env), "agents")))
+          end
         end
 
         # Same convention as SkillInstaller: PI_CODING_AGENT_DIR or ~/.pi/agent.

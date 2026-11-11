@@ -6,7 +6,7 @@ require "pathname"
 module Space
   module Architect
     module SkillInstaller
-      PROVIDERS = %w[claude codex opencode pi].freeze
+      PROVIDERS = %w[claude codex opencode pi tart].freeze
 
       class << self
         def source_root
@@ -26,6 +26,9 @@ module Space
           when "pi"
             base = project ? Pathname.new(cwd) : Pathname.new(pi_agent_dir(env: env))
             base.join("skills")
+          when "tart"
+            base = project ? Pathname.new(cwd) : Pathname.new(Space::Core::XDG.home(env: env))
+            base.join(".tart", "skills")
           else
             raise Space::Core::Error, "Unknown provider '#{provider}'. Expected one of: #{PROVIDERS.join(', ')}"
           end
