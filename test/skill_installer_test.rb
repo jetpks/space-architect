@@ -44,6 +44,15 @@ class SkillInstallerTest < Space::ArchitectTest
     assert_equal File.join(custom, "skills"), path.to_s
   end
 
+  def test_dest_root_tart_global
+    # tart has no root env seam: a bogus PI_CODING_AGENT_DIR must not move it
+    # (HOME via XDG.home is the whole seam, exactly like the claude arm).
+    custom = File.join(@tmp[:root], "custom-pi")
+    e = env.merge("PI_CODING_AGENT_DIR" => custom)
+    path = Space::Architect::SkillInstaller.dest_root("tart", project: false, env: e)
+    assert_equal File.join(@tmp[:root], "home", ".tart", "skills"), path.to_s
+  end
+
   # dest_root — per-provider project paths
 
   def test_dest_root_claude_project
@@ -64,6 +73,11 @@ class SkillInstallerTest < Space::ArchitectTest
   def test_dest_root_pi_project
     path = Space::Architect::SkillInstaller.dest_root("pi", project: true, env: env, cwd: @tmp[:root])
     assert_equal File.join(@tmp[:root], "skills"), path.to_s
+  end
+
+  def test_dest_root_tart_project
+    path = Space::Architect::SkillInstaller.dest_root("tart", project: true, env: env, cwd: @tmp[:root])
+    assert_equal File.join(@tmp[:root], ".tart", "skills"), path.to_s
   end
 
   # dest_root — unknown provider
@@ -165,6 +179,50 @@ class SkillInstallerTest < Space::ArchitectTest
     refute_equal "# tampered\n", dest.read
   end
 
+  # tart — I93: same shared install path, .tart/skills dest. The claude pins
+  # mirrored mechanically; no env override exists for tart's root.
+
+  def test_install_tart_copies_all_skills
+    result = Space::Architect::SkillInstaller.install("tart", project: false, force: false, env: env)
+    skills = result[:skills]
+    names = skills.map { |s| s[:name] }
+    assert_equal %w[architect architect-action architect-discuss architect-research architect-status],
+                 names.sort
+    assert_equal File.join(@tmp[:root], "home", ".tart", "skills"), result[:dest_root].to_s
+    names.each do |name|
+      assert result[:dest_root].join(name, "SKILL.md").exist?, "expected #{name}/SKILL.md on disk"
+    end
+  end
+
+  def test_install_tart_rerun_is_unchanged
+    Space::Architect::SkillInstaller.install("tart", project: false, force: false, env: env)
+    result = Space::Architect::SkillInstaller.install("tart", project: false, force: false, env: env)
+    assert result[:skills].all? { |s| s[:action] == :unchanged }
+  end
+
+  def test_install_tart_conflict_raises_without_force_and_force_updates
+    Space::Architect::SkillInstaller.install("tart", project: false, force: false, env: env)
+    dest = Space::Architect::SkillInstaller.dest_root("tart", project: false, env: env).join("architect", "SKILL.md")
+    dest.write("# tampered\n")
+
+    error = assert_raises(Space::Core::Error) do
+      Space::Architect::SkillInstaller.install("tart", project: false, force: false, env: env)
+    end
+    assert_match(/Refusing to overwrite/, error.message)
+
+    result = Space::Architect::SkillInstaller.install("tart", project: false, force: true, env: env)
+    architect = result[:skills].find { |s| s[:name] == "architect" }
+    assert_equal :updated, architect[:action]
+    refute_equal "# tampered\n", dest.read
+  end
+
+  def test_unknown_provider_message_lists_tart
+    error = assert_raises(Space::Core::Error) do
+      Space::Architect::SkillInstaller.install("bogus", project: false, force: false, env: env)
+    end
+    assert_includes error.message, "claude, codex, opencode, pi, tart"
+  end
+
   def test_install_unknown_provider_raises
     assert_raises(Space::Core::Error) do
       Space::Architect::SkillInstaller.install("unknown", project: false, force: false, env: env)
@@ -212,6 +270,27 @@ class SkillInstallerTest < Space::ArchitectTest
     result = Space::Architect::SkillInstaller.install("claude", project: false, force: true,
                                                      env: env, dry_run: true)
     architect = result[:skills].find { |s| s[:name] == "architect" }
+    assert_equal :would_update, architect[:action]
+    assert_equal "# tampered\n", dest.read
+  end
+
+  def test_install_tart_dry_run_reports_without_writing
+    installer = Space::Architect::SkillInstaller
+
+    fresh = installer.install("tart", project: false, force: false, env: env, dry_run: true)
+    assert fresh[:skills].all? { |s| s[:action] == :would_install }
+    refute fresh[:dest_root].exist?
+
+    installer.install("tart", project: false, force: false, env: env)
+    dest = installer.dest_root("tart", project: false, env: env).join("architect", "SKILL.md")
+    dest.write("# tampered\n")
+
+    conflict = installer.install("tart", project: false, force: false, env: env, dry_run: true)
+    architect = conflict[:skills].find { |s| s[:name] == "architect" }
+    assert_equal :conflict, architect[:action]
+
+    would_update = installer.install("tart", project: false, force: true, env: env, dry_run: true)
+    architect = would_update[:skills].find { |s| s[:name] == "architect" }
     assert_equal :would_update, architect[:action]
     assert_equal "# tampered\n", dest.read
   end

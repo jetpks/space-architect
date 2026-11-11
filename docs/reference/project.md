@@ -66,14 +66,14 @@ the gem, or after upgrading to pick up skill changes.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--provider=VALUE` | `claude` | Skill install target (validated by the installer). |
+| `--provider=VALUE` | `pi` | Skill install target: claude \| codex \| opencode \| pi \| tart (validated by the installer). |
 | `--[no-]project` | `false` | Install to the current working directory instead of globally. |
 | `--[no-]force` | `false` | Overwrite existing skills that differ. |
 | `--[no-]dry-run` | `false` | Print what would happen without writing files. |
 
 ```sh
-architect install-skills                       # claude (default)
-architect install-skills --provider pi         # or codex | opencode
+architect install-skills                       # pi (default)
+architect install-skills --provider tart       # or claude | codex | opencode
 architect install-skills --project --dry-run   # show what would change
 ```
 
