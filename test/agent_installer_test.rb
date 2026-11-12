@@ -114,4 +114,60 @@ class AgentInstallerTest < Space::ArchitectTest
     assert_match(/no architect\.yaml found/, error.message)
     assert_match(/routing init --global/, error.message)
   end
+
+  # tart — I93: same render pipeline, ~/.tart/agents dest. The helper env's
+  # PI_AGENTS_DIR/PI_CODING_AGENT_DIR stay SET in these tests on purpose: a
+  # passing tart pin proves the tart arm ignores them (tart has no env seam).
+
+  def test_tart_provider_installs_the_four_playbooks_to_dot_tart_and_removes_a_stale_coordinator
+    installer = Space::Architect::AgentInstaller
+    stale = File.join(@tmp[:root], "home", ".tart", "agents", "architect-coordinator.md")
+    FileUtils.mkdir_p(File.dirname(stale))
+    File.write(stale, "stale pre-driver playbook\n")
+
+    result = installer.install(env: env, provider: "tart", extension_dir: @ext_dir)
+
+    assert_equal Pathname.new(File.join(@tmp[:root], "home", ".tart", "agents")), result[:dest_root]
+    installed = result[:agents].select { |a| a[:action] == :installed }
+    assert_equal %w[architect-builder.md architect-judge.md architect-narrator.md architect-spec.md],
+                 installed.map { |a| a[:name] }.sort
+    assert_equal({ name: "architect-coordinator.md", action: :removed, path: Pathname.new(stale) },
+                 result[:agents].find { |a| a[:name] == "architect-coordinator.md" })
+    refute File.exist?(stale), "the stale coordinator playbook must be gone"
+
+    spec = result[:dest_root].join("architect-spec.md")
+    assert_equal "---\nname: architect-spec\nmodel: prov/x\n---\nplaybook body for spec\n", File.read(spec)
+  end
+
+  def test_tart_playbooks_are_byte_identical_to_the_pi_render
+    installer = Space::Architect::AgentInstaller
+    pi = installer.install(env: env, provider: "pi", extension_dir: @ext_dir)
+    tart = installer.install(env: env, provider: "tart", extension_dir: @ext_dir)
+
+    %w[spec builder judge narrator].each do |role|
+      assert_equal File.read(pi[:dest_root].join("architect-#{role}.md")),
+                   File.read(tart[:dest_root].join("architect-#{role}.md")),
+                   "tart render must be byte-identical to the pi render for architect-#{role}.md"
+    end
+  end
+
+  def test_tart_dry_run_reports_the_stale_coordinator_removal_without_deleting
+    installer = Space::Architect::AgentInstaller
+    stale = File.join(@tmp[:root], "home", ".tart", "agents", "architect-coordinator.md")
+    FileUtils.mkdir_p(File.dirname(stale))
+    File.write(stale, "stale bytes\n")
+
+    result = installer.install(env: env, provider: "tart", extension_dir: @ext_dir, dry_run: true)
+
+    assert_equal :would_remove,
+                 result[:agents].find { |a| a[:name] == "architect-coordinator.md" }[:action]
+    assert_equal "stale bytes\n", File.read(stale)
+  end
+
+  def test_unknown_agent_provider_raises_naming_pi_and_tart
+    error = assert_raises(Space::Core::Error) do
+      Space::Architect::AgentInstaller.install(env: env, provider: "bogus", extension_dir: @ext_dir)
+    end
+    assert_match(/Unknown provider 'bogus'\. Expected one of: pi, tart/, error.message)
+  end
 end
