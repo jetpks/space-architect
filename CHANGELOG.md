@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.9.2] - 2026-11-14
+
+### Added
+
+- **`architect looplog` reads tart records (I95)** — alongside the pi roots,
+  looplog now lists/follows tart's own run records (`TART_SUBAGENTS_HOME`,
+  default `~/.tart/subagents`: `status.json` identity with null-tolerant task
+  and dir-name id fallback, newest `sessions/**/*.jsonl` as the transcript
+  unit, space-cwd scope filter with both sides symlink-expanded, malformed
+  entries skipped silently) and session records (`TART_SESSIONS_DIR`, default
+  `~/.tart/sessions`: every `*.jsonl` under the space's slug dir, under the
+  `(session)` label). Both render through the ONE existing Renderer via a
+  drain-level tart→pi record adapter — no forked display code. Known display
+  note: the ✓ line's cache-read slot is filled from `cache_write_tokens`
+  (uniformly 0 across the real corpus, so rendering is byte-identical); the
+  slot correction rides the open `cache_read_tokens` follow-up.
+
 ## [9.9.1] - 2026-10-30
 
 ### Changed

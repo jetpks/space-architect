@@ -2,6 +2,6 @@
 
 module Space
   module Architect
-    VERSION = "9.9.1"
+    VERSION = "9.9.2"
   end
 end
