@@ -91,9 +91,12 @@ human again until the loop needs them.
    `architect_loop` with `from` = the plan file path. The tool installs the
    driver playbook into THIS session as operating instructions — and driving
    starts in this same turn: the session spawns and tends spec → builders →
-   judge itself, one hop from the human. It compacts only after its first
-   child launch (`architect_compact`, never before — a compaction with no
-   child in flight aborts the turn with no wake source, and the loop stalls).
+   judge itself, one hop from the human. It calls `architect_compact` after
+   each child launch, never before the first (a compaction with no child in
+   flight aborts the turn with no wake source, and the loop stalls); the tool
+   self-guards on context size, so a call under the compaction threshold —
+   max(150k tokens, 15% of the context window) — is a no-op, and every
+   compaction that does happen re-sends the playbook into the session.
    An older extension without the driver-mode `architect_loop` is updated via
    `architect install-extensions` — never spawned around.
 7. **Report the launch, then drive.** Tell the human: the plan path and how
