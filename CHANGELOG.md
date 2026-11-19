@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [9.9.3] - 2026-11-19
 
 ### Changed
 
@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the call cadence stays "after each child launch", the tool itself skips below
   `max(150k tokens, 15% of the context window)`, and every compaction re-sends
   the driver playbook into the session (pi's own auto-compactions included).
+- **Ruby 4.0.10** (critical security fixes): the gemspec minimum rises
+  `>= 4.0.5` → `>= 4.0.10`, and every pinned dev/CI ruby site (mise.toml,
+  .ruby-version, the e2e driver's `mise exec ruby@…` pins) moves to 4.0.10.
 
 ## [9.9.2] - 2026-11-14
 

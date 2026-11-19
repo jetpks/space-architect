@@ -71,7 +71,7 @@ namespace :test do
 
     gem_root = File.expand_path(__dir__)
     driver = File.join(gem_root, "test", "e2e", "iterations_emission_e2e.rb")
-    command = "cd #{afnp.shellescape} && mise exec ruby@4.0.5 -- bundle exec ruby #{driver.shellescape} #{gem_root.shellescape}"
+    command = "cd #{afnp.shellescape} && mise exec ruby@4.0.10 -- bundle exec ruby #{driver.shellescape} #{gem_root.shellescape}"
     # Unbundle: the task itself runs under the GEM's bundle, and an inherited
     # BUNDLE_GEMFILE would keep the afnp child on the gem's bundle — hanami
     # would never load. The driver must boot afnp under afnp's own bundle.

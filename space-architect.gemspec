@@ -12,7 +12,7 @@ Gem::Specification.new do |spec|
   spec.description = "A dry-cli CLI for the Architect Loop: iterations, briefs, freezes, verdicts, lane worktrees, and headless pi dispatch — the judgment loop that runs inside space-cadet's task-scoped workspaces. Depends on the space-cadet gem for the spaces substrate (hard)."
   spec.homepage = "https://github.com/jetpks/space-architect"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 4.0.5"
+  spec.required_ruby_version = ">= 4.0.10"
 
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"

@@ -4,7 +4,7 @@
 # I16 — the emission end-to-end driver: the first natively-surfaced iteration.
 #
 # Run by the gem's `rake test:e2e` (see Rakefile) UNDER the all-fax-no-printer
-# checkout's bundle context (cd $SPACE_E2E_AFNP_DIR && mise exec ruby@4.0.5 --
+# checkout's bundle context (cd $SPACE_E2E_AFNP_DIR && mise exec ruby@4.0.10 --
 # bundle exec ruby <gem-root>/test/e2e/iterations_emission_e2e.rb <gem-root>):
 # the driver boots the REAL Hanami app on a real ephemeral TCP port via
 # Async::HTTP::Server + Protocol::Rack::Adapter (the ingest_falcon pattern),
@@ -137,7 +137,7 @@ begin
   # prepare` in the afnp checkout first — the test:e2e gate does).
   conn = Space::Server::App["db.gateway"].connection
   unless conn.table_exists?(:iterations) && conn.table_exists?(:gate_results)
-    abort "the afnp test database is not prepared — run (cd $SPACE_E2E_AFNP_DIR && mise exec ruby@4.0.5 -- bundle exec hanami db prepare)"
+    abort "the afnp test database is not prepared — run (cd $SPACE_E2E_AFNP_DIR && mise exec ruby@4.0.10 -- bundle exec hanami db prepare)"
   end
 
   # 1. Real user + real sat_ bearer (the ingest_falcon minting pattern).
